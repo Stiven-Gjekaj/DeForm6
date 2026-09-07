@@ -104,12 +104,12 @@ Version 1 recovers metadata. It does not recover statements.
 - [ ] **VER-01**: A differential test decompiles each corpus program and
       compares the result against the original source that the executable was
       built from.
-- [ ] **VER-02**: The expectation for each program comes from the file list the
+- [x] **VER-02**: The expectation for each program comes from the file list the
       `.vbp` declares, never from a directory glob, because a project directory
       holds source that was never compiled.
-- [ ] **VER-03**: Where several `.vbp` files sit in one directory, the harness
+- [x] **VER-03**: Where several `.vbp` files sit in one directory, the harness
       selects the one whose `ExeName32` names the executable under test.
-- [ ] **VER-04**: What the compiler does not keep is excluded by a written
+- [x] **VER-04**: What the compiler does not keep is excluded by a written
       rule, not by a per-program allowance.
 - [ ] **VER-05**: A recovery ratio per program is pinned in the repository. A
       fall fails the build and names what went missing. A rise fails the build

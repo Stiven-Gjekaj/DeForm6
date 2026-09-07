@@ -3,11 +3,11 @@ gsd_state_version: "1.0"
 current_phase: 1
 current_phase_name: It reads the file
 status: complete
-stopped_at: Completed 01-08-PLAN.md
-last_updated: "2026-09-07T16:40:00.000Z"
+stopped_at: Completed 02-07-PLAN.md
+last_updated: "2026-09-07T22:15:32.314Z"
 last_activity: 2026-09-07
 last_activity_desc: "Plan 01-08 executed. The deform6 binary parses with Cli::try_parse and maps every Refusal to one of six exit codes; the eight-line report is read from Report::runtime_dll and Report::signature, never a literal. 134 tests pass across the workspace: 115 library, 9 refusal.rs, 1 corpus_sweep.rs (all 44 executables), 9 cli.rs. Nine deliberate breakages run and reverted; two of the plan's own predictions did not match measurement and are recorded in the SUMMARY. Phase 1 is complete."
-state_head: c259684
+state_head: 15803bb2dc6184ae522f0b231172c306334d90ed
 progress:
   total_phases: 6
   completed_phases: 1
@@ -60,7 +60,6 @@ before starting phase 2, then:
 `gsd-tools query init.execute-phase` reports every plan as runnable at once.
 That is wrong: a plan cannot write into a module another plan has not created
 yet. Take the wave order from ROADMAP.md, not from the tool.
-
 
 **Executors run in a worktree, not the primary checkout.** Verify what lands on
 the main branch after each wave rather than assuming the merge did the right
@@ -134,6 +133,7 @@ Progress: [██████████] 100% of the plans in phase 1, which i
 | Phase 01 P04 | 1 session | 3 tasks | 1 files |
 | Phase 01 P07 | 1 session | 3 tasks | 4 files |
 | Phase 01 P08 | 1 session | 3 tasks | 4 files |
+| Phase 02 P07 | 1 session | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -158,6 +158,9 @@ Recent decisions affecting current work:
 - [Phase 1]: Report carries runtime_dll and signature read from the file, because a one variant Runtime enum makes an equality assertion a tautology.
 - [Phase 1]: 01-08: Cli::try_parse with a hand-written, exhaustive Refusal-to-Exit match, never Cli::parse or process::exit. A usage error is exit 5, never exit 2.
 - [Phase 1]: 01-08: The corpus sweep's header-string check cross-checks Report's fields against a second, independent header read by field identity, not only an ascending-offset check, because the offsets alone cannot see a field-swap bug in Report construction.
+- [Phase 2]: 02-07: The 40-line prefix scan for Attribute VB_Name matches 2 of 53 forms, not zero as the plan claimed. Both are short forms (LockWorkStation, SK-Gradient-Sample__VB6) where the attribute lands inside the bound by chance.
+- [Phase 2]: 02-07: Grayscale-effect's pdOpenSaveDialog.cls declares six non-public procedure slots (four Private Declare Function, two Friend Function), not two as the plan claimed. Plain grep without -a silently treats the Latin-1 file as binary and hides the Friend lines.
+- [Phase 2]: 02-07: support::rules::apply_symmetrically derives both sides of an exclusion from one rule evaluation, so the absent-source rule cannot be applied to one side of the differential comparison only.
 
 ### Pending Todos
 
@@ -186,8 +189,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-07T16:40:00.000Z
-Stopped at: Completed 01-08-PLAN.md
+Last session: 2026-09-07T22:15:32.302Z
+Stopped at: Completed 02-07-PLAN.md
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and
