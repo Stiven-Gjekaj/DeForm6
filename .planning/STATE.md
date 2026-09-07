@@ -39,7 +39,7 @@ crate that names the `object` crate.
 That is wrong: 01-02 cannot write `read/region.rs` before 01-01 creates the
 workspace it lives in. Use the order from ROADMAP.md:
 
-    [01-01 done]  [01-02 done, 01-03 done]  [01-04 done]  [01-05, 01-06]  [01-07]  [01-08]
+    [01-01 done]  [01-02 done, 01-03 done]  [01-04 done]  [01-05 done, 01-06 done]  [01-07]  [01-08]
 
 **Executors run in a worktree, not the primary checkout.** Verify what lands on
 the main branch after each wave rather than assuming the merge did the right
@@ -71,14 +71,14 @@ inferred.
 ## Current Position
 
 Phase: 1 of 6 (It reads the file)
-Plan: 4 of 8 in current phase
-Status: Executing. Waves 1, 2 and 3 complete, wave 4 next.
+Plan: 6 of 8 in current phase
+Status: Executing. Waves 1 to 4 complete, wave 5 next.
 Open defect: `.planning/WINDOWS.md` records that the section overlap rule has
 no test, because no corpus file has overlapping sections. It can be given a
 synthetic test the way `has_clr_header` was.
 Last activity: 2026-09-07 - Plan 01-04 executed. PeImage reads a real binary and resolves an address to a file offset through one predicate. 58 tests pass. Six deliberate breakages found four tests in the plan that the corpus alone could not make fail.
 
-Progress: [█████░░░░░] 50%
+Progress: [███████░░░] 75%
 
 ## Performance Metrics
 
