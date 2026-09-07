@@ -1,0 +1,27 @@
+# A Visual Basic form resource is binary. Git must not touch its line endings.
+#
+# This is not a preference. `corpus/vb6-code/Hidden-Markov-model/frmHMM.frx`
+# arrived from upstream with one byte missing: its record header declares 56
+# bytes of payload and only 55 are present, and the file ends with a lone 0x0A
+# where a 0x0D 0x0A pair belongs. A carriage return was stripped by end of line
+# normalisation. Upstream marks these files `-diff`, which suppresses the diff
+# but does not stop normalisation.
+*.frx binary
+*.ctx binary
+*.dsx binary
+
+# Executables and the other compiled artifacts in the corpus.
+*.exe binary
+*.dll binary
+*.ocx binary
+
+# Visual Basic source is text that VB6 writes with CRLF. Keep it exactly as the
+# compiler and the IDE produced it, because the differential gate compares it
+# against bytes recovered from a binary.
+*.frm -text
+*.bas -text
+*.cls -text
+*.ctl -text
+*.vbp -text
+*.vbw -text
+*.mak -text

@@ -58,3 +58,26 @@ rejected and why.
 Microsoft's own VB98 samples are not here.
 The Visual Studio 6 licence grants no redistribution right, and the samples
 shipped without executables, so they carry no ground truth.
+
+## A known defect in one corpus file
+
+`corpus/vb6-code/Hidden-Markov-model/frmHMM.frx` is damaged, and it arrived
+that way.
+
+The file holds one record, the `Text` property of a text box. Its record header
+declares 56 bytes of payload. Only 55 are present. The file ends with a lone
+`0x0A` where a `0x0D 0x0A` pair belongs, so one carriage return was removed by
+end of line normalisation.
+
+The damage is upstream, not in this copy. This copy is byte for byte identical
+to the upstream clone, and `core.autocrlf` was unset on the machine that cloned
+it, so no normalisation happened here. Upstream marks `.frx` as `-diff`, which
+suppresses the diff but does not stop normalisation.
+
+**The bytes are kept as upstream holds them.** Repairing the file would invent
+data and would make this copy no longer a faithful record of its origin. The
+differential gate excludes this one property, names this note as the reason,
+and must not silently pass it.
+
+`.gitattributes` in this repository marks `.frx` as binary so that the same
+loss cannot happen here.
