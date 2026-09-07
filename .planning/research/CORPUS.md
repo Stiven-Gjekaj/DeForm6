@@ -94,3 +94,22 @@ outside GitHub.
 
 No public dataset is tagged "VB6 compiled" as its organising principle. The
 nearest, MalSource, is malware under a research-only licence.
+
+## What the corpus proves, measured rather than cited
+
+Vendored on 2026-09-07: **44 executables and 45 project files** in 4.6 MB.
+`corpus/vb6-code` holds 31 executables, `corpus/public-domain` holds 13.
+
+A check ran over all 44 executables. For each one it read the PE header,
+resolved `AddressOfEntryPoint` to a file offset through the section table, and
+looked at the bytes there.
+
+**All 44 match the documented pattern.** In every case the entry point begins
+with opcode `0x68`, which is `push imm32`, and is followed by `0xE8`, which is
+`call rel32`. In every case the pushed pointer, converted from a virtual
+address to a file offset, lands on the four bytes `VB5!`.
+
+This is the first link in the chain the parser depends on, and it is now
+measured on this corpus rather than taken from a document. The entry point
+addresses vary (`0x1424`, `0x116C`, `0x195C` and so on), so the offset is not
+constant and must be resolved through the section table each time.
