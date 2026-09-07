@@ -353,9 +353,49 @@ apart, so they are **words**, and AI's naming is a typo. SEK, SVBD, PVB and IDC
 all read them as u16. **[C]**
 
 **Which count to loop on.** SVBD loops on `wTotalObjects` (its
-`ObjectCount1` at 0x2A); PVB and GD loop on `wCompiledObjects` (0x2C). They are
-equal after a clean compile. **Use `wCompiledObjects` and cross-check against
-`wTotalObjects`; report a mismatch as a damage indicator.** **[L]**
+`ObjectCount1` at 0x2A); PVB and GD loop on `wCompiledObjects` (0x2C).
+
+An earlier draft of this section said the two are equal after a clean compile
+and recommended `wCompiledObjects` as the count. **The corpus refutes that, and
+the recommendation is withdrawn.** See §4.1.
+
+### 4.1 The two counts are not the same quantity, 2026-09-07
+
+A script read both fields from all **44** corpus executables and compared each
+against the number of objects the matching `.vbp` declares. The `.vbp` was
+selected by its `ExeName32` key, as §12 requires, and an object is a `Form`,
+`Module`, `Class`, `UserControl`, `PropertyPage`, `UserDocument`, `Designer`
+or `RelatedDoc` key.
+
+| Field | Equals the number of objects the `.vbp` declares |
+|---|---|
+| `wTotalObjects` at 0x2A | **44 of 44** |
+| `wCompiledObjects` at 0x2C | 29 of 44 |
+
+In the other 15 files `wCompiledObjects` is larger, and it is larger by the
+amount that rounds the array up: a project that declares 1, 2 or 3 objects
+reports 4, and a project that declares 5 reports 8. `wObjectsInUse` at 0x2E
+equals `wTotalObjects` in all 44.
+
+Walking the array past `wTotalObjects` in those files reaches a name pointer
+that is `0`, or one that resolves to nothing, or one that resolves to an
+unrelated string. `corpus/vb6-code/Grayscale-effect/Grayscale.exe` declares
+one form and two classes, its array holds `frmGrayscale`, `pdOpenSaveDialog`
+and `FastDrawing` and then a null pointer, and its `wCompiledObjects` is 4.
+
+**So `wCompiledObjects` is the capacity of the object array and
+`wTotalObjects` is the number of objects.** **[C]**
+
+**Read the count from `wTotalObjects`.** Read `wCompiledObjects` as the
+capacity, and use it as the bound the count must not exceed. A capacity above
+the count is normal and must not be reported as damage: it is what a third of
+this corpus holds. A capacity **below** the count is a real disagreement,
+because the array then has no room for the objects the same structure
+declares, and that is the damage indicator to report.
+
+§12 records that `wCompiledObjects` "bounds a walkable object array, 44 of
+44". That measurement stands. It bounds the array, because it is the size of
+the array. It is not the number of objects in it.
 
 ---
 
@@ -1532,11 +1572,12 @@ answer stated confidently would be worse than no answer.
 | 16 | Nine unknown dwords in `GUIObjectInfo` 0x35-0x58 (§8.2) | nothing known | Leave opaque |
 | 17 | Five unknown dwords in the external component entry (§7.3) | nothing known | Leave opaque |
 | 18 | Entry-point stub variants `0x5A` / `0x11` (§1.3) | exotic inputs | Do not implement without a sample |
+| 19 | Which object table count is the number of objects (§4) | the object count DeForm6 reports, and the Phase 2 object walk | CLOSED 2026-09-07, 44 of 44 corpus binaries against their `.vbp`. `wTotalObjects` is the count and `wCompiledObjects` is the array capacity. Method and numbers in §4.1. |
 
 A closed row stays in this register and it is marked closed. A register that
 drops a row loses the record of what was once uncertain, and Phase 6 has to
 list every gap that is still open at release. That is easier to check against
-a register that shows all eighteen rows with their state.
+a register that shows all nineteen rows with their state.
 
 **The method that closed gap 1.** Read the four `u32` values at `VBHeader`
 +0x58, +0x5C, +0x60 and +0x64 as offsets from the start of the header, read
