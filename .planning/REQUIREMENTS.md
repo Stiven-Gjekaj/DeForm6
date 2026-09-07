@@ -158,16 +158,30 @@ Deferred. Tracked, not in this roadmap.
 |-------------|-------|--------|
 | DET-01 to DET-06 | Phase 1 | Pending |
 | OBJ-01 to OBJ-06 | Phase 2 | Pending |
+| VER-01 to VER-05 | Phase 2 | Pending |
 | FRM-01 to FRM-06 | Phase 3 | Pending |
+| VER-06 | Phase 3 | Pending |
 | WRT-01 to WRT-07 | Phase 4 | Pending |
 | RPT-01 to RPT-06 | Phase 4 | Pending |
 | SAF-01 to SAF-05 | Phase 5 | Pending |
-| VER-01 to VER-06 | Phase 2 onward | Pending |
+
+Phase 6 owns no new requirement. It measures the whole set end to end and turns
+the result into the released documentation.
+
+VER-05 pins the recovery ratio. Phase 2 introduces the file and the two failure
+messages. Phase 3 and Phase 4 each raise the pinned numbers.
+
+SAF-01 and SAF-04 are proved in Phase 5. The mechanism that makes them possible
+is built in Phase 1: the lint wall, `#![forbid(unsafe_code)]`, and the `Region`
+type with no infallible accessor.
 
 **Coverage:**
-- v1 requirements: 36 total
-- Mapped to phases: 36
+- v1 requirements: 42 total in 7 categories
+- Mapped to phases: 42
 - Unmapped: 0
+
+An earlier count in this file said 36. That number left out the Verification
+category, VER-01 to VER-06. The correct total is 42.
 
 ---
 *Requirements defined: 2026-09-07*
