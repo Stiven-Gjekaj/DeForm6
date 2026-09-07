@@ -509,6 +509,25 @@ mod tests {
         assert_eq!(header.signature, MANDELBROT[at..at + 4]);
     }
 
+    /// `STRUCTURES.md` section 13 says a survey read `0x58` as a virtual
+    /// address and reported the string `MZ` out of the DOS stub. This crate
+    /// cannot reach that string, and this test says why.
+    ///
+    /// The value is `0x78`. It is below the image base, so `Va::to_rva` gives
+    /// nothing, and it is below the address of the first section, so a route
+    /// that forgot the image base gives nothing either. The survey needed a
+    /// third fault as well: a fallback that reads an unresolved address as a
+    /// file offset. `PeImage` has no such fallback, which is threat T-01-12.
+    #[test]
+    fn the_executable_name_offset_reaches_nothing_when_it_is_read_as_an_address() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let raw = mandelbrot_header().o_project_exe_name.get();
+        assert!(raw < image.image_base());
+        assert!(Va::new(raw).to_rva(image.image_base()).is_none());
+        assert!(image.region_at_va(Va::new(raw)).is_none());
+        assert!(image.region_at(Rva::new(raw)).is_none());
+    }
+
     #[test]
     fn the_four_string_offsets_ascend() {
         let header = mandelbrot_header();
