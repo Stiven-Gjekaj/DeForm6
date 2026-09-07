@@ -322,6 +322,106 @@ impl<'a> PeImage<'a> {
         self.region_at(va.to_rva(self.image_base)?)
     }
 
+    /// Gives the upper cased name of every DLL in the import directory.
+    ///
+    /// An image with no import data directory returns an empty list. That is
+    /// not an error, and plan 01-06 turns it into "no Visual Basic runtime"
+    /// rather than "damaged".
+    ///
+    /// The name is folded with `to_ascii_uppercase` and never with
+    /// `to_uppercase`. A DLL name is ASCII, the import directory stores it as
+    /// raw bytes with no case rule, and the Windows loader resolves a module
+    /// name without regard to case, so a linker writes whatever case it
+    /// likes. The Unicode fold of a stray high byte can produce a longer
+    /// string and a wrong comparison. All 44 corpus files hold the upper case
+    /// ASCII name already, so the fold is never exercised by the corpus. It
+    /// costs one method call and the counter example is a file nobody has
+    /// yet.
+    ///
+    /// # Errors
+    ///
+    /// Returns the `object::Error` when the directory or a name is outside
+    /// the bytes of the file. A truncated file reaches this.
+    pub fn imported_dlls(&self) -> Result<Vec<String>, object::Error> {
+        let mut out = Vec::new();
+        let Some(table) = self.file.import_table()? else {
+            return Ok(out);
+        };
+        // The descriptor iterator is fallible. Its `next` is an inherent
+        // method that returns `Result<Option<_>>` and it does not implement
+        // `Iterator`, so a `for` loop does not compile and this shape does.
+        let mut descriptors = table.descriptors()?;
+        while let Some(descriptor) = descriptors.next()? {
+            let name = table.name(descriptor.name.get(LE))?;
+            out.push(String::from_utf8_lossy(name).to_ascii_uppercase());
+        }
+        Ok(out)
+    }
+
+    /// Gives the upper cased name of every DLL in the delay load directory.
+    ///
+    /// **This list is informational only and must never decide the runtime.**
+    /// `object` computes the delay load name address with a wrapping
+    /// subtraction and never reads the `attributes` field of the descriptor,
+    /// and the old Visual C++ 6 delay load format stores virtual addresses in
+    /// that table rather than relative virtual addresses. A wrapping
+    /// subtraction on a garbage address cannot panic, so the worst case is a
+    /// bounds check failure, which is a damage report. Plan 01-06 owns the
+    /// rule that the delay load table never decides.
+    ///
+    /// No corpus file has a delay load directory at all, in 44 of 44.
+    ///
+    /// # Errors
+    ///
+    /// Returns the `object::Error` when the directory or a name is outside
+    /// the bytes of the file.
+    pub fn delay_loaded_dlls(&self) -> Result<Vec<String>, object::Error> {
+        let mut out = Vec::new();
+        let Some(table) = self.file.delay_load_import_table()? else {
+            return Ok(out);
+        };
+        let mut descriptors = table.descriptors()?;
+        while let Some(descriptor) = descriptors.next()? {
+            let name = table.name(descriptor.dll_name_rva.get(LE))?;
+            out.push(String::from_utf8_lossy(name).to_ascii_uppercase());
+        }
+        Ok(out)
+    }
+
+    /// Gives the file offset and the length of every imported DLL name.
+    ///
+    /// The offset comes from the address in the import descriptor, resolved
+    /// through [`PeImage::rva_to_off`]. **It is not a byte search.** A search
+    /// for the runtime name could hit the same bytes in `.rsrc` or in a
+    /// string table and report a match at an offset that no pointer in the
+    /// file names.
+    ///
+    /// The Phase 4 report needs a byte offset as evidence for "the runtime is
+    /// MSVBVM60.DLL", and plan 01-08 patches a name in place at the offset
+    /// the file itself gives.
+    ///
+    /// A name whose address resolves to nothing is dropped rather than read.
+    ///
+    /// # Errors
+    ///
+    /// Returns the `object::Error` when the directory or a name is outside
+    /// the bytes of the file.
+    pub fn dll_name_sites(&self) -> Result<Vec<(Off, u32)>, object::Error> {
+        let mut out = Vec::new();
+        let Some(table) = self.file.import_table()? else {
+            return Ok(out);
+        };
+        let mut descriptors = table.descriptors()?;
+        while let Some(descriptor) = descriptors.next()? {
+            let rva = Rva::new(descriptor.name.get(LE));
+            let name = table.name(descriptor.name.get(LE))?;
+            if let Some(offset) = self.rva_to_off(rva) {
+                out.push((offset, u32::try_from(name.len()).unwrap_or(u32::MAX)));
+            }
+        }
+        Ok(out)
+    }
+
     /// Tells whether the image declares a common language runtime header.
     ///
     /// This reads data directory 14 and nothing else. Plan 01-06 uses it to
@@ -421,6 +521,7 @@ fn overlap_defects(sections: &[SectionInfo], table_at: u32) -> Vec<Defect> {
     clippy::expect_used,
     clippy::indexing_slicing,
     clippy::arithmetic_side_effects,
+    clippy::integer_division,
     clippy::panic,
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
@@ -679,6 +780,157 @@ mod tests {
             }
         }
         assert!(resolved > 0, "no address resolved, so nothing was compared");
+    }
+
+    /// Builds a small portable executable whose one section starts at a
+    /// different address from its file offset.
+    ///
+    /// Both corpus files put their import directory in `.text`, where the
+    /// virtual address and the file offset are the same number, so neither
+    /// of them can tell a file offset from an address. This image can: the
+    /// section is at address 0x1000 and at file offset 0x400.
+    ///
+    /// The image imports two DLLs, not one. Both corpus files import exactly
+    /// one, so neither of them can see a descriptor loop that stops after the
+    /// first name.
+    ///
+    /// The first name is lower case. All 44 corpus files hold the upper case
+    /// name already, so the corpus never exercises the ASCII fold either.
+    ///
+    /// `with_imports` says whether the image declares an import data
+    /// directory. When it does not, `object` gives `Ok(None)`, which is not
+    /// an error.
+    fn a_small_image(with_imports: bool) -> Vec<u8> {
+        const LFANEW: usize = 0x40;
+        const OPTIONAL: usize = LFANEW + 24;
+        const SECTION: usize = OPTIONAL + 224;
+
+        let mut out = vec![0_u8; 0x600];
+        out[0] = b'M';
+        out[1] = b'Z';
+        out[0x3c..0x40].copy_from_slice(&u32::try_from(LFANEW).unwrap().to_le_bytes());
+        out[LFANEW..LFANEW + 4].copy_from_slice(b"PE\0\0");
+
+        // The COFF file header.
+        out[LFANEW + 4..LFANEW + 6].copy_from_slice(&0x014c_u16.to_le_bytes());
+        out[LFANEW + 6..LFANEW + 8].copy_from_slice(&1_u16.to_le_bytes());
+        out[LFANEW + 20..LFANEW + 22].copy_from_slice(&224_u16.to_le_bytes());
+        out[LFANEW + 22..LFANEW + 24].copy_from_slice(&0x0102_u16.to_le_bytes());
+
+        // The PE32 optional header.
+        out[OPTIONAL..OPTIONAL + 2].copy_from_slice(&0x010b_u16.to_le_bytes());
+        out[OPTIONAL + 0x10..OPTIONAL + 0x14].copy_from_slice(&0x1000_u32.to_le_bytes());
+        out[OPTIONAL + 0x1c..OPTIONAL + 0x20].copy_from_slice(&0x0040_0000_u32.to_le_bytes());
+        out[OPTIONAL + 0x20..OPTIONAL + 0x24].copy_from_slice(&0x1000_u32.to_le_bytes());
+        out[OPTIONAL + 0x24..OPTIONAL + 0x28].copy_from_slice(&0x200_u32.to_le_bytes());
+        out[OPTIONAL + 0x38..OPTIONAL + 0x3c].copy_from_slice(&0x2000_u32.to_le_bytes());
+        out[OPTIONAL + 0x3c..OPTIONAL + 0x40].copy_from_slice(&0x400_u32.to_le_bytes());
+        out[OPTIONAL + 0x5c..OPTIONAL + 0x60].copy_from_slice(&16_u32.to_le_bytes());
+        if with_imports {
+            let dir = OPTIONAL + 96 + 8;
+            out[dir..dir + 4].copy_from_slice(&0x1000_u32.to_le_bytes());
+            out[dir + 4..dir + 8].copy_from_slice(&60_u32.to_le_bytes());
+        }
+
+        // One section, at address 0x1000 and at file offset 0x400.
+        out[SECTION..SECTION + 8].copy_from_slice(b".text\0\0\0");
+        out[SECTION + 8..SECTION + 12].copy_from_slice(&0x200_u32.to_le_bytes());
+        out[SECTION + 12..SECTION + 16].copy_from_slice(&0x1000_u32.to_le_bytes());
+        out[SECTION + 16..SECTION + 20].copy_from_slice(&0x200_u32.to_le_bytes());
+        out[SECTION + 20..SECTION + 24].copy_from_slice(&0x400_u32.to_le_bytes());
+        out[SECTION + 36..SECTION + 40].copy_from_slice(&0x6000_0020_u32.to_le_bytes());
+
+        // Two import descriptors at address 0x1000, then the terminator. A
+        // descriptor is 20 bytes and its name address is at offset 12. The
+        // names are at addresses 0x1040 and 0x1050, which are file offsets
+        // 0x440 and 0x450.
+        out[0x400 + 12..0x400 + 16].copy_from_slice(&0x1040_u32.to_le_bytes());
+        out[0x414 + 12..0x414 + 16].copy_from_slice(&0x1050_u32.to_le_bytes());
+        out[0x440..0x44b].copy_from_slice(b"somelib.dll");
+        out[0x450..0x45c].copy_from_slice(b"OTHERLIB.DLL");
+        out
+    }
+
+    #[test]
+    fn the_corpus_file_imports_the_visual_basic_6_runtime_and_nothing_else() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        assert_eq!(image.imported_dlls().unwrap(), vec!["MSVBVM60.DLL"]);
+    }
+
+    #[test]
+    fn the_corpus_file_delay_loads_nothing() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        assert!(image.delay_loaded_dlls().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_name_site_names_the_bytes_that_imported_dlls_returned() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let sites = image.dll_name_sites().unwrap();
+        assert_eq!(sites.len(), 1);
+        let (offset, len) = sites[0];
+        let at = usize::try_from(offset.get()).unwrap();
+        let len = usize::try_from(len).unwrap();
+        let bytes = &MANDELBROT[at..at + len];
+        assert_eq!(
+            String::from_utf8_lossy(bytes).to_ascii_uppercase(),
+            image.imported_dlls().unwrap()[0]
+        );
+    }
+
+    #[test]
+    fn a_name_site_is_a_file_offset_and_not_an_address() {
+        // Both corpus files put the import directory in a section whose
+        // address and file offset are the same number, so neither of them
+        // can tell the two apart. This image can.
+        let bytes = a_small_image(true);
+        let image = PeImage::parse(&bytes).unwrap();
+
+        let sites = image.dll_name_sites().unwrap();
+        assert_eq!(sites.len(), 2);
+        for (site, (address, raw)) in sites
+            .iter()
+            .zip([(0x1040_u32, &b"somelib.dll"[..]), (0x1050, b"OTHERLIB.DLL")])
+        {
+            let (offset, len) = *site;
+            assert_eq!(offset, image.rva_to_off(Rva::new(address)).unwrap());
+            assert_ne!(
+                offset.get(),
+                address,
+                "the address and the file offset must differ here, or this test proves nothing"
+            );
+            let at = usize::try_from(offset.get()).unwrap();
+            assert_eq!(&bytes[at..at + usize::try_from(len).unwrap()], raw);
+        }
+    }
+
+    #[test]
+    fn every_descriptor_is_read_and_every_name_is_folded_to_upper_case() {
+        let bytes = a_small_image(true);
+        let image = PeImage::parse(&bytes).unwrap();
+        // The first name is lower case in the file. A loop that stopped
+        // after the first descriptor would return one name here.
+        assert_eq!(
+            image.imported_dlls().unwrap(),
+            vec!["SOMELIB.DLL", "OTHERLIB.DLL"]
+        );
+    }
+
+    #[test]
+    fn an_image_with_no_import_directory_imports_nothing() {
+        let bytes = a_small_image(false);
+        let image = PeImage::parse(&bytes).unwrap();
+        assert!(image.imported_dlls().unwrap().is_empty());
+        assert!(image.dll_name_sites().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_truncated_file_cannot_read_its_import_directory() {
+        // The parse still succeeds. That is the point: a successful parse is
+        // not evidence of an intact file.
+        let half = &MANDELBROT[..MANDELBROT.len() / 2];
+        let image = PeImage::parse(half).unwrap();
+        assert!(image.imported_dlls().is_err());
     }
 
     #[test]
