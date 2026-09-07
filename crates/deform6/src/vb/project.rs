@@ -4,14 +4,27 @@
 //! virtual address, so it reaches bytes only through
 //! [`PeImage::region_at_va`].
 //!
+//! `ProjectInfo.lpObjectTable` is the only route to the object table, and it
+//! is a virtual address as well.
+//!
 //! Each structure is narrowed to the size the format gives, with
 //! `Region::subregion`, before any field inside it is read. A truncated file
 //! therefore fails at the window rather than three reads later, and no read
 //! can run out of the structure into unrelated bytes.
+//!
+//! # This module reads the head of the object table and stops there
+//!
+//! Phase 1 reaches the object table because the project name is stored in it,
+//! so the number of objects is free and honest here and the number is
+//! reported without naming any object. Walking the objects themselves is
+//! Phase 2, plan 02-01. **Do not extend [`ObjectTableHead::read`] to follow
+//! the address at `0x30`.** Nothing here sizes an allocation from a field in
+//! the file, and SAF-04 requires the count to be checked against the real
+//! file length before anything in Phase 2 does.
 
-use crate::error::Refusal;
+use crate::error::{Defect, DefectKind, Refusal, Site};
 use crate::read::pe::PeImage;
-use crate::read::region::{Off, Region, Va};
+use crate::read::region::{Off, Region, Rva, Va};
 
 /// The size of the `ProjectInfo` structure.
 ///
@@ -138,6 +151,205 @@ impl ProjectInfo {
     }
 }
 
+/// The size of the `ObjectTable` structure.
+///
+/// `STRUCTURES.md` section 4 gives `0x54` = 84 bytes, and four sources agree.
+const OBJECT_TABLE_SIZE: u32 = 0x54;
+
+/// The bound on the project name string.
+///
+/// `Region::cstr` needs a mandatory maximum, so a file with no NUL byte after
+/// the name cannot make the scan run to the end of the section.
+const NAME_MAX: u32 = 0x104;
+
+/// The head of the object table, which `STRUCTURES.md` section 4 describes.
+///
+/// Three fields are read: the two counts and the address of the project name.
+///
+/// # The two counts are not the same quantity
+///
+/// `STRUCTURES.md` section 4 calls `wCompiledObjects` "the loop bound for the
+/// object array" and says the two counts are equal after a clean compile. It
+/// then recommends, at confidence `[L]`, reading the count from
+/// `wCompiledObjects`. **The corpus does not support that.**
+///
+/// A script read both fields from all 44 corpus executables and compared each
+/// against the number of objects the matching `.vbp` declares, selected by
+/// its `ExeName32` key.
+///
+/// | Field | Equals the number of objects the `.vbp` declares |
+/// |---|---|
+/// | `wTotalObjects` at `0x2A` | 44 of 44 |
+/// | `wCompiledObjects` at `0x2C` | 29 of 44 |
+///
+/// `[VERIFIED: local, 44 of 44]` In the other 15 files `wCompiledObjects` is
+/// larger, and it is larger by the amount that rounds the array up: a project
+/// with 1, 2 or 3 objects reports 4, and a project with 5 reports 8. The
+/// entries of the array past `wTotalObjects` hold a null pointer or a value
+/// that resolves to nothing. So `wCompiledObjects` is the **capacity** of the
+/// object array and `wTotalObjects` is the **number of objects**.
+///
+/// [`ObjectTableHead::object_count`] therefore gives `wTotalObjects`. Taking
+/// the compiled count instead would print 4 for a project that declares 1,
+/// for a third of the corpus, and `AGENTS.md` requires the number that can be
+/// proved against the source the executable was built from.
+///
+/// Both fields are kept, because Phase 2 needs both: the count says how many
+/// objects to read, and the capacity is the bound that the count must not
+/// exceed.
+#[derive(Clone, Debug)]
+pub struct ObjectTableHead {
+    /// The number of objects the project declares.
+    pub w_total_objects: u16,
+    /// The capacity of the object array. See the doc comment on this struct.
+    pub w_compiled_objects: u16,
+    /// The address of the project name string.
+    ///
+    /// This is a **virtual address**, which `STRUCTURES.md` section 4 marks
+    /// at confidence `[C]`. It is a different kind of pointer from the four
+    /// header relative offsets [`crate::vb::header::VbHeader`] carries, and
+    /// the type is what keeps the two apart.
+    pub lpsz_project_name: Va,
+    /// The project name, which is the `.vbp` `Name` value.
+    pub project_name: String,
+    defects: Vec<Defect>,
+}
+
+impl ObjectTableHead {
+    /// Reads the head of the object table.
+    ///
+    /// The window is exactly [`OBJECT_TABLE_SIZE`] bytes, taken before any
+    /// field is read, for the reason [`ProjectInfo::read`] gives.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Refusal::Damaged`] when the object table address is in no
+    /// section, when the file ends inside the structure, when the project
+    /// name address is in no section, and when no NUL byte follows the name
+    /// within [`NAME_MAX`] bytes.
+    ///
+    /// A disagreement between the two counts is **not** an error. It is a
+    /// [`DefectKind::CountMismatch`] at [`crate::error::Severity::Recoverable`]
+    /// on [`ObjectTableHead::defects`], and the read continues. The count is
+    /// one number in a report, and a wrong number is not a reason to refuse a
+    /// file whose whole spine resolved.
+    pub fn read(pe: &PeImage<'_>, lp_object_table: Va) -> Result<Self, Refusal> {
+        let at = pe.region_at_va(lp_object_table).ok_or(Refusal::Damaged(
+            "the object table pointer is in no section",
+        ))?;
+        let window = at
+            .subregion(Off::new(0), OBJECT_TABLE_SIZE)
+            .ok_or(Refusal::Damaged(
+                "the file ends inside the object table structure",
+            ))?;
+
+        // The `dw` prefix that one prior source gives these two fields is a
+        // typo. They are two bytes apart, so they are words, and four other
+        // sources read them as `u16`.
+        let w_total_objects = u16_at(&window, 0x2A, "the object table holds no object count")?;
+        let w_compiled_objects = u16_at(
+            &window,
+            0x2C,
+            "the object table holds no object array capacity",
+        )?;
+        let lpsz_project_name = va_at(
+            &window,
+            0x40,
+            "the object table holds no address for the project name",
+        )?;
+
+        let name = pe.region_at_va(lpsz_project_name).ok_or(Refusal::Damaged(
+            "the project name pointer is in no section",
+        ))?;
+        let bytes = name
+            .cstr(Off::new(0), NAME_MAX)
+            .ok_or(Refusal::Damaged("the project name is not a bounded string"))?;
+        // Each byte becomes its Latin-1 code point, which is the rule
+        // `vb/header.rs` uses for the four header strings.
+        // `String::from_utf8_lossy` is wrong here: a byte in 0x80 to 0xFF
+        // would become the replacement character and the name would be lost.
+        let project_name = bytes.iter().copied().map(char::from).collect();
+
+        let defects = count_defects(
+            &window,
+            lp_object_table,
+            pe.image_base(),
+            w_total_objects,
+            w_compiled_objects,
+        );
+
+        Ok(Self {
+            w_total_objects,
+            w_compiled_objects,
+            lpsz_project_name,
+            project_name,
+            defects,
+        })
+    }
+
+    /// Gives the number of objects the project declares.
+    ///
+    /// This is `wTotalObjects`. Read the doc comment on
+    /// [`ObjectTableHead`] for the measurement that decided which of the two
+    /// count fields answers this question.
+    #[must_use]
+    pub const fn object_count(&self) -> u16 {
+        self.w_total_objects
+    }
+
+    /// Gives the defects the read found, which is the count disagreement.
+    #[must_use]
+    pub fn defects(&self) -> &[Defect] {
+        &self.defects
+    }
+}
+
+/// Reports a capacity that cannot hold the objects the table declares.
+///
+/// The test is `capacity < count` and it is not `capacity != count`. A
+/// capacity larger than the count is what a clean compile produces in 15 of
+/// the 44 corpus files, so reporting inequality would mark a third of the
+/// corpus damaged. A capacity **below** the count is a real disagreement:
+/// the array does not have room for the objects the same structure declares,
+/// so one of the two numbers is wrong.
+fn count_defects(
+    window: &Region<'_>,
+    lp_object_table: Va,
+    image_base: u32,
+    w_total_objects: u16,
+    w_compiled_objects: u16,
+) -> Vec<Defect> {
+    if w_compiled_objects >= w_total_objects {
+        return Vec::new();
+    }
+    // The window exists, so this sum lies inside it. `Region` has no
+    // infallible accessor, so the fallback is written out. It names offset 0,
+    // which is visibly not the site of a field and cannot be mistaken for one.
+    let offset = window.file_offset(Off::new(0x2C)).map_or(0, Off::get);
+    vec![Defect {
+        site: Site {
+            offset,
+            rva: lp_object_table
+                .to_rva(image_base)
+                .and_then(|rva| rva.checked_add(0x2C))
+                .map(Rva::get),
+            structure: "ObjectTable",
+            field: "wCompiledObjects",
+        },
+        kind: DefectKind::CountMismatch {
+            offset,
+            count: u32::from(w_compiled_objects),
+            expected: u32::from(w_total_objects),
+            other_field: "wTotalObjects",
+        },
+    }]
+}
+
+/// Reads an unsigned 16-bit value out of a structure window.
+fn u16_at(window: &Region<'_>, at: u32, what: &'static str) -> Result<u16, Refusal> {
+    window.u16_le(Off::new(at)).ok_or(Refusal::Damaged(what))
+}
+
 /// Reads an unsigned 32-bit value out of a structure window.
 fn u32_at(window: &Region<'_>, at: u32, what: &'static str) -> Result<u32, Refusal> {
     window.u32_le(Off::new(at)).ok_or(Refusal::Damaged(what))
@@ -158,8 +370,9 @@ fn va_at(window: &Region<'_>, at: u32, what: &'static str) -> Result<Va, Refusal
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{CompileMode, PROJECT_INFO_SIZE, ProjectInfo};
+    use super::{CompileMode, ObjectTableHead, PROJECT_INFO_SIZE, ProjectInfo};
     use crate::error::Refusal;
+    use crate::error::{DefectKind, Severity};
     use crate::read::pe::PeImage;
     use crate::read::region::{Off, Va};
     use crate::vb::header::{VbHeader, header_region};
@@ -296,6 +509,165 @@ mod tests {
         assert_eq!(
             ProjectInfo::read(&image, project_data_va(&bytes)).unwrap_err(),
             Refusal::Damaged("the file ends inside the ProjectInfo structure")
+        );
+    }
+
+    /// Reads the head of the object table out of a byte slice.
+    fn object_table(data: &[u8]) -> Result<ObjectTableHead, Refusal> {
+        let image = PeImage::parse(data).unwrap();
+        let info = ProjectInfo::read(&image, project_data_va(data)).unwrap();
+        ObjectTableHead::read(&image, info.lp_object_table)
+    }
+
+    /// Gives the absolute file offset of a field inside the object table.
+    ///
+    /// The route is the parser's own: the address the header holds, then the
+    /// address `ProjectInfo` holds, then `file_offset`. Nothing searches for
+    /// a byte pattern.
+    fn object_table_field_offset(data: &[u8], field: u32) -> usize {
+        let image = PeImage::parse(data).unwrap();
+        let info = ProjectInfo::read(&image, project_data_va(data)).unwrap();
+        let window = image.region_at_va(info.lp_object_table).unwrap();
+        let at = window.file_offset(Off::new(field)).unwrap();
+        usize::try_from(at.get()).unwrap()
+    }
+
+    /// Copies the corpus bytes and writes a `u16` into the object table.
+    fn with_object_table_u16(field: u32, value: u16) -> Vec<u8> {
+        let at = object_table_field_offset(MANDELBROT, field);
+        let mut out = MANDELBROT.to_vec();
+        assert_ne!(
+            out[at..at + 2],
+            value.to_le_bytes(),
+            "the fixture writes the value the field already holds, so it proves nothing"
+        );
+        out[at..at + 2].copy_from_slice(&value.to_le_bytes());
+        out
+    }
+
+    /// Copies the corpus bytes and writes a `u32` into the object table.
+    fn with_object_table_u32(field: u32, value: u32) -> Vec<u8> {
+        let at = object_table_field_offset(MANDELBROT, field);
+        let mut out = MANDELBROT.to_vec();
+        assert_ne!(
+            out[at..at + 4],
+            value.to_le_bytes(),
+            "the fixture writes the value the field already holds, so it proves nothing"
+        );
+        out[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        out
+    }
+
+    /// The `.vbp` beside `Mandelbrot.exe` declares
+    /// `Name="Mandelbrot_Fractal_Demo"`.
+    #[test]
+    fn the_project_name_comes_from_the_object_table() {
+        assert_eq!(
+            object_table(MANDELBROT).unwrap().project_name,
+            "Mandelbrot_Fractal_Demo"
+        );
+    }
+
+    /// The two sources of the project name are two different fields, in two
+    /// different structures, reached by two different kinds of pointer.
+    ///
+    /// The header holds a byte offset from the header base at `0x64`. The
+    /// object table holds a virtual address at `0x40`. Neither is derived
+    /// from the other, so this is a cross-check and not a tautology.
+    #[test]
+    fn the_object_table_and_the_header_agree_on_the_project_name() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let header = VbHeader::read(&header_region(&image).unwrap()).unwrap();
+        let table = object_table(MANDELBROT).unwrap();
+        assert_eq!(table.project_name, header.project_name);
+        assert!(!table.project_name.is_empty());
+    }
+
+    #[test]
+    fn the_corpus_file_declares_one_object_and_its_array_holds_one() {
+        let table = object_table(MANDELBROT).unwrap();
+        assert_eq!(table.w_total_objects, 1);
+        assert_eq!(table.w_compiled_objects, 1);
+        assert_eq!(table.object_count(), 1);
+        assert!(table.defects().is_empty());
+    }
+
+    /// The count is the number of objects and not the capacity of the array.
+    ///
+    /// `Mandelbrot.exe` cannot tell the two apart, because both of its fields
+    /// hold the value one. 15 of the 44 corpus files can tell them apart:
+    /// their capacity is rounded up to 4 or to 8 while the project declares
+    /// one, two, three or five objects, and the `.vbp` of each proves which
+    /// number is the truth. This fixture reproduces that shape on the one
+    /// file this module may read.
+    #[test]
+    fn a_capacity_above_the_object_count_is_normal_and_is_not_a_defect() {
+        let bytes = with_object_table_u16(0x2C, 4);
+        let table = object_table(&bytes).unwrap();
+        assert_eq!(table.w_compiled_objects, 4);
+        assert_eq!(
+            table.object_count(),
+            1,
+            "the reported count must be the number of objects the project declares, and not \
+             the capacity the compiler rounded the array up to"
+        );
+        assert!(
+            table.defects().is_empty(),
+            "a capacity above the count is what 15 of the 44 corpus files hold, so it must \
+             not be reported as damage: {:?}",
+            table.defects()
+        );
+    }
+
+    /// A capacity below the count is a real disagreement, and it is not fatal.
+    #[test]
+    fn a_capacity_below_the_object_count_is_a_recoverable_defect_and_not_a_refusal() {
+        let bytes = with_object_table_u16(0x2A, 3);
+        let table = object_table(&bytes).expect("a count disagreement must not refuse the file");
+        assert_eq!(table.w_total_objects, 3);
+        assert_eq!(table.w_compiled_objects, 1);
+        // The rest of the read still stands.
+        assert_eq!(table.project_name, "Mandelbrot_Fractal_Demo");
+
+        assert_eq!(table.defects().len(), 1);
+        let defect = &table.defects()[0];
+        assert_eq!(defect.kind.severity(), Severity::Recoverable);
+        assert!(matches!(
+            defect.kind,
+            DefectKind::CountMismatch {
+                count: 1,
+                expected: 3,
+                other_field: "wTotalObjects",
+                ..
+            }
+        ));
+        // The defect names the byte the parser read, not a byte near it.
+        assert_eq!(
+            defect.site.offset,
+            u32::try_from(object_table_field_offset(MANDELBROT, 0x2C)).unwrap()
+        );
+        assert_eq!(defect.site.field, "wCompiledObjects");
+    }
+
+    #[test]
+    fn an_object_table_pointer_in_no_section_is_damaged() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let nowhere = Va::new(image.image_base() + 0x00F0_0000);
+        assert!(image.region_at_va(nowhere).is_none());
+        assert_eq!(
+            ObjectTableHead::read(&image, nowhere).unwrap_err(),
+            Refusal::Damaged("the object table pointer is in no section")
+        );
+    }
+
+    #[test]
+    fn a_project_name_pointer_in_no_section_is_damaged() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let nowhere = image.image_base() + 0x00F0_0000;
+        let bytes = with_object_table_u32(0x40, nowhere);
+        assert_eq!(
+            object_table(&bytes).unwrap_err(),
+            Refusal::Damaged("the project name pointer is in no section")
         );
     }
 }
