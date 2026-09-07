@@ -44,7 +44,7 @@ in 01-08-PLAN.md still names the wrong field. See `STRUCTURES.md` section 4.1.
 That is wrong: 01-02 cannot write `read/region.rs` before 01-01 creates the
 workspace it lives in. Use the order from ROADMAP.md:
 
-    [01-01 done]  [01-02 done, 01-03 done]  [01-04 done]  [01-05 done, 01-06 done]  [01-07]  [01-08]
+    [01-01 done]  [01-02 done, 01-03 done]  [01-04 done]  [01-05 done, 01-06 done]  [01-07 done]  [01-08]
 
 **Executors run in a worktree, not the primary checkout.** Verify what lands on
 the main branch after each wave rather than assuming the merge did the right
