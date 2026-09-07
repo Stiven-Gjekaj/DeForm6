@@ -300,3 +300,152 @@ pub fn corpus_wide_exe_name_index(projects: &[PathBuf]) -> HashMap<String, Vec<P
     }
     index
 }
+
+/// The eight keys a `.vbp` file uses to declare an object, matched
+/// exactly against the text before the first `=` sign. Per D-03 the
+/// declared object list comes from these keys and from nothing else:
+/// never a directory glob, which would count an orphan source file
+/// (one the project file never lists) as a recovery failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectKind {
+    Form,
+    Module,
+    Class,
+    UserControl,
+    PropertyPage,
+    UserDocument,
+    Designer,
+    RelatedDoc,
+}
+
+impl ObjectKind {
+    /// Matches a `.vbp` key exactly against the eight object kinds.
+    /// Gives `None` for every other key, including `ExeName32`,
+    /// `Title` and `Reference`.
+    fn from_key(key: &str) -> Option<Self> {
+        Some(match key {
+            "Form" => Self::Form,
+            "Module" => Self::Module,
+            "Class" => Self::Class,
+            "UserControl" => Self::UserControl,
+            "PropertyPage" => Self::PropertyPage,
+            "UserDocument" => Self::UserDocument,
+            "Designer" => Self::Designer,
+            "RelatedDoc" => Self::RelatedDoc,
+            _ => return None,
+        })
+    }
+}
+
+/// Where a declared object's name came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NameSource {
+    /// `Attribute VB_Name` inside the referenced source file, found by
+    /// scanning the whole file. The attribute sits after the whole
+    /// `Begin ... End` block for a form, which can run to thousands of
+    /// lines when the form embeds picture data, so a bounded scan
+    /// misses it.
+    Attribute,
+    /// The prefix before the semicolon on the project line. Used only
+    /// when the repository does not hold the referenced source file, so
+    /// the attribute is unreachable. A form line carries no prefix, so
+    /// this can never name a form.
+    Fallback,
+}
+
+/// One object a project file declares.
+#[derive(Debug, Clone)]
+pub struct DeclaredObject {
+    pub kind: ObjectKind,
+    /// The compiled object name. `None` when neither the attribute nor
+    /// the fallback prefix could name it: a form whose source file is
+    /// missing has no recoverable name and must be reported as a gap,
+    /// never guessed.
+    pub name: Option<String>,
+    pub name_source: Option<NameSource>,
+    /// The raw prefix before the semicolon on the project line, kept
+    /// separately from `name` so a test can cross-check the two. A
+    /// `Form=` line has none: only `Module=`, `Class=`, `UserControl=`,
+    /// `PropertyPage=` and `UserDocument=` lines carry a prefix.
+    pub prefix: Option<String>,
+    /// The source file the project line references, resolved relative
+    /// to the project file's own directory. May not exist on disk.
+    pub source_file: PathBuf,
+}
+
+/// Scans a source file's whole text for `Attribute VB_Name = "..."` and
+/// gives the quoted name.
+///
+/// The whole file is scanned, not a bounded prefix. A 40-line prefix
+/// scan matches none of the forms in this corpus whose form definition
+/// block runs long, because the attribute is written after the whole
+/// `Begin VB.Form ... End` block. Gives `None` when the file cannot be
+/// read (missing from the repository) or carries no such line.
+fn find_vb_name(path: &Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    let text: String = bytes.iter().copied().map(char::from).collect();
+    for line in text.lines() {
+        let s = line.trim();
+        let Some(rest) = s.strip_prefix("Attribute VB_Name") else {
+            continue;
+        };
+        let Some(rest) = rest.trim_start().strip_prefix('=') else {
+            continue;
+        };
+        if let Some(name) = quoted_value(rest) {
+            return Some(name);
+        }
+    }
+    None
+}
+
+impl Project {
+    /// Gives every object this project file declares, per D-03: read
+    /// from the eight object keys and from nothing else, never from a
+    /// directory listing.
+    ///
+    /// `Hidden-Markov-model` and `Randomize-effects` each carry a
+    /// `cCommonDialog.cls` source file on disk that neither project
+    /// file lists; walking this list rather than the directory is what
+    /// keeps both out, because the compiler never built either one in.
+    #[must_use]
+    pub fn declared_objects(&self) -> Vec<DeclaredObject> {
+        let dir = self.path.parent().unwrap_or_else(|| Path::new("."));
+        let mut out = Vec::new();
+        for line in self.text.lines() {
+            let s = line.trim();
+            let Some((k, rest)) = key_value(s) else {
+                continue;
+            };
+            let Some(kind) = ObjectKind::from_key(k) else {
+                continue;
+            };
+            // Unlike a string property, an object line's value is never
+            // quoted. `Form=File.frm` carries only a file name;
+            // `Class=Name; File.cls` carries a prefix, a semicolon, and
+            // a file name. A key with no semicolon has no prefix.
+            let (prefix, file) = match rest.split_once(';') {
+                Some((p, f)) => (Some(p.trim().to_owned()), f.trim().to_owned()),
+                None => (None, rest.trim().to_owned()),
+            };
+            let source_file = dir.join(&file);
+
+            let (name, name_source) = match find_vb_name(&source_file) {
+                Some(attribute_name) => (Some(attribute_name), Some(NameSource::Attribute)),
+                None => match prefix.clone() {
+                    Some(p) if !source_file.exists() => (Some(p), Some(NameSource::Fallback)),
+                    _ => (None, None),
+                },
+            };
+
+            out.push(DeclaredObject {
+                kind,
+                name,
+                name_source,
+                prefix,
+                source_file,
+            });
+        }
+        out
+    }
+}
