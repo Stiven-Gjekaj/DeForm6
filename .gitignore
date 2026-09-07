@@ -14,3 +14,7 @@
 
 # Agent worktrees. Transient, and each one is a checkout of this repo.
 .claude/worktrees/
+
+# The state cache that gsd-tools writes. It is derived from ROADMAP.md and
+# STATE.md, and it goes stale as soon as either one changes.
+/.planning/state.json
