@@ -395,11 +395,24 @@ const DECLARE_DESCRIPTOR_SIZE: u32 = 8;
 /// # What survives compilation, and what does not
 ///
 /// `STRUCTURES.md` section 7.2 names exactly two things that survive: the
-/// library name and the export name. Neither the Visual Basic level
-/// procedure name and its `Alias`, the argument names and types, nor the
-/// owning module and its `Public` or `Private` marker are stored anywhere in
-/// this table. Plan 02-06's second task adds markers that name each of those
-/// three explicitly; this task carries only what the file holds.
+/// library name and the export name. Three do not, and this type marks each
+/// one as missing rather than inventing it, per decision D-07:
+///
+/// - The Visual Basic level procedure name and its `Alias`. A source that
+///   wrote `Declare Function FindWindow Lib "user32" Alias "FindWindowA"`
+///   leaves only the export name in the file. [`Declaration::NAME_MARKER`]
+///   is the comment a caller prints beside it. One prior tool works around
+///   the gap with a bundled 800 kilobyte table of known declarations.
+///   `AGENTS.md` calls that a database and not recovery, and this crate
+///   ships no such table: `grep -rE 'FindWindowA|winapi\.dat|KNOWN_APIS'`
+///   over `crates/deform6/src/` finds nothing outside a comment.
+/// - The argument names and types. [`Declaration::ARGUMENTS_MARKER`] is the
+///   comment. This type carries no argument list, because there is not one
+///   to carry: inventing an empty list would look like a recovered
+///   signature with zero parameters, which is a different, false claim.
+/// - The owning module, and whether the declaration was `Public` or
+///   `Private`. [`Declaration::SCOPE_MARKER`] is the comment. One prior
+///   tool's own comment records that the executable does not keep this.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Declaration {
     /// The library name, verbatim.
@@ -411,8 +424,63 @@ pub struct Declaration {
     /// the author wrote in the source, so normalising it would change what
     /// the recovered declaration says.
     pub library: String,
+    /// The export name, or the ordinal it encodes.
+    pub export: ExportName,
+}
+
+impl Declaration {
+    /// What a caller prints beside [`Declaration::export`] when it prints a
+    /// [`ExportName::Name`]: the file holds no Visual Basic level procedure
+    /// name and no `Alias`, only the export name that survives compilation.
+    pub const NAME_MARKER: &'static str = "the Visual Basic procedure name and its Alias are not in this file; only the export \
+         name that survives compilation is shown";
+    /// What a caller prints beside every [`Declaration`]: the file holds no
+    /// argument name and no argument type for this statement.
+    pub const ARGUMENTS_MARKER: &'static str =
+        "the argument names and types of this Declare are not in this file";
+    /// What a caller prints beside every [`Declaration`]: the file holds no
+    /// record of which module owned this statement, and no `Public` or
+    /// `Private` marker for it.
+    pub const SCOPE_MARKER: &'static str =
+        "the owning module and the Public or Private marker of this Declare are not in this file";
+}
+
+/// What an export name gives: a name, or an ordinal it encodes.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum ExportName {
     /// The export name, exactly as the file holds it.
-    pub export: String,
+    Name(String),
+    /// An ordinal alias, decoded from a name of the shape `"#123"`.
+    ///
+    /// `STRUCTURES.md` gap 10: a source level `Alias "#123"` should leave the
+    /// literal string `"#123"` in the file, because Visual Basic stores an
+    /// alias verbatim. But no source confirms this and no sample was ever
+    /// inspected, and a script run over every corpus program and every
+    /// corpus binary in this repository, this session, found not one export
+    /// name beginning with `#` anywhere, in source or in a compiled file.
+    /// This path is therefore flagged inferred wherever it is printed, per
+    /// decision D-09, and it stays untested against a real file for the same
+    /// reason the P-code branch on [`CompileMode::PCode`] does: there is
+    /// nothing in this corpus to test it against.
+    OrdinalInferred(u32),
+}
+
+/// Parses an export name into a plain name or an inferred ordinal alias.
+///
+/// The rule is section 7.2's: the whole string after a leading `#` must
+/// parse as a decimal integer, or this is a plain name. `"#12a"` is a plain
+/// name and not ordinal 12, because the character after the digits is not a
+/// digit. An empty string after the `#` is also a plain name, not ordinal 0,
+/// because `str::parse` on an empty string returns an error.
+fn parse_export_name(name: String) -> ExportName {
+    if let Some(digits) = name.strip_prefix('#')
+        && !digits.is_empty()
+        && digits.bytes().all(|b| b.is_ascii_digit())
+        && let Ok(ordinal) = digits.parse::<u32>()
+    {
+        return ExportName::OrdinalInferred(ordinal);
+    }
+    ExportName::Name(name)
 }
 
 /// The `Declare` import table, reached from [`ProjectInfo::lp_external_table`].
@@ -535,7 +603,10 @@ impl DeclareTable {
                 // is a path every third program takes. `[VERIFIED: local]`
                 6 => {}
                 7 => match read_declare_descriptor(pe, descriptor_va) {
-                    Ok((library, export)) => declarations.push(Declaration { library, export }),
+                    Ok((library, export)) => declarations.push(Declaration {
+                        library,
+                        export: parse_export_name(export),
+                    }),
                     Err(failure) => {
                         defects.push(failure.into_defect(pe, entry_offset, descriptor_va));
                     }
@@ -659,7 +730,10 @@ fn read_latin1_cstr(pe: &PeImage<'_>, va: Va) -> Option<String> {
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{CompileMode, DeclareTable, ObjectTableHead, PROJECT_INFO_SIZE, ProjectInfo};
+    use super::{
+        CompileMode, Declaration, DeclareTable, ExportName, ObjectTableHead, PROJECT_INFO_SIZE,
+        ProjectInfo, parse_export_name,
+    };
     use crate::error::Refusal;
     use crate::error::{DefectKind, Severity};
     use crate::read::pe::PeImage;
@@ -989,11 +1063,19 @@ mod tests {
 
     /// Gives every recovered declaration as a `(library, export)` pair of
     /// plain strings, so a test can compare against an ordered literal.
+    ///
+    /// A declaration whose export is an inferred ordinal has no place in this
+    /// shape; no test that calls this reaches one.
     fn as_pairs(table: &DeclareTable) -> Vec<(&str, &str)> {
         table
             .declarations
             .iter()
-            .map(|d| (d.library.as_str(), d.export.as_str()))
+            .map(|d| {
+                let ExportName::Name(export) = &d.export else {
+                    panic!("an ordinal alias has no place in a plain (library, export) pair");
+                };
+                (d.library.as_str(), export.as_str())
+            })
             .collect()
     }
 
@@ -1157,5 +1239,67 @@ mod tests {
                 .iter()
                 .any(|d| matches!(d.kind, DefectKind::ImplausibleCount { count: 0xFFFF, .. }))
         );
+    }
+
+    #[test]
+    fn the_name_marker_the_arguments_marker_and_the_scope_marker_each_name_what_is_missing() {
+        assert!(Declaration::NAME_MARKER.contains("procedure name"));
+        assert!(Declaration::NAME_MARKER.contains("Alias"));
+        assert!(Declaration::ARGUMENTS_MARKER.contains("argument"));
+        assert!(Declaration::SCOPE_MARKER.contains("Public"));
+        assert!(Declaration::SCOPE_MARKER.contains("Private"));
+        assert!(Declaration::SCOPE_MARKER.contains("module"));
+    }
+
+    #[test]
+    fn a_hash_then_all_decimal_digits_is_an_inferred_ordinal() {
+        assert_eq!(
+            parse_export_name("#123".to_string()),
+            ExportName::OrdinalInferred(123)
+        );
+    }
+
+    /// The character after the digits is not a digit, so this is a plain
+    /// name and not ordinal 12. A lazy parse that stopped at the first
+    /// non-digit would turn this into `OrdinalInferred(12)`.
+    #[test]
+    fn a_hash_then_a_non_decimal_tail_is_a_plain_name_and_not_an_ordinal() {
+        assert_eq!(
+            parse_export_name("#12a".to_string()),
+            ExportName::Name("#12a".to_string())
+        );
+    }
+
+    #[test]
+    fn a_bare_hash_with_no_digits_is_a_plain_name() {
+        assert_eq!(
+            parse_export_name("#".to_string()),
+            ExportName::Name("#".to_string())
+        );
+    }
+
+    #[test]
+    fn a_name_with_no_leading_hash_is_a_plain_name() {
+        assert_eq!(
+            parse_export_name("SetPixelV".to_string()),
+            ExportName::Name("SetPixelV".to_string())
+        );
+    }
+
+    /// No corpus program uses an ordinal alias anywhere. A script run over
+    /// every `Declare`-bearing program in this repository, this session,
+    /// confirms it: 220 external entries, zero of them ordinal.
+    #[test]
+    fn no_corpus_program_recovers_an_ordinal_alias() {
+        for data in [MANDELBROT, GRAYSCALE, VB_SCANNER_SUPPORT] {
+            let table = declare_table(data);
+            for decl in &table.declarations {
+                assert!(
+                    matches!(decl.export, ExportName::Name(_)),
+                    "no sample anywhere confirms the ordinal encoding; this corpus must not \
+                     manufacture one: {decl:?}"
+                );
+            }
+        }
     }
 }
