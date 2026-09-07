@@ -7,9 +7,11 @@
 //! discriminator the format itself uses, four independent implementations
 //! use it, and all 44 corpus executables agree.
 //!
-//! This module holds a pure classifier over two name lists.
+//! This module holds a pure classifier over two name lists, and one wrapper
+//! that reads those lists out of a parsed image.
 
 use crate::error::Refusal;
+use crate::read::pe::PeImage;
 
 /// The runtime that Visual Basic 6 links against.
 pub const VB6_DLL: &str = "MSVBVM60.DLL";
@@ -77,11 +79,13 @@ pub enum Runtime {
 /// No corpus file has a delay load directory at all, in 44 of 44. The Visual
 /// Basic 6 linker does not emit one for the runtime, because the runtime
 /// entry point is called from the entry stub itself, before any user code
-/// runs. And `object` resolves a delay load name with a wrapping subtraction
-/// and never reads the `attributes` field of the descriptor, while the old
-/// Visual C++ 6 delay load format stores virtual addresses in that table
-/// rather than relative virtual addresses. The bit that tells the two formats
-/// apart is not documented in the Microsoft PE specification.
+/// runs. And the parser behind `PeImage::delay_loaded_dlls` resolves a delay
+/// load name with a wrapping subtraction and never reads the `attributes`
+/// field of the descriptor, while the old Visual C++ 6 delay load format
+/// stores virtual addresses in that table rather than relative virtual
+/// addresses. The bit that tells the two formats apart is not documented in
+/// the Microsoft PE specification. The doc comment on
+/// `PeImage::delay_loaded_dlls` records the measurement.
 ///
 /// So the list is read and reported as information, and it is given no vote.
 /// A file whose only Visual Basic runtime reference is delay loaded is
@@ -137,15 +141,255 @@ pub fn classify(
     Err(Refusal::NoVbRuntime { dot_net })
 }
 
+/// Reads the runtime out of a parsed image.
+///
+/// This is [`classify`] with the three lists taken from the image. It gives
+/// back the pair `classify` gives back, so the matched runtime name reaches
+/// the caller.
+///
+/// # A missing import directory is not damage
+///
+/// The import walk produces two outcomes and they mean different things to a
+/// person sorting a directory of files.
+///
+/// An error means the data directory names an address that maps nowhere, or
+/// the descriptors run past the end of the file. That is [`Refusal::Damaged`]
+/// and exit code 4. A truncated Visual Basic 6 file must not be reported as
+/// "this holds no Visual Basic runtime".
+///
+/// A list, empty or not, goes to `classify`. An empty list is what a missing
+/// import data directory produces, and `classify` answers it with
+/// [`Refusal::NoVbRuntime`] and exit code 2. That is neither an error nor
+/// damage. The empty case is not a branch here, because `classify` already
+/// holds the rule and a second copy of it would be a second place for it to
+/// drift.
+///
+/// # A packed image
+///
+/// If a packer rewrote the entry point and the import directory, none of this
+/// holds. Three sub-cases, and the answer to each:
+///
+/// | What the file looks like | What DeForm6 says |
+/// |---|---|
+/// | No import data directory | [`Refusal::NoVbRuntime`], exit 2 |
+/// | The directory address maps nowhere, or the descriptors are truncated | [`Refusal::Damaged`], exit 4 |
+/// | The directory reads and names only the stub imports of the packer | [`Refusal::NoVbRuntime`], exit 2 |
+///
+/// Confidence in the discrimination itself is high. Confidence that the
+/// import table is present is a different question, and for a file with no
+/// readable import directory DeForm6 has no second opinion in this phase and
+/// does not pretend to. **Do not add a fallback here.** Phase 5 adds the
+/// salvage path behind a flag, and marks every result it produces inferred.
+///
+/// # The delay load walk cannot change the answer
+///
+/// A failure of the delay load walk degrades to an empty list rather than to
+/// a refusal. The list decides nothing, so a delay load directory that cannot
+/// be read must not be able to move the outcome.
+///
+/// # Errors
+///
+/// Returns [`Refusal::Damaged`] when the import directory cannot be read, and
+/// the refusal that [`classify`] gives for the names it finds.
+pub fn runtime_of(pe: &PeImage<'_>) -> Result<(Runtime, String), Refusal> {
+    let imports = pe
+        .imported_dlls()
+        .map_err(|_| Refusal::Damaged("the import directory is unreadable"))?;
+    let delay_loaded = pe.delay_loaded_dlls().unwrap_or_default();
+    classify(&imports, &delay_loaded, pe.has_clr_header())
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
+    clippy::expect_used,
     clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::integer_division,
+    clippy::panic,
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{Runtime, VB4_32_DLL, VB5_DLL, VB6_DLL, classify};
+    use super::{Runtime, VB4_32_DLL, VB5_DLL, VB6_DLL, classify, runtime_of};
     use crate::error::Refusal;
+    use crate::read::pe::PeImage;
+
+    /// The general purpose corpus file.
+    ///
+    /// A test inside `src/` reaches a corpus file this way and never through
+    /// a path. The library takes a byte slice and names no file system type,
+    /// and the grep that proves it does not know a test module from library
+    /// code. A file under `tests/` is a separate crate root and may keep a
+    /// path helper.
+    const MANDELBROT: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/vb6-code/Mandelbrot/Mandelbrot.exe"
+    ));
+
+    /// Gives a copy of `data` whose first imported DLL name is `replacement`.
+    ///
+    /// The offset comes from `PeImage::dll_name_sites`, which resolves the
+    /// address in the import descriptor. **It is never a byte search.** A
+    /// search for the runtime name could hit the same bytes in the resource
+    /// section or in a string table, and the patch would then land on a byte
+    /// that no pointer in the file names.
+    ///
+    /// The replacement must be as long as the name it covers, so a wrong
+    /// length is a loud failure rather than a corrupted image. `MSVBVM60.DLL`
+    /// is 12 bytes. `VB40032.DLL` is 11, so its replacement carries its own
+    /// trailing NUL and the original NUL becomes a second, harmless one.
+    ///
+    /// Nothing is written to disk. The bytes live for one test function.
+    fn with_the_runtime_named(data: &[u8], replacement: &[u8]) -> Vec<u8> {
+        let image = PeImage::parse(data).unwrap();
+        let sites = image.dll_name_sites().unwrap();
+        let (offset, len) = sites[0];
+        let at = usize::try_from(offset.get()).unwrap();
+        let len = usize::try_from(len).unwrap();
+        assert_eq!(
+            replacement.len(),
+            len,
+            "the replacement must be as long as the name it covers"
+        );
+        // The site must hold the runtime name now, or the patch proves
+        // nothing about the runtime.
+        assert_eq!(
+            String::from_utf8_lossy(&data[at..at + len]).into_owned(),
+            VB6_DLL
+        );
+
+        let mut out = data.to_vec();
+        out[at..at + len].copy_from_slice(replacement);
+        out
+    }
+
+    /// Gives a copy of `data` whose data directory `index` holds `address`
+    /// and `size`.
+    ///
+    /// Data directory 14 is zero in all 44 corpus executables, so the corpus
+    /// gives `PeImage::has_clr_header` no positive case. This builds one in
+    /// memory. The same helper, with index 1 and two zeroes, takes the import
+    /// data directory away and builds the "no import directory" case.
+    ///
+    /// The helper asserts that the write changes the entry, so a fixture that
+    /// has become a no-op fails loudly rather than passing for the wrong
+    /// reason.
+    fn with_data_directory(data: &[u8], index: usize, address: u32, size: u32) -> Vec<u8> {
+        let mut out = data.to_vec();
+        let lfanew = u32::from_le_bytes(out[0x3c..0x40].try_into().unwrap());
+        // 24 reaches the optional header from the PE signature. 96 reaches
+        // the data directories from the start of a PE32 optional header.
+        // Each entry is eight bytes.
+        let at = usize::try_from(lfanew).unwrap() + 24 + 96 + index * 8;
+        let was_address = u32::from_le_bytes(out[at..at + 4].try_into().unwrap());
+        let was_size = u32::from_le_bytes(out[at + 4..at + 8].try_into().unwrap());
+        assert_ne!(
+            (was_address, was_size),
+            (address, size),
+            "data directory {index} already holds this value, so the patch proves nothing"
+        );
+
+        out[at..at + 4].copy_from_slice(&address.to_le_bytes());
+        out[at + 4..at + 8].copy_from_slice(&size.to_le_bytes());
+        out
+    }
+
+    /// The address of the first section, which is a mapped address in every
+    /// corpus file.
+    fn the_first_section_address(data: &[u8]) -> u32 {
+        PeImage::parse(data)
+            .unwrap()
+            .sections()
+            .first()
+            .expect("the corpus file must hold at least one section")
+            .virtual_address
+            .get()
+    }
+
+    #[test]
+    fn the_corpus_file_uses_the_visual_basic_6_runtime() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let (runtime, _) = runtime_of(&image).unwrap();
+        assert_eq!(runtime, Runtime::Vb6);
+    }
+
+    #[test]
+    fn the_corpus_file_names_its_runtime_and_the_name_reaches_the_caller() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let (_, matched) = runtime_of(&image).unwrap();
+        // The sweep in plan 01-08 reads this value for each of the 44 files,
+        // and the command line prints it. It comes out of the file.
+        assert_eq!(matched, VB6_DLL);
+    }
+
+    #[test]
+    fn a_patched_visual_basic_5_runtime_name_is_refused() {
+        let bytes = with_the_runtime_named(MANDELBROT, b"MSVBVM50.DLL");
+        let image = PeImage::parse(&bytes).unwrap();
+        assert_eq!(runtime_of(&image).unwrap_err(), Refusal::IsVb5);
+    }
+
+    #[test]
+    fn a_patched_32_bit_visual_basic_4_runtime_name_is_refused() {
+        // 11 bytes of name and the NUL that ends it, which is 12 in all.
+        let bytes = with_the_runtime_named(MANDELBROT, b"VB40032.DLL\0");
+        let image = PeImage::parse(&bytes).unwrap();
+        assert_eq!(runtime_of(&image).unwrap_err(), Refusal::IsVb4);
+    }
+
+    #[test]
+    fn a_patched_name_that_is_no_visual_basic_runtime_is_refused() {
+        let bytes = with_the_runtime_named(MANDELBROT, b"KERNEL32.DLL");
+        let image = PeImage::parse(&bytes).unwrap();
+        assert_eq!(
+            runtime_of(&image).unwrap_err(),
+            Refusal::NoVbRuntime { dot_net: false }
+        );
+    }
+
+    #[test]
+    fn a_truncated_file_is_damaged_and_not_a_file_without_a_runtime() {
+        // The parse still succeeds. A successful parse is not evidence of an
+        // intact file.
+        let half = &MANDELBROT[..MANDELBROT.len() / 2];
+        let image = PeImage::parse(half).unwrap();
+        let refusal = runtime_of(&image).unwrap_err();
+        assert!(
+            matches!(refusal, Refusal::Damaged(_)),
+            "an unreadable import directory is damage and exit code 4, \
+             and it is not the exit code 2 that means no Visual Basic runtime: {refusal:?}"
+        );
+    }
+
+    #[test]
+    fn an_image_with_no_import_data_directory_is_not_damaged() {
+        let bytes = with_data_directory(MANDELBROT, 1, 0, 0);
+        let image = PeImage::parse(&bytes).unwrap();
+        // The list is empty rather than an error, so this is exit code 2.
+        assert!(image.imported_dlls().unwrap().is_empty());
+        assert_eq!(
+            runtime_of(&image).unwrap_err(),
+            Refusal::NoVbRuntime { dot_net: false }
+        );
+    }
+
+    #[test]
+    fn a_common_language_runtime_directory_makes_the_refusal_name_a_dot_net_assembly() {
+        // Data directory 14 is zero in all 44 corpus files, so a `runtime_of`
+        // that passed a hard coded `false` would satisfy every other test in
+        // this module. This is the one input that carries the directory.
+        let plain = with_the_runtime_named(MANDELBROT, b"KERNEL32.DLL");
+        let address = the_first_section_address(&plain);
+        // 0x48 is the size of the common language runtime header structure.
+        let bytes = with_data_directory(&plain, 14, address, 0x48);
+
+        let image = PeImage::parse(&bytes).unwrap();
+        assert!(image.has_clr_header());
+        assert_eq!(
+            runtime_of(&image).unwrap_err(),
+            Refusal::NoVbRuntime { dot_net: true }
+        );
+    }
 
     /// Turns a literal list into the owned list the classifier takes.
     fn names(list: &[&str]) -> Vec<String> {
