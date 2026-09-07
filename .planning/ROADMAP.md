@@ -187,7 +187,7 @@ VER-02, VER-03, VER-04, VER-05
     `support/vbp.rs` is a second, independent reader. It must not call anything
     in `src/`. A harness that shares a reader agrees with a bug in that reader.
 
-**Plans**: 10 plans
+**Plans**: 1/10 plans executed
 
 Plans:
 
@@ -196,7 +196,7 @@ Plans:
 - [ ] 02-03-PLAN.md - `ObjectInfo` and `PrivateObj` - public procedure names, and a null name reported as private
 - [ ] 02-04-PLAN.md - `FuncTypDesc` and the type code table - prototypes with argument names, types and modifiers
 - [ ] 02-05-PLAN.md - `PubVarDesc` and `EventDesc` - the two counts explained and the event descriptor addresses
-- [ ] 02-06-PLAN.md - The `Declare` import table and the external component table
+- [x] 02-06-PLAN.md - The `Declare` import table and the external component table
 - [ ] 02-07-PLAN.md - Harness support - `support/vbp.rs`, an independent reader, and `support/rules.rs`, the exclusion rules
 - [ ] 02-08-PLAN.md - `differential.rs` - the gate over all 44 corpus programs
 - [ ] 02-09-PLAN.md - `ratios.toml`, the exact pin, the two failure messages, and `xtask update-ratios`
@@ -555,7 +555,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. It reads the file | 7/8 | In Progress|  |
-| 2. The object graph | 0/10 | Not started | - |
+| 2. The object graph | 1/10 | In Progress|  |
 | 3. Forms | 0/10 | Not started | - |
 | 4. It writes a project | 0/9 | Not started | - |
 | 5. Hostility | 0/8 | Not started | - |

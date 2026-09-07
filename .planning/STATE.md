@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 current_phase: 1
 current_phase_name: It reads the file
 status: complete
-stopped_at: Completed 01-08-PLAN.md
-last_updated: "2026-09-07T16:40:00.000Z"
+stopped_at: Completed 02-06-PLAN.md
+last_updated: "2026-09-07T22:13:08.018Z"
 last_activity: 2026-09-07
 last_activity_desc: "Plan 01-08 executed. The deform6 binary parses with Cli::try_parse and maps every Refusal to one of six exit codes; the eight-line report is read from Report::runtime_dll and Report::signature, never a literal. 134 tests pass across the workspace: 115 library, 9 refusal.rs, 1 corpus_sweep.rs (all 44 executables), 9 cli.rs. Nine deliberate breakages run and reverted; two of the plan's own predictions did not match measurement and are recorded in the SUMMARY. Phase 1 is complete."
-state_head: c259684
+state_head: b1ac7e6f5bb8599136ac3831bca421dc903bf68a
 progress:
   total_phases: 6
-  completed_phases: 1
-  total_plans: 8
-  completed_plans: 8
-  percent: 100
+  completed_phases: 0
+  total_plans: 18
+  completed_plans: 9
+  percent: 0
 ---
 
 ## Continue
@@ -61,7 +61,6 @@ before starting phase 2, then:
 That is wrong: a plan cannot write into a module another plan has not created
 yet. Take the wave order from ROADMAP.md, not from the tool.
 
-
 **Executors run in a worktree, not the primary checkout.** Verify what lands on
 the main branch after each wave rather than assuming the merge did the right
 thing.
@@ -105,7 +104,7 @@ vendored project is native. `inspect` drops the defects it collects, because
 `Report` derives `PartialEq` and `Defect` does not.
 Last activity: 2026-09-07 - Plan 01-08 executed. The `deform6` binary, six exit codes, the locked eight-line report, and the three test files that turn the phase's ROADMAP success criteria into commands. 134 tests pass across the workspace. Nine deliberate breakages; two of the plan's own predicted measurements did not hold and are recorded.
 
-Progress: [██████████] 100% of the plans in phase 1, which is 8 of 8
+Progress: [░░░░░░░░░░] 0% of the plans in phase 1, which is 8 of 8
 
 ## Performance Metrics
 
@@ -134,6 +133,7 @@ Progress: [██████████] 100% of the plans in phase 1, which i
 | Phase 01 P04 | 1 session | 3 tasks | 1 files |
 | Phase 01 P07 | 1 session | 3 tasks | 4 files |
 | Phase 01 P08 | 1 session | 3 tasks | 4 files |
+| Phase 02 P06 | ~50min | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -158,6 +158,7 @@ Recent decisions affecting current work:
 - [Phase 1]: Report carries runtime_dll and signature read from the file, because a one variant Runtime enum makes an equality assertion a tautology.
 - [Phase 1]: 01-08: Cli::try_parse with a hand-written, exhaustive Refusal-to-Exit match, never Cli::parse or process::exit. A usage error is exit 5, never exit 2.
 - [Phase 1]: 01-08: The corpus sweep's header-string check cross-checks Report's fields against a second, independent header read by field identity, not only an ascending-offset check, because the offsets alone cannot see a field-swap bug in Report construction.
+- [Phase 1]: D-07/D-09 applied in 02-06: no bundled Win32 declaration table; ordinal alias path flagged inferred (0 samples in 220 external entries).
 
 ### Pending Todos
 
@@ -186,8 +187,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-07T16:40:00.000Z
-Stopped at: Completed 01-08-PLAN.md
+Last session: 2026-09-07T22:13:08.007Z
+Stopped at: Completed 02-06-PLAN.md
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and
