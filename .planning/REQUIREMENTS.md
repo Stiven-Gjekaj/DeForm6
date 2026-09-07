@@ -27,7 +27,7 @@ Version 1 recovers metadata. It does not recover statements.
 
 ### Object graph
 
-- [ ] **OBJ-01**: The tool walks the object table and recovers the name of
+- [x] **OBJ-01**: The tool walks the object table and recovers the name of
       every compiled object.
 - [ ] **OBJ-02**: The tool tells a form, a module, and a class apart.
 - [ ] **OBJ-03**: The tool recovers public procedure names for every object.
