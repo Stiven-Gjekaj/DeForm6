@@ -25,7 +25,7 @@ inferred.
 
 Phase: 1 of 6 (It reads the file)
 Plan: 0 of 8 in current phase
-Status: Ready to plan
+Status: Planned and checked. Ready to execute.
 Last activity: 2026-09-07 - Roadmap created from PROJECT.md, REQUIREMENTS.md and the five research documents.
 
 Progress: [..........] 0%
@@ -94,5 +94,14 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-09-07
-Stopped at: ROADMAP.md and STATE.md written. Phase 1 is ready to plan.
+Stopped at: Phase 1 is planned. Eight PLAN.md files are written, checked by
+the plan checker, and repaired. The checker returned PASS WITH CONCERNS with
+two blockers and four warnings. All were applied, none were disputed, and the
+planner found one further defect the checker missed: the zero filled tail test
+was pointed at a file that has no such section, so it would have passed
+vacuously. It now uses `corpus/public-domain/PassGen/PassGen.exe`, whose
+`.data` declares 8948 virtual bytes against 4096 raw.
+
+Next: `/gsd-execute-phase 1`. Wave order is
+[01-01] [01-02, 01-03] [01-04] [01-05, 01-06] [01-07] [01-08].
 Resume file: None
