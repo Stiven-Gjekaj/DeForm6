@@ -99,6 +99,12 @@ pub fn header_region<'a>(pe: &PeImage<'a>) -> Result<Region<'a>, Refusal> {
     // refused when it is short. The bytes that do exist are real, and every
     // read inside the window is still bounded. This is the same choice
     // `Region::cstr` makes, and for the same reason.
+    //
+    // The clamp makes the refusal below unreachable, because `subregion`
+    // fails only when the length leaves the window or the base sum leaves a
+    // `u32`, and neither can happen here. It stays because `subregion`
+    // returns an `Option` and this function must not unwrap one. No test
+    // covers it, and no test can.
     let width = HEADER_WINDOW.min(hdr.len());
     hdr.subregion(Off::new(0), width)
         .ok_or(Refusal::Damaged("the VB header window is not readable"))
@@ -685,6 +691,37 @@ mod tests {
         assert_eq!(header.title, synth::TITLE);
         assert_eq!(header.help_file, synth::HELP_FILE);
         assert_eq!(header.project_name, synth::PROJECT_NAME);
+    }
+
+    /// The file offset of `AddressOfEntryPoint` inside the synthetic image.
+    const SYNTH_ENTRY_FIELD: usize = 0x40 + 24 + 0x10;
+
+    #[test]
+    fn an_entry_point_in_no_section_is_refused() {
+        let mut bytes = a_synthetic_vb_image();
+        // An address above every section. No corpus file reaches this
+        // branch, because both of them have an entry point that resolves.
+        bytes[SYNTH_ENTRY_FIELD..SYNTH_ENTRY_FIELD + 4].copy_from_slice(&0x9000_u32.to_le_bytes());
+        let image = PeImage::parse(&bytes).unwrap();
+        assert_eq!(
+            header_region(&image).unwrap_err(),
+            Refusal::Damaged("the entry point is in no section")
+        );
+    }
+
+    #[test]
+    fn a_push_operand_that_runs_past_the_end_of_the_section_is_refused() {
+        let mut bytes = a_synthetic_vb_image();
+        // The last byte of the section holds the push opcode, so the four
+        // byte operand lies outside the window that the address resolves to.
+        let last_rva = 0x1000_u32 + 0x400 - 1;
+        bytes[SYNTH_ENTRY_FIELD..SYNTH_ENTRY_FIELD + 4].copy_from_slice(&last_rva.to_le_bytes());
+        bytes[0x800 - 1] = PUSH_IMM32;
+        let image = PeImage::parse(&bytes).unwrap();
+        assert_eq!(
+            header_region(&image).unwrap_err(),
+            Refusal::Damaged("the push operand runs past the end of the section")
+        );
     }
 
     #[test]
