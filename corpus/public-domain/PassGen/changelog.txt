@@ -1,0 +1,110 @@
+v1.2.2:
+----------
+1. Just cosmetic changes. About is now under "Help" in the Menu.
+2. The number of special characters enabled appears in (...) next to the caption and before the [?] button.
+
+v1.2.1:
+----------
+I realized that I incremented the version number incorrectly after the last version. Sadly, I'm now stuck with it. Now with that out of the way...
+
+1. Added an option to avoid using space on the first and last characters in the password.
+2. Added a simple "Help" MsgBox which lists the hotkeys that can be used.
+
+v1.2.0:
+----------
+1. Fixed a very minor glitch.
+2. Included an "Exclude All" button on the specials form.
+3. Pressing F5 or the Generate button now resets the timer if it is enabled.
+
+v1.1.0.1:
+----------
+1. Added a "Website..." menu item.
+2. Minor cosmetic changes.
+3. Minor code changes.
+
+v1.1.0:
+----------
+1. I found out that the password length for VeraCrypt increased to 128 characters, so PIM has now been extended to passwords that are 128 characters;
+     however, added an override option to limit PIM usage to 64 character passwords.
+2. Added an override option to drop the default PIM to 92 characters for those that use sha512/Whirlpool in VeraCrypt.
+3. Fixed a bug in the override form where pressing Esc didn't check to see if settings needed to be reset to defaults after unchecking the boxes.
+4. One or two minor tweaks to the code.
+
+v1.0.0.9:
+----------
+1. Included "for Next Time" on the Save Settings menu item to make it more clearer. (Also makes it slightly longer, but there's nothing I can do about that.)
+2. Added an option to avoid repeating characters. (E.g. ABBA vs. ABCA)
+
+v1.0.0.8:
+----------
+1. App version now appears in the titlebar. (Eight revisions later...)
+2. Changed "Settings:" to "Include:" in the main frame.
+3. You can now close forms using the Escape (Esc) key.
+4. Added a pointless "About" form which just includes a copy of The Unlicense text.
+5. Added hotkeys for menu items (CTRL+E for Exit, CTRL+O for override, etc.) (They're mentioned next to the item in the menubar.)
+6. You can now save your settings to the registry upon exit, these will be saved under: HKCU\Software\Github\Jigsy1\PassGen\
+     The existence(?) of the registry entry will always be viewed as "Save Settings to Registry on Exit."
+     This can be stopped either by unchecking this option in the menubar (which deletes the key), or simply by deleting the key from the registry itself.
+7. Fixed a bug where automatic generation when everything was deselected would generate [empty strings].
+8. Added a minor key functionality (aside from Escape):
+     * Pressing Del (Delete) will now clear the password list.
+     * Pressing F5 (Refresh) will now generate new passwords.
+9. Other minor changes. (Uniform button width, etc.)
+
+v1.0.0.7:
+----------
+1. Clarified what Uppercase characters and Lowercase characters are for those who aren't "tech savvy."
+2. I noticed that having just specials enabled and one special character didn't offer any variety, so you now need a minimum of two special characters enabled.
+
+v1.0.0.6:
+----------
+1. Increased randomness parameters.
+2. Although nobody asked, increased PIM from 2048 to 8192. (The default is still 1024.)
+3. Two minor tweaks to the code.
+
+v1.0.0.5:
+----------
+1. Noticed I forgot to include a "Minimize" button on the main form. (Either that or I accidentally unset it.)
+2. Re-arranged the special characters form so that the ordering is based on the ASCII table standard. !, ", #, etc.
+3. Also clarified a few other characters on the same form.
+4. Increased randomness parameters.
+5. Tidied up the code. (Condensed, etc.)
+
+v1.0.0.4:
+----------
+1. Added error checking to the Copy command since trying to copy 1,024 512 character passwords caused it to crash on Windows 8.1 (and possibly other OS'.)
+     Oddly enough, it works perfectly fine on my Windows XP Virtual Machine. *shrug*
+2. Added an option to include a random PIM (number) at the end of a password for those who use VeraCrypt. This will appear like: <password> -------- <N>
+     This will only be included if the password is between 8 and 64 characters. Anything longer than that will be ignored.
+     The choices are between 1->128, 1->256, 1->512, 1->1024, 1->2048. Anything above that is overkill, but I will include slightly above that if anyone
+     requests it. (Not set as default.)
+
+v1.0.0.3:
+----------
+1. Fixed a (possible) bug where Rand was only returning passwords up to 63 characters instead of 64.
+2. I remembered one the applications I use has a max password of 80 characters. Rather than keep updating this every so often
+     in order to update the max length, I've added settings that allow you to override the maximum length of the password generated.
+     In the Menubar via a new option called "Settings," you can call the "Override" form where you can do this.
+     You can choose up to 128, 256 or 512 characters. (Not set as default.)
+3. In the same form, I've added an option for "increased randomness." (Not set as default incase it's "too random." E.g. mostly special characters.)
+4. Even though these are the only two with Tool Tips specifically for this reason, I decided to update the special character
+     selection form to help clarify "Minus" and "Period" better.
+
+v1.0.0.2:
+----------
+1. Noticed I forgot to include & in Close for ALT+C functionality, so added that.
+2. Added a separate form to allow you to choose what special characters you want to include.
+3. Tidied up the form so everything is aligned correctly.
+4. Added a menu with an option to exit the program.
+5. Other minor changes not worth mentioning.
+
+v1.0.0.1:
+----------
+1. Rephrased settings.
+2. Included an option to include spaces in passwords. (Not set as default.)
+3. Included an option to automatically (re-)generate new passwords every 60s. (Not set as default.)
+4. Added a "Select All" button for easier copying.
+
+v1.0.0:
+----------
+1. Initial release.

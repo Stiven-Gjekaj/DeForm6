@@ -1,0 +1,40 @@
+v1.0.0.5 (hotfix):
+--------------------
+1. Updated the tab ordering because I forgot to do it.
+
+v1.0.0.5:
+----------
+1. Updated the labels to slightly match PassGen.
+2. Added an option to include hyphens (-'s).
+3. Increased the timer to 30s because I felt 10s was too short.
+4. Added menu items (Exit, Website, etc.) and a pointless "About" form which just includes a copy of The Unlicense text.
+5. You can now save your settings to the registry upon exit, these will be saved under: HKCU\Software\Github\Jigsy1\UUID2\
+     The existence(?) of the registry entry will always be viewed as "Save Settings to Registry on Exit."
+     This can be stopped either by unchecking this option in the menubar (which deletes the key), or simply by deleting the key from the registry itself.
+6. Pressing F5 or the Generate button now resets the timer if it is enabled.
+
+v1.0.0.4:
+----------
+1. App version now appears in the titlebar.
+2. Added error checking to the copy button to prevent it from crashing if it fails to copy to clipboard.
+3. You can now end the program by pressing Escape (Esc).
+4. You can now generate a new "UUID2" by pressing F5 (Refresh).
+5. Other minor changes. (Tidied up the code, uniform button width, wording changes, etc.)
+
+v1.0.0.3:
+----------
+1. Increased randomness parameters.
+
+v1.0.0.2:
+----------
+1. Like my password generator, added an option for "increased randomness." (Not set as default.)
+2. Minor tidying up of the alignment and things of that nature.
+
+v1.0.0.1:
+----------
+1. Rephrased settings. (Now using the correct term, {Braces}!)
+2. Corrected the tab ordering.
+
+v1.0.0:
+----------
+1. Initial release.

@@ -1,0 +1,60 @@
+# corpus/NOTICES
+
+Every program in `corpus/` is third party work.
+It is here because its licence permits redistribution.
+This file names the origin, the licence, and the upstream commit of each one.
+
+A program that does not have such a licence does not go in this directory.
+The test harness fetches those at run time instead, from a manifest of pinned
+hashes, and their bytes are never committed.
+
+## corpus/vb6-code
+
+Origin: https://github.com/tannerhelland/vb6-code
+Upstream commit: f2703861b9e6a7ed4acdc6eedb2632ca8903f895
+Licence: BSD 2-Clause, Copyright (c) 2018, Tanner Helland
+Licence text: `corpus/vb6-code/LICENSE.md`
+
+32 Visual Basic 6 projects with the executable that each one builds.
+31 executables, all Standard EXE, all native code, all verified to import
+MSVBVM60.
+
+Two kinds of file were left out of this copy.
+The sample JPEG images were left out because they are one megabyte and the
+gate does not read them.
+`Scanner-TWAIN/EZTW32.dll` was left out because it is a third party library
+that the upstream author did not write and cannot relicense.
+Nothing else was changed.
+
+## corpus/public-domain
+
+Ten repositories, all released under the Unlicense, which places them in the
+public domain.
+13 executables, all Standard EXE, all verified to import MSVBVM60.
+
+| Directory | Origin | Upstream commit |
+|---|---|---|
+| `SK-Gradient-Sample__VB6` | https://github.com/RizkyKhapidsyah/SK-Gradient-Sample__VB6 | ff13362 |
+| `SK-MCI-Sample__VB6` | https://github.com/RizkyKhapidsyah/SK-MCI-Sample__VB6 | dfafac3 |
+| `SK-TFTP-Sample__VB6` | https://github.com/RizkyKhapidsyah/SK-TFTP-Sample__VB6 | 2c230d9 |
+| `SK-Winsock-Sample__VB6` | https://github.com/RizkyKhapidsyah/SK-Winsock-Sample__VB6 | b6f4ef5 |
+| `HexScroll` | https://github.com/Jigsy1/HexScroll | 66cd9a6 |
+| `PassGen` | https://github.com/Jigsy1/PassGen | 92602de |
+| `UUID2` | https://github.com/Jigsy1/UUID2 | ec57648 |
+| `LockWorkStation` | https://github.com/Jigsy1/LockWorkStation | c22bc9f |
+| `machineLanguageConversion` | https://github.com/Jigsy1/machineLanguageConversion | 28c2ac9 |
+| `dump` | https://github.com/Jigsy1/dump | a3074d5 |
+
+Each directory keeps its own `LICENSE` file.
+
+## Why these and not others
+
+A sweep of 366 Visual Basic 6 repositories found 120 that hold both source and
+an executable.
+Only 52 of those carry a licence that permits redistribution.
+`.planning/research/CORPUS.md` records the measurement, and names what was
+rejected and why.
+
+Microsoft's own VB98 samples are not here.
+The Visual Studio 6 licence grants no redistribution right, and the samples
+shipped without executables, so they carry no ground truth.

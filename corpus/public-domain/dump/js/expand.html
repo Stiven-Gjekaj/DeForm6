@@ -1,0 +1,21 @@
+﻿<html>
+	<head>
+		<script language="javascript" type="text/javascript">
+			function toggle(name) {
+				var expand = document.getElementById(name).style;
+				if (expand.display == "block") {
+					expand.display = "none";
+					return;
+				}
+				expand.display = "block";
+			}
+		</script>
+		<title>Title</title>
+	</head>
+	<body>
+		<a href="javascript:toggle('expand1')">Expand ↕</a>
+		<div id="expand1" style="display: none;">Nothing here...</div>
+		<a href="javascript:toggle('expand2')">Expand ↕</a>
+		<div id="expand2" style="display: none;">Still nothing...</div>
+	</body>
+</html>

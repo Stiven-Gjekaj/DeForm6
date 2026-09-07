@@ -1,0 +1,18 @@
+--------------------------------------------------------------------
+-  This sample code was downloaded from http://www.subreality.net  -
+--------------------------------------------------------------------
+
+==[ Project Information ]==-----------------------------------------
+Project		:	Winsock Sample
+Level		:	Intermediate
+
+Author		:	SubReality
+
+==[ Description ]==-------------------------------------------------
+This code allows you to connect to connect to any server and port
+and receive data from it as well as send data to it, using a
+WinSock control.
+
+==[ Updates / Bugs ]==----------------------------------------------
+Check http://www.subreality.net for the latest version of this code.
+Please report bugs to webmaster@subreality.net
