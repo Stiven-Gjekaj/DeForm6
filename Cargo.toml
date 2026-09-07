@@ -1,0 +1,37 @@
+[workspace]
+resolver = "3"
+members = ["crates/deform6", "crates/deform6-cli"]
+exclude = ["crates/deform6/fuzz"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+license = "MIT"
+
+[workspace.dependencies]
+deform6 = { path = "crates/deform6" }
+object = { version = "0.40.0", default-features = false, features = ["read_core", "pe", "std"] }
+thiserror = "2.0.20"
+serde = { version = "1.0.229", features = ["derive"] }
+clap = { version = "4.6.6", default-features = false, features = ["std", "derive", "help", "error-context"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unreachable = "deny"
+cast_possible_truncation = "deny"
+cast_sign_loss = "deny"
+cast_possible_wrap = "deny"
+integer_division = "deny"
+
+[profile.release]
+panic = "abort"
+overflow-checks = true

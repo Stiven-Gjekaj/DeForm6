@@ -1,0 +1,17 @@
+[package]
+name = "deform6-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "deform6"
+path = "src/main.rs"
+
+[dependencies]
+deform6.workspace = true
+clap.workspace = true
+
+[lints]
+workspace = true
