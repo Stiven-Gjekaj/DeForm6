@@ -20,6 +20,7 @@ reachable.
 ## Phases
 
 **Phase Numbering:**
+
 - Integer phases (1, 2, 3): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
@@ -46,6 +47,7 @@ non-zero exit code.
 **Requirements**: DET-01, DET-02, DET-03, DET-04, DET-05, DET-06
 
 **Success Criteria** (what must be TRUE):
+
   1. `deform6 inspect corpus/vb6-code/Mandelbrot/Mandelbrot.exe` prints the VB
      header fields, the project name and the word `native`, exits 0, and
      changes no file on disk. A directory listing taken before and after the
@@ -63,6 +65,7 @@ non-zero exit code.
      cargo test --workspace` passes on a clean clone.
 
 **Named risks**:
+
   - **The safety primitives cannot be retrofitted.** `#![forbid(unsafe_code)]`,
     the clippy deny wall, the `Region` type with no infallible accessor, and
     the `Off` / `Rva` / `Va` newtypes with no `Add` go in before the first
@@ -85,13 +88,14 @@ non-zero exit code.
     field is never exercised, because every vendored `.vbp` carries
     `CompilationType=0`. The branch exists and is untested by construction.
 
-**Plans**: 8 plans
+**Plans**: 4/8 plans executed
 
 Plans:
+
 - [x] 01-01-PLAN.md - Workspace, toolchain, the lint wall, and the three-command gate in CI
 - [x] 01-02-PLAN.md - `read/region.rs` - `Region`, `Off`, `Rva`, `Va`, no dependency, every read returns `Option`
 - [x] 01-03-PLAN.md - `error.rs` and `journal.rs` - `Site`, `DefectKind`, `Severity`, `Defect`, `Error`, `Refusal`, `Journal`, `Mode`
-- [ ] 01-04-PLAN.md - `read/pe.rs` - the PE envelope over `object` 0.40.0, the section table, the one address-to-offset predicate, the import directory
+- [x] 01-04-PLAN.md - `read/pe.rs` - the PE envelope over `object` 0.40.0, the section table, the one address-to-offset predicate, the import directory
 - [ ] 01-05-PLAN.md - `vb/header.rs` - the entry stub, the `VB5!` signature, the `VBHeader` fields, and the closed 0x58 / 0x5C gap
 - [ ] 01-06-PLAN.md - Runtime discrimination and the three refusals - `MSVBVM50.DLL`, `VB40032.DLL`, and no VB runtime at all
 - [ ] 01-07-PLAN.md - `vb/project.rs` - `ProjectInfo`, the project name, the object count, the compilation mode from `lpNativeCode`, and `inspect`
@@ -115,6 +119,7 @@ differential test measures all of it against the original source.
 VER-02, VER-03, VER-04, VER-05
 
 **Success Criteria** (what must be TRUE):
+
   1. `cargo test --workspace` runs `differential.rs` over all 44 corpus
      programs. Every object that the program's `.vbp` declares is recovered by
      name and by kind, 44 of 44.
@@ -137,6 +142,7 @@ VER-02, VER-03, VER-04, VER-05
      table, with the library name, the alias and the argument list.
 
 **Named risks**:
+
   - **A `.bas` code module carries no type descriptors.** The type data is part
     of the `IDispatch` plumbing, and a standard module is not a COM object.
     OBJ-04 is therefore reachable for forms, classes and user controls and is
@@ -170,6 +176,7 @@ VER-02, VER-03, VER-04, VER-05
 **Plans**: 10 plans
 
 Plans:
+
 - [ ] 02-01: `ObjectTable` and the `Object` array - every object recovered by name
 - [ ] 02-02: `fObjectType` classification - form, module, class, and `Unknown` with a fallback
 - [ ] 02-03: `ObjectInfo` and `PrivateObj` - public procedure names, and a null name reported as private
@@ -198,6 +205,7 @@ control.
 **Requirements**: FRM-01, FRM-02, FRM-03, FRM-04, FRM-05, FRM-06, VER-06
 
 **Success Criteria** (what must be TRUE):
+
   1. `inspect` prints the control tree of every corpus form with the parent of
      each control. On all 44 programs the sum of the control block `Length`
      fields tiles `GUIObjectInfo.lPropertiesLength` exactly. Where the tiling
@@ -220,6 +228,7 @@ control.
      the gate fail with a named message, not pass silently.
 
 **Named risks**:
+
   - **STRUCTURES gap 15**: no public opcode-to-property table exists. The
     opcode space is per control type, and the same opcode 31 means `Appearance`
     on a CommandButton, `BackStyle` on a Label and `DrawMode` on a Form. Semi VB
@@ -255,6 +264,7 @@ control.
 **Plans**: 10 plans
 
 Plans:
+
 - [ ] 03-01: The GUI table, `GUIObjectInfo`, the control block header, and the `lPropertiesLength` tiling invariant
 - [ ] 03-02: The opcode-to-property derived data table, per control type, built from a type library dump
 - [ ] 03-03: `support/frm.rs`, the independent `.frm` reader, and the `frmHMM.frx` exclusion by name
@@ -282,6 +292,7 @@ each recovered item by confidence and names the bytes it came from.
 RPT-01, RPT-02, RPT-03, RPT-04, RPT-05, RPT-06
 
 **Success Criteria** (what must be TRUE):
+
   1. `deform6 extract <exe> -o out/` on each of the 44 corpus programs writes
      one `.vbp`, one `.frm` per form, one `.frx` per form that holds a blob, one
      `.bas` or `.cls` per module and class, and one JSON report. The run exits
@@ -305,6 +316,7 @@ RPT-01, RPT-02, RPT-03, RPT-04, RPT-05, RPT-06
      never a number. Two runs on the same input produce byte-identical reports.
 
 **Named risks**:
+
   - **The `.frx` offset is not stored in the executable.** It is a running
     cursor that starts at 0 for each form and advances by `blobLen + 12` after
     each blob. The `.frm` writer and the `.frx` writer are therefore one
@@ -339,6 +351,7 @@ RPT-01, RPT-02, RPT-03, RPT-04, RPT-05, RPT-06
 **Plans**: 9 plans
 
 Plans:
+
 - [ ] 04-01: `model.rs`, the recovered project model, the Windows-1252 and CRLF emitter primitives, the 40-character clamp, the identifier check
 - [ ] 04-02: Property value serialisation - integers, strings, booleans, enumerations, colours, floats, the `Font` block, blob references
 - [ ] 04-03: `write/vbp.rs` - component lines, the setting block order, `Startup=`, no stray `ResFile32=`
@@ -365,6 +378,7 @@ and every crash it finds becomes a committed test that replays on stable Rust.
 **Requirements**: SAF-01, SAF-02, SAF-03, SAF-04, SAF-05
 
 **Success Criteria** (what must be TRUE):
+
   1. `cargo +nightly fuzz run --fuzz-dir crates/deform6/fuzz parse --
      -max_total_time=60 -rss_limit_mb=2048` finds no crash, and the job runs on
      every pull request. The fuzz crate builds only on nightly and stays out of
@@ -387,6 +401,7 @@ and every crash it finds becomes a committed test that replays on stable Rust.
      read, and that number equals the number of files that exist.
 
 **Named risks**:
+
   - **`cargo fuzz` needs nightly, and the isolation needs two statements, not
     one.** Pass `--fuzzing-workspace true`, because the flag defaults to
     `false`, and also put `exclude = ["crates/deform6/fuzz"]` in the root
@@ -411,6 +426,7 @@ and every crash it finds becomes a committed test that replays on stable Rust.
 **Plans**: 8 plans
 
 Plans:
+
 - [ ] 05-01: The strict and salvage split wired end to end, `--salvage` on both subcommands, every assumption recorded in the report
 - [ ] 05-02: The bound check audit - every count and length field from the parse order, checked against the real file size
 - [ ] 05-03: The fuzz crate - `cargo fuzz init` with the workspace flag, the `exclude` line, and a target that calls both modes
@@ -438,6 +454,7 @@ and VER end to end and turns the measured result into the released
 documentation.
 
 **Success Criteria** (what must be TRUE):
+
   1. `deform6 extract` runs to completion on all 44 corpus programs, the
      structural check passes for all 44, the JSON report validates against the
      schema for all 44, and every pinned ratio in `tests/ratios.toml` holds
@@ -458,6 +475,7 @@ documentation.
      produces no warning, and the tag matches the version in `Cargo.toml`.
 
 **Named risks**:
+
   - **The temptation to state a percentage.** A commercial tool in this field
     advertises "85% recovery" with no evidence behind it. DeForm6 has three
     named confidence words and one ratio measured against the original source.
@@ -474,6 +492,7 @@ documentation.
 **Plans**: 5 plans
 
 Plans:
+
 - [ ] 06-01: The README - what it returns, what it does not, and the confidence vocabulary defined
 - [ ] 06-02: The public library API review, the doc comments, and a clean `cargo doc --no-deps`
 - [ ] 06-03: The end-to-end acceptance run over all 44 corpus programs, with the numbers recorded
@@ -521,7 +540,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. It reads the file | 0/8 | Not started | - |
+| 1. It reads the file | 4/8 | In Progress|  |
 | 2. The object graph | 0/10 | Not started | - |
 | 3. Forms | 0/10 | Not started | - |
 | 4. It writes a project | 0/9 | Not started | - |

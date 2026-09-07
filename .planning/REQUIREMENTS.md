@@ -12,7 +12,7 @@ Version 1 recovers metadata. It does not recover statements.
 
 ### Identification
 
-- [ ] **DET-01**: The tool reads a PE file and resolves its entry point to a
+- [x] **DET-01**: The tool reads a PE file and resolves its entry point to a
       file offset through the section table.
 - [ ] **DET-02**: The tool follows the entry point stub to the VB header and
       confirms the `VB5!` signature.
@@ -176,6 +176,7 @@ is built in Phase 1: the lint wall, `#![forbid(unsafe_code)]`, and the `Region`
 type with no infallible accessor.
 
 **Coverage:**
+
 - v1 requirements: 42 total in 7 categories
 - Mapped to phases: 42
 - Unmapped: 0
