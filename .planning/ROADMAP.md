@@ -89,8 +89,8 @@ non-zero exit code.
 
 Plans:
 - [x] 01-01-PLAN.md - Workspace, toolchain, the lint wall, and the three-command gate in CI
-- [ ] 01-02-PLAN.md - `read/region.rs` - `Region`, `Off`, `Rva`, `Va`, no dependency, every read returns `Option`
-- [ ] 01-03-PLAN.md - `error.rs` and `journal.rs` - `Site`, `DefectKind`, `Severity`, `Defect`, `Error`, `Refusal`, `Journal`, `Mode`
+- [x] 01-02-PLAN.md - `read/region.rs` - `Region`, `Off`, `Rva`, `Va`, no dependency, every read returns `Option`
+- [x] 01-03-PLAN.md - `error.rs` and `journal.rs` - `Site`, `DefectKind`, `Severity`, `Defect`, `Error`, `Refusal`, `Journal`, `Mode`
 - [ ] 01-04-PLAN.md - `read/pe.rs` - the PE envelope over `object` 0.40.0, the section table, the one address-to-offset predicate, the import directory
 - [ ] 01-05-PLAN.md - `vb/header.rs` - the entry stub, the `VB5!` signature, the `VBHeader` fields, and the closed 0x58 / 0x5C gap
 - [ ] 01-06-PLAN.md - Runtime discrimination and the three refusals - `MSVBVM50.DLL`, `VB40032.DLL`, and no VB runtime at all

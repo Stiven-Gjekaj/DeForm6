@@ -11,7 +11,12 @@ progress:
 
 ## Continue
 
-**Resumed:** 2026-09-07. Plan 01-01 is complete and merged. Wave 2 is next.
+**Resumed:** 2026-09-07. Waves 1 and 2 are complete and merged. Wave 3, plan 01-04, is next.
+
+The workspace, the lint wall, the CI gate, the `Region` bounded window, the
+`Off`/`Rva`/`Va` newtypes, the error model and the journal all exist. 34 tests
+pass. Two compile-fail proof scripts run in the gate and between them refuse
+eleven bad shapes.
 
 **To continue:**
 
@@ -22,7 +27,7 @@ progress:
 That is wrong: 01-02 cannot write `read/region.rs` before 01-01 creates the
 workspace it lives in. Use the order from ROADMAP.md:
 
-    [01-01 done]  [01-02, 01-03]  [01-04]  [01-05, 01-06]  [01-07]  [01-08]
+    [01-01 done]  [01-02 done, 01-03 done]  [01-04]  [01-05, 01-06]  [01-07]  [01-08]
 
 **Executors run in a git worktree, not the primary checkout.** Verify what
 lands on `main` after each wave rather than assuming the merge did the right
@@ -47,11 +52,11 @@ inferred.
 ## Current Position
 
 Phase: 1 of 6 (It reads the file)
-Plan: 1 of 8 in current phase
-Status: Executing. Wave 1 complete, wave 2 next.
+Plan: 3 of 8 in current phase
+Status: Executing. Waves 1 and 2 complete, wave 3 next.
 Last activity: 2026-09-07 - Plan 01-01 executed and merged. The workspace, the pinned toolchain, the lint wall and the CI gate exist. The wall was proved rather than asserted: all eight forbidden shapes are rejected, nine errors over eight lines.
 
-Progress: [#.........] 13%
+Progress: [###.......] 38%
 
 ## Performance Metrics
 
