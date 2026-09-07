@@ -360,6 +360,295 @@ fn va_at(window: &Region<'_>, at: u32, what: &'static str) -> Result<Va, Refusal
     window.va_le(Off::new(at)).ok_or(Refusal::Damaged(what))
 }
 
+/// # Two tables share the name "external". This module reads both, and this
+/// comment is the one place that tells them apart.
+///
+/// [`ProjectInfo.lp_external_table`] holds the `Declare` import table, read
+/// by [`DeclareTable::read`]. Its count is [`ProjectInfo::dw_external_count`].
+/// This is the table `STRUCTURES.md` section 7.1 describes.
+///
+/// [`crate::vb::header::VbHeader`]`.lp_external_table` holds the component
+/// table: the OCX and type library references a form pulls in, read by
+/// [`ComponentTable::read`]. Its count is `w_external_count` on that same
+/// structure. This is `STRUCTURES.md` section 7.3.
+///
+/// Both pointers are virtual addresses named `lpExternalTable` in the
+/// sources this project reads from, on two different structures, with two
+/// different counts, and they answer two different questions. `STRUCTURES.md`
+/// section 7 opens with the same warning, because getting this wrong means
+/// walking one table with the other's count, or resolving one table's
+/// address against the wrong structure's field.
+///
+/// The size of one `Declare` import table entry.
+const DECLARE_ENTRY_SIZE: u32 = 8;
+
+/// The size of the descriptor a `dwEntryType == 7` entry points at.
+///
+/// `STRUCTURES.md` section 7.1 also records a third dword after these two,
+/// pointing at thunking data (a module handle and a resolved address) that
+/// the runtime fills in after loading. It holds nothing before that, so it
+/// is not read here. `[L]`
+const DECLARE_DESCRIPTOR_SIZE: u32 = 8;
+
+/// One `Declare` statement recovered from the external import table.
+///
+/// # What survives compilation, and what does not
+///
+/// `STRUCTURES.md` section 7.2 names exactly two things that survive: the
+/// library name and the export name. Neither the Visual Basic level
+/// procedure name and its `Alias`, the argument names and types, nor the
+/// owning module and its `Public` or `Private` marker are stored anywhere in
+/// this table. Plan 02-06's second task adds markers that name each of those
+/// three explicitly; this task carries only what the file holds.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Declaration {
+    /// The library name, verbatim.
+    ///
+    /// Neither the presence nor the absence of a `.dll` extension is
+    /// normalised. A script run over this corpus found `comdlg32` next to
+    /// `comdlg32.dll` in two different programs, and `EZTW32.dll` next to
+    /// `kernel32` inside one single program. The extension is part of what
+    /// the author wrote in the source, so normalising it would change what
+    /// the recovered declaration says.
+    pub library: String,
+    /// The export name, exactly as the file holds it.
+    pub export: String,
+}
+
+/// The `Declare` import table, reached from [`ProjectInfo::lp_external_table`].
+///
+/// Read the doc comment above [`DECLARE_ENTRY_SIZE`] before reaching for this
+/// type from the wrong pointer: [`crate::vb::header::VbHeader`] holds a
+/// different table under the same field name.
+#[derive(Clone, Debug)]
+pub struct DeclareTable {
+    /// Every `dwEntryType == 7` entry the walk resolved, in table order.
+    pub declarations: Vec<Declaration>,
+    defects: Vec<Defect>,
+}
+
+impl DeclareTable {
+    /// Walks the `Declare` import table.
+    ///
+    /// This never refuses. A zero count gives an empty list without touching
+    /// [`ProjectInfo::lp_external_table`] at all, which is what
+    /// `LockWorkStation.exe` needs: this corpus's smallest program declares no
+    /// external table, and there is no reason to dereference a pointer this
+    /// walk will not use.
+    ///
+    /// # Bounding `dwExternalCount`
+    ///
+    /// The count is a `u32` straight out of the file. Before the loop, it is
+    /// checked against the real length of the region the table's own address
+    /// resolves to: `dwExternalCount * 8` must fit inside it. A count that
+    /// does not fit is `DefectKind::ImplausibleCount` at `Recoverable`, and
+    /// the loop below still bounds itself independently, one entry at a
+    /// time, through [`Region::subregion`]. The largest count measured in
+    /// this corpus is 9, and the whole corpus holds 249 entries.
+    ///
+    /// # A known gap in the shared defect vocabulary
+    ///
+    /// Three recoverable outcomes below reuse a [`DefectKind`] variant whose
+    /// own `severity()` disagrees with the word "recoverable" used here:
+    /// [`DefectKind::UnmappedAddress`] is `Fatal` in `error.rs`, because it
+    /// was written for a spine pointer whose loss means nothing downstream
+    /// resolves. Losing one entry's descriptor is not that: the other
+    /// entries still resolve, which every test in this module proves. `mod
+    /// project.rs` was not opened for this plan, so this doc comment names
+    /// the mismatch rather than silently curing it, and the caller here never
+    /// consults `severity()` to decide whether to continue.
+    #[must_use]
+    pub fn read(pe: &PeImage<'_>, info: &ProjectInfo) -> Self {
+        let mut declarations = Vec::new();
+        let mut defects = Vec::new();
+
+        if info.dw_external_count == 0 {
+            return Self {
+                declarations,
+                defects,
+            };
+        }
+
+        let Some(table) = pe.region_at_va(info.lp_external_table) else {
+            return Self {
+                declarations,
+                defects,
+            };
+        };
+
+        if let Some(wanted) = info.dw_external_count.checked_mul(DECLARE_ENTRY_SIZE)
+            && wanted > table.len()
+        {
+            let offset = table.file_offset(Off::new(0)).map_or(0, Off::get);
+            // The exact entry count the region can hold is one division, and
+            // it names nothing but the defect's own report field: the loop
+            // below bounds itself through `Region::subregion`, one entry at
+            // a time, and never reads this value.
+            #[allow(
+                clippy::integer_division,
+                reason = "report field only; the loop below is bounded by subregion, not by this"
+            )]
+            let max_entries = table.len() / DECLARE_ENTRY_SIZE;
+            defects.push(Defect {
+                site: Site {
+                    offset,
+                    rva: info.lp_external_table.to_rva(pe.image_base()).map(Rva::get),
+                    structure: "ProjectInfo",
+                    field: "dwExternalCount",
+                },
+                kind: DefectKind::ImplausibleCount {
+                    offset,
+                    count: info.dw_external_count,
+                    max: max_entries,
+                },
+            });
+        }
+
+        for i in 0..info.dw_external_count {
+            let Some(byte_off) = i.checked_mul(DECLARE_ENTRY_SIZE) else {
+                break;
+            };
+            let Some(entry) = table.subregion(Off::new(byte_off), DECLARE_ENTRY_SIZE) else {
+                break;
+            };
+            let entry_offset = entry.file_offset(Off::new(0)).map_or(0, Off::get);
+
+            // The subregion above is exactly `DECLARE_ENTRY_SIZE` bytes, so
+            // both reads below always succeed. The fallback stays because
+            // `Region` has no infallible accessor. No test covers it and no
+            // test can.
+            let Some(entry_type) = entry.u32_le(Off::new(0x00)) else {
+                break;
+            };
+            let Some(descriptor_va) = entry.va_le(Off::new(0x04)) else {
+                break;
+            };
+
+            match entry_type {
+                // Resolved inside the runtime. Its descriptor points at a
+                // different shape entirely: a pair of addresses whose first
+                // four words one source reports as identical across every
+                // Visual Basic application. Dereferencing one as a library
+                // and export name pair would present unrelated in-image
+                // bytes as a recovered declaration. This is not a defect: 29
+                // of the 249 entries in this corpus are this type, so this
+                // is a path every third program takes. `[VERIFIED: local]`
+                6 => {}
+                7 => match read_declare_descriptor(pe, descriptor_va) {
+                    Ok((library, export)) => declarations.push(Declaration { library, export }),
+                    Err(failure) => {
+                        defects.push(failure.into_defect(pe, entry_offset, descriptor_va));
+                    }
+                },
+                // No source describes any value but 6 and 7. A value found
+                // here is undocumented, so it is skipped and named in a
+                // defect rather than guessed at.
+                other => defects.push(Defect {
+                    site: Site {
+                        offset: entry_offset,
+                        rva: None,
+                        structure: "DeclareTableEntry",
+                        field: "dwEntryType",
+                    },
+                    kind: DefectKind::CountMismatch {
+                        offset: entry_offset,
+                        count: other,
+                        expected: 7,
+                        other_field: "dwEntryType, which this table defines only as 6 \
+                                      (internal) or 7 (external)",
+                    },
+                }),
+            }
+        }
+
+        Self {
+            declarations,
+            defects,
+        }
+    }
+
+    /// Gives the defects the walk found: an implausible count, an
+    /// undocumented entry type, or a descriptor that resolves nowhere.
+    #[must_use]
+    pub fn defects(&self) -> &[Defect] {
+        &self.defects
+    }
+}
+
+/// Why a `dwEntryType == 7` entry did not resolve to a declaration.
+enum DeclareDescriptorFailure {
+    /// `lpImportDescriptor` itself is in no section, or the file ends inside
+    /// the eight bytes it names.
+    Descriptor,
+    /// `lpDllName` resolves to no bounded string.
+    DllName(Va),
+    /// `lpApiName` resolves to no bounded string.
+    ApiName(Va),
+}
+
+impl DeclareDescriptorFailure {
+    /// Builds the defect a caller records for this failure.
+    fn into_defect(self, pe: &PeImage<'_>, entry_offset: u32, descriptor_va: Va) -> Defect {
+        let (field, va) = match self {
+            Self::Descriptor => ("lpImportDescriptor", descriptor_va),
+            Self::DllName(va) => ("lpDllName", va),
+            Self::ApiName(va) => ("lpApiName", va),
+        };
+        Defect {
+            site: Site {
+                offset: entry_offset,
+                rva: va.to_rva(pe.image_base()).map(Rva::get),
+                structure: "DeclareTableEntry",
+                field,
+            },
+            kind: DefectKind::UnmappedAddress {
+                offset: entry_offset,
+                va: va.get(),
+            },
+        }
+    }
+}
+
+/// Reads the library name and the export name a `dwEntryType == 7` entry
+/// names.
+///
+/// The third word `STRUCTURES.md` section 7.1 records after these two is
+/// runtime scratch, a module handle and a resolved address that hold
+/// nothing before the loader runs. It is not read.
+fn read_declare_descriptor(
+    pe: &PeImage<'_>,
+    descriptor_va: Va,
+) -> Result<(String, String), DeclareDescriptorFailure> {
+    let descriptor = pe
+        .region_at_va(descriptor_va)
+        .and_then(|r| r.subregion(Off::new(0), DECLARE_DESCRIPTOR_SIZE))
+        .ok_or(DeclareDescriptorFailure::Descriptor)?;
+    let lp_dll_name = descriptor
+        .va_le(Off::new(0x00))
+        .ok_or(DeclareDescriptorFailure::Descriptor)?;
+    let lp_api_name = descriptor
+        .va_le(Off::new(0x04))
+        .ok_or(DeclareDescriptorFailure::Descriptor)?;
+    let library =
+        read_latin1_cstr(pe, lp_dll_name).ok_or(DeclareDescriptorFailure::DllName(lp_dll_name))?;
+    let export =
+        read_latin1_cstr(pe, lp_api_name).ok_or(DeclareDescriptorFailure::ApiName(lp_api_name))?;
+    Ok((library, export))
+}
+
+/// Resolves a virtual address to a NUL terminated string, Latin-1 decoded.
+///
+/// This is the same rule `vb/header.rs` and this module's own
+/// [`ObjectTableHead::read`] use for every string this crate reads:
+/// `char::from(byte)` gives the Latin-1 code point. `String::from_utf8_lossy`
+/// is wrong here, because a byte in `0x80` to `0xFF` would become the
+/// replacement character and the name would be lost.
+fn read_latin1_cstr(pe: &PeImage<'_>, va: Va) -> Option<String> {
+    let region = pe.region_at_va(va)?;
+    let bytes = region.cstr(Off::new(0), NAME_MAX)?;
+    Some(bytes.iter().copied().map(char::from).collect())
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -370,7 +659,7 @@ fn va_at(window: &Region<'_>, at: u32, what: &'static str) -> Result<Va, Refusal
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{CompileMode, ObjectTableHead, PROJECT_INFO_SIZE, ProjectInfo};
+    use super::{CompileMode, DeclareTable, ObjectTableHead, PROJECT_INFO_SIZE, ProjectInfo};
     use crate::error::Refusal;
     use crate::error::{DefectKind, Severity};
     use crate::read::pe::PeImage;
@@ -387,6 +676,26 @@ mod tests {
     const MANDELBROT: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../corpus/vb6-code/Mandelbrot/Mandelbrot.exe"
+    ));
+
+    /// Nine `Declare` table entries, eight of them external. `[VERIFIED:
+    /// local]` `dw_external_count == 9`.
+    const GRAYSCALE: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/vb6-code/Grayscale-effect/Grayscale.exe"
+    ));
+
+    /// A zero-entry `Declare` table, and this corpus's smallest program.
+    const LOCK_WORK_STATION: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/public-domain/LockWorkStation/LockWorkStation.exe"
+    ));
+
+    /// One library name carries a `.dll` extension and another does not,
+    /// inside the same program: `EZTW32.dll` next to `kernel32`.
+    const VB_SCANNER_SUPPORT: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/vb6-code/Scanner-TWAIN/VB_Scanner_Support.exe"
     ));
 
     /// Gives the address of `ProjectInfo` that the file itself holds.
@@ -668,6 +977,185 @@ mod tests {
         assert_eq!(
             object_table(&bytes).unwrap_err(),
             Refusal::Damaged("the project name pointer is in no section")
+        );
+    }
+
+    /// Walks the `Declare` import table out of a byte slice.
+    fn declare_table(data: &[u8]) -> DeclareTable {
+        let image = PeImage::parse(data).unwrap();
+        let info = ProjectInfo::read(&image, project_data_va(data)).unwrap();
+        DeclareTable::read(&image, &info)
+    }
+
+    /// Gives every recovered declaration as a `(library, export)` pair of
+    /// plain strings, so a test can compare against an ordered literal.
+    fn as_pairs(table: &DeclareTable) -> Vec<(&str, &str)> {
+        table
+            .declarations
+            .iter()
+            .map(|d| (d.library.as_str(), d.export.as_str()))
+            .collect()
+    }
+
+    #[test]
+    fn the_corpus_file_declares_one_external_import() {
+        let table = declare_table(MANDELBROT);
+        assert_eq!(as_pairs(&table), vec![("gdi32", "SetPixelV")]);
+        assert!(table.defects().is_empty());
+    }
+
+    /// Eight of the nine entries are external. The ninth is `dwEntryType ==
+    /// 6`, resolved inside the runtime, and it must not appear here.
+    #[test]
+    fn eight_of_nine_grayscale_entries_are_external_and_the_ninth_is_skipped() {
+        let table = declare_table(GRAYSCALE);
+        assert_eq!(
+            as_pairs(&table),
+            vec![
+                ("gdi32", "StretchDIBits"),
+                ("gdi32", "GetDIBits"),
+                ("gdi32", "SetStretchBltMode"),
+                ("gdi32", "GetObjectA"),
+                ("kernel32", "lstrlenW"),
+                ("comdlg32", "CommDlgExtendedError"),
+                ("comdlg32", "GetSaveFileNameW"),
+                ("comdlg32", "GetOpenFileNameW"),
+            ],
+            "a walk that reorders, drops, or adds an entry must fail here with both lists \
+             printed"
+        );
+        assert_eq!(
+            table.declarations.len(),
+            8,
+            "the ninth entry is internal (dwEntryType == 6) and must not be dereferenced"
+        );
+        assert!(table.defects().is_empty());
+    }
+
+    #[test]
+    fn the_smallest_corpus_program_declares_no_external_import_and_is_not_refused() {
+        let table = declare_table(LOCK_WORK_STATION);
+        assert!(table.declarations.is_empty());
+        assert!(table.defects().is_empty());
+    }
+
+    /// `EZTW32.dll` carries its extension and `kernel32` does not, inside the
+    /// same program. Neither is normalised.
+    #[test]
+    fn a_library_name_is_given_verbatim_extension_and_all() {
+        let table = declare_table(VB_SCANNER_SUPPORT);
+        let pairs = as_pairs(&table);
+        assert!(
+            pairs.contains(&("EZTW32.dll", "TWAIN_IsAvailable")),
+            "{pairs:?}"
+        );
+        assert!(pairs.contains(&("kernel32", "LoadLibraryA")), "{pairs:?}");
+        assert!(table.defects().is_empty());
+    }
+
+    /// Gives the absolute file offset of a field inside one `Declare` table
+    /// entry.
+    ///
+    /// The route is the parser's own: the header, then `ProjectInfo`, then
+    /// the external table address, then the entry stride. Nothing searches
+    /// for a byte pattern.
+    fn declare_entry_field_offset(data: &[u8], entry_index: u32, field: u32) -> usize {
+        let image = PeImage::parse(data).unwrap();
+        let info = ProjectInfo::read(&image, project_data_va(data)).unwrap();
+        let table = image.region_at_va(info.lp_external_table).unwrap();
+        let entry = table.subregion(Off::new(entry_index * 8), 8).unwrap();
+        let at = entry.file_offset(Off::new(field)).unwrap();
+        usize::try_from(at.get()).unwrap()
+    }
+
+    /// Copies `MANDELBROT` and writes a `u32` into its one `Declare` entry.
+    fn with_mandelbrot_entry_u32(field: u32, value: u32) -> Vec<u8> {
+        let at = declare_entry_field_offset(MANDELBROT, 0, field);
+        let mut out = MANDELBROT.to_vec();
+        assert_ne!(
+            out[at..at + 4],
+            value.to_le_bytes(),
+            "the fixture writes the value the field already holds, so it proves nothing"
+        );
+        out[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        out
+    }
+
+    /// An undocumented entry type is skipped, and the byte offset and the
+    /// value found are both named in a recoverable defect.
+    #[test]
+    fn an_entry_type_that_is_neither_six_nor_seven_is_skipped_and_flagged() {
+        let bytes = with_mandelbrot_entry_u32(0x00, 99);
+        let table = declare_table(&bytes);
+        assert!(
+            table.declarations.is_empty(),
+            "an undocumented entry type must not be dereferenced as a library import"
+        );
+        assert_eq!(table.defects().len(), 1);
+        let defect = &table.defects()[0];
+        assert_eq!(defect.kind.severity(), Severity::Recoverable);
+        assert!(matches!(
+            defect.kind,
+            DefectKind::CountMismatch {
+                count: 99,
+                expected: 7,
+                ..
+            }
+        ));
+        assert_eq!(
+            defect.site.offset,
+            u32::try_from(declare_entry_field_offset(MANDELBROT, 0, 0x00)).unwrap()
+        );
+    }
+
+    /// A descriptor address in no section produces a defect, and the walk
+    /// does not stop: it is the only entry `Mandelbrot.exe` has, so this
+    /// proves the walk finishes rather than that another entry survives.
+    /// [`eight_of_nine_grayscale_entries_are_external_and_the_ninth_is_skipped`]
+    /// is the test that a real defect on one entry leaves the others intact,
+    /// because `Grayscale.exe` has more than one.
+    #[test]
+    fn a_descriptor_address_in_no_section_produces_a_defect_and_the_walk_finishes() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let nowhere = image.image_base() + 0x00F0_0000;
+        let bytes = with_mandelbrot_entry_u32(0x04, nowhere);
+        let table = declare_table(&bytes);
+        assert!(table.declarations.is_empty());
+        assert_eq!(table.defects().len(), 1);
+        let defect = &table.defects()[0];
+        assert!(matches!(
+            defect.kind,
+            DefectKind::UnmappedAddress { va, .. } if va == nowhere
+        ));
+        assert_eq!(defect.site.field, "lpImportDescriptor");
+    }
+
+    /// A bound `dwExternalCount` still resolves every entry the region can
+    /// hold, and it does not panic on the ones it cannot.
+    ///
+    /// This corpus never exercises an implausible count: the largest is 9.
+    /// The fixture inflates `Mandelbrot.exe`'s own count by a wide margin,
+    /// which the file's own external table region cannot hold.
+    #[test]
+    fn an_implausible_external_count_is_clamped_and_flagged() {
+        let at = {
+            let image = PeImage::parse(MANDELBROT).unwrap();
+            let window = image.region_at_va(project_data_va(MANDELBROT)).unwrap();
+            usize::try_from(window.file_offset(Off::new(0x238)).unwrap().get()).unwrap()
+        };
+        let mut bytes = MANDELBROT.to_vec();
+        bytes[at..at + 4].copy_from_slice(&0xFFFF_u32.to_le_bytes());
+        let table = declare_table(&bytes);
+        assert_eq!(
+            table.declarations.len(),
+            1,
+            "the one real entry must still resolve"
+        );
+        assert!(
+            table
+                .defects()
+                .iter()
+                .any(|d| matches!(d.kind, DefectKind::ImplausibleCount { count: 0xFFFF, .. }))
         );
     }
 }
