@@ -141,8 +141,8 @@ structure**, not a VA and not an RVA. All four sources agree on that. **[C]**
 | 0x4C | 4 | `lpGuiTable` | VA | VA of an array of `wFormCount` GUI table entries, `0x50` bytes each (§8.1). AG calls this `DialogsStruct`. | **[C]** |
 | 0x50 | 4 | `lpExternalTable` | VA | VA of the **external component** (OCX/typelib reference) table, `wExternalCount` entries (§7.3). Note the name collision with `ProjectInfo.lpExternalTable`, which is a *different* table holding `Declare` imports. | **[C]** |
 | 0x54 | 4 | `lpComRegisterData` | VA | VA of `tagREGDATA`. Present even in a Standard EXE. | **[C]** |
-| 0x58 | 4 | offset | u32 | **Disputed.** AI/IDC/PVB: project description. SVBD/SEK: project EXE name. | **[D]** |
-| 0x5C | 4 | offset | u32 | **Disputed.** AI/IDC/PVB: project EXE name. SVBD/SEK: project title. | **[D]** |
+| 0x58 | 4 | `oProjectExeName` | u32 | Header-relative offset to the EXE name **without** its extension, NTS. Equals `.vbp` `ExeName32=` minus `.exe`. | **[C]** |
+| 0x5C | 4 | `oProjectTitle` | u32 | Header-relative offset to the project title, NTS. Equals `.vbp` `Title=`, which VB6 omits when it equals `Name=`. | **[C]** |
 | 0x60 | 4 | `oHelpFile` | u32 | Offset to the project help file name, NTS. All sources agree. | **[C]** |
 | 0x64 | 4 | `oProjectName` | u32 | Offset to the project name, NTS. All sources agree. | **[C]** |
 
@@ -186,7 +186,11 @@ Clipboard (`0xF000`) plus Drive and Dir (`0x30000`). AG's sample reads
 
 AG's Standard EXE sample reads `0x08`.
 
-### 2.3 The 0x58 / 0x5C disagreement **[D]**
+### 2.3 The 0x58 / 0x5C disagreement, settled **[C]**
+
+This question was open. The corpus closed it. §13 holds the method and the
+worked example. This section holds the record of who said what, because that
+record is why the question was open at all.
 
 | Source | 0x58 | 0x5C |
 |---|---|---|
@@ -196,7 +200,7 @@ AG's Standard EXE sample reads `0x08`.
 | SVBD | `oProjectExename` (max 0x104) | `oProjectTitle` (max 0x28) |
 | SEK | `oProjectExename` | `oProjectTitle` |
 
-0x60 and 0x64 are agreed by everyone, so the dispute is confined to the first
+0x60 and 0x64 are agreed by everyone, so the dispute was confined to the first
 two slots.
 
 **Attempt to resolve from AG's dump.** AG lists the four values as
@@ -207,14 +211,24 @@ agreed help-file slot is consistent with both readings. The two 5-character
 strings match neither `"Progetto1"` (9) nor a plausible EXE name, so the dump
 does **not** settle it.
 
-**Recommendation.** Implement both names as aliases over the same two fields and
-resolve empirically on the first pass over `tannerhelland/vb6-code`, where the
-`.vbp` gives ground truth for `Title=`, `ExeName32=` and `Name=`. Until then,
-emit `ExeName32` from 0x5C only if it ends in `.exe`, otherwise fall back to
-`ProjectName` + `.exe`, and record the choice in the report as inferred. Note
-that the COM register data (§2.4) carries its own project description, which
-makes a duplicate description in the header slightly less likely and tips the
-balance toward the SVBD/SEK reading. That is an argument, not evidence.
+**The corpus settles it.** 0x58 is `oProjectExeName` and 0x5C is
+`oProjectTitle`. The SVBD and SEK reading is correct. The AI, IDC and PVB
+reading is wrong.
+
+The evidence is all 44 corpus binaries, each diffed against the `.vbp` that
+declares its `ExeName32`. **23** of the 44 hold a different string in the two
+slots, so those 23 discriminate between the two candidate readings. All 23
+agree with SVBD and SEK. The other 21 hold the same string in both slots,
+because the title of those projects equals the executable name, so they are
+consistent with either reading and they prove nothing. 21 plus 23 is 44. §13
+carries that reconciliation and the reason an earlier draft said 24.
+
+Do not implement the two names as aliases over the same two fields. The
+question is answered, and an alias would keep a wrong name alive in the code.
+Do not emit `ExeName32` from 0x5C when the value ends in `.exe` either: that
+rule reads the wrong field, and no corpus value ends in `.exe`, because the
+extension is not in the file. Phase 4 builds `ExeName32` from 0x58 plus the
+literal `.exe`.
 
 ### 2.4 `tagREGDATA` (COM registration data)
 
@@ -1500,7 +1514,7 @@ answer stated confidently would be worse than no answer.
 
 | # | Gap | Blocks | Resolution path |
 |---|---|---|---|
-| 1 | `VBHeader` 0x58 / 0x5C meaning (§2.3) | `.vbp` `Title=` / `ExeName32=` | Diff against `tannerhelland/vb6-code` `.vbp` files |
+| 1 | `VBHeader` 0x58 / 0x5C meaning (§2.3) | `.vbp` `Title=` / `ExeName32=` | CLOSED 2026-09-07, 44 of 44 corpus binaries. 0x58 is the EXE name, 0x5C is the title. Method and worked example in §13. |
 | 2 | `OptionalObjectInfo` presence test (§5.5) | reading controls off a class | Use `fObjectType & 2`, validate on corpus |
 | 3 | MDIForm `fObjectType` value (§5.5) | classifying MDI parents | Corpus scan for `cType == 20` forms |
 | 4 | `ParamArray` type encoding (§6.5) | correct `.bas`/`.cls` signatures | Compile a `ParamArray` sample, diff |
@@ -1518,6 +1532,28 @@ answer stated confidently would be worse than no answer.
 | 16 | Nine unknown dwords in `GUIObjectInfo` 0x35-0x58 (§8.2) | nothing known | Leave opaque |
 | 17 | Five unknown dwords in the external component entry (§7.3) | nothing known | Leave opaque |
 | 18 | Entry-point stub variants `0x5A` / `0x11` (§1.3) | exotic inputs | Do not implement without a sample |
+
+A closed row stays in this register and it is marked closed. A register that
+drops a row loses the record of what was once uncertain, and Phase 6 has to
+list every gap that is still open at release. That is easier to check against
+a register that shows all eighteen rows with their state.
+
+**The method that closed gap 1.** Read the four `u32` values at `VBHeader`
++0x58, +0x5C, +0x60 and +0x64 as offsets from the start of the header, read
+the string at each one, and compare the four against the `.vbp` that declares
+the executable under test. Select that `.vbp` by its `ExeName32` value and not
+by the directory it sits in (§12).
+
+The checking method has to handle two exceptions, and both cost a correct
+answer on the first run:
+
+1. A `.vbp` value can contain a double quote.
+   `corpus/vb6-code/Sepia-effect/Sepia.vbp` holds
+   `Title="Sepia / "Antique" Image Filter"`. Strip one leading and one
+   trailing quote, and nothing more.
+2. One corpus project has no `Title=` key at all, because VB6 omits the key
+   when the title equals the project name. An absent key is not an empty
+   title. Fall back to `Name=`.
 
 ---
 
