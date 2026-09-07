@@ -1618,9 +1618,16 @@ title, as SVBD and SEK say. AI, IDC and PVB are wrong.**
 | `0x60` | (control) | 44 of 44 |
 | `0x64` | (control) | 44 of 44 |
 
-24 of the 44 corpus programs carry an executable name that differs from the
-project title, so those 24 discriminate between the two candidate readings
-rather than merely being consistent with both.
+23 of the 44 corpus programs carry an executable name that differs from the
+project title, so those 23 discriminate between the two candidate readings
+rather than merely being consistent with both. The other 21 hold the same
+string in both fields and are consistent with either reading.
+
+An earlier draft of this section said 24. That figure was wrong. It came from
+comparing the binary against values parsed out of the `.vbp` files, and the
+truncated `Title` described below inflated it by one. The figure above compares
+the two binary fields against each other, which needs no `.vbp` parsing at all,
+and it reconciles: 21 + 23 = 44.
 
 ### These four fields are offsets from the VB header, not virtual addresses
 
