@@ -25,14 +25,19 @@ recognise. Text serves them. A script that wants structure can wait one phase.
 The shape:
 
 ```
-File      Mandelbrot.exe  (57344 bytes)
-Format    PE32, 4 sections
+File      Mandelbrot.exe  (28672 bytes)
+Format    PE32, 3 sections
 Runtime   MSVBVM60.DLL  (Visual Basic 6)
-Header    VB5! at 0x0000141c  build 0x231c
+Header    VB5! at 0x00001760  build 0x2636
 Project   Mandelbrot_Fractal_Demo
+Title     Mandelbrot Fractal Demo
 Mode      native
 Objects   1
 ```
+
+Those numbers are measured from `corpus/vb6-code/Mandelbrot/Mandelbrot.exe`,
+not invented. An earlier draft of this file carried made-up values. Do not pin
+them in a test either way: pin the shape, and read the values from the file.
 
 ### The exit code names the reason.
 
@@ -102,3 +107,35 @@ diffing the values against the `Title=` and `ExeName32=` lines in the matching
 `.vbp`. The corpus answers this question. Record the answer in
 `STRUCTURES.md`, and say which of the two candidate readings the evidence
 supports.
+
+## Three decisions taken after research, 2026-09-07
+
+Phase 1 research built a working prototype rather than describing one, and it
+raised three things the gate decisions did not cover.
+
+### `clap` already uses exit code 2, so the CLI must not let it exit
+
+`clap` exits with status 2 on a usage error. Exit code 2 is locked in the table
+above as "a PE file, but it holds no Visual Basic runtime". A user who
+mistypes a flag would get the code that means "this file is not Visual Basic",
+which is worse than no code at all.
+
+**`Cli::try_parse` with a hand written mapping is required, not a preference.**
+Do not call `Cli::parse`. A usage error maps to code 5.
+
+### Code 3 widens to "Visual Basic, but not version 6"
+
+The table said "Visual Basic 5, not Visual Basic 6". Research found VB4-32,
+which imports `VB40032.DLL`, has no code at all. Rather than add a sixth code
+for a fourth runtime, code 3 now means any Visual Basic runtime that is not
+version 6, and the message names which one it found.
+
+VB4-16 is unreachable and needs no handling. A 16 bit VB4 image is an NE file,
+not a PE file, so it never gets past the format check and it exits 1.
+
+### `inspect` prints the object count in this phase
+
+The count comes from `wCompiledObjects` in the object table, and Phase 1
+already reaches the object table because the project name is read from it. The
+count is therefore free and honest here. Walking the objects is Phase 2, and
+this phase prints the number without naming any of them.
