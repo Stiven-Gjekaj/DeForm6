@@ -124,3 +124,55 @@ than "is broken". Two touch this phase:
   variants of the constant. The fix is to return the name verbatim and compare
   case-insensitively, after which a lower-case import fixture separates them.
   Cheap, and this phase touches neither file, so take it only if it is free.
+
+## Two decisions taken after research, 2026-09-07
+
+Phase 2 research measured the corpus rather than reading the documents, and it
+raised two questions measurement cannot answer.
+
+### The ratio is pinned over procedures, not objects
+
+Object recovery is 44 of 44 across the whole corpus with no variance. A pinned
+ratio on it could never move, so it could never fail, and `AGENTS.md` says a
+test that cannot fail is worse than none.
+
+**Object recovery is asserted as an equality, in both directions**: every
+object the `.vbp` declares is recovered, and every object recovered is
+declared. That is an invariant, not a ratio.
+
+**The pinned ratio is over procedures**, where the variance is real. Worked
+examples the research measured: `Mandelbrot` 9 of 9, `Grayscale-effect` 12 of
+34, `LockWorkStation` 0 of 1.
+
+### The roadmap had the two failure messages the wrong way round
+
+Success criterion 3 said that editing a pin **down** produces `REGRESSION`.
+That is backwards, and the criterion is corrected in `ROADMAP.md`.
+
+- Editing a pin **up** means the pin now claims more than the tool recovers.
+  Something is missing. That is `REGRESSION`, and the message lists what.
+- Editing a pin **down** means the tool now recovers more than the pin claims.
+  That is `MOVED UP`, and the message prints the TOML block to paste.
+
+The messages describe what happened to the **tool**, not to the file.
+
+### One finding that changes what OBJ-03 can promise
+
+Research measured something stronger than the documented behaviour. For a
+`.bas` standard module the whole `lpProcNamesArray` **pointer** is `0`, in 8 of
+8 corpus module objects, even though `ProcCount` correctly reports 1 to 7
+procedures each.
+
+So a module's procedures are not merely prototype-less, as the `.bas` cap in
+`ROADMAP.md` says. They are **name-less through this structure**. OBJ-03
+promises public procedure names for every object; for a `.bas` that is not
+reachable from the object table at all. Say so in the report and in the ratio,
+and do not present the count as a recovery failure.
+
+### One field to distrust by default
+
+`cntPublicVars` does not count source-level `Public` variables. A corpus class
+with zero `Public` declarations reports 4. This is the same shape as
+`wCompiledObjects`, which turned out to be a rounded capacity rather than a
+count. Do not build the `PubVarDesc` stride on the assumption that this field
+means what its name says.

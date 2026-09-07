@@ -129,11 +129,18 @@ VER-02, VER-03, VER-04, VER-05
      several `.vbp` files, the harness selects the one whose `ExeName32` names
      the executable under test, and the two corpus projects that need this
      pass.
-  3. `tests/ratios.toml` holds two counts and a rounded ratio per program.
-     Editing one pinned number down makes the test fail with the word
-     `REGRESSION` and a list of the items that went missing. Editing it up
-     makes the test fail with the words `MOVED UP` and prints the exact TOML
-     block to paste. `cargo run -p xtask -- update-ratios` rewrites the file.
+  3. `tests/ratios.toml` holds two counts and a rounded ratio per program,
+     counted over **procedures**, not objects. Editing one pinned number
+     **up** makes the test fail with the word `REGRESSION` and a list of the
+     items that went missing, because the tool now recovers less than the pin
+     claims. Editing it **down** makes the test fail with the words `MOVED UP`
+     and prints the exact TOML block to paste, because the tool now recovers
+     more than the pin claims. `cargo run -p xtask -- update-ratios` rewrites
+     the file.
+
+     Object recovery is not pinned as a ratio. It is 44 of 44 with no variance,
+     so a pin on it could never move and therefore could never fail. It is
+     asserted as an equality instead, in both directions.
   4. `inspect` prints a public procedure prototype with argument names, argument
      types, and the ByRef, Array, Optional and ParamArray modifiers. It prints
      a private procedure as `Private` with no name, because the name array
