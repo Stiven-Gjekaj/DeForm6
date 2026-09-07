@@ -29,7 +29,7 @@ Version 1 recovers metadata. It does not recover statements.
 
 - [x] **OBJ-01**: The tool walks the object table and recovers the name of
       every compiled object.
-- [ ] **OBJ-02**: The tool tells a form, a module, and a class apart.
+- [x] **OBJ-02**: The tool tells a form, a module, and a class apart.
 - [x] **OBJ-03**: The tool recovers public procedure names for every object.
 - [ ] **OBJ-04**: The tool recovers procedure signatures with argument names
       and types, and the ByRef, Array, Optional and ParamArray modifiers.
@@ -157,7 +157,7 @@ Deferred. Tracked, not in this roadmap.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | DET-01 to DET-06 | Phase 1 | Complete |
-| OBJ-01 to OBJ-06 | Phase 2 | Pending |
+| OBJ-01 to OBJ-06 | Phase 2 | In Progress |
 | VER-01 to VER-05 | Phase 2 | Pending |
 | FRM-01 to FRM-06 | Phase 3 | Pending |
 | VER-06 | Phase 3 | Pending |
