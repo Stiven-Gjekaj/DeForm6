@@ -61,8 +61,17 @@ jobs:
         run: cargo test --workspace
 
       # The wall is proved on every run, and not only on the day it was
-      # written. This step comes last, because the script writes a probe into
-      # the source tree and then removes it. The script needs `jq`, which the
-      # ubuntu runner image already holds.
+      # written. The proof steps come after the three gate commands, because
+      # each script writes a probe into the source tree and then removes it.
+      # This script needs `jq`, which the ubuntu runner image already holds.
       - name: Prove the lint wall
         run: sh scripts/prove-lint-wall.sh
+
+      # The lint wall catches a bad shape written with primitives. It cannot
+      # catch a caller that reaches into a `Region` or adds two offsets,
+      # because the type refuses those shapes and they never reach a lint.
+      # The three commands above are blind to them for the same reason, so
+      # this step is the only guard on the three. It would rot silently the
+      # first day somebody makes a field public or adds a `Deref`.
+      - name: Prove the Region wall
+        run: sh scripts/prove-region-wall.sh
