@@ -1,83 +1,56 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 1
-current_phase_name: It reads the file
-status: complete
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-09-07T22:12:36.245Z"
-last_activity: 2026-09-07
-last_activity_desc: "Plan 01-08 executed. The deform6 binary parses with Cli::try_parse and maps every Refusal to one of six exit codes; the eight-line report is read from Report::runtime_dll and Report::signature, never a literal. 134 tests pass across the workspace: 115 library, 9 refusal.rs, 1 corpus_sweep.rs (all 44 executables), 9 cli.rs. Nine deliberate breakages run and reverted; two of the plan's own predictions did not match measurement and are recorded in the SUMMARY. Phase 1 is complete."
-state_head: 6d740499789a452ba97f50cad3535df3c4494be1
+current_phase: 2
+current_phase_name: The object graph
+status: executing
+stopped_at: "Phase 2 wave 1 complete and merged: 02-01, 02-06, 02-07"
+last_updated: "2026-09-08T00:00:00.000Z"
+last_activity: 2026-09-08
+last_activity_desc: "Phase 2 wave 1 executed and merged. The object array walk bounded by wTotalObjects, the Declare import table and the external component table, and the independent .vbp harness reader with the five written exclusion rules. 185 tests pass: 145 library, 21 support_selftest, 9 refusal, 9 cli, 1 corpus_sweep. The harness names deform6 zero times, proved by grep."
+state_head: d404830a26633780a583368c93c41cc6e28b3fac
 progress:
   total_phases: 6
-  completed_phases: 0
-  total_plans: 18
-  completed_plans: 9
-  percent: 0
+  completed_phases: 1
+  total_plans: 50
+  completed_plans: 11
+  percent: 22
 ---
 
 ## Continue
 
-**Phase 1 is complete.** All eight plans executed. `deform6 inspect` runs end
-to end: it reads a compiled Visual Basic 6 executable, prints the locked
-eight-line shape, exits 0, and changes no file on disk; a VB5 file, a VB4
-file, a .NET file and a non-PE file each exit a distinct, locked code; and
-`cargo test --workspace` runs the whole gate, 134 tests, including a sweep
-over all 44 corpus executables and nine refusal tests built from fixtures
-patched in memory.
+**Phase 2, wave 1 is complete and merged.** Next is wave 2.
 
-**Two measurements in 01-08-PLAN.md's own prompt did not match what running
-the code actually showed**, and both are recorded in
-`01-08-SUMMARY.md` rather than silently corrected to fit: forcing
-`PeImage::has_clr_header` to a constant `false` fails three tests across the
-workspace, not one, because plans 01-04 and 01-06 each already carry a unit
-test that asserts the method directly; and the check that catches a swap of
-`exe_name`/`title` in `Report` construction is a cross-check against an
-independently-read header, not the raw ascending-offset check the plan calls
-"the ordering assertion" — the offsets alone are blind to that class of bug.
+    /gsd-execute-phase 2
 
-**To continue:**
+Wave order, which the tooling does not know and will not tell you:
 
-    /gsd-verify-work
+    [02-01 done, 02-06 done, 02-07 done]
+    [02-02, 02-03]
+    [02-04, 02-05]
+    [02-08]
+    [02-09, 02-10]
 
-Phase 1 is complete. All eight plans are executed and merged, 134 tests pass,
-and `deform6 inspect` reads all 44 corpus executables. Run the phase verifier
-before starting phase 2, then:
+**Three things wave 1 established that later plans depend on.**
 
-    /gsd-plan-phase 2
+- `DefectKind::UnreadablePointer` now exists, `Recoverable`, as the leaf-pointer
+  twin of `UnmappedAddress`, which stays `Fatal` because a spine pointer that
+  maps nowhere stops the walk. Plans 02-01 and 02-06 both hit this; 02-06
+  worked around it and its workaround can now be simplified.
+- The harness reader is independent and proved so by grep. It must stay that
+  way. A harness that shares a reader agrees with a bug in that reader.
+- Two corpus numbers were corrected by measurement and later plans reuse them:
+  the 40-line prefix scan matches 2 of 53 forms, not zero, and
+  `Grayscale-effect/pdOpenSaveDialog.cls` declares six non-public procedure
+  slots, not two.
 
-**Two lessons from phase 1 execution, both cost something:**
+**A tooling defect to work around.** `gsd-tools query state.*` recalculates the
+global progress block as a side effect, and a worktree agent cannot see its
+siblings, so every parallel-wave agent writes a wrong global figure. All three
+wave 1 agents corrupted it independently. The orchestrator owns this file after
+a parallel wave; do not trust an agent's edit to it.
 
-- A quota limit killed one attempt at plan 01-08. `.planning/config.json` sets
-  `executor_model: sonnet`, but the Agent tool inherits the orchestrator's
-  model unless the dispatch passes `model` explicitly, so the first six
-  executors ran on Opus. Pass `model: "sonnet"` on the dispatch.
-- An executor should commit each task as soon as it is whole and green, not all
-  tasks at the end, so an interruption stops at a boundary instead of losing
-  the run.
-
-**The wave order is fixed and the tooling does not know it.**
-`gsd-tools query init.execute-phase` reports every plan as runnable at once.
-That is wrong: a plan cannot write into a module another plan has not created
-yet. Take the wave order from ROADMAP.md, not from the tool.
-
-**Executors run in a worktree, not the primary checkout.** Verify what lands on
-the main branch after each wave rather than assuming the merge did the right
-thing.
-
-**A test that the corpus alone cannot make fail is the recurring fault across
-this phase.** Plan 01-04 found four of them in its own plan; plan 01-08 hit
-the same limit again: filling `Report::runtime_dll` from the constant
-`VB6_DLL` instead of the name `runtime_of` actually matched passes the whole
-sweep, because every corpus file's imported name upper-cases to exactly that
-constant, so no fixture on this corpus can tell the two apart. Only
-`crates/deform6-cli/src/`'s grep for the bare literal, and `cargo clippy`'s
-unused-binding check on the library composer, close that gap. Three corpus
-facts that hide a bug are worth carrying into Phase 2: data directory 14 is
-zero in all 44 files, both usable corpus files import exactly one DLL, and
-in both of them the import directory sits in a section where the address
-and the file offset are the same number. Build the fixture in memory when
-the corpus cannot answer.
+**Executors run in a worktree.** Verify what lands on `main` after each wave
+rather than assuming the merge did the right thing.
 
 # Project State
 
