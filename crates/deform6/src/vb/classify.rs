@@ -1,4 +1,5 @@
-//! Telling a form, a standard module and a class apart from `fObjectType`.
+//! Telling a form, a standard module and a class apart from `fObjectType`,
+//! and the disputed presence test for the optional half of `ObjectInfo`.
 //!
 //! Everything here is a pure function over a `u32`. Nothing in this file
 //! reads a file, resolves an address or allocates a growable buffer.
@@ -93,6 +94,62 @@ pub const fn classify(f_object_type: u32) -> ObjectKind {
     }
 }
 
+/// Tells whether `fObjectType` carries the optional half of `ObjectInfo`
+/// (`STRUCTURES.md` section 5.3), the `0x40`-byte block that follows
+/// `ObjectInfo` at `lpObjectInfo + 0x38` and holds the control array, the
+/// object's CLSID and its method-link table.
+///
+/// # The presence test is disputed, and both published tests are wrong
+///
+/// `STRUCTURES.md` gap 2 records two stated tests, and neither survives a
+/// check against the value table in section 5.5:
+///
+/// - SVBD's comment on `tOptionalObjectInfo` gives `fObjectType AND 0x80`.
+///   Bit `0x80` is set for a form and for nothing else in the whole
+///   seventeen-value table, yet a class plainly carries controls and
+///   event pointers of its own. This test says every class has no optional
+///   block, which is false.
+/// - PVB's `OBJECT_HAS_OPTIONAL_INFO` gives `fObjectType AND 0x01`. Bit
+///   `0x01` is set in all seventeen tabulated values, including every
+///   standard module value. This test says a `.bas` module carries the
+///   optional block, which contradicts `STRUCTURES.md` section 5.3's own
+///   statement that a module does not have one.
+///
+/// **This function uses `fObjectType & 0x2`.** Bit `0x2` (bit 1 of the
+/// bitfield) is the only bit that separates a standard module from
+/// everything else across all seventeen tabulated values: clear for
+/// `0x18001`, `0x18021`, `0x18041`, `0x18061`, set for the other thirteen.
+/// Neither of the two published tests above is implemented here.
+#[must_use]
+pub const fn has_optional_info(f_object_type: u32) -> bool {
+    f_object_type & 0x2 != 0
+}
+
+/// Cross-checks the `0x2` bit against `ObjectInfo.lpPrivateObject`
+/// (`STRUCTURES.md` section 5.2, offset `0x0C`), which SVBD notes is `-1`
+/// for a standard module and something else for everything else.
+///
+/// Returns `true` when the two markers agree, `false` when they disagree.
+/// Per the ROADMAP risk on gap 2, a disagreement is reported, never
+/// resolved by picking a side. This function reports nothing itself: it
+/// carries no dependency on `error.rs`, so `classify.rs` stays a pure
+/// module with no file access and no `Defect` construction. A caller that
+/// already holds a [`crate::error::Defect`] builder decides how a `false`
+/// here becomes one; a plain `bool` is the smaller surface for a branch a
+/// script this phase's research ran found on zero of 105 corpus objects.
+///
+/// A script this phase's research ran, and a second script this plan's
+/// planner ran independently, both found the two markers agreeing on all
+/// 105 corpus objects: the same eight objects report no private object and
+/// are classified [`ObjectKind::Module`]. **No corpus file makes this
+/// function return `false`.** The disagreement path exists for a file this
+/// corpus does not contain, and it is exercised here only by a synthetic
+/// pair of values, never by a corpus fixture.
+#[must_use]
+pub const fn agree(f_object_type: u32, lp_private_object: u32) -> bool {
+    has_optional_info(f_object_type) == (lp_private_object != 0xFFFF_FFFF)
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -100,9 +157,9 @@ pub const fn classify(f_object_type: u32) -> ObjectKind {
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{ObjectKind, classify};
+    use super::{ObjectKind, agree, classify, has_optional_info};
     use crate::read::pe::PeImage;
-    use crate::read::region::Va;
+    use crate::read::region::{Off, Va};
     use crate::vb::header::{VbHeader, header_region};
     use crate::vb::object::ObjectTable;
     use crate::vb::project::{ObjectTableHead, ProjectInfo};
@@ -203,6 +260,17 @@ mod tests {
         ObjectTable::walk(&image, object_table_va(data), &head).unwrap()
     }
 
+    /// Reads `ObjectInfo.lpPrivateObject` at `lpObjectInfo + 0x0C`
+    /// (`STRUCTURES.md` section 5.2), independently of `vb/privateobj.rs`,
+    /// which this plan does not touch. This is the one field task 2 needs
+    /// from `ObjectInfo`, read through the same `PeImage` primitives
+    /// `vb/object.rs` already uses for every other field in this phase.
+    fn private_object_ptr(pe: &PeImage<'_>, lp_object_info: Va) -> Va {
+        pe.region_at_va(lp_object_info)
+            .and_then(|region| region.va_le(Off::new(0x0C)))
+            .unwrap()
+    }
+
     #[test]
     fn walking_grayscale_classifies_form_class_class_in_array_order() {
         let table = walk(GRAYSCALE);
@@ -214,6 +282,74 @@ mod tests {
         assert_eq!(
             kinds,
             vec![ObjectKind::Form, ObjectKind::Class, ObjectKind::Class]
+        );
+    }
+
+    #[test]
+    fn the_form_and_the_class_each_carry_the_optional_block_and_the_module_does_not() {
+        assert!(has_optional_info(0x0001_8083), "a form has one");
+        assert!(has_optional_info(0x0011_8003), "a class has one");
+        assert!(!has_optional_info(0x0001_8001), "a module does not");
+    }
+
+    #[test]
+    fn the_two_markers_agree_when_they_say_the_same_thing_and_disagree_otherwise() {
+        // A form, with a real (non-sentinel) private-object address.
+        assert!(agree(0x0001_8083, 0x0040_1000));
+        // A module, with the sentinel.
+        assert!(agree(0x0001_8001, 0xFFFF_FFFF));
+        // A form whose private-object address is the module sentinel: the
+        // bit says "has one", the pointer says "does not".
+        assert!(!agree(0x0001_8083, 0xFFFF_FFFF));
+    }
+
+    /// The synthetic case named in the plan: no corpus file produces a
+    /// disagreement, so this pair is built here, in the test, rather than
+    /// read from a file. This is the pure-function call the plan's fourth
+    /// behaviour asks for, needing no file at all.
+    #[test]
+    fn a_synthetic_bit_set_pointer_at_the_sentinel_pair_reports_a_disagreement() {
+        assert!(!agree(0x0001_8083, 0xFFFF_FFFF));
+    }
+
+    #[test]
+    fn no_corpus_file_makes_the_two_optional_info_markers_disagree() {
+        let image = PeImage::parse(GRAYSCALE).unwrap();
+        let table = walk(GRAYSCALE);
+        for object in &table.objects {
+            let private_object = private_object_ptr(&image, object.lp_object_info);
+            assert!(
+                agree(object.f_object_type, private_object.get()),
+                "{:?} disagrees, and this corpus is measured to have none that do",
+                object.name
+            );
+        }
+    }
+
+    /// Both published presence tests are named in the doc comment, with
+    /// the reason each is wrong, and neither is the test this file runs.
+    /// `has_optional_info` uses `0x2`; this checks the doc comment still
+    /// names `0x80` and `0x01` as the two tests it rejected, so a later
+    /// edit cannot drop the record of why they are wrong without this test
+    /// noticing.
+    #[test]
+    fn the_doc_comment_names_both_rejected_presence_tests_and_the_reason_each_is_wrong() {
+        let source = include_str!("classify.rs");
+        assert!(
+            source.contains("0x80"),
+            "the doc comment must still name SVBD's `0x80` test"
+        );
+        assert!(
+            source.contains("0x01"),
+            "the doc comment must still name PVB's `0x01` test"
+        );
+        assert!(
+            source.contains("a class plainly carries controls"),
+            "the doc comment must still give the reason `0x80` is wrong"
+        );
+        assert!(
+            source.contains("standard module value"),
+            "the doc comment must still give the reason `0x01` is wrong"
         );
     }
 }
