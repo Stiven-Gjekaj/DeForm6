@@ -1550,3 +1550,52 @@ answer stated confidently would be worse than no answer.
   `wEventCount`, `dwExternalCount`, every `Length`) must be bounds-checked
   against the real file size **before** any allocation is sized from it. Several
   of these are `u32` fields read straight from attacker-controlled bytes.
+
+---
+
+## 12. What this document's spine was verified against, 2026-09-07
+
+A script walked the full pointer chain on **all 44 corpus executables**. It is
+not a citation. It ran, and these are its numbers.
+
+The chain: PE `AddressOfEntryPoint`, resolved to a file offset through the
+section table, then the `push imm32` operand as a virtual address, then
+`VBHeader + 0x30` (`lpProjectData`), then `ProjectInfo + 0x04`
+(`lpObjectTable`), then `ObjectTable + 0x30` (`lpObjectArray`), then each
+`Object` record of `0x30` bytes at `+0x18` (`lpszObjectName`).
+
+| Claim | Result |
+|---|---|
+| Entry stub is `push imm32` then `call rel32` | 44 of 44 |
+| The pushed pointer lands on `VB5!` | 44 of 44 |
+| `VBHeader + 0x30` reaches a usable ProjectInfo | 44 of 44 |
+| `ProjectInfo + 0x20` (`lpNativeCode`) is non-zero | 44 of 44, all native |
+| `ObjectTable + 0x40` gives a readable project name | 44 of 44 |
+| `wCompiledObjects` bounds a walkable object array | 44 of 44 |
+| Every object the project declares is recovered by name | **44 of 44** |
+
+`lpNativeCode` being non-zero on all 44 agrees with the source: every vendored
+`.vbp` carries `CompilationType=0`, which is native. The corpus therefore does
+**not** exercise the P-code branch of this field. A P-code binary is needed
+before that branch can be called tested.
+`TimoKunze/ExplorerTreeView-VB6` is the known source of one.
+
+### A trap the harness fell into first
+
+The first run reported 42 of 44, not 44 of 44. Two projects appeared to be
+missing an object named `cCommonDialog`.
+
+The parser was right and the check was wrong. `cCommonDialog.cls` sits in those
+two project directories but **is not listed in the `.vbp`**, so the compiler
+never put it in the executable. The check had built its expectation from a
+directory glob rather than from the file list the project declares.
+
+**The differential gate must take its expectation from the `.vbp` file list,
+never from a directory glob.** A project directory holds orphan source that was
+never compiled, and a glob counts it as a recovery failure. This is the same
+shape as the rule in `AGENTS.md`: build the state a test needs from the thing
+that defines it, not from what happens to sit next to it.
+
+One more detail the harness needs: a directory can hold several `.vbp` files
+for one program. Select the project whose `ExeName32` matches the executable
+under test. Two corpus projects require this.
