@@ -88,14 +88,14 @@ non-zero exit code.
 **Plans**: 8 plans
 
 Plans:
-- [ ] 01-01: Workspace, toolchain, the lint wall, and the three-command gate in CI
-- [ ] 01-02: `read/region.rs` - `Region`, `Off`, `Rva`, `Va`, no dependency, every read returns `Option`
-- [ ] 01-03: `error.rs` and `journal.rs` - `Site`, `DefectKind`, `Severity`, `Defect`, `Error`, `Journal`, `Mode`
-- [ ] 01-04: `read/pe.rs` - the PE envelope over `object` 0.40.0, the section table, the address-to-offset map, the import directory
-- [ ] 01-05: `vb/header.rs` - the entry stub, the `VB5!` signature, the `VBHeader` fields
-- [ ] 01-06: Runtime discrimination and the three refusals - `MSVBVM50.DLL`, `VB40032.DLL`, and no VB runtime at all
-- [ ] 01-07: `vb/project.rs` - `ProjectInfo`, the project name, the compilation mode from `lpNativeCode`
-- [ ] 01-08: The `deform6-cli` shell, the `inspect` subcommand, exit codes, and `refusal.rs`
+- [ ] 01-01-PLAN.md - Workspace, toolchain, the lint wall, and the three-command gate in CI
+- [ ] 01-02-PLAN.md - `read/region.rs` - `Region`, `Off`, `Rva`, `Va`, no dependency, every read returns `Option`
+- [ ] 01-03-PLAN.md - `error.rs` and `journal.rs` - `Site`, `DefectKind`, `Severity`, `Defect`, `Error`, `Refusal`, `Journal`, `Mode`
+- [ ] 01-04-PLAN.md - `read/pe.rs` - the PE envelope over `object` 0.40.0, the section table, the one address-to-offset predicate, the import directory
+- [ ] 01-05-PLAN.md - `vb/header.rs` - the entry stub, the `VB5!` signature, the `VBHeader` fields, and the closed 0x58 / 0x5C gap
+- [ ] 01-06-PLAN.md - Runtime discrimination and the three refusals - `MSVBVM50.DLL`, `VB40032.DLL`, and no VB runtime at all
+- [ ] 01-07-PLAN.md - `vb/project.rs` - `ProjectInfo`, the project name, the object count, the compilation mode from `lpNativeCode`, and `inspect`
+- [ ] 01-08-PLAN.md - The `deform6-cli` shell, the `inspect` subcommand, exit codes, `refusal.rs` and the 44-file corpus sweep
 
 **Waves**: [01-01] then [01-02, 01-03] then [01-04] then [01-05, 01-06] then [01-07] then [01-08]
 
