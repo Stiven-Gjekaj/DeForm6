@@ -335,7 +335,7 @@ PVB `ObjectTable`.)
 | 0x18 | 16 | `uuidObject` | GUID of the object table. AI, PVB, IDC read it as a GUID; SVBD reads the same 16 bytes as four opaque dwords. Same bytes either way. | **[C]** |
 | 0x28 | 2 | `fCompileState` | Internal compile flag. | **[C]** |
 | 0x2A | 2 | `wTotalObjects` | Total objects in the project. | **[C]** |
-| 0x2C | 2 | `wCompiledObjects` | **The loop bound for the object array.** Equal to `wTotalObjects` after a clean compile. | **[C]** |
+| 0x2C | 2 | `wCompiledObjects` | **Not the number of objects.** It is the capacity of the object array, rounded up. It equals `wTotalObjects` in only 29 of the 44 corpus files. Do not loop on it. See §4.1. | **[C]** |
 | 0x2E | 2 | `wObjectsInUse` | Usually equal to the above after compile. | **[C]** |
 | 0x30 | 4 | `lpObjectArray` | VA of an array of `Object` records, `0x30` bytes each (§5.1). | **[C]** |
 | 0x34 | 4 | `fIdeFlag` | IDE only. | **[C]** |
@@ -1739,3 +1739,38 @@ The first run reported 42 of 44 for `0x5C`. Both failures were faults in the
 Both matter beyond this check. The Phase 4 `.vbp` writer must be able to write
 a value containing a double quote, and the differential harness must be able to
 read one back.
+
+### 4.1.1 Confirmed a second time, independently
+
+The measurement in §4.1 was re-run by the orchestrator against all 44 corpus
+executables, selecting each program's `.vbp` by its `ExeName32` and counting
+the `Form=`, `Module=`, `Class=`, `UserControl=` and `PropertyPage=` lines.
+
+| Field | Equals the declared count |
+|---|---|
+| `wTotalObjects` at 0x2A | **44 of 44** |
+| `wCompiledObjects` at 0x2C | **29 of 44** |
+| `wObjectsInUse` at 0x2E | **44 of 44** |
+
+The 15 disagreements are all the same shape. `wCompiledObjects` is the capacity
+of the array rounded up, so a program that declares 1, 2 or 3 objects reports
+4. `LockWorkStation` declares 1 and reports 4. `Grayscale` declares 3 and
+reports 4.
+
+**This corrects a recommendation written in this document earlier the same
+day**, which said to loop on `wCompiledObjects` and to report a disagreement
+with `wTotalObjects` as a damage indicator. Following it would have printed the
+wrong object count for a third of the corpus and called 15 healthy files
+damaged.
+
+It also corrects the two open references that this document leaned on:
+`python-vb` and the Gen Digital article both loop on `wCompiledObjects`.
+Semi VB Decompiler loops on `wTotalObjects` and is right.
+
+**An earlier check in this repository missed this**, and the reason is worth
+recording. The orchestrator's first corpus walk looped on `wCompiledObjects`
+and reported that every declared object was recovered in 44 of 44. It asserted
+that the expected names were a **subset** of the recovered names, so the extra
+slots that the capacity introduced added unexpected names without failing
+anything. A subset assertion cannot see an over-count. The differential gate in
+Phase 2 must compare both directions.
