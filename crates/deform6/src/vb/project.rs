@@ -720,6 +720,215 @@ fn read_latin1_cstr(pe: &PeImage<'_>, va: Va) -> Option<String> {
     Some(bytes.iter().copied().map(char::from).collect())
 }
 
+/// One entry of the external component table: an OCX or type library
+/// reference a form pulls in.
+///
+/// Read the doc comment above [`DECLARE_ENTRY_SIZE`] first: this is reached
+/// from [`crate::vb::header::VbHeader::lp_external_table`], never from
+/// [`ProjectInfo::lp_external_table`].
+///
+/// `[`Component::library`]` is the key Phase 3 joins a form's external
+/// control to its CLSID, and this table is what produces the `Object=` lines
+/// of the `.vbp` in Phase 4.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Component {
+    /// The OCX or DLL file name, e.g. `"MSWINSCK.OCX"`.
+    pub file_name: String,
+    /// The library name, e.g. `"MSWinsockLib.Winsock"`.
+    pub library: String,
+    /// The component name, e.g. `"Winsock"`.
+    pub name: String,
+    /// The entry-relative offset of the textual GUID. Carried, not decoded:
+    /// `STRUCTURES.md` gap 17 leaves this and four other fields opaque, and
+    /// nothing in this phase needs them.
+    pub guid_offset: Off,
+    /// `-1` means no binary identifier at `oUuid`. `72` means the textual
+    /// GUID is 36 UTF-16 characters. Carried, not decoded.
+    pub guid_length: i32,
+}
+
+/// The external component table, reached from
+/// [`crate::vb::header::VbHeader::lp_external_table`].
+#[derive(Clone, Debug)]
+pub struct ComponentTable {
+    /// Every entry the walk resolved, in table order.
+    pub components: Vec<Component>,
+    defects: Vec<Defect>,
+}
+
+impl ComponentTable {
+    /// Walks the external component table.
+    ///
+    /// Entries are variable length and self-describing: `StructLength` at
+    /// entry offset `0x00` gives the length of this entry, and the next
+    /// entry starts at this entry plus that length. **Every sub-offset below
+    /// is relative to the start of the entry that names it, never to the
+    /// start of the table.** `STRUCTURES.md` section 7.3 opens with the same
+    /// warning.
+    ///
+    /// This never refuses. A zero count gives an empty list without
+    /// touching `lp_external_table` at all, matching `Mandelbrot.exe` and
+    /// `Grayscale.exe`, neither of which references a component.
+    ///
+    /// # What this corpus proves and what it does not
+    ///
+    /// A script run over all 44 vendored programs, this session, found
+    /// three component entries in total, in three programs, and all three
+    /// name the same control: file `MSWINSCK.OCX`, library
+    /// `MSWinsockLib.Winsock`, component `Winsock`, each with a declared
+    /// entry length of 368. One distinct sample proves the three string
+    /// offsets resolve. It does not prove the walk advances correctly from
+    /// one entry to the next, because no corpus file holds a second entry to
+    /// advance to. A synthetic two-entry table in this module's own tests
+    /// proves that: [`crate::vb::header::header_region`]'s test module holds
+    /// a synthetic image builder that plan 02-06's action text points to,
+    /// but that helper is private to that module's own `#[cfg(test)]` block
+    /// and is not reachable from here, so this module builds an independent
+    /// synthetic image of the same shape rather than importing one.
+    #[must_use]
+    pub fn read(pe: &PeImage<'_>, lp_external_table: Va, w_external_count: u16) -> Self {
+        let mut components = Vec::new();
+        let mut defects = Vec::new();
+
+        if w_external_count == 0 {
+            return Self {
+                components,
+                defects,
+            };
+        }
+
+        let Some(table) = pe.region_at_va(lp_external_table) else {
+            return Self {
+                components,
+                defects,
+            };
+        };
+
+        let mut cursor = Off::new(0);
+        for _ in 0..w_external_count {
+            let Some(entry_offset) = table.file_offset(cursor) else {
+                break;
+            };
+            let Some(struct_len) = table.u32_le(cursor) else {
+                break;
+            };
+
+            if struct_len == 0 {
+                // A zero length would leave the cursor standing still for
+                // the rest of the count. Stop rather than loop.
+                defects.push(Defect {
+                    site: Site {
+                        offset: entry_offset.get(),
+                        rva: None,
+                        structure: "ExternalComponentEntry",
+                        field: "StructLength",
+                    },
+                    kind: DefectKind::CountMismatch {
+                        offset: entry_offset.get(),
+                        count: 0,
+                        expected: 1,
+                        other_field: "StructLength, which must be at least 1 byte for the \
+                                      cursor to advance",
+                    },
+                });
+                break;
+            }
+
+            let Some(entry) = table.subregion(cursor, struct_len) else {
+                // The declared length runs past what the region holds.
+                let remaining = table.len().saturating_sub(cursor.get());
+                defects.push(Defect {
+                    site: Site {
+                        offset: entry_offset.get(),
+                        rva: None,
+                        structure: "ExternalComponentEntry",
+                        field: "StructLength",
+                    },
+                    kind: DefectKind::ImplausibleCount {
+                        offset: entry_offset.get(),
+                        count: struct_len,
+                        max: remaining,
+                    },
+                });
+                break;
+            };
+
+            match read_component_entry(&entry) {
+                Some(component) => components.push(component),
+                // The corpus's one distinct sample resolves cleanly on all
+                // three of its occurrences, so this is defensive and not
+                // corpus-exercised: five of thirteen fields in this
+                // structure are unknown, and a file that declares a length
+                // too short to hold the fixed fields, or a string offset
+                // with no terminator, must not panic and must not invent a
+                // component out of the bytes that are there.
+                None => defects.push(Defect {
+                    site: Site {
+                        offset: entry_offset.get(),
+                        rva: None,
+                        structure: "ExternalComponentEntry",
+                        field: "NameOffset",
+                    },
+                    kind: DefectKind::NoNulTerminator {
+                        offset: entry_offset.get(),
+                        limit: NAME_MAX,
+                    },
+                }),
+            }
+
+            let Some(next) = cursor.checked_add(struct_len) else {
+                break;
+            };
+            cursor = next;
+        }
+
+        Self {
+            components,
+            defects,
+        }
+    }
+
+    /// Gives the defects the walk found: a zero or overrunning declared
+    /// length, or an entry whose fixed fields or strings did not resolve.
+    #[must_use]
+    pub fn defects(&self) -> &[Defect] {
+        &self.defects
+    }
+}
+
+/// Reads the three strings and the GUID fields of one component entry.
+///
+/// Every offset read here is relative to `entry`'s own base, never to the
+/// table. `entry` already spans exactly `StructLength` bytes, so a string
+/// offset that names a byte inside this entry resolves inside `entry`
+/// directly, with no second address to follow.
+fn read_component_entry(entry: &Region<'_>) -> Option<Component> {
+    let guid_offset = entry.off_le(Off::new(0x1C))?;
+    let guid_length = entry.i32_le(Off::new(0x20))?;
+    let file_name_off = entry.off_le(Off::new(0x28))?;
+    let source_off = entry.off_le(Off::new(0x2C))?;
+    let name_off = entry.off_le(Off::new(0x30))?;
+
+    let file_name = component_cstr(entry, file_name_off)?;
+    let library = component_cstr(entry, source_off)?;
+    let name = component_cstr(entry, name_off)?;
+
+    Some(Component {
+        file_name,
+        library,
+        name,
+        guid_offset,
+        guid_length,
+    })
+}
+
+/// Reads one NUL terminated, Latin-1 decoded string at an entry-relative
+/// offset.
+fn component_cstr(entry: &Region<'_>, at: Off) -> Option<String> {
+    let bytes = entry.cstr(at, NAME_MAX)?;
+    Some(bytes.iter().copied().map(char::from).collect())
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -731,8 +940,8 @@ fn read_latin1_cstr(pe: &PeImage<'_>, va: Va) -> Option<String> {
 )]
 mod tests {
     use super::{
-        CompileMode, Declaration, DeclareTable, ExportName, ObjectTableHead, PROJECT_INFO_SIZE,
-        ProjectInfo, parse_export_name,
+        CompileMode, Component, ComponentTable, Declaration, DeclareTable, ExportName,
+        ObjectTableHead, PROJECT_INFO_SIZE, ProjectInfo, parse_export_name,
     };
     use crate::error::Refusal;
     use crate::error::{DefectKind, Severity};
@@ -770,6 +979,14 @@ mod tests {
     const VB_SCANNER_SUPPORT: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../corpus/vb6-code/Scanner-TWAIN/VB_Scanner_Support.exe"
+    ));
+
+    /// One of the three corpus programs whose component table holds an
+    /// entry: file `MSWINSCK.OCX`, library `MSWinsockLib.Winsock`, component
+    /// `Winsock`.
+    const SERVER: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/public-domain/SK-TFTP-Sample__VB6/Server/demo/Server.exe"
     ));
 
     /// Gives the address of `ProjectInfo` that the file itself holds.
@@ -1301,5 +1518,200 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Walks the external component table out of a byte slice, reached from
+    /// the header, never from `ProjectInfo`.
+    fn component_table(data: &[u8]) -> ComponentTable {
+        let image = PeImage::parse(data).unwrap();
+        let hdr = header_region(&image).unwrap();
+        let header = VbHeader::read(&hdr).unwrap();
+        ComponentTable::read(&image, header.lp_external_table, header.w_external_count)
+    }
+
+    #[test]
+    fn the_one_component_server_exe_declares_resolves_all_three_strings() {
+        let table = component_table(SERVER);
+        assert_eq!(table.components.len(), 1);
+        let component = &table.components[0];
+        assert_eq!(component.file_name, "MSWINSCK.OCX");
+        assert_eq!(component.library, "MSWinsockLib.Winsock");
+        assert_eq!(component.name, "Winsock");
+        assert_eq!(component.guid_length, 72);
+        assert!(table.defects().is_empty());
+    }
+
+    #[test]
+    fn a_program_with_no_component_reference_gives_an_empty_list_without_refusing() {
+        for data in [MANDELBROT, GRAYSCALE] {
+            let table = component_table(data);
+            assert!(table.components.is_empty());
+            assert!(table.defects().is_empty());
+        }
+    }
+
+    /// A minimal synthetic portable executable, built for this module's
+    /// component table tests only.
+    ///
+    /// Every other test in this file exercises the real corpus. This exists
+    /// for one reason: both corpus files vendored in this repository place
+    /// every structure this module reads at a virtual address that is
+    /// numerically equal to its file offset, so a test built against either
+    /// one cannot tell a bug that reads the RVA in place of the file offset
+    /// from a bug that does not exist. Here the two differ by `0xC00`.
+    ///
+    /// Plan 02-06's action text points at a synthetic builder held in
+    /// `vb/header.rs`'s own `#[cfg(test)]` module. That function is private
+    /// to that module and is not reachable from here, so this is an
+    /// independent construction of the same PE shape, not a shared import.
+    /// `AGENTS.md` favours this anyway: "build the state a test needs inside
+    /// the test."
+    fn a_synthetic_pe_image(payload: &[u8]) -> (Vec<u8>, Va) {
+        const IMAGE_BASE: u32 = 0x0040_0000;
+        const SECTION_RVA: u32 = 0x1000;
+        const SECTION_OFF: usize = 0x400;
+        const LFANEW: usize = 0x40;
+        const OPTIONAL: usize = LFANEW + 24;
+        const SECTION: usize = OPTIONAL + 224;
+
+        let total = (SECTION_OFF + payload.len() + 0x100).max(0x800);
+        let mut out = vec![0_u8; total];
+        out[0] = b'M';
+        out[1] = b'Z';
+        out[0x3c..0x40].copy_from_slice(&u32::try_from(LFANEW).unwrap().to_le_bytes());
+        out[LFANEW..LFANEW + 4].copy_from_slice(b"PE\0\0");
+        out[LFANEW + 4..LFANEW + 6].copy_from_slice(&0x014c_u16.to_le_bytes());
+        out[LFANEW + 6..LFANEW + 8].copy_from_slice(&1_u16.to_le_bytes());
+        out[LFANEW + 20..LFANEW + 22].copy_from_slice(&224_u16.to_le_bytes());
+        out[LFANEW + 22..LFANEW + 24].copy_from_slice(&0x0102_u16.to_le_bytes());
+
+        out[OPTIONAL..OPTIONAL + 2].copy_from_slice(&0x010b_u16.to_le_bytes());
+        out[OPTIONAL + 0x1c..OPTIONAL + 0x20].copy_from_slice(&IMAGE_BASE.to_le_bytes());
+        out[OPTIONAL + 0x20..OPTIONAL + 0x24].copy_from_slice(&0x1000_u32.to_le_bytes());
+        out[OPTIONAL + 0x24..OPTIONAL + 0x28].copy_from_slice(&0x200_u32.to_le_bytes());
+        out[OPTIONAL + 0x38..OPTIONAL + 0x3c].copy_from_slice(&0x2000_u32.to_le_bytes());
+        out[OPTIONAL + 0x3c..OPTIONAL + 0x40]
+            .copy_from_slice(&u32::try_from(total).unwrap().to_le_bytes());
+        out[OPTIONAL + 0x5c..OPTIONAL + 0x60].copy_from_slice(&16_u32.to_le_bytes());
+
+        let section_bytes = u32::try_from(total - SECTION_OFF).unwrap();
+        out[SECTION..SECTION + 8].copy_from_slice(b".text\0\0\0");
+        out[SECTION + 8..SECTION + 12].copy_from_slice(&section_bytes.to_le_bytes());
+        out[SECTION + 12..SECTION + 16].copy_from_slice(&SECTION_RVA.to_le_bytes());
+        out[SECTION + 16..SECTION + 20].copy_from_slice(&section_bytes.to_le_bytes());
+        out[SECTION + 20..SECTION + 24]
+            .copy_from_slice(&u32::try_from(SECTION_OFF).unwrap().to_le_bytes());
+        out[SECTION + 36..SECTION + 40].copy_from_slice(&0x6000_0020_u32.to_le_bytes());
+
+        out[SECTION_OFF..SECTION_OFF + payload.len()].copy_from_slice(payload);
+
+        let va = Va::new(IMAGE_BASE + SECTION_RVA);
+        (out, va)
+    }
+
+    /// Builds one component entry: the fixed fields, then the three strings
+    /// and a placeholder textual GUID, each written once and referenced by
+    /// its own entry-relative offset.
+    fn build_component_entry(file_name: &str, library: &str, name: &str) -> Vec<u8> {
+        let mut buf = vec![0_u8; 0x34];
+        let mut pool = Vec::new();
+
+        let place = |bytes: &[u8], pool: &mut Vec<u8>| -> u32 {
+            let at = u32::try_from(0x34 + pool.len()).unwrap();
+            pool.extend_from_slice(bytes);
+            pool.push(0);
+            at
+        };
+
+        let guid_off = place(b"{00000000-0000-0000-0000-000000000000}", &mut pool);
+        let file_name_off = place(file_name.as_bytes(), &mut pool);
+        let source_off = place(library.as_bytes(), &mut pool);
+        let name_off = place(name.as_bytes(), &mut pool);
+
+        buf[0x1C..0x20].copy_from_slice(&guid_off.to_le_bytes());
+        buf[0x20..0x24].copy_from_slice(&72_i32.to_le_bytes());
+        buf[0x28..0x2C].copy_from_slice(&file_name_off.to_le_bytes());
+        buf[0x2C..0x30].copy_from_slice(&source_off.to_le_bytes());
+        buf[0x30..0x34].copy_from_slice(&name_off.to_le_bytes());
+
+        buf.extend_from_slice(&pool);
+        let total_len = u32::try_from(buf.len()).unwrap();
+        buf[0x00..0x04].copy_from_slice(&total_len.to_le_bytes());
+        buf
+    }
+
+    /// Two entries, each with its own unique strings, back to back. Reading
+    /// the second entry's strings correctly is only possible if every
+    /// sub-offset is resolved relative to that entry's own start: this
+    /// corpus's one distinct sample has no second entry to prove this
+    /// against, so it is proved synthetically here.
+    #[test]
+    fn a_synthetic_two_entry_table_proves_offsets_are_relative_to_the_entry() {
+        let mut payload = build_component_entry("First.ocx", "FirstLib.First", "First");
+        payload.extend(build_component_entry(
+            "Second.ocx",
+            "SecondLib.Second",
+            "Second",
+        ));
+        let (bytes, va) = a_synthetic_pe_image(&payload);
+        let image = PeImage::parse(&bytes).unwrap();
+        let table = ComponentTable::read(&image, va, 2);
+
+        assert_eq!(table.components.len(), 2, "{:?}", table.defects());
+        assert_eq!(
+            table.components[0],
+            Component {
+                file_name: "First.ocx".to_string(),
+                library: "FirstLib.First".to_string(),
+                name: "First".to_string(),
+                guid_offset: table.components[0].guid_offset,
+                guid_length: 72,
+            }
+        );
+        assert_eq!(table.components[1].file_name, "Second.ocx");
+        assert_eq!(table.components[1].library, "SecondLib.Second");
+        assert_eq!(table.components[1].name, "Second");
+        assert!(table.defects().is_empty());
+    }
+
+    #[test]
+    fn a_declared_length_of_zero_stops_the_walk_with_a_recoverable_defect() {
+        let mut payload = build_component_entry("Zero.ocx", "ZeroLib.Zero", "Zero");
+        // Corrupt only the declared length of this one entry to zero, after
+        // it was built correctly, so the fixture proves the guard and
+        // nothing else.
+        payload[0x00..0x04].copy_from_slice(&0_u32.to_le_bytes());
+        let (bytes, va) = a_synthetic_pe_image(&payload);
+        let image = PeImage::parse(&bytes).unwrap();
+        let table = ComponentTable::read(&image, va, 3);
+
+        assert!(table.components.is_empty());
+        assert_eq!(table.defects().len(), 1);
+        let defect = &table.defects()[0];
+        assert_eq!(defect.kind.severity(), Severity::Recoverable);
+        assert!(matches!(
+            defect.kind,
+            DefectKind::CountMismatch { count: 0, .. }
+        ));
+    }
+
+    #[test]
+    fn a_declared_length_past_the_end_of_the_region_stops_the_walk_with_a_recoverable_defect() {
+        let mut payload = build_component_entry("Over.ocx", "OverLib.Over", "Over");
+        let real_len = u32::try_from(payload.len()).unwrap();
+        // A declared length far larger than what the region holds.
+        payload[0x00..0x04].copy_from_slice(&(real_len + 10_000).to_le_bytes());
+        let (bytes, va) = a_synthetic_pe_image(&payload);
+        let image = PeImage::parse(&bytes).unwrap();
+        let table = ComponentTable::read(&image, va, 1);
+
+        assert!(table.components.is_empty());
+        assert_eq!(table.defects().len(), 1);
+        let defect = &table.defects()[0];
+        assert_eq!(defect.kind.severity(), Severity::Recoverable);
+        assert!(matches!(
+            defect.kind,
+            DefectKind::ImplausibleCount { count, .. } if count == real_len + 10_000
+        ));
     }
 }
