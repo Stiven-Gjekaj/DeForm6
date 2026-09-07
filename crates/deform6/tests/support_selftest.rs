@@ -25,6 +25,14 @@ use std::path::{Path, PathBuf};
 
 use support::vbp;
 
+/// Reads a file as Latin-1 bytes, the same rule every reader in this
+/// harness uses. `std::fs::read_to_string` would refuse a source file
+/// that carries a byte above 127 in a comment, which this corpus does.
+fn read_latin1(path: &Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    Some(bytes.iter().copied().map(char::from).collect())
+}
+
 /// The count this whole harness is built to protect: 44 vendored
 /// executables.
 const EXPECTED_EXECUTABLE_COUNT: usize = 44;
@@ -514,4 +522,279 @@ fn neither_orphan_common_dialog_class_appears_in_its_projects_declared_list() {
             project_path.display()
         );
     }
+}
+
+#[test]
+fn five_rules_exist_each_with_an_identifier_and_a_reason() {
+    assert_eq!(support::rules::RULES.len(), 5);
+    for rule in support::rules::RULES {
+        assert!(!rule.id.is_empty());
+        assert!(
+            rule.reason.len() > 20,
+            "rule {:?} carries a reason too short to be a real explanation: {:?}",
+            rule.id,
+            rule.reason
+        );
+    }
+}
+
+/// Builds every [`support::rules::Candidate`] the whole corpus supports,
+/// covering every rule at least once. This is the real-corpus input the
+/// "every rule matches something" instrument tallies; see
+/// `support::rules::tally` for the generic counting logic itself.
+fn all_rule_candidates() -> Vec<support::rules::Candidate> {
+    use support::rules::Candidate;
+
+    let mut out = Vec::new();
+
+    // Procedure candidates: every procedure in every declared object,
+    // tagged with whether its object is a standard module.
+    for (_, object) in all_declared_objects() {
+        let Ok(bytes) = std::fs::read(&object.source_file) else {
+            continue;
+        };
+        let text: String = bytes.iter().copied().map(char::from).collect();
+        let in_standard_module = object.kind == support::vbp::ObjectKind::Module;
+        for visibility in support::rules::scan_procedure_visibilities(&text) {
+            out.push(Candidate::Procedure {
+                in_standard_module,
+                visibility,
+            });
+        }
+    }
+
+    // Source-listing candidates: every declared object's source-file
+    // presence (covers the absent-source rule), plus the two orphan
+    // common dialog class sources (covers the unlisted-source rule).
+    for (_, object) in all_declared_objects() {
+        out.push(Candidate::SourceListing {
+            declared_in_project: true,
+            exists_on_disk: object.source_file.exists(),
+        });
+    }
+    for project_path in vbp::project_files().iter().filter(|p| {
+        p.to_str()
+            .is_some_and(|s| s.contains("Hidden-Markov-model") || s.contains("Randomize-effects"))
+    }) {
+        let dir = project_path
+            .parent()
+            .expect("a project file always has a parent directory");
+        let orphan = dir.join("cCommonDialog.cls");
+        if orphan.exists() {
+            out.push(Candidate::SourceListing {
+                declared_in_project: false,
+                exists_on_disk: true,
+            });
+        }
+    }
+
+    // A never-kept candidate: a real local variable declaration exists
+    // in the corpus (`Mandelbrot.frm`'s `Form_Load` declares one with
+    // `Dim`), which is the kind of fact this rule covers.
+    let mandelbrot_form = all_declared_objects()
+        .into_iter()
+        .find(|(_, o)| {
+            o.kind == support::vbp::ObjectKind::Form
+                && o.source_file.file_name().and_then(|n| n.to_str()) == Some("Mandelbrot.frm")
+        })
+        .map(|(_, o)| o.source_file);
+    if let Some(path) = mandelbrot_form {
+        let text = read_latin1(&path).unwrap_or_default();
+        if text.lines().any(|l| l.trim_start().starts_with("Dim ")) {
+            out.push(Candidate::NeverKept);
+        }
+    }
+
+    out
+}
+
+#[test]
+fn every_rule_matches_at_least_one_real_corpus_case() {
+    let candidates = all_rule_candidates();
+    let tally = support::rules::tally(candidates);
+    let zero: Vec<&str> = tally
+        .iter()
+        .filter(|&(_, &count)| count == 0)
+        .map(|(&id, _)| id)
+        .collect();
+    assert!(
+        zero.is_empty(),
+        "the following rules matched zero real corpus cases: {zero:?}; a rule that matches \
+         nothing is either wrong or no longer needed"
+    );
+}
+
+#[test]
+fn the_standard_module_rule_excludes_exactly_eight_objects_and_twenty_three_procedure_slots() {
+    let declared = all_declared_objects();
+    let module_objects: Vec<_> = declared
+        .iter()
+        .filter(|(_, o)| o.kind == support::vbp::ObjectKind::Module)
+        .collect();
+    assert_eq!(module_objects.len(), 8);
+
+    let mut slots = 0usize;
+    for (_, object) in &module_objects {
+        let Some(text) = read_latin1(&object.source_file) else {
+            continue;
+        };
+        slots += support::rules::scan_procedure_visibilities(&text).len();
+    }
+    assert_eq!(
+        slots, 23,
+        "the 8 standard module objects in the corpus declare 23 procedure slots (Sub, \
+         Function, Property and Declare lines combined); found {slots}"
+    );
+}
+
+#[test]
+fn the_scope_rule_excludes_every_non_public_procedure_grayscale_effects_dialog_class_declares() {
+    let declared = all_declared_objects();
+    let dialog_class = declared
+        .iter()
+        .find(|(p, o)| {
+            p.to_str().is_some_and(|s| s.contains("Grayscale-effect"))
+                && o.source_file.file_name().and_then(|n| n.to_str())
+                    == Some("pdOpenSaveDialog.cls")
+        })
+        .map(|(_, o)| o.source_file.clone())
+        .expect("the corpus vendors Grayscale-effect/pdOpenSaveDialog.cls");
+
+    let text = read_latin1(&dialog_class).expect("reading pdOpenSaveDialog.cls");
+    let visibilities = support::rules::scan_procedure_visibilities(&text);
+    // The plan this harness was built from states this class declares
+    // "its two procedures" friend. Measured against the real file: it
+    // declares six, two `Friend Function` members and four `Private
+    // Declare Function` lines (the four API imports near the top of the
+    // file). A `Private Declare` consumes a procedure slot exactly as a
+    // `Private Sub` does (per `CONTEXT.md`'s `frmFractal` measurement),
+    // so all six, not two, are non-public. The plan's "two" undercounts
+    // the real case; the correction is recorded in the SUMMARY. Note
+    // also: plain `grep` (no `-a`) silently treats this Latin-1 file as
+    // binary and reports zero matches for "Friend" -- a trap for anyone
+    // re-verifying this by hand.
+    assert_eq!(
+        visibilities.len(),
+        6,
+        "expected six procedure declarations (four Private Declare, two Friend Function), \
+         found {visibilities:?}"
+    );
+    let friend_count = visibilities
+        .iter()
+        .filter(|v| **v == support::rules::Visibility::Friend)
+        .count();
+    let private_count = visibilities
+        .iter()
+        .filter(|v| **v == support::rules::Visibility::Private)
+        .count();
+    assert_eq!(friend_count, 2);
+    assert_eq!(private_count, 4);
+
+    let scope_rule = support::rules::RULES
+        .iter()
+        .find(|r| r.id == "scope")
+        .expect("the scope rule exists");
+    for visibility in visibilities {
+        let candidate = support::rules::Candidate::Procedure {
+            in_standard_module: false,
+            visibility,
+        };
+        assert!(
+            scope_rule.excludes(candidate),
+            "the scope rule must exclude every procedure this class declares, since none are \
+             Public: got {visibility:?}"
+        );
+    }
+}
+
+#[test]
+fn the_unlisted_source_rule_excludes_the_two_orphan_common_dialog_classes() {
+    let unlisted_source_rule = support::rules::RULES
+        .iter()
+        .find(|r| r.id == "unlisted-source")
+        .expect("the unlisted-source rule exists");
+
+    let orphan_projects: Vec<PathBuf> = vbp::project_files()
+        .into_iter()
+        .filter(|p| {
+            p.to_str().is_some_and(|s| {
+                s.contains("Hidden-Markov-model") || s.contains("Randomize-effects")
+            })
+        })
+        .collect();
+    assert_eq!(orphan_projects.len(), 2);
+
+    for project_path in &orphan_projects {
+        let dir = project_path
+            .parent()
+            .expect("a project file always has a parent directory");
+        let orphan = dir.join("cCommonDialog.cls");
+        assert!(
+            orphan.exists(),
+            "{} expects an orphan cCommonDialog.cls on disk",
+            project_path.display()
+        );
+        let candidate = support::rules::Candidate::SourceListing {
+            declared_in_project: false,
+            exists_on_disk: true,
+        };
+        assert!(unlisted_source_rule.excludes(candidate));
+    }
+}
+
+#[test]
+fn the_absent_source_rule_excludes_from_both_sides_and_never_lets_recovered_exceed_declared() {
+    let edge_detection = vbp::project_files()
+        .into_iter()
+        .find(|p| {
+            p.to_str().is_some_and(|s| s.contains("Edge-detection"))
+                && p.file_name().and_then(|n| n.to_str()) == Some("EdgeDetection.vbp")
+        })
+        .expect("the corpus vendors Edge-detection/EdgeDetection.vbp");
+    let project = support::vbp::Project::read(&edge_detection);
+    let declared = project.declared_objects();
+    assert_eq!(declared.len(), 4, "Edge-detection declares four objects");
+
+    let missing_source_count = declared.iter().filter(|o| !o.source_file.exists()).count();
+    assert_eq!(
+        missing_source_count, 1,
+        "expected exactly one of Edge-detection's declared objects to have no source file on \
+         disk"
+    );
+
+    let absent_source_rule = support::rules::RULES
+        .iter()
+        .find(|r| r.id == "absent-source")
+        .expect("the absent-source rule exists");
+
+    // "recovered" is simulated as the compiled binary's own object
+    // count: every object the .vbp declares, since the compiler built
+    // all four in, including the one whose source this repository no
+    // longer holds.
+    let recovered_total = declared.len();
+    let mut declared_after = 0usize;
+    let mut recovered_excluded = 0usize;
+    for object in &declared {
+        let candidate = support::rules::Candidate::SourceListing {
+            declared_in_project: true,
+            exists_on_disk: object.source_file.exists(),
+        };
+        let (excluded_declared, excluded_recovered) =
+            support::rules::apply_symmetrically(absent_source_rule, candidate);
+        if !excluded_declared {
+            declared_after += 1;
+        }
+        if excluded_recovered {
+            recovered_excluded += 1;
+        }
+    }
+    let recovered_after = recovered_total - recovered_excluded;
+
+    assert_eq!(declared_after, 3);
+    assert_eq!(
+        recovered_after, declared_after,
+        "the absent-source rule must exclude its match from both sides; a one-sided exclusion \
+         would let the recovered count ({recovered_after}) exceed the declared count \
+         ({declared_after})"
+    );
 }
