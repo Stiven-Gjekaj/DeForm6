@@ -460,3 +460,21 @@ Both hashes resolve with `git log --oneline <hash> -1`. Every file named in
 722c7e0 HEAD` is empty, so neither commit deleted a tracked file.
 
 ## Self-Check: PASSED
+
+## Resolved after the merge: `Journal::mode` is gone
+
+This summary flagged that the plan asked for `Journal::mode()` and, two lines
+later, said not to add a method that lets a caller read the mode and branch on
+it. Threat T-01-10 states the stronger form: `Journal` exposes no branchable
+mode accessor to a parse site.
+
+The orchestrator took the stronger reading and deleted the method and its test.
+
+The reason is the one `AGENTS.md` gives for the whole lint wall. A grep that
+says no file outside `journal.rs` names `Mode` is a rule somebody has to keep.
+A method that does not exist cannot be called. The accessor had exactly one
+caller in the whole workspace, which was its own test, so the deletion cost
+nothing.
+
+The gate stays green at 34 tests, one fewer than before, and that one is the
+test of the deleted method.
