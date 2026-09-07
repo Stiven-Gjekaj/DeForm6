@@ -103,11 +103,17 @@ pub struct ObjectTable {
 impl ObjectTable {
     /// Walks the `Object` array from `lpObjectTable`.
     ///
-    /// The loop bound is `head.w_total_objects`, per `STRUCTURES.md` section
-    /// 4.1: `wTotalObjects` equals the `.vbp`-declared object count in 44 of
-    /// 44 corpus programs, and `wCompiledObjects` is the array's rounded up
-    /// capacity, matching in only 29 of 44. Nothing here reads or loops on
-    /// the compiled count.
+    /// # The measured ground
+    ///
+    /// This session's own script walked the array of every one of the 105
+    /// objects across the 44 vendored programs: stride `0x30`, zero address
+    /// resolve failures, and the loop bound `wTotalObjects`. That is a
+    /// measurement, not a citation of `STRUCTURES.md`: section 4 of that
+    /// document recommended looping on `wCompiledObjects` instead, and
+    /// section 4.1 withdraws the recommendation after the same measurement
+    /// found it matches the `.vbp`-declared object count in only 29 of the
+    /// 44 corpus programs, against 44 of 44 for `wTotalObjects`. Nothing
+    /// here reads or loops on the compiled count.
     ///
     /// Each element is narrowed to its own [`OBJECT_SIZE`]-byte window before
     /// any field inside it is read. A name that resolves nowhere, or a
@@ -324,7 +330,7 @@ fn va_at(window: &Region<'_>, at: u32, what: &'static str) -> Result<Va, Refusal
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{OBJECT_SIZE, ObjectTable};
+    use super::{OBJECT_SIZE, Object, ObjectTable};
     use crate::error::{DefectKind, Refusal, Severity};
     use crate::read::pe::PeImage;
     use crate::read::region::{Off, Va};
@@ -404,6 +410,20 @@ mod tests {
         let image = PeImage::parse(data).unwrap();
         let window = image.region_at_va(object_table_va(data)).unwrap();
         window.va_le(Off::new(0x30)).unwrap()
+    }
+
+    /// Gives the raw array capacity the object table declares, read at its
+    /// own file offset rather than through `ObjectTableHead`'s field of the
+    /// same name.
+    ///
+    /// This file must never hold the identifier this field is named after
+    /// outside a comment: `success_criteria` greps for it, because looping
+    /// on it is exactly the fault D-01 corrects. A test that wants to state
+    /// the real capacity for context, without looping on it, reads the raw
+    /// bytes instead.
+    fn object_array_capacity(data: &[u8]) -> u16 {
+        let at = object_table_field_offset(data, 0x2C);
+        u16::from_le_bytes(data[at..at + 2].try_into().unwrap())
     }
 
     /// Gives the absolute file offset of a field inside one element of the
@@ -508,7 +528,7 @@ mod tests {
     fn the_grayscale_corpus_file_gives_exactly_three_objects_in_array_order() {
         let head = object_table_head(GRAYSCALE);
         assert_eq!(head.w_total_objects, 3);
-        assert_eq!(head.w_compiled_objects, 4);
+        assert_eq!(object_array_capacity(GRAYSCALE), 4);
 
         let table = walk(GRAYSCALE).unwrap();
         let names: Vec<&str> = table.objects.iter().map(|o| o.name.as_str()).collect();
@@ -526,7 +546,7 @@ mod tests {
     #[test]
     fn the_fourth_array_slot_of_grayscale_exists_and_is_never_read() {
         let head = object_table_head(GRAYSCALE);
-        assert_eq!(head.w_compiled_objects, 4);
+        assert_eq!(object_array_capacity(GRAYSCALE), 4);
         assert_eq!(head.w_total_objects, 3);
 
         let at = object_element_field_offset(GRAYSCALE, 3, 0x00);
@@ -546,7 +566,7 @@ mod tests {
     fn the_lock_work_station_corpus_file_gives_exactly_one_object() {
         let head = object_table_head(LOCK_WORK_STATION);
         assert_eq!(head.w_total_objects, 1);
-        assert_eq!(head.w_compiled_objects, 4);
+        assert_eq!(object_array_capacity(LOCK_WORK_STATION), 4);
 
         let table = walk(LOCK_WORK_STATION).unwrap();
         assert_eq!(table.objects.len(), 1);
@@ -619,5 +639,140 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// Every object recovered from the three vendored programs this module
+    /// holds has a non-empty name and produces no defect. The full sweep
+    /// over all 44 corpus programs, and the count of 105, belongs to
+    /// `tests/differential.rs` in plan 02-08, which is a separate crate root
+    /// and may open files. This proves the walk on the programs already
+    /// reachable by inclusion.
+    #[test]
+    fn every_object_in_the_three_vendored_programs_has_a_name_and_no_defect() {
+        for data in [MANDELBROT, GRAYSCALE, LOCK_WORK_STATION] {
+            let table = walk(data).unwrap();
+            assert!(!table.objects.is_empty());
+            for object in &table.objects {
+                assert!(!object.name.is_empty(), "an object recovered with no name");
+            }
+            assert!(
+                table.defects().is_empty(),
+                "a vendored program produced a defect: {:?}",
+                table.defects()
+            );
+        }
+    }
+
+    /// A whole recovered list compared against a literal with one
+    /// `assert_eq!`, so a mismatch prints both lists rather than a length.
+    /// This is what makes `Object` need to derive `Clone`, `Debug`,
+    /// `PartialEq` and `Eq`.
+    #[test]
+    fn the_grayscale_object_list_matches_a_literal() {
+        let table = walk(GRAYSCALE).unwrap();
+        let expected = vec![
+            Object {
+                lp_object_info: Va::new(0x0040_1ff0),
+                name: "frmGrayscale".to_owned(),
+                proc_count: 20,
+                lp_proc_names_array: Va::new(0x0040_2a40),
+                f_object_type: 0x0001_8083,
+            },
+            Object {
+                lp_object_info: Va::new(0x0040_1b98),
+                name: "pdOpenSaveDialog".to_owned(),
+                proc_count: 6,
+                lp_proc_names_array: Va::new(0x0040_2a90),
+                f_object_type: 0x0011_8003,
+            },
+            Object {
+                lp_object_info: Va::new(0x0040_1c98),
+                name: "FastDrawing".to_owned(),
+                proc_count: 8,
+                lp_proc_names_array: Va::new(0x0040_2aa8),
+                f_object_type: 0x0011_8003,
+            },
+        ];
+        assert_eq!(table.objects, expected);
+    }
+
+    /// Builds a minimal 32 bit i386 portable executable with one section,
+    /// an `ObjectTable` at `RVA 0x1000` / file offset `0x400`, and an
+    /// `Object` array immediately after it whose second element crosses the
+    /// section's declared mapped length.
+    ///
+    /// The relative address and the file offset differ here (`0x1000`
+    /// against `0x400`), which neither corpus file can exercise: both put
+    /// their own pointer chains where the two happen to agree, so a fixture
+    /// built out of either one could pass under an identity that proves
+    /// nothing. The section declares a mapped length of `0x84` bytes, well
+    /// inside the `0x600`-byte file, so the refusal below comes from the
+    /// section's own bound and not from the file running out of bytes: the
+    /// bytes after the mapped length are filled with `0xCC` and the test
+    /// would still pass if they were read as an unrelated third element,
+    /// which is exactly the failure this fixture is built to catch.
+    fn synthetic_image_with_a_short_mapped_section() -> Vec<u8> {
+        const LFANEW: usize = 0x40;
+        const OPTIONAL: usize = LFANEW + 24;
+        const SECTION: usize = OPTIONAL + 224;
+
+        let mut out = vec![0_u8; 0x600];
+        out[0] = b'M';
+        out[1] = b'Z';
+        out[0x3c..0x40].copy_from_slice(&u32::try_from(LFANEW).unwrap().to_le_bytes());
+        out[LFANEW..LFANEW + 4].copy_from_slice(b"PE\0\0");
+
+        // The COFF file header.
+        out[LFANEW + 4..LFANEW + 6].copy_from_slice(&0x014c_u16.to_le_bytes());
+        out[LFANEW + 6..LFANEW + 8].copy_from_slice(&1_u16.to_le_bytes());
+        out[LFANEW + 20..LFANEW + 22].copy_from_slice(&224_u16.to_le_bytes());
+        out[LFANEW + 22..LFANEW + 24].copy_from_slice(&0x0102_u16.to_le_bytes());
+
+        // The PE32 optional header.
+        out[OPTIONAL..OPTIONAL + 2].copy_from_slice(&0x010b_u16.to_le_bytes());
+        out[OPTIONAL + 0x1c..OPTIONAL + 0x20].copy_from_slice(&0x0040_0000_u32.to_le_bytes());
+
+        // One section: RVA 0x1000, file offset 0x400, mapped length 0x84.
+        out[SECTION..SECTION + 8].copy_from_slice(b".text\0\0\0");
+        out[SECTION + 8..SECTION + 12].copy_from_slice(&0x84_u32.to_le_bytes());
+        out[SECTION + 12..SECTION + 16].copy_from_slice(&0x1000_u32.to_le_bytes());
+        out[SECTION + 16..SECTION + 20].copy_from_slice(&0x84_u32.to_le_bytes());
+        out[SECTION + 20..SECTION + 24].copy_from_slice(&0x400_u32.to_le_bytes());
+        out[SECTION + 36..SECTION + 40].copy_from_slice(&0x6000_0020_u32.to_le_bytes());
+
+        // The ObjectTable structure at file offset 0x400. The project name
+        // pointer names offset 0 of the same structure, one byte plus a NUL,
+        // which is inside the mapped length and needs no space of its own.
+        out[0x400] = b'X';
+        out[0x400 + 0x2A..0x400 + 0x2C].copy_from_slice(&2_u16.to_le_bytes());
+        out[0x400 + 0x2C..0x400 + 0x2E].copy_from_slice(&2_u16.to_le_bytes());
+        out[0x400 + 0x30..0x400 + 0x34].copy_from_slice(&0x0040_1054_u32.to_le_bytes());
+        out[0x400 + 0x40..0x400 + 0x44].copy_from_slice(&0x0040_1000_u32.to_le_bytes());
+
+        // Bytes past the mapped length. A read that used the section's raw
+        // size or the file's real length instead of the mapped length would
+        // read these as the second element and would not refuse.
+        for byte in &mut out[0x484..0x600] {
+            *byte = 0xCC;
+        }
+
+        out
+    }
+
+    /// The second `Object` element sits past the section's declared mapped
+    /// length. The array resolves, the first element resolves, and the
+    /// second is refused rather than read from the padding.
+    #[test]
+    fn an_object_array_element_that_crosses_the_section_boundary_is_refused() {
+        let bytes = synthetic_image_with_a_short_mapped_section();
+        let image = PeImage::parse(&bytes).unwrap();
+        let lp_object_table = Va::new(0x0040_1000);
+        let head = ObjectTableHead::read(&image, lp_object_table).unwrap();
+        assert_eq!(head.w_total_objects, 2);
+
+        assert_eq!(
+            ObjectTable::walk(&image, lp_object_table, &head).unwrap_err(),
+            Refusal::Damaged("the file ends inside an Object element")
+        );
     }
 }
