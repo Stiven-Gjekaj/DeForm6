@@ -1,0 +1,10 @@
+# Rust build output.
+/target/
+
+# The robustness corpus. Its bytes are fetched at run time from a manifest of
+# pinned hashes, because those programs carry no licence that permits
+# redistribution. The manifest is committed. The files are not.
+/corpus/fetched/
+
+# macOS.
+.DS_Store
