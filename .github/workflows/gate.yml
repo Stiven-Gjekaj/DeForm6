@@ -1,0 +1,68 @@
+# The gate.
+#
+# AGENTS.md gives three commands and says to run every one of them, not a
+# selection. They run here as three steps, so a reader of a red run sees which
+# of the three failed without opening the log.
+#
+# `cargo test --workspace` is the build check. Never put `cargo build` here.
+# `build` does not compile a `#[cfg(test)]` module, so a broken test helper
+# passes `build` and fails later under clippy.
+name: gate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  gate:
+    name: fmt, clippy and test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      # `rust-toolchain.toml` names the channel and the two components. The
+      # version is not repeated here, because two pins drift apart.
+      - name: Install the toolchain that rust-toolchain.toml names
+        run: rustup show
+
+      - name: Report the versions
+        run: |
+          rustc --version
+          cargo --version
+          cargo fmt --version
+          cargo clippy --version
+
+      - name: Cache the cargo registry and the target directory
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: cargo fmt
+        run: cargo fmt --all --check
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace
+
+      # The wall is proved on every run, and not only on the day it was
+      # written. This step comes last, because the script writes a probe into
+      # the source tree and then removes it. The script needs `jq`, which the
+      # ubuntu runner image already holds.
+      - name: Prove the lint wall
+        run: sh scripts/prove-lint-wall.sh
