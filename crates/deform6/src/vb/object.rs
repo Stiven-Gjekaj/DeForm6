@@ -342,6 +342,22 @@ mod tests {
         "/../../corpus/vb6-code/Mandelbrot/Mandelbrot.exe"
     ));
 
+    /// The program whose object count and object capacity differ: one form
+    /// and two classes declared, and a capacity of 4. The fourth array slot
+    /// holds a null pointer that the walk must never reach.
+    const GRAYSCALE: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/vb6-code/Grayscale-effect/Grayscale.exe"
+    ));
+
+    /// The program whose capacity is 4 and whose count is 1. The three slots
+    /// past the count resolve to nothing, and the walk must never reach them
+    /// either.
+    const LOCK_WORK_STATION: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/public-domain/LockWorkStation/LockWorkStation.exe"
+    ));
+
     /// Gives the address of `ProjectInfo` that the file itself holds.
     fn project_data_va(data: &[u8]) -> Va {
         let image = PeImage::parse(data).unwrap();
@@ -480,6 +496,101 @@ mod tests {
             ObjectTable::walk(&truncated, lp_object_table, &head).unwrap_err(),
             Refusal::Damaged("the file ends inside an Object element")
         );
+    }
+
+    /// `Grayscale.exe` declares one form and two classes, its array holds the
+    /// three names and then a null pointer, and its capacity is 4. A walk
+    /// that looped on the capacity would give four objects here. The
+    /// expectation is an exact ordered list, never a subset: a subset
+    /// assertion cannot see an over-count, which is the whole reason this
+    /// phase exists.
+    #[test]
+    fn the_grayscale_corpus_file_gives_exactly_three_objects_in_array_order() {
+        let head = object_table_head(GRAYSCALE);
+        assert_eq!(head.w_total_objects, 3);
+        assert_eq!(head.w_compiled_objects, 4);
+
+        let table = walk(GRAYSCALE).unwrap();
+        let names: Vec<&str> = table.objects.iter().map(|o| o.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["frmGrayscale", "pdOpenSaveDialog", "FastDrawing"]
+        );
+        assert!(table.defects().is_empty());
+    }
+
+    /// The object table declares room for four objects. The fourth slot is
+    /// real, not a fiction of the capacity field: it holds a null
+    /// `lpObjectInfo` in the file. The walk never reaches it, because the
+    /// loop bound is the count and not the capacity.
+    #[test]
+    fn the_fourth_array_slot_of_grayscale_exists_and_is_never_read() {
+        let head = object_table_head(GRAYSCALE);
+        assert_eq!(head.w_compiled_objects, 4);
+        assert_eq!(head.w_total_objects, 3);
+
+        let at = object_element_field_offset(GRAYSCALE, 3, 0x00);
+        let raw = u32::from_le_bytes(GRAYSCALE[at..at + 4].try_into().unwrap());
+        assert_eq!(
+            raw, 0,
+            "the fourth slot must hold a null lpObjectInfo, or this test proves nothing"
+        );
+
+        assert_eq!(walk(GRAYSCALE).unwrap().objects.len(), 3);
+    }
+
+    /// `LockWorkStation.exe` declares one form. Its capacity is 4, and the
+    /// three slots past the count hold pointers that resolve to nothing. A
+    /// walk that looped on the capacity would give four objects here too.
+    #[test]
+    fn the_lock_work_station_corpus_file_gives_exactly_one_object() {
+        let head = object_table_head(LOCK_WORK_STATION);
+        assert_eq!(head.w_total_objects, 1);
+        assert_eq!(head.w_compiled_objects, 4);
+
+        let table = walk(LOCK_WORK_STATION).unwrap();
+        assert_eq!(table.objects.len(), 1);
+        assert_eq!(table.objects[0].name, "FrmLockWorkStation");
+        assert!(table.defects().is_empty());
+    }
+
+    /// A name pointer that resolves nowhere is one unreadable object, not a
+    /// broken file. The walk still returns every object, the one whose name
+    /// could not be read keeps its other fields with an empty name, and the
+    /// defect names the byte offset and the address so a person can open the
+    /// file at that offset.
+    #[test]
+    fn a_grayscale_name_pointer_in_no_section_loses_one_name_and_no_object() {
+        let image = PeImage::parse(GRAYSCALE).unwrap();
+        let nowhere = image.image_base() + 0x00F0_0000;
+        assert!(image.region_at_va(Va::new(nowhere)).is_none());
+
+        let at = object_element_field_offset(GRAYSCALE, 1, 0x18);
+        let bytes = with_u32_at(GRAYSCALE, at, nowhere);
+
+        let table = walk(&bytes).unwrap();
+        assert_eq!(table.objects.len(), 3);
+        assert_eq!(table.objects[0].name, "frmGrayscale");
+        assert_eq!(table.objects[1].name, "");
+        assert_eq!(table.objects[2].name, "FastDrawing");
+
+        assert_eq!(table.defects().len(), 1);
+        let defect = &table.defects()[0];
+        assert_eq!(defect.kind.severity(), Severity::Recoverable);
+        assert!(matches!(
+            defect.kind,
+            DefectKind::UnreadablePointer { va, .. } if va == nowhere
+        ));
+        assert_eq!(defect.site.offset, u32::try_from(at).unwrap());
+    }
+
+    /// `fObjectType` is carried raw. Plan 02-02 classifies it; this file does
+    /// not, and it does not guess a type code.
+    #[test]
+    fn the_grayscale_object_kinds_are_carried_raw() {
+        let table = walk(GRAYSCALE).unwrap();
+        let kinds: Vec<u32> = table.objects.iter().map(|o| o.f_object_type).collect();
+        assert_eq!(kinds, vec![0x0001_8083, 0x0011_8003, 0x0011_8003]);
     }
 
     /// A `ProcCount` larger than the file can hold is bounded and clamped
