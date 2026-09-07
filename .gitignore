@@ -8,3 +8,6 @@
 
 # macOS.
 .DS_Store
+
+# Research tooling scratch.
+.planning/research/.cache/
