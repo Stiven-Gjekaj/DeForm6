@@ -88,7 +88,7 @@ non-zero exit code.
     field is never exercised, because every vendored `.vbp` carries
     `CompilationType=0`. The branch exists and is untested by construction.
 
-**Plans**: 4/8 plans executed
+**Plans**: 7/8 plans executed
 
 Plans:
 
@@ -98,7 +98,7 @@ Plans:
 - [x] 01-04-PLAN.md - `read/pe.rs` - the PE envelope over `object` 0.40.0, the section table, the one address-to-offset predicate, the import directory
 - [x] 01-05-PLAN.md - `vb/header.rs` - the entry stub, the `VB5!` signature, the `VBHeader` fields, and the closed 0x58 / 0x5C gap
 - [x] 01-06-PLAN.md - Runtime discrimination and the three refusals - `MSVBVM50.DLL`, `VB40032.DLL`, and no VB runtime at all
-- [ ] 01-07-PLAN.md - `vb/project.rs` - `ProjectInfo`, the project name, the object count, the compilation mode from `lpNativeCode`, and `inspect`
+- [x] 01-07-PLAN.md - `vb/project.rs` - `ProjectInfo`, the project name, the object count, the compilation mode from `lpNativeCode`, and `inspect`
 - [ ] 01-08-PLAN.md - The `deform6-cli` shell, the `inspect` subcommand, exit codes, `refusal.rs` and the 44-file corpus sweep
 
 **Waves**: [01-01] then [01-02, 01-03] then [01-04] then [01-05, 01-06] then [01-07] then [01-08]
@@ -540,7 +540,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. It reads the file | 4/8 | In Progress|  |
+| 1. It reads the file | 7/8 | In Progress|  |
 | 2. The object graph | 0/10 | Not started | - |
 | 3. Forms | 0/10 | Not started | - |
 | 4. It writes a project | 0/9 | Not started | - |

@@ -3,32 +3,37 @@ gsd_state_version: "1.0"
 current_phase: 1
 current_phase_name: It reads the file
 status: planning
-stopped_at: Completed 01-04-PLAN.md. Wave 3 done. Wave 4 is 01-05 and 01-06.
-last_updated: "2026-09-07T15:07:13.298Z"
+stopped_at: Completed 01-07-PLAN.md
+last_updated: "2026-09-07T15:53:37.478Z"
 last_activity: 2026-09-07
-last_activity_desc: "Plan 01-04 executed. PeImage reads a real binary and resolves an address to a file offset through one predicate. 58 tests pass. Six deliberate breakages found four tests in the plan that the corpus alone could not make fail."
-state_head: 5ba4e33538193af1fb1c627c44fefd5ebf8c7d9d
+last_activity_desc: "Plan 01-07 executed. inspect takes a byte slice and returns a Report, and it reads all 44 corpus executables. 115 tests pass. A measurement over the 44 project files showed that the object count is wTotalObjects and not wCompiledObjects, which the plan, CONTEXT.md and STRUCTURES.md all named."
+state_head: 5fc9144c3c66a7b075e433b25047e08280fff8e5
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 8
-  completed_plans: 4
-  percent: 0
+  completed_plans: 7
+  percent: 88
 ---
 
 ## Continue
 
-**Resumed:** 2026-09-07. Waves 1, 2 and 3 are complete. Wave 4, plans 01-05 and
-01-06, is next.
+**Resumed:** 2026-09-07. Waves 1 to 5 are complete. Wave 6, plan 01-08, is
+next, and it is the last plan of the phase.
 
-The workspace, the lint wall, the CI gate, the `Region` bounded window, the
-`Off`/`Rva`/`Va` newtypes, the error model, the journal and the PE envelope all
-exist. 58 tests pass. Two compile-fail proof scripts run in the gate and
-between them refuse eleven bad shapes.
+The whole library exists. `deform6::inspect` takes a byte slice and returns a
+`Report`, and it reads all 44 corpus executables: every one is native, every
+one names `MSVBVM60.DLL`, and every object count equals the number its `.vbp`
+declares. 115 tests pass. Two compile-fail proof scripts run in the gate and
+between them refuse eleven bad shapes. `crates/deform6-cli/src/main.rs` is
+still `fn main() {}`.
 
-`PeImage` reads a real binary. It resolves the entry point of a corpus file to
-a file offset through one address map, and `read/pe.rs` is the only file in the
-crate that names the `object` crate.
+**Plan 01-08 must not print the object count from `wCompiledObjects`.** Plan
+01-07 measured both count fields against all 44 project files:
+`wTotalObjects` is the declared object count in 44 of 44 and
+`wCompiledObjects` in 29 of 44, because `wCompiledObjects` is the capacity of
+the object array. `Report.object_count` already holds the right number. D-05
+in 01-08-PLAN.md still names the wrong field. See `STRUCTURES.md` section 4.1.
 
 **To continue:**
 
@@ -71,14 +76,16 @@ inferred.
 ## Current Position
 
 Phase: 1 of 6 (It reads the file)
-Plan: 6 of 8 in current phase
-Status: Executing. Waves 1 to 4 complete, wave 5 next.
-Open defect: `.planning/WINDOWS.md` records that the section overlap rule has
-no test, because no corpus file has overlapping sections. It can be given a
-synthetic test the way `has_clr_header` was.
-Last activity: 2026-09-07 - Plan 01-04 executed. PeImage reads a real binary and resolves an address to a file offset through one predicate. 58 tests pass. Six deliberate breakages found four tests in the plan that the corpus alone could not make fail.
+Plan: 7 of 8 in current phase
+Status: Executing. Waves 1 to 5 complete, wave 6 next, which is plan 01-08.
+Open defects: `.planning/WINDOWS.md` holds three, all of them limits that are
+stated rather than hidden. The section overlap rule has no test because no
+corpus file overlaps. The P-code branch has no real sample because every
+vendored project is native. `inspect` drops the defects it collects, because
+`Report` derives `PartialEq` and `Defect` does not.
+Last activity: 2026-09-07 - Plan 01-07 executed. `inspect` takes a byte slice and returns a `Report`, and it reads all 44 corpus executables. 115 tests pass. Seven deliberate breakages, and a measurement over the 44 project files showed the plan named the wrong object count field.
 
-Progress: [███████░░░] 75%
+Progress: [█████████░] 88% of the plans in phase 1, which is 7 of 8
 
 ## Performance Metrics
 
@@ -105,6 +112,7 @@ Progress: [███████░░░] 75%
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 01 P04 | 1 session | 3 tasks | 1 files |
+| Phase 01 P07 | 1 session | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -124,6 +132,9 @@ Recent decisions affecting current work:
   the result into the released documentation.
 - [Phase 1]: 01-04: DeForm6 owns one address to file offset predicate. mapped_len is min(virtual_size, size_of_raw_data) with a strict less-than test, and object's contains_rva and pe_file_range_at are never called.
 - [Phase 1]: 01-04: A case the corpus cannot exercise gets a fixture the test builds in memory. has_clr_header, the two import descriptors and the address that differs from its file offset all come from one.
+- [Phase 1]: The object count comes from wTotalObjects at 0x2A, not wCompiledObjects at 0x2C. Measured against the .vbp of all 44 corpus programs: 44 of 44 against 29 of 44. wCompiledObjects is the capacity of the object array.
+- [Phase 1]: A count disagreement is reported only when the capacity is below the count. Reporting inequality would attach a defect to 15 of the 44 corpus files.
+- [Phase 1]: Report carries runtime_dll and signature read from the file, because a one variant Runtime enum makes an equality assertion a tautology.
 
 ### Pending Todos
 
@@ -139,8 +150,8 @@ None yet.
 - Two derived data tables have no public source and must be built from a type
   library dump in Phase 3: the opcode-to-property table per control type, and
   the event name table per control type.
-- STRUCTURES section 11 holds 18 open gaps. Each one is named as a risk on the
-  phase where it lands.
+- STRUCTURES section 11 holds 19 gaps, of which 2 are closed. Each open one is
+  named as a risk on the phase where it lands.
 
 ## Deferred Items
 
@@ -152,8 +163,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-07T15:07:13.288Z
-Stopped at: Completed 01-04-PLAN.md. Wave 3 done. Wave 4 is 01-05 and 01-06.
+Last session: 2026-09-07T15:53:37.469Z
+Stopped at: Completed 01-07-PLAN.md
 the plan checker, and repaired. The checker returned PASS WITH CONCERNS with
 two blockers and four warnings. All were applied, none were disputed, and the
 planner found one further defect the checker missed: the zero filled tail test

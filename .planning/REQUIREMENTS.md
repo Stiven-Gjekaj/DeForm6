@@ -20,7 +20,7 @@ Version 1 recovers metadata. It does not recover statements.
       not by the signature, because both runtimes write `VB5!`.
 - [ ] **DET-04**: The tool refuses a VB5 file by name, and refuses a file that
       is not Visual Basic at all, each with one clear sentence.
-- [ ] **DET-05**: The tool reports whether the file is native or P-code from
+- [x] **DET-05**: The tool reports whether the file is native or P-code from
       `ProjectInfo.lpNativeCode`.
 - [ ] **DET-06**: `deform6 inspect <exe>` prints the header, the project name,
       and the compilation mode, and writes nothing to disk.
