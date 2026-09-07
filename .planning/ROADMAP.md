@@ -192,7 +192,7 @@ VER-02, VER-03, VER-04, VER-05
 Plans:
 
 - [x] 02-01-PLAN.md - `ObjectTable` and the `Object` array - every object recovered by name
-- [ ] 02-02-PLAN.md - `fObjectType` classification - form, module, class, and `Unknown` with a fallback
+- [x] 02-02-PLAN.md - `fObjectType` classification - form, module, class, and `Unknown` with a fallback
 - [x] 02-03-PLAN.md - `ObjectInfo` and `PrivateObj` - public procedure names, and a null name reported as private
 - [ ] 02-04-PLAN.md - `FuncTypDesc` and the type code table - prototypes with argument names, types and modifiers
 - [ ] 02-05-PLAN.md - `PubVarDesc` and `EventDesc` - the two counts explained and the event descriptor addresses
