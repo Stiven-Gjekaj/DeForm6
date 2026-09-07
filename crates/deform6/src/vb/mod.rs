@@ -4,8 +4,17 @@
 //! returns a value. It opens no file and it writes no file, which is what
 //! makes the Phase 5 fuzz target the real public API rather than an internal
 //! one, and which leaves the file system to the command line crate.
+//!
+//! `classify`, `functyp`, `object` and `privateobj` are declared together, in
+//! one commit, for the reason `lib.rs` gives for its own module list: plans
+//! 02-02 through 02-05 each edit only the one new file this phase gives them,
+//! so this file is written once and never becomes a merge point.
 
+pub mod classify;
+pub mod functyp;
 pub mod header;
+pub mod object;
+pub mod privateobj;
 pub mod project;
 pub mod runtime;
 

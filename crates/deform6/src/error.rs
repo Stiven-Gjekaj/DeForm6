@@ -118,6 +118,23 @@ pub enum DefectKind {
         /// The name of the other field, such as `"wTotalObjects"`.
         other_field: &'static str,
     },
+
+    /// A pointer inside one item resolves to nothing.
+    ///
+    /// This is not the one spine pointer that reaches the item, which
+    /// [`DefectKind::UnmappedAddress`] already covers as fatal. This is a
+    /// leaf pointer inside an item that has already been reached: the item
+    /// keeps every other field, and the value this pointer would have named
+    /// is empty rather than invented.
+    #[error(
+        "address {va:#x} at offset {offset:#x} resolves to nothing, and the item keeps its other fields"
+    )]
+    UnreadablePointer {
+        /// The absolute file offset of the pointer that held the address.
+        offset: u32,
+        /// The address that maps nowhere.
+        va: u32,
+    },
 }
 
 /// How bad a defect is.
@@ -161,6 +178,10 @@ impl DefectKind {
             // Two counts disagree. The parser takes the smaller one and
             // reports the disagreement.
             Self::CountMismatch { .. } => Severity::Recoverable,
+            // A leaf pointer inside an item, not the one spine pointer that
+            // reaches the item. The item that holds it keeps its other
+            // fields, so the walk that found it continues.
+            Self::UnreadablePointer { .. } => Severity::Recoverable,
         }
     }
 }
@@ -343,6 +364,13 @@ mod tests {
                 },
                 0x88,
             ),
+            (
+                DefectKind::UnreadablePointer {
+                    offset: 0x99,
+                    va: 0x0040_2000,
+                },
+                0x99,
+            ),
         ]
     }
 
@@ -413,6 +441,7 @@ mod tests {
                 expected: 0,
                 other_field: "wTotalObjects",
             },
+            DefectKind::UnreadablePointer { offset: 0, va: 0 },
         ];
         for kind in recoverable {
             assert_eq!(
