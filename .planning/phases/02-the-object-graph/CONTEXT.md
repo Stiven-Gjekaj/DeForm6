@@ -176,3 +176,51 @@ with zero `Public` declarations reports 4. This is the same shape as
 `wCompiledObjects`, which turned out to be a rounded capacity rather than a
 count. Do not build the `PubVarDesc` stride on the assumption that this field
 means what its name says.
+
+## Corrections after planning, 2026-09-07
+
+The planner measured the corpus rather than trusting these documents, and found
+eleven disagreements. Four change what this phase must do.
+
+### `Mandelbrot` is 0 of 9, not 9 of 9
+
+The worked example above was wrong, and it was wrong in the most misleading
+direction: the program chosen to illustrate full recovery is one that recovers
+nothing. `frmFractal` reports `ProcCount` 9 with **all nine name entries
+null**, because every procedure in `Mandelbrot.frm` is `Private`.
+
+The corrected worked examples are `Mandelbrot` 0 of 9, `Grayscale-effect` 12 of
+34, `LockWorkStation` 0 of 1.
+
+### `ExeName32` does not uniquely identify a project
+
+`SK-MCI-Sample__VB6/MCI.VBP` and `SK-Gradient-Sample__VB6/Project1.vbp` both
+declare `ExeName32="Project1.exe"`, and both ship a `demo/Project1.exe`. A
+corpus-wide index keyed on that value resolves one of them to the wrong
+project. Reproduced: 104 objects and 7 modules instead of 105 and 8.
+
+**VER-03's rule is: scope the search to the corpus entry directory first, then
+apply `ExeName32`.** With that rule all 44 resolve to exactly one candidate,
+and 8 of the 44 genuinely need the key to choose between siblings.
+
+### There are 45 project files and 44 executables
+
+`Brightness-effect/Part 3 - DIBs/Brightness3.vbp` declares `dibBrightness.exe`,
+which is not vendored. A harness that iterates project files tests 45 and fails
+on one. Iterate executables, not project files.
+
+### `optionalVals` records are not a fixed six bytes
+
+Measured over all 61 records: a `u32` length, then a virtual address equal to
+`optionalVals + 8`, then an OLE variant tag with its value padded to two bytes.
+The length takes 4, 6, 10, 12 and 60. The six byte shape holds only for
+`VT_I4`. With the full grammar the walk closes 61 of 61 over 89 value records
+and six tags.
+
+### Two things this phase cannot deliver, and must say so
+
+- **No corpus program carries an event descriptor.** `cntEvents` is 0 in 97 of
+  97 objects that have a `PrivateObj`. Plan 02-05 ships the address walk with
+  synthetic fixtures and a test that fires the day a real sample arrives.
+- **`ParamArray` occurs nowhere in the corpus source**, and its encoding is
+  unknown. OBJ-04 names it. It is a reported gap, not a guessed encoding.

@@ -145,8 +145,15 @@ VER-02, VER-03, VER-04, VER-05
      types, and the ByRef, Array, Optional and ParamArray modifiers. It prints
      a private procedure as `Private` with no name, because the name array
      holds a null there.
-  5. `inspect` prints one `Declare` statement per entry in the external import
-     table, with the library name, the alias and the argument list.
+  5. `inspect` prints one line per entry in the external import table, giving
+     the library name and the export name that the file holds.
+
+     It does **not** print an alias or an argument list, and it says so with a
+     marker rather than omitting them silently. `STRUCTURES.md` §7.2 records at
+     confidence [C] that neither survives compilation, so the earlier wording
+     of this criterion promised something no VB6 binary contains. A reader must
+     be able to tell "this file does not hold it" from "DeForm6 did not recover
+     it".
 
 **Named risks**:
 
