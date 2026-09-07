@@ -33,7 +33,7 @@ Version 1 recovers metadata. It does not recover statements.
 - [ ] **OBJ-03**: The tool recovers public procedure names for every object.
 - [ ] **OBJ-04**: The tool recovers procedure signatures with argument names
       and types, and the ByRef, Array, Optional and ParamArray modifiers.
-- [ ] **OBJ-05**: The tool recovers the `Declare` statements for external API
+- [x] **OBJ-05**: The tool recovers the `Declare` statements for external API
       calls from the external table.
 - [ ] **OBJ-06**: The tool reports a private procedure as private rather than
       inventing a name for it.
