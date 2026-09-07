@@ -9,6 +9,29 @@ progress:
   percent: 0
 ---
 
+## Continue
+
+**Resumed:** 2026-09-07. Plan 01-01 is complete and merged. Wave 2 is next.
+
+**To continue:**
+
+    /gsd-execute-phase 1
+
+**The wave order is fixed and the tooling does not know it.**
+`gsd-tools query init.execute-phase` reports every plan as runnable at once.
+That is wrong: 01-02 cannot write `read/region.rs` before 01-01 creates the
+workspace it lives in. Use the order from ROADMAP.md:
+
+    [01-01 done]  [01-02, 01-03]  [01-04]  [01-05, 01-06]  [01-07]  [01-08]
+
+**Executors run in a git worktree, not the primary checkout.** Verify what
+lands on `main` after each wave rather than assuming the merge did the right
+thing.
+
+**Watch plan 01-08.** The plan checker estimated it at 70k tokens with three
+tasks and four new test files, and named it the plan most likely to need
+splitting during execution.
+
 # Project State
 
 ## Project Reference
@@ -24,11 +47,11 @@ inferred.
 ## Current Position
 
 Phase: 1 of 6 (It reads the file)
-Plan: 0 of 8 in current phase
-Status: Planned and checked. Ready to execute.
-Last activity: 2026-09-07 - Roadmap created from PROJECT.md, REQUIREMENTS.md and the five research documents.
+Plan: 1 of 8 in current phase
+Status: Executing. Wave 1 complete, wave 2 next.
+Last activity: 2026-09-07 - Plan 01-01 executed and merged. The workspace, the pinned toolchain, the lint wall and the CI gate exist. The wall was proved rather than asserted: all eight forbidden shapes are rejected, nine errors over eight lines.
 
-Progress: [..........] 0%
+Progress: [#.........] 13%
 
 ## Performance Metrics
 

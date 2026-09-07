@@ -11,3 +11,6 @@
 
 # Research tooling scratch.
 .planning/research/.cache/
+
+# Agent worktrees. Transient, and each one is a checkout of this repo.
+.claude/worktrees/
