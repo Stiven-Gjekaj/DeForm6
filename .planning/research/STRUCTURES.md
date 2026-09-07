@@ -1599,3 +1599,59 @@ that defines it, not from what happens to sit next to it.
 One more detail the harness needs: a directory can hold several `.vbp` files
 for one program. Select the project whose `ExeName32` matches the executable
 under test. Two corpus projects require this.
+
+---
+
+## 13. Gap 1 closed: `VBHeader` 0x58 and 0x5C, 2026-09-07
+
+Section 2.3 recorded a dispute. Alex Ionescu, the IDA script and `python-vb`
+give one reading of these two fields. Semi VB Decompiler and the Sekoia parser
+give another. AndreaGeddon's dump does not settle it.
+
+**The corpus settles it. The fields are the executable name and the project
+title, as SVBD and SEK say. AI, IDC and PVB are wrong.**
+
+| Field | Meaning | Agreement |
+|---|---|---|
+| `0x58` | The executable name with the extension removed | 44 of 44 |
+| `0x5C` | The project title | 44 of 44 |
+| `0x60` | (control) | 44 of 44 |
+| `0x64` | (control) | 44 of 44 |
+
+24 of the 44 corpus programs carry an executable name that differs from the
+project title, so those 24 discriminate between the two candidate readings
+rather than merely being consistent with both.
+
+### These four fields are offsets from the VB header, not virtual addresses
+
+This is the detail that makes the field look wrong when it is read the obvious
+way. `lpProjectData` at `0x30` is a **virtual address**. The fields at `0x58`,
+`0x5C`, `0x60` and `0x64` are **byte offsets from the start of the VBHeader**.
+
+A first attempt at this check treated `0x58` as a virtual address, resolved it
+through the section table, and read the string `"MZ"` out of the DOS stub,
+because the stored value happened to be small enough to look like an image
+base offset. The value is `0x78`, and the VBHeader in that file sits at file
+offset `0x1760`. `0x1760 + 0x78` is `0x17D8`, which is exactly where the name
+`Mandelbrot` is stored.
+
+**One structure therefore mixes two kinds of pointer.** This is the reason the
+`Off`, `Rva` and `Va` newtypes exist and do not convert into one another
+implicitly. A parser that has only `u32` will make this mistake and will report
+a real string from the wrong place with confidence.
+
+### A defect this check found in the checking harness
+
+The first run reported 42 of 44 for `0x5C`. Both failures were faults in the
+`.vbp` reader used to build the expectation, not in the binary.
+
+1. One project has no `Title=` key at all. The compiler wrote the project name
+   into the field instead. An absent key is not an empty title.
+2. `corpus/vb6-code/Sepia-effect` has the title `Sepia / "Antique" Image
+   Filter`. **A `.vbp` value can contain a double quote.** A regular expression
+   of the form `"([^"]*)"` stops at the inner quote and silently returns a
+   truncated value.
+
+Both matter beyond this check. The Phase 4 `.vbp` writer must be able to write
+a value containing a double quote, and the differential harness must be able to
+read one back.
