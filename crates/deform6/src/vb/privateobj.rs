@@ -561,7 +561,10 @@ fn va_at(window: &Region<'_>, at: u32, what: &'static str) -> Result<Va, Refusal
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{OBJECT_INFO_SIZE, ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureList};
+    use super::{
+        OBJECT_INFO_SIZE, ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureCounts,
+        ProcedureList,
+    };
     use crate::error::Refusal;
     use crate::read::pe::PeImage;
     use crate::read::region::{Off, Va};
@@ -879,5 +882,68 @@ mod tests {
         let list = ProcedureList::read(&image, &object);
         assert_eq!(list.procs, ProcNames::NoNameArray { proc_count: 7 });
         assert!(list.defects().is_empty());
+    }
+
+    /// Sums `ProcedureCounts` over every object of one program.
+    fn program_totals(data: &[u8]) -> (u32, u32, u32) {
+        let image = PeImage::parse(data).unwrap();
+        let mut declared = 0_u32;
+        let mut recovered = 0_u32;
+        let mut capped = 0_u32;
+        for object in objects(data) {
+            let list = ProcedureList::read(&image, &object);
+            let counts = ProcedureCounts::of(&list.procs);
+            declared += counts.declared;
+            recovered += counts.recovered;
+            if counts.no_name_array {
+                capped += counts.declared;
+            }
+        }
+        (declared, recovered, capped)
+    }
+
+    /// The measured recovery, summed over every object of each program: this
+    /// planner's own script over the vendored corpus, not a document.
+    /// `Grayscale.exe` recovers 12 of 34 declared slots. `Mandelbrot.exe`
+    /// recovers 0 of 9: every one of its nine slots is private, not merely
+    /// null (see the correction above). `Map Editor.exe` recovers 0 of 36,
+    /// and 8 of those 36 sit in the two standard modules that carry no name
+    /// array at all: the cap is a number this test states, not a shortfall
+    /// it silently absorbs.
+    #[test]
+    fn the_three_vendored_programs_recover_the_measured_number_of_names() {
+        assert_eq!(program_totals(GRAYSCALE), (34, 12, 0));
+        assert_eq!(program_totals(MANDELBROT), (9, 0, 0));
+        assert_eq!(program_totals(MAP_EDITOR), (36, 0, 8));
+    }
+
+    /// `ProcedureCounts::of` gives the three numbers a report needs for one
+    /// object: slots declared, names recovered, and whether the object
+    /// carries a name array at all.
+    #[test]
+    fn procedure_counts_of_gives_the_three_numbers_for_one_object() {
+        let slots = ProcedureCounts::of(&ProcNames::Slots(vec![
+            Procedure::Private,
+            Procedure::Public("GetImageWidth".to_owned()),
+            Procedure::Public("GetImageHeight".to_owned()),
+        ]));
+        assert_eq!(
+            slots,
+            ProcedureCounts {
+                declared: 3,
+                recovered: 2,
+                no_name_array: false,
+            }
+        );
+
+        let absent = ProcedureCounts::of(&ProcNames::NoNameArray { proc_count: 7 });
+        assert_eq!(
+            absent,
+            ProcedureCounts {
+                declared: 7,
+                recovered: 0,
+                no_name_array: true,
+            }
+        );
     }
 }
