@@ -1351,3 +1351,34 @@ from disk and are the strongest evidence here.
 
 ---
 *Researched 2026-09-07.*
+
+---
+
+## A `.vbp` value can contain a double quote, 2026-09-07
+
+`corpus/vb6-code/Sepia-effect` carries this line:
+
+    Title="Sepia / "Antique" Image Filter"
+
+The value holds two unescaped double quotes. A reader written as
+`"([^"]*)"` stops at the first inner quote and returns `Sepia / ` without
+failing, which is the worst shape of defect: a wrong answer that looks like a
+right one.
+
+This was found because such a reader silently truncated the value while
+checking something else, and the check then reported a mismatch against the
+binary that did not exist.
+
+Two consequences.
+
+- The Phase 4 `.vbp` writer must reproduce a value containing a double quote in
+  the form the IDE accepts, which the corpus shows is unescaped between an
+  opening and a closing quote at the ends of the value.
+- The differential harness must read the value the same way. Take everything
+  between the first quote and the **last** quote on the line, not between the
+  first and the next.
+
+A second reading trap sits next to it: one corpus project has no `Title=` key
+at all, and the compiler wrote the project name into the binary field instead.
+**An absent key is not an empty value.** A harness that treats a missing key as
+`""` reports a mismatch against a binary that is correct.

@@ -1430,3 +1430,43 @@ Documents:
   <https://github.com/mandiant/capa/blob/master/capa/render/result_document.py>
 - capa Explorer Web, the viewer that capa's nested JSON needs:
   <https://github.com/mandiant/capa/blob/master/web/explorer/README.md>
+
+---
+
+## Corrections found while building phase 1, 2026-09-07
+
+Phase 1 research built the workspace this document specifies and ran it. Three
+statements above did not survive contact.
+
+1. **The `exclude` line for the fuzz crate is not load-bearing on cargo
+   1.97.1.** This document says the root manifest must exclude
+   `crates/deform6/fuzz` or a workspace build tries to compile it. Tested in
+   all four combinations of present and absent: it makes no difference on this
+   toolchain. **Keep the line**, because it states the intent and costs
+   nothing, but drop the claim that it is required.
+
+2. **The `ExeName32` fallback rule reads the wrong field.** Section 4 describes
+   deriving the executable name from a field that does not hold it. The field
+   that holds it is `VBHeader + 0x58`, which holds the name with the extension
+   already removed. No corpus value ends in `.exe`. See `STRUCTURES.md` §13.
+
+3. **`PeFile32::parse` returns `Ok` on a corpus file truncated to one eighth of
+   its length.** A successful parse is not evidence that a file is intact. Any
+   bound check that relies on the parser having validated the file is unsound.
+   Every offset must still be checked against the real length of the byte
+   slice.
+
+Two further findings that this document did not cover and that the parser must
+settle for itself.
+
+4. **`object` gives two different answers for the same question.**
+   `contains_rva` and `pe_file_range_at` disagree for an address that falls in
+   a section's zero filled tail, where virtual size exceeds raw size. 7 of the
+   132 sections in the corpus have such a tail. **DeForm6 owns one predicate**
+   and does not call both.
+
+5. **The lint wall needs no relaxation in library or binary code.** The derive
+   output of `clap::Parser`, `serde::Serialize` and `thiserror::Error` all pass
+   it clean. Relaxation is needed only in `tests/` and `examples/`. Use
+   `#[allow]` there, never `#[expect]`, because `#[expect]` becomes a warning
+   itself once the lint stops firing and the deny wall then fails on it.
