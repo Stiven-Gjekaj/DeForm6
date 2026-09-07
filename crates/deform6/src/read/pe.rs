@@ -16,7 +16,7 @@ use object::LittleEndian as LE;
 use object::read::pe::{ImageNtHeaders as _, ImageOptionalHeader as _, PeFile32};
 
 use crate::error::{Defect, DefectKind, Refusal, Site};
-use crate::read::region::{Off, Rva};
+use crate::read::region::{Off, Region, Rva, Va};
 
 /// The number of bytes from the PE signature to the optional header.
 ///
@@ -117,6 +117,7 @@ impl SectionInfo {
 /// A parsed 32 bit i386 portable executable.
 #[derive(Debug)]
 pub struct PeImage<'a> {
+    data: &'a [u8],
     file: PeFile32<'a>,
     image_base: u32,
     entry_rva: Rva,
@@ -185,6 +186,7 @@ impl<'a> PeImage<'a> {
         let defects = overlap_defects(&sections, table_at);
 
         Ok(Self {
+            data,
             file,
             image_base,
             entry_rva,
@@ -219,6 +221,105 @@ impl<'a> PeImage<'a> {
     #[must_use]
     pub fn defects(&self) -> &[Defect] {
         &self.defects
+    }
+
+    /// Gives the section that holds `rva`, or nothing.
+    ///
+    /// # This is the one address to file offset predicate
+    ///
+    /// `section_for`, [`PeImage::rva_to_off`], [`PeImage::va_to_off`],
+    /// [`PeImage::region_at`] and [`PeImage::region_at_va`] all route through
+    /// this method, so they cannot disagree with one another.
+    ///
+    /// The `object` crate offers two helpers that answer this same question
+    /// and give opposite answers for one address. One compares the distance
+    /// against the virtual size of the section and says yes for an address in
+    /// the zero filled tail. The other compares the distance against the
+    /// mapped length and says no for the same address. A third helper is
+    /// built on the first one, so two calls in the same program can resolve
+    /// one address two ways. 7 of the 132 corpus sections have such a tail,
+    /// so the disagreement is reachable, not theoretical. DeForm6 owns one
+    /// predicate and calls neither helper.
+    ///
+    /// The distance is a `checked_sub`, so an address below the section
+    /// returns nothing rather than a wrapped distance. The comparison is
+    /// strictly less than the mapped length, so the first address above the
+    /// mapped bytes is in no section.
+    ///
+    /// The first section in section table order wins. First match is
+    /// deterministic. When two sections overlap, the Windows loader gives the
+    /// later one, so the two disagree, and [`PeImage::defects`] reports the
+    /// overlap that the parse found.
+    #[must_use]
+    pub fn section_for(&self, rva: Rva) -> Option<&SectionInfo> {
+        self.sections
+            .iter()
+            .find(|s| match rva.get().checked_sub(s.virtual_address.get()) {
+                Some(distance) => distance < s.mapped_len(),
+                None => false,
+            })
+    }
+
+    /// Converts a relative virtual address into a file offset.
+    ///
+    /// An address in no section resolves to nothing, and the caller turns
+    /// that into an `UnmappedAddress` defect. There is no fallback that
+    /// treats the address as a file offset. On an image whose file alignment
+    /// equals its section alignment the two often agree, so that fallback
+    /// works until the one file where they differ, and it then reports real
+    /// bytes from the wrong place with no error. There is no fallback to the
+    /// header region either: nothing Visual Basic writes points there.
+    #[must_use]
+    pub fn rva_to_off(&self, rva: Rva) -> Option<Off> {
+        let section = self.section_for(rva)?;
+        let distance = rva.get().checked_sub(section.virtual_address.get())?;
+        section.pointer_to_raw_data.checked_add(distance)
+    }
+
+    /// Converts a virtual address into a file offset.
+    ///
+    /// An address below the image base resolves to nothing, because
+    /// `Va::to_rva` is a `checked_sub`.
+    #[must_use]
+    pub fn va_to_off(&self, va: Va) -> Option<Off> {
+        self.rva_to_off(va.to_rva(self.image_base)?)
+    }
+
+    /// Gives a bounded window that starts at `rva` and runs to the end of the
+    /// mapped bytes of its section.
+    ///
+    /// The base of the window is the file offset, which is what lets a defect
+    /// three levels down name an absolute byte offset. `object` cannot give
+    /// that: its own helpers return a bare slice or a pair of integers with
+    /// no offset attached.
+    ///
+    /// A section that declares more raw data than the file holds gives a
+    /// short window rather than nothing. The bytes that do exist are real,
+    /// and every read inside the window is still bounded by the real length
+    /// of the byte slice.
+    #[must_use]
+    pub fn region_at(&self, rva: Rva) -> Option<Region<'a>> {
+        let section = self.section_for(rva)?;
+        let distance = rva.get().checked_sub(section.virtual_address.get())?;
+        let offset = section.pointer_to_raw_data.checked_add(distance)?;
+        let mapped = section.mapped_len().checked_sub(distance)?;
+        let start = usize::try_from(offset.get()).unwrap_or(usize::MAX);
+        let want = usize::try_from(mapped).unwrap_or(usize::MAX);
+        let rest = self.data.get(start..)?;
+        // `get` gives nothing when the section declares more bytes than the
+        // file holds. The window is then everything that is left.
+        let bytes = rest.get(..want).unwrap_or(rest);
+        Some(Region::new(bytes, offset))
+    }
+
+    /// Gives a bounded window that starts at a virtual address.
+    ///
+    /// This is `Va::to_rva` followed by [`PeImage::region_at`]. It is the
+    /// only route from a virtual address to bytes, because `Va` has no
+    /// conversion into `Off` and no `Add`.
+    #[must_use]
+    pub fn region_at_va(&self, va: Va) -> Option<Region<'a>> {
+        self.region_at(va.to_rva(self.image_base)?)
     }
 
     /// Tells whether the image declares a common language runtime header.
@@ -320,17 +421,45 @@ fn overlap_defects(sections: &[SectionInfo], table_at: u32) -> Vec<Defect> {
     clippy::expect_used,
     clippy::indexing_slicing,
     clippy::arithmetic_side_effects,
+    clippy::panic,
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
     use super::{PeImage, PeReject, SectionInfo};
     use crate::error::Refusal;
+    use crate::read::region::{Off, Rva, Va};
 
     /// The general purpose corpus file.
     const MANDELBROT: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../corpus/vb6-code/Mandelbrot/Mandelbrot.exe"
     ));
+
+    /// The corpus file that holds a section with a zero filled tail.
+    ///
+    /// `Mandelbrot.exe` cannot serve here. All three of its sections declare
+    /// a raw size larger than their virtual size, so it has no tail and a
+    /// tail test against it would pass while proving nothing. 7 of the 132
+    /// corpus sections have a tail and all 7 are `.data`.
+    const PASSGEN: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/public-domain/PassGen/PassGen.exe"
+    ));
+
+    /// Gives the first section whose virtual size exceeds its raw size.
+    ///
+    /// The index is not hard coded. A test that named section 1 would keep
+    /// passing against a section that no longer has a tail.
+    fn the_section_with_a_zero_filled_tail(image: &PeImage) -> SectionInfo {
+        *image
+            .sections()
+            .iter()
+            .find(|s| s.virtual_size > s.size_of_raw_data)
+            .expect(
+                "this corpus file must hold a section whose virtual size exceeds its raw size, \
+                 or the zero filled tail is not exercised at all",
+            )
+    }
 
     #[test]
     fn the_corpus_file_parses_and_names_its_three_sections() {
@@ -432,6 +561,124 @@ mod tests {
         assert_eq!(Refusal::from(not_pe), Refusal::NotPe);
         assert_eq!(Refusal::from(PeReject::NotI386), Refusal::NotI386);
         assert_eq!(Refusal::from(PeReject::NotPe32), Refusal::NotPe32);
+    }
+
+    #[test]
+    fn the_entry_point_resolves_to_the_file_offset_of_its_first_stub_byte() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let offset = image.rva_to_off(image.entry_rva()).unwrap();
+        let at = usize::try_from(offset.get()).unwrap();
+        assert!(at < MANDELBROT.len());
+        assert_eq!(MANDELBROT[at], 0x68);
+    }
+
+    #[test]
+    fn an_address_in_a_zero_filled_tail_resolves_to_nothing() {
+        let image = PeImage::parse(PASSGEN).unwrap();
+        let section = the_section_with_a_zero_filled_tail(&image);
+        // The boundary comes from the raw field, never from `mapped_len`.
+        // A test that asked the method it covers where the boundary is would
+        // move its own goal posts when that method changed.
+        let first_unmapped = section.virtual_address.get() + section.size_of_raw_data;
+        assert!(first_unmapped < section.virtual_address.get() + section.virtual_size);
+        assert_eq!(image.rva_to_off(Rva::new(first_unmapped)), None);
+        assert!(image.section_for(Rva::new(first_unmapped)).is_none());
+        assert!(image.region_at(Rva::new(first_unmapped)).is_none());
+    }
+
+    #[test]
+    fn the_last_mapped_address_of_that_section_still_resolves() {
+        let image = PeImage::parse(PASSGEN).unwrap();
+        let section = the_section_with_a_zero_filled_tail(&image);
+        let last_mapped = section.virtual_address.get() + section.size_of_raw_data - 1;
+        let offset = image.rva_to_off(Rva::new(last_mapped)).unwrap();
+        let at = usize::try_from(offset.get()).unwrap();
+        assert!(at < PASSGEN.len());
+    }
+
+    #[test]
+    fn an_address_in_the_file_alignment_padding_resolves_to_nothing() {
+        // The other direction of the same rule. The loader maps the virtual
+        // size, so the bytes above it in the file are padding at an address
+        // the program never sees. 125 of the 132 corpus sections have it.
+        //
+        // This case is what a `mapped_len` of `size_of_raw_data` alone would
+        // let through, and the zero filled tail cannot catch that, because
+        // for a section with a tail the raw size **is** the smaller of the
+        // two.
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let section = *image
+            .sections()
+            .iter()
+            .find(|s| s.size_of_raw_data > s.virtual_size)
+            .expect(
+                "this corpus file must hold a section whose raw size exceeds its virtual size, \
+                 or the file alignment padding is not exercised at all",
+            );
+        let first_padding = section.virtual_address.get() + section.virtual_size;
+        assert!(first_padding < section.virtual_address.get() + section.size_of_raw_data);
+        assert_eq!(image.rva_to_off(Rva::new(first_padding)), None);
+        assert!(image.section_for(Rva::new(first_padding)).is_none());
+
+        let last_mapped = first_padding - 1;
+        assert!(image.rva_to_off(Rva::new(last_mapped)).is_some());
+    }
+
+    #[test]
+    fn an_address_above_every_section_resolves_to_nothing() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let above = image
+            .sections()
+            .iter()
+            .map(|s| s.virtual_address.get() + s.mapped_len())
+            .max()
+            .unwrap();
+        // The value is a plausible file offset as well, so a fallback that
+        // treated the address as an offset would answer here.
+        assert!(usize::try_from(above).unwrap() <= MANDELBROT.len());
+        assert_eq!(image.rva_to_off(Rva::new(above)), None);
+        assert_eq!(image.rva_to_off(Rva::new(0xffff_ffff)), None);
+    }
+
+    #[test]
+    fn a_virtual_address_below_the_image_base_resolves_to_nothing() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let below = Va::new(image.image_base() - 1);
+        assert_eq!(image.va_to_off(below), None);
+        assert_eq!(image.va_to_off(Va::new(0x1000)), None);
+    }
+
+    #[test]
+    fn a_region_starts_at_the_offset_that_rva_to_off_gives() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let rva = image.entry_rva();
+        let region = image.region_at(rva).unwrap();
+        assert_eq!(region.file_offset(Off::new(0)), image.rva_to_off(rva));
+        assert_eq!(region.u8(Off::new(0)), Some(0x68));
+    }
+
+    #[test]
+    fn region_at_va_and_region_at_agree_on_every_address() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let base = image.image_base();
+        let mut resolved = 0_u32;
+        for step in 0..0x400_u32 {
+            let rva = Rva::new(step * 0x40);
+            let va = Va::new(base + rva.get());
+            match (image.region_at(rva), image.region_at_va(va)) {
+                (Some(by_rva), Some(by_va)) => {
+                    assert_eq!(
+                        by_rva.file_offset(Off::new(0)),
+                        by_va.file_offset(Off::new(0))
+                    );
+                    assert_eq!(by_rva.len(), by_va.len());
+                    resolved += 1;
+                }
+                (None, None) => {}
+                _ => panic!("the two routes disagree at rva {:#x}", rva.get()),
+            }
+        }
+        assert!(resolved > 0, "no address resolved, so nothing was compared");
     }
 
     #[test]
