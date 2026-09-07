@@ -39,6 +39,18 @@ in 01-08-PLAN.md still names the wrong field. See `STRUCTURES.md` section 4.1.
 
     /gsd-execute-phase 1
 
+**A quota limit killed one attempt at plan 01-08.** It failed before creating
+its worktree, so nothing was lost and `main` was untouched. Two things to know
+if it happens again:
+
+- `.planning/config.json` sets `executor_model: sonnet`, but the Agent tool
+  inherits the orchestrator's model unless the dispatch passes `model`
+  explicitly. All six executors up to 01-07 therefore ran on Opus. Pass
+  `model: "sonnet"` on the dispatch to honour the config.
+- An executor should commit each task as soon as it is whole and green, rather
+  than committing all tasks at the end, so an interruption stops at a boundary
+  instead of losing the run.
+
 **The wave order is fixed and the tooling does not know it.**
 `gsd-tools query init.execute-phase` reports every plan as runnable at once.
 That is wrong: 01-02 cannot write `read/region.rs` before 01-01 creates the
