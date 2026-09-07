@@ -44,9 +44,10 @@
 //! promise for a `.bas`, not a per-file anomaly, and it is named here, before
 //! plan 02-09 pins the first ratio, per decision D-10.
 
-use crate::error::Refusal;
+use crate::error::{Defect, DefectKind, Refusal, Site};
 use crate::read::pe::PeImage;
-use crate::read::region::{Off, Region, Va};
+use crate::read::region::{Off, Region, Rva, Va};
+use crate::vb::object::Object;
 
 /// The size of the `ObjectInfo` structure.
 ///
@@ -65,6 +66,21 @@ const PRIVATE_OBJ_SIZE: u32 = 0x40;
 /// synthetic value nothing in the corpus needs, and `PrivateObj::read` treats
 /// both as the same fact, per the plan's own instruction.
 const NO_PRIVATE_OBJECT: u32 = 0xFFFF_FFFF;
+
+/// The width of one entry in `Object.lpProcNamesArray`.
+const PROC_NAME_PTR_SIZE: u32 = 4;
+
+/// The bound on a procedure name string.
+///
+/// This is deliberately tighter than the `0x104` bound every other string in
+/// this crate uses for an object or a project name. `CONTEXT.md`'s own
+/// measurement script used exactly this bound as part of the test that
+/// separates a real procedure name from an uninitialised array entry read
+/// back as a virtual address: 64 bytes is generous for a VB6 identifier
+/// (whose language limit is far shorter) and still tight enough that an
+/// unrelated run of in-image bytes is unlikely to happen to hold a NUL within
+/// it.
+const PROC_NAME_MAX: u32 = 64;
 
 /// The head of `ObjectInfo`, reached from `Object.lpObjectInfo`.
 ///
@@ -225,6 +241,301 @@ impl PrivateObj {
     }
 }
 
+/// One procedure slot: a recovered public name, or a private procedure.
+///
+/// Per OBJ-06, [`Procedure::Private`] carries nothing. There is no index
+/// number, no placeholder and no name derived from a vtable offset: a
+/// private procedure has no name in this file, and none is invented for it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Procedure {
+    /// A recovered public procedure name.
+    Public(String),
+    /// A private procedure, or an entry this file could not validate as a
+    /// name. See [`ProcedureList::read`] for what "could not validate"
+    /// means, and why an unresolvable entry ends up here rather than being
+    /// printed as a recovered name.
+    Private,
+}
+
+/// The procedure slots one object carries, or the fact that it carries none.
+///
+/// These two states are kept apart on purpose, per D-13: an empty list and
+/// "this object has no name array at all" are different facts about the
+/// file, and collapsing them would erase the difference the standard-module
+/// cap depends on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProcNames {
+    /// `Object.proc_count` slots, each resolved to [`Procedure::Public`] or
+    /// [`Procedure::Private`].
+    Slots(Vec<Procedure>),
+    /// The object carries no `lpProcNamesArray` at all: the pointer itself is
+    /// null (or, defensively, resolves to no section). `proc_count` is
+    /// still the number of procedures the object declares; there is simply
+    /// no array to read their names through. Measured: this is exactly the
+    /// 8 of 105 corpus objects that are standard modules, with `proc_count`
+    /// from 1 to 7. See the module doc comment.
+    NoNameArray {
+        /// The number of procedures the object declares, carried through
+        /// unread: there is nothing here to bound it against.
+        proc_count: u32,
+    },
+}
+
+/// The three numbers a report needs for one object's procedures: how many
+/// slots it declares, how many of those this file recovered a public name
+/// for, and whether it carries a name array at all.
+///
+/// Plan 02-09 pins this and plan 02-10 prints it. Putting the three numbers
+/// together here stops each of them from recomputing the arithmetic
+/// differently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProcedureCounts {
+    /// The number of procedure slots the object declares.
+    pub declared: u32,
+    /// The number of those slots recovered as [`Procedure::Public`].
+    pub recovered: u32,
+    /// True when the object carries no procedure name array at all (the
+    /// `.bas` cap, D-13). When true, `recovered` is always `0`, and OBJ-03
+    /// cannot be attempted for this object through this structure at all.
+    pub no_name_array: bool,
+}
+
+impl ProcedureCounts {
+    /// Computes the three numbers from a [`ProcNames`] value.
+    ///
+    /// This file never averages, rounds or computes a ratio: that
+    /// arithmetic is plan 02-09's, pinned in one place. This gives the two
+    /// counts a ratio is built from, and nothing else.
+    #[must_use]
+    pub fn of(procs: &ProcNames) -> Self {
+        match procs {
+            ProcNames::Slots(slots) => {
+                let recovered = slots
+                    .iter()
+                    .filter(|proc| matches!(proc, Procedure::Public(_)))
+                    .count();
+                Self {
+                    declared: u32::try_from(slots.len()).unwrap_or(u32::MAX),
+                    recovered: u32::try_from(recovered).unwrap_or(u32::MAX),
+                    no_name_array: false,
+                }
+            }
+            ProcNames::NoNameArray { proc_count } => Self {
+                declared: *proc_count,
+                recovered: 0,
+                no_name_array: true,
+            },
+        }
+    }
+}
+
+/// The procedure slots one object carries, resolved from
+/// `Object.lpProcNamesArray`, plus the defects the walk found.
+pub struct ProcedureList {
+    /// The recovered slots, or the fact that there is no array to recover
+    /// them from.
+    pub procs: ProcNames,
+    defects: Vec<Defect>,
+}
+
+impl ProcedureList {
+    /// Walks `object.lp_proc_names_array`, giving one [`Procedure`] per
+    /// entry.
+    ///
+    /// # The pointer is checked before the loop
+    ///
+    /// `RESEARCH.md`'s "Anti-Patterns to Avoid" names this as the first trap
+    /// of the phase: code that only tests `entry == 0` inside a loop over
+    /// `proc_count` either skips the loop by accident, or, if it checks the
+    /// pointer first and then unconditionally trusts `proc_count`, ends up
+    /// dereferencing address zero. This function checks
+    /// `object.lp_proc_names_array.is_null()` and returns
+    /// [`ProcNames::NoNameArray`] before anything calls
+    /// [`PeImage::region_at_va`], so a null pointer is never resolved and no
+    /// byte is ever read at address zero. A non-null pointer that
+    /// nonetheless resolves to no section (not observed anywhere in the
+    /// corpus) is treated the same way, for the same reason, and is not
+    /// reported as a defect: [`crate::vb::project::DeclareTable::read`]
+    /// treats an unmapped table pointer identically, and this file follows
+    /// that precedent.
+    ///
+    /// # Every non-null entry is validated before it is trusted
+    ///
+    /// This is the correction the module doc comment describes.
+    /// `STRUCTURES.md` section 5.1 states that a null entry means the
+    /// procedure at that index is private, and that rule is safe in the
+    /// direction it is used: a null entry never names a procedure. The
+    /// converse does not hold. A non-null entry earns
+    /// [`Procedure::Public`] only when every one of these holds:
+    ///
+    /// 1. It resolves inside a mapped section
+    ///    ([`PeImage::region_at_va`]).
+    /// 2. The bytes there are NUL terminated within [`PROC_NAME_MAX`] bytes.
+    /// 3. The first byte is an ASCII letter or an underscore.
+    /// 4. Every byte is an ASCII alphanumeric character or an underscore.
+    ///
+    /// This is the exact test `CONTEXT.md`'s own measurement script used:
+    /// 193 of the corpus's entries passed it, agreeing exactly with the 193
+    /// `FuncTypDesc` records plan 02-04 counts by a wholly independent
+    /// route. An entry that fails any part of this is [`Procedure::Private`],
+    /// plus a defect naming the offset and the raw address, so an
+    /// uninitialised array entry is reported as a gap and never presented as
+    /// a recovered name.
+    ///
+    /// # `Mandelbrot.exe`'s `frmFractal`
+    ///
+    /// This is the corpus case that exercises the correction directly.
+    /// Every one of its nine entries is non-null, and every one fails step 1
+    /// above: read as a virtual address, each resolves to no section, because
+    /// the array was never written by the compiler and holds a fragment of a
+    /// build-machine path instead. All nine therefore give
+    /// [`Procedure::Private`], each with its own defect, which is the
+    /// corrected fact: not nine null entries, but nine uninitialised ones.
+    #[must_use]
+    pub fn read(pe: &PeImage<'_>, object: &Object) -> Self {
+        if object.lp_proc_names_array.is_null() {
+            return Self {
+                procs: ProcNames::NoNameArray {
+                    proc_count: object.proc_count,
+                },
+                defects: Vec::new(),
+            };
+        }
+
+        let no_name_array = || Self {
+            procs: ProcNames::NoNameArray {
+                proc_count: object.proc_count,
+            },
+            defects: Vec::new(),
+        };
+
+        let Some(array) = pe.region_at_va(object.lp_proc_names_array) else {
+            return no_name_array();
+        };
+        let Some(window_size) = object.proc_count.checked_mul(PROC_NAME_PTR_SIZE) else {
+            return no_name_array();
+        };
+        let Some(window) = array.subregion(Off::new(0), window_size) else {
+            return no_name_array();
+        };
+
+        let mut procs = Vec::with_capacity(usize::try_from(object.proc_count).unwrap_or(0));
+        let mut defects = Vec::new();
+        for index in 0..object.proc_count {
+            let (proc, defect) = resolve_entry(pe, &window, index);
+            procs.push(proc);
+            if let Some(defect) = defect {
+                defects.push(defect);
+            }
+        }
+
+        Self {
+            procs: ProcNames::Slots(procs),
+            defects,
+        }
+    }
+
+    /// Gives the defects the walk found: an entry that resolved to no
+    /// section, one with no NUL terminator within [`PROC_NAME_MAX`] bytes, or
+    /// one whose bytes are not a plausible identifier.
+    #[must_use]
+    pub fn defects(&self) -> &[Defect] {
+        &self.defects
+    }
+}
+
+/// Resolves one entry of `lpProcNamesArray` to a [`Procedure`], plus the
+/// defect this file records when the entry is non-null but does not survive
+/// validation.
+///
+/// `window` is the `proc_count * 4` byte subregion [`ProcedureList::read`]
+/// already took, so every offset here is `index * 4`. The fallbacks below
+/// `window.va_le` cannot be reached, because `index < proc_count` and the
+/// window is exactly `proc_count * 4` bytes: they stay because `Region` has
+/// no infallible accessor, and no test covers them for that reason.
+fn resolve_entry(pe: &PeImage<'_>, window: &Region<'_>, index: u32) -> (Procedure, Option<Defect>) {
+    let Some(entry_off) = index.checked_mul(PROC_NAME_PTR_SIZE) else {
+        return (Procedure::Private, None);
+    };
+    let Some(va) = window.va_le(Off::new(entry_off)) else {
+        return (Procedure::Private, None);
+    };
+    if va.is_null() {
+        return (Procedure::Private, None);
+    }
+
+    let offset = window.file_offset(Off::new(entry_off)).map_or(0, Off::get);
+    let site = Site {
+        offset,
+        rva: va.to_rva(pe.image_base()).map(Rva::get),
+        structure: "Object",
+        field: "lpProcNamesArray",
+    };
+
+    let Some(name_region) = pe.region_at_va(va) else {
+        let defect = Defect {
+            site,
+            kind: DefectKind::UnreadablePointer {
+                offset,
+                va: va.get(),
+            },
+        };
+        return (Procedure::Private, Some(defect));
+    };
+
+    let Some(bytes) = name_region.cstr(Off::new(0), PROC_NAME_MAX) else {
+        let defect = Defect {
+            site,
+            kind: DefectKind::NoNulTerminator {
+                offset,
+                limit: PROC_NAME_MAX,
+            },
+        };
+        return (Procedure::Private, Some(defect));
+    };
+
+    if is_plausible_identifier(bytes) {
+        let name = bytes.iter().copied().map(char::from).collect();
+        (Procedure::Public(name), None)
+    } else {
+        // The address resolved, and a NUL terminator was found, but the
+        // bytes do not read as an identifier: the same shape of evidence a
+        // build-machine path fragment would leave if a garbage dword ever
+        // happened to land inside a mapped section. Not observed anywhere
+        // in the corpus, this file does not use `error.rs`'s
+        // `UnmappedAddress`, because the address did resolve; it reuses
+        // `UnreadablePointer`, which already carries exactly the raw value
+        // CONTEXT.md asks a gap to carry, and is the nearest fit among the
+        // kinds this plan's file boundary leaves reachable.
+        let defect = Defect {
+            site,
+            kind: DefectKind::UnreadablePointer {
+                offset,
+                va: va.get(),
+            },
+        };
+        (Procedure::Private, Some(defect))
+    }
+}
+
+/// Tells whether a run of bytes reads as a plausible VB6 identifier.
+///
+/// The rule is `CONTEXT.md`'s own measurement rule: the first byte is an
+/// ASCII letter or an underscore, and every byte is an ASCII alphanumeric
+/// character or an underscore. An empty slice is not plausible: a NUL as the
+/// very first byte terminates `cstr` immediately and gives no name at all.
+fn is_plausible_identifier(bytes: &[u8]) -> bool {
+    let Some(&first) = bytes.first() else {
+        return false;
+    };
+    if !(first.is_ascii_alphabetic() || first == b'_') {
+        return false;
+    }
+    bytes
+        .iter()
+        .all(|&b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
 /// Reads an unsigned 16-bit value out of a structure window.
 fn u16_at(window: &Region<'_>, at: u32, what: &'static str) -> Result<u16, Refusal> {
     window.u16_le(Off::new(at)).ok_or(Refusal::Damaged(what))
@@ -250,7 +561,7 @@ fn va_at(window: &Region<'_>, at: u32, what: &'static str) -> Result<Va, Refusal
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{OBJECT_INFO_SIZE, ObjectInfo, PrivateObj};
+    use super::{OBJECT_INFO_SIZE, ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureList};
     use crate::error::Refusal;
     use crate::read::pe::PeImage;
     use crate::read::region::{Off, Va};
@@ -445,5 +756,128 @@ mod tests {
             ObjectInfo::read(&truncated, object.lp_object_info).unwrap_err(),
             Refusal::Damaged("the file ends inside the ObjectInfo structure")
         );
+    }
+
+    /// `FastDrawing` gives eight procedure slots: four `Public`, at indices 4
+    /// to 7, named `GetImageWidth`, `GetImageHeight`, `GetImageData2D` and
+    /// `SetImageData2D`; the first four are `Private`, the four `Private
+    /// Declare Function` lines its source carries.
+    #[test]
+    fn grayscale_fast_drawing_gives_eight_slots_four_public_four_private() {
+        let objs = objects(GRAYSCALE);
+        let fast_drawing = &objs[2];
+        assert_eq!(fast_drawing.name, "FastDrawing");
+        assert_eq!(fast_drawing.proc_count, 8);
+
+        let image = PeImage::parse(GRAYSCALE).unwrap();
+        let list = ProcedureList::read(&image, fast_drawing);
+        assert!(list.defects().is_empty());
+        assert_eq!(
+            list.procs,
+            ProcNames::Slots(vec![
+                Procedure::Private,
+                Procedure::Private,
+                Procedure::Private,
+                Procedure::Private,
+                Procedure::Public("GetImageWidth".to_owned()),
+                Procedure::Public("GetImageHeight".to_owned()),
+                Procedure::Public("GetImageData2D".to_owned()),
+                Procedure::Public("SetImageData2D".to_owned()),
+            ])
+        );
+    }
+
+    /// `pdOpenSaveDialog` gives six slots and every one is `Private`: its
+    /// source declares four `Private Declare Function` lines and two
+    /// `Friend Function` members, and only `Public` survives here.
+    #[test]
+    fn grayscale_pd_open_save_dialog_gives_six_slots_all_private() {
+        let objs = objects(GRAYSCALE);
+        let pd_open_save_dialog = &objs[1];
+        assert_eq!(pd_open_save_dialog.name, "pdOpenSaveDialog");
+        assert_eq!(pd_open_save_dialog.proc_count, 6);
+
+        let image = PeImage::parse(GRAYSCALE).unwrap();
+        let list = ProcedureList::read(&image, pd_open_save_dialog);
+        assert!(list.defects().is_empty());
+        assert_eq!(list.procs, ProcNames::Slots(vec![Procedure::Private; 6]));
+    }
+
+    /// The correction this plan carries. `CONTEXT.md` measured that
+    /// `frmFractal`'s nine `lpProcNamesArray` entries are not null: every one
+    /// is a non-null address that resolves to no section, a fragment of a
+    /// build-machine path the compiler never overwrote. Every one of the
+    /// nine gives `Procedure::Private`, each with its own defect, which is
+    /// what makes these nine uninitialised and not simply null.
+    #[test]
+    fn mandelbrot_frm_fractal_gives_nine_slots_all_private_and_uninitialised() {
+        let objs = objects(MANDELBROT);
+        let frm_fractal = &objs[0];
+        assert_eq!(frm_fractal.name, "frmFractal");
+        assert_eq!(frm_fractal.proc_count, 9);
+        assert!(!frm_fractal.lp_proc_names_array.is_null());
+
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let list = ProcedureList::read(&image, frm_fractal);
+        assert_eq!(list.procs, ProcNames::Slots(vec![Procedure::Private; 9]));
+        assert_eq!(
+            list.defects().len(),
+            9,
+            "every one of the nine entries is non-null and resolves to no section, so every \
+             one must leave a defect behind it: {:?}",
+            list.defects()
+        );
+    }
+
+    /// `Map Editor.exe`'s two standard modules give the absent-array state,
+    /// carrying their own `proc_count`, and no slot list at all.
+    #[test]
+    fn map_editor_both_standard_modules_give_the_absent_array_state() {
+        let objs = objects(MAP_EDITOR);
+        let declaration_module = &objs[1];
+        let sub_module = &objs[2];
+        assert!(declaration_module.lp_proc_names_array.is_null());
+        assert!(sub_module.lp_proc_names_array.is_null());
+
+        let image = PeImage::parse(MAP_EDITOR).unwrap();
+        assert_eq!(
+            ProcedureList::read(&image, declaration_module).procs,
+            ProcNames::NoNameArray { proc_count: 1 }
+        );
+        assert_eq!(
+            ProcedureList::read(&image, sub_module).procs,
+            ProcNames::NoNameArray { proc_count: 7 }
+        );
+    }
+
+    /// The absent-array state and a list of nine `Private` slots are
+    /// different values, and this compares them and finds them different:
+    /// an empty-looking count is not the same fact as no array at all.
+    #[test]
+    fn the_absent_array_state_and_a_list_of_nine_private_slots_are_different_values() {
+        let absent = ProcNames::NoNameArray { proc_count: 9 };
+        let nine_private = ProcNames::Slots(vec![Procedure::Private; 9]);
+        assert_ne!(absent, nine_private);
+    }
+
+    /// A synthetic object whose `lp_proc_names_array` is null and whose
+    /// `proc_count` is 7 gives the absent-array state, not a list of seven
+    /// private slots: the pointer is checked before the loop, so nothing
+    /// ever calls `region_at_va` on the null address, let alone reads
+    /// through it.
+    #[test]
+    fn a_synthetic_object_with_a_null_array_pointer_and_a_nonzero_count_gives_the_absent_state() {
+        let image = PeImage::parse(GRAYSCALE).unwrap();
+        let object = Object {
+            lp_object_info: Va::new(0x0040_1000),
+            name: "SyntheticModule".to_owned(),
+            proc_count: 7,
+            lp_proc_names_array: Va::new(0),
+            f_object_type: 0x0001_8001,
+        };
+
+        let list = ProcedureList::read(&image, &object);
+        assert_eq!(list.procs, ProcNames::NoNameArray { proc_count: 7 });
+        assert!(list.defects().is_empty());
     }
 }
