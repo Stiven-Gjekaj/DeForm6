@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 3
+open_count: 4
 waived_count: 0
 fixed_count: 0
-total_count: 3
-last_updated: 2026-09-07T15:53:11.332Z
+total_count: 4
+last_updated: 2026-09-07T18:10:34.445Z
 ---
 
 # Broken Windows Ledger
@@ -18,6 +18,7 @@ last_updated: 2026-09-07T15:53:11.332Z
 | 1 | 01 | unrun-verify | crates/deform6/src/read/pe.rs |  | The section overlap rule is untested by construction: no corpus file has overlapping sections | open |  | 2026-09-07T15:06:30.501Z |  |
 | 2 | 01 | unrun-verify | crates/deform6/src/vb/project.rs |  | No corpus program is P-code, so CompileMode::PCode is exercised only by zeroing lpNativeCode in a copy of a native program | open |  | 2026-09-07T15:53:05.293Z |  |
 | 3 | 01 | unmet-truth | crates/deform6/src/vb/mod.rs |  | inspect drops the defects it collects: Report derives PartialEq and Defect does not, so the count mismatch and the section overlap reach no caller until the Phase 4 report | open |  | 2026-09-07T15:53:11.332Z |  |
+| 4 | 01 | unrun-verify | crates/deform6/src/vb/runtime.rs |  | runtime_dll cannot be proved to come from the file: imported_dlls upper-cases every name and classify accepts only case variants of the constant, so the matched name always equals it. A discard written as _matched compiles clean under the whole gate. Fix in phase 2 by returning the name verbatim and comparing case-insensitively, then a lower-case import fixture separates them. | open |  | 2026-09-07T18:10:34.445Z |  |
 
 ````json
 [
@@ -55,6 +56,18 @@ last_updated: 2026-09-07T15:53:11.332Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-07T15:53:11.332Z",
+    "resolved_at": null
+  },
+  {
+    "id": 4,
+    "kind": "unrun-verify",
+    "phase": "01",
+    "file": "crates/deform6/src/vb/runtime.rs",
+    "line": null,
+    "description": "runtime_dll cannot be proved to come from the file: imported_dlls upper-cases every name and classify accepts only case variants of the constant, so the matched name always equals it. A discard written as _matched compiles clean under the whole gate. Fix in phase 2 by returning the name verbatim and comparing case-insensitively, then a lower-case import fixture separates them.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-07T18:10:34.445Z",
     "resolved_at": null
   }
 ]
