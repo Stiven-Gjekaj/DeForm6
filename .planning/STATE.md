@@ -73,9 +73,12 @@ inferred.
 Phase: 1 of 6 (It reads the file)
 Plan: 4 of 8 in current phase
 Status: Executing. Waves 1, 2 and 3 complete, wave 4 next.
+Open defect: `.planning/WINDOWS.md` records that the section overlap rule has
+no test, because no corpus file has overlapping sections. It can be given a
+synthetic test the way `has_clr_header` was.
 Last activity: 2026-09-07 - Plan 01-04 executed. PeImage reads a real binary and resolves an address to a file offset through one predicate. 58 tests pass. Six deliberate breakages found four tests in the plan that the corpus alone could not make fail.
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
