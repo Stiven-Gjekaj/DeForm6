@@ -3,29 +3,30 @@ gsd_state_version: "1.0"
 current_phase: 2
 current_phase_name: The object graph
 status: executing
-stopped_at: "Phase 2 wave 1 complete and merged: 02-01, 02-06, 02-07"
+stopped_at: "Phase 2 wave 2 complete and merged: 02-02, 02-03"
 last_updated: "2026-09-08T00:00:00.000Z"
 last_activity: 2026-09-08
-last_activity_desc: "Phase 2 wave 1 executed and merged. The object array walk bounded by wTotalObjects, the Declare import table and the external component table, and the independent .vbp harness reader with the five written exclusion rules. 185 tests pass: 145 library, 21 support_selftest, 9 refusal, 9 cli, 1 corpus_sweep. The harness names deform6 zero times, proved by grep."
-state_head: d404830a26633780a583368c93c41cc6e28b3fac
+last_activity_desc: "Phase 2 wave 2 executed and merged. Object kind classification with a proved Unknown path, and the procedure name recovery that validates every array entry before trusting it. 209 tests pass: 169 library, 21 support_selftest, 9 refusal, 9 cli, 1 corpus_sweep."
+state_head: efaa29f2198233cbb6cbbeef486d8ce3452a1583
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 50
-  completed_plans: 11
-  percent: 22
+  completed_plans: 13
+  percent: 26
 ---
 
 ## Continue
 
-**Phase 2, wave 1 is complete and merged.** Next is wave 2.
+**Phase 2, waves 1 and 2 are complete and merged.** Next is wave 3, plans
+02-04 and 02-05.
 
     /gsd-execute-phase 2
 
 Wave order, which the tooling does not know and will not tell you:
 
     [02-01 done, 02-06 done, 02-07 done]
-    [02-02, 02-03]
+    [02-02 done, 02-03 done]
     [02-04, 02-05]
     [02-08]
     [02-09, 02-10]
