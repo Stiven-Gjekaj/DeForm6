@@ -16,3 +16,4 @@ pub mod read;
 pub mod vb;
 
 pub use error::Refusal;
+pub use vb::{Report, inspect};
