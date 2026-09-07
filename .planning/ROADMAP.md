@@ -26,7 +26,7 @@ reachable.
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: It reads the file** - PE parsing, VB6 detection, the VB header, the refusals, and the safety primitives every later phase depends on
+- [x] **Phase 1: It reads the file** - PE parsing, VB6 detection, the VB header, the refusals, and the safety primitives every later phase depends on
 - [ ] **Phase 2: The object graph** - Objects, kinds, public procedure names, prototypes, the external table, and the differential harness that measures all of it
 - [ ] **Phase 3: Forms** - The control tree, control types and names, property values, the `.frx` blobs, and the event handler names
 - [ ] **Phase 4: It writes a project** - `extract` emits `.vbp`, `.frm`, `.frx`, `.bas` and `.cls`, plus the JSON confidence report
@@ -88,7 +88,7 @@ non-zero exit code.
     field is never exercised, because every vendored `.vbp` carries
     `CompilationType=0`. The branch exists and is untested by construction.
 
-**Plans**: 7/8 plans executed
+**Plans**: 8/8 plans executed
 
 Plans:
 
@@ -99,7 +99,7 @@ Plans:
 - [x] 01-05-PLAN.md - `vb/header.rs` - the entry stub, the `VB5!` signature, the `VBHeader` fields, and the closed 0x58 / 0x5C gap
 - [x] 01-06-PLAN.md - Runtime discrimination and the three refusals - `MSVBVM50.DLL`, `VB40032.DLL`, and no VB runtime at all
 - [x] 01-07-PLAN.md - `vb/project.rs` - `ProjectInfo`, the project name, the object count, the compilation mode from `lpNativeCode`, and `inspect`
-- [ ] 01-08-PLAN.md - The `deform6-cli` shell, the `inspect` subcommand, exit codes, `refusal.rs` and the 44-file corpus sweep
+- [x] 01-08-PLAN.md - The `deform6-cli` shell, the `inspect` subcommand, exit codes, `refusal.rs` and the 44-file corpus sweep
 
 **Waves**: [01-01] then [01-02, 01-03] then [01-04] then [01-05, 01-06] then [01-07] then [01-08]
 

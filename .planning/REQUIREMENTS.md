@@ -14,15 +14,15 @@ Version 1 recovers metadata. It does not recover statements.
 
 - [x] **DET-01**: The tool reads a PE file and resolves its entry point to a
       file offset through the section table.
-- [ ] **DET-02**: The tool follows the entry point stub to the VB header and
+- [x] **DET-02**: The tool follows the entry point stub to the VB header and
       confirms the `VB5!` signature.
-- [ ] **DET-03**: The tool tells VB6 from VB5 by the imported runtime DLL name,
+- [x] **DET-03**: The tool tells VB6 from VB5 by the imported runtime DLL name,
       not by the signature, because both runtimes write `VB5!`.
-- [ ] **DET-04**: The tool refuses a VB5 file by name, and refuses a file that
+- [x] **DET-04**: The tool refuses a VB5 file by name, and refuses a file that
       is not Visual Basic at all, each with one clear sentence.
 - [x] **DET-05**: The tool reports whether the file is native or P-code from
       `ProjectInfo.lpNativeCode`.
-- [ ] **DET-06**: `deform6 inspect <exe>` prints the header, the project name,
+- [x] **DET-06**: `deform6 inspect <exe>` prints the header, the project name,
       and the compilation mode, and writes nothing to disk.
 
 ### Object graph
@@ -156,7 +156,7 @@ Deferred. Tracked, not in this roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DET-01 to DET-06 | Phase 1 | Pending |
+| DET-01 to DET-06 | Phase 1 | Complete |
 | OBJ-01 to OBJ-06 | Phase 2 | Pending |
 | VER-01 to VER-05 | Phase 2 | Pending |
 | FRM-01 to FRM-06 | Phase 3 | Pending |

@@ -2,64 +2,61 @@
 gsd_state_version: "1.0"
 current_phase: 1
 current_phase_name: It reads the file
-status: planning
-stopped_at: Completed 01-07-PLAN.md
-last_updated: "2026-09-07T15:53:37.478Z"
+status: complete
+stopped_at: Completed 01-08-PLAN.md
+last_updated: "2026-09-07T16:40:00.000Z"
 last_activity: 2026-09-07
-last_activity_desc: "Plan 01-07 executed. inspect takes a byte slice and returns a Report, and it reads all 44 corpus executables. 115 tests pass. A measurement over the 44 project files showed that the object count is wTotalObjects and not wCompiledObjects, which the plan, CONTEXT.md and STRUCTURES.md all named."
-state_head: 5fc9144c3c66a7b075e433b25047e08280fff8e5
+last_activity_desc: "Plan 01-08 executed. The deform6 binary parses with Cli::try_parse and maps every Refusal to one of six exit codes; the eight-line report is read from Report::runtime_dll and Report::signature, never a literal. 134 tests pass across the workspace: 115 library, 9 refusal.rs, 1 corpus_sweep.rs (all 44 executables), 9 cli.rs. Nine deliberate breakages run and reverted; two of the plan's own predictions did not match measurement and are recorded in the SUMMARY. Phase 1 is complete."
+state_head: c259684
 progress:
   total_phases: 6
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 8
-  completed_plans: 7
-  percent: 88
+  completed_plans: 8
+  percent: 100
 ---
 
 ## Continue
 
-**Resumed:** 2026-09-07. Waves 1 to 5 are complete. Wave 6, plan 01-08, is
-next, and it is the last plan of the phase.
+**Phase 1 is complete.** All eight plans executed. `deform6 inspect` runs end
+to end: it reads a compiled Visual Basic 6 executable, prints the locked
+eight-line shape, exits 0, and changes no file on disk; a VB5 file, a VB4
+file, a .NET file and a non-PE file each exit a distinct, locked code; and
+`cargo test --workspace` runs the whole gate, 134 tests, including a sweep
+over all 44 corpus executables and nine refusal tests built from fixtures
+patched in memory.
 
-The whole library exists. `deform6::inspect` takes a byte slice and returns a
-`Report`, and it reads all 44 corpus executables: every one is native, every
-one names `MSVBVM60.DLL`, and every object count equals the number its `.vbp`
-declares. 115 tests pass. Two compile-fail proof scripts run in the gate and
-between them refuse eleven bad shapes. `crates/deform6-cli/src/main.rs` is
-still `fn main() {}`.
-
-**Plan 01-08 must not print the object count from `wCompiledObjects`.** Plan
-01-07 measured both count fields against all 44 project files:
-`wTotalObjects` is the declared object count in 44 of 44 and
-`wCompiledObjects` in 29 of 44, because `wCompiledObjects` is the capacity of
-the object array. `Report.object_count` already holds the right number. D-05
-in 01-08-PLAN.md still names the wrong field. See `STRUCTURES.md` section 4.1.
+**Two measurements in 01-08-PLAN.md's own prompt did not match what running
+the code actually showed**, and both are recorded in
+`01-08-SUMMARY.md` rather than silently corrected to fit: forcing
+`PeImage::has_clr_header` to a constant `false` fails three tests across the
+workspace, not one, because plans 01-04 and 01-06 each already carry a unit
+test that asserts the method directly; and the check that catches a swap of
+`exe_name`/`title` in `Report` construction is a cross-check against an
+independently-read header, not the raw ascending-offset check the plan calls
+"the ordering assertion" — the offsets alone are blind to that class of bug.
 
 **To continue:**
 
-    /gsd-execute-phase 1
-
-**The wave order is fixed and the tooling does not know it.**
-`gsd-tools query init.execute-phase` reports every plan as runnable at once.
-That is wrong: 01-02 cannot write `read/region.rs` before 01-01 creates the
-workspace it lives in. Use the order from ROADMAP.md:
-
-    [01-01 done]  [01-02 done, 01-03 done]  [01-04 done]  [01-05 done, 01-06 done]  [01-07 done]  [01-08]
+    /gsd-execute-phase 2
 
 **Executors run in a worktree, not the primary checkout.** Verify what lands on
 the main branch after each wave rather than assuming the merge did the right
 thing.
 
-**A test that the corpus alone cannot make fail is the recurring fault in this
-phase.** Plan 01-04 found four of them in its own plan. Three corpus facts that
-hide a bug are worth carrying forward: data directory 14 is zero in all 44
-files, both usable corpus files import exactly one DLL, and in both of them the
-import directory sits in a section where the address and the file offset are
-the same number. Build the fixture in memory when the corpus cannot answer.
-
-**Watch plan 01-08.** The plan checker estimated it at 70k tokens with three
-tasks and four new test files, and named it the plan most likely to need
-splitting during execution.
+**A test that the corpus alone cannot make fail is the recurring fault across
+this phase.** Plan 01-04 found four of them in its own plan; plan 01-08 hit
+the same limit again: filling `Report::runtime_dll` from the constant
+`VB6_DLL` instead of the name `runtime_of` actually matched passes the whole
+sweep, because every corpus file's imported name upper-cases to exactly that
+constant, so no fixture on this corpus can tell the two apart. Only
+`crates/deform6-cli/src/`'s grep for the bare literal, and `cargo clippy`'s
+unused-binding check on the library composer, close that gap. Three corpus
+facts that hide a bug are worth carrying into Phase 2: data directory 14 is
+zero in all 44 files, both usable corpus files import exactly one DLL, and
+in both of them the import directory sits in a section where the address
+and the file offset are the same number. Build the fixture in memory when
+the corpus cannot answer.
 
 # Project State
 
@@ -71,21 +68,22 @@ See: .planning/PROJECT.md (updated 2026-09-07)
 Visual Basic project that opens in the VB6 IDE, with the forms and the names
 intact, and a report that says how much of it is proved and how much is
 inferred.
-**Current focus:** Phase 1 - It reads the file
+**Current focus:** Phase 1 complete - Phase 2, The object graph, is next
 
 ## Current Position
 
-Phase: 1 of 6 (It reads the file)
-Plan: 7 of 8 in current phase
-Status: Executing. Waves 1 to 5 complete, wave 6 next, which is plan 01-08.
+Phase: 1 of 6 (It reads the file) - complete
+Plan: 8 of 8 in current phase - complete
+Status: Phase 1 done. `deform6 inspect` runs end to end on a real corpus
+file and on all 44. Ready to plan Phase 2.
 Open defects: `.planning/WINDOWS.md` holds three, all of them limits that are
 stated rather than hidden. The section overlap rule has no test because no
 corpus file overlaps. The P-code branch has no real sample because every
 vendored project is native. `inspect` drops the defects it collects, because
 `Report` derives `PartialEq` and `Defect` does not.
-Last activity: 2026-09-07 - Plan 01-07 executed. `inspect` takes a byte slice and returns a `Report`, and it reads all 44 corpus executables. 115 tests pass. Seven deliberate breakages, and a measurement over the 44 project files showed the plan named the wrong object count field.
+Last activity: 2026-09-07 - Plan 01-08 executed. The `deform6` binary, six exit codes, the locked eight-line report, and the three test files that turn the phase's ROADMAP success criteria into commands. 134 tests pass across the workspace. Nine deliberate breakages; two of the plan's own predicted measurements did not hold and are recorded.
 
-Progress: [█████████░] 88% of the plans in phase 1, which is 7 of 8
+Progress: [██████████] 100% of the plans in phase 1, which is 8 of 8
 
 ## Performance Metrics
 
@@ -113,6 +111,7 @@ Progress: [█████████░] 88% of the plans in phase 1, which is
 |------|----------|-------|-------|
 | Phase 01 P04 | 1 session | 3 tasks | 1 files |
 | Phase 01 P07 | 1 session | 3 tasks | 4 files |
+| Phase 01 P08 | 1 session | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -135,6 +134,8 @@ Recent decisions affecting current work:
 - [Phase 1]: The object count comes from wTotalObjects at 0x2A, not wCompiledObjects at 0x2C. Measured against the .vbp of all 44 corpus programs: 44 of 44 against 29 of 44. wCompiledObjects is the capacity of the object array.
 - [Phase 1]: A count disagreement is reported only when the capacity is below the count. Reporting inequality would attach a defect to 15 of the 44 corpus files.
 - [Phase 1]: Report carries runtime_dll and signature read from the file, because a one variant Runtime enum makes an equality assertion a tautology.
+- [Phase 1]: 01-08: Cli::try_parse with a hand-written, exhaustive Refusal-to-Exit match, never Cli::parse or process::exit. A usage error is exit 5, never exit 2.
+- [Phase 1]: 01-08: The corpus sweep's header-string check cross-checks Report's fields against a second, independent header read by field identity, not only an ascending-offset check, because the offsets alone cannot see a field-swap bug in Report construction.
 
 ### Pending Todos
 
@@ -163,15 +164,12 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-07T15:53:37.469Z
-Stopped at: Completed 01-07-PLAN.md
-the plan checker, and repaired. The checker returned PASS WITH CONCERNS with
-two blockers and four warnings. All were applied, none were disputed, and the
-planner found one further defect the checker missed: the zero filled tail test
-was pointed at a file that has no such section, so it would have passed
-vacuously. It now uses `corpus/public-domain/PassGen/PassGen.exe`, whose
-`.data` declares 8948 virtual bytes against 4096 raw.
+Last session: 2026-09-07T16:40:00.000Z
+Stopped at: Completed 01-08-PLAN.md
 
-Next: `/gsd-execute-phase 1`. Wave order is
-[01-01] [01-02, 01-03] [01-04] [01-05, 01-06] [01-07] [01-08].
+Phase 1 is complete: all eight plans executed, 134 tests pass across the
+workspace, and every ROADMAP success criterion for the phase was run and
+confirmed rather than assumed.
+
+Next: `/gsd-execute-phase 2` to plan and execute Phase 2, The object graph.
 Resume file: None
