@@ -224,3 +224,63 @@ and six tags.
   synthetic fixtures and a test that fires the day a real sample arrives.
 - **`ParamArray` occurs nowhere in the corpus source**, and its encoding is
   unknown. OBJ-04 names it. It is a reported gap, not a guessed encoding.
+
+## The procedure name array does not behave as documented
+
+Measured on 2026-09-07 over all 105 objects in the 44 corpus programs, after
+the plan checker flagged the `Mandelbrot` worked example as unverified.
+
+`STRUCTURES.md` §5.1 says `lpProcNamesArray` is an array of `ProcCount` virtual
+addresses, each pointing at a procedure name, and that **a null entry means the
+procedure at that index is private**. The corpus does not support that as a
+complete rule.
+
+| Entries across all 105 objects | Count |
+|---|---|
+| Null | 296 |
+| Resolve to a plausible procedure name | 193 |
+| **Neither null nor a resolvable name** | **428** |
+
+8 objects have `lpProcNamesArray == 0` entirely. Those are the 8 `.bas`
+modules, which is the documented and expected case. 12 objects have every entry
+null. **74 of 105 objects contain at least one entry that is neither.**
+
+### What `Mandelbrot` actually holds
+
+`frmFractal` has `ProcCount` 9, which matches the source: 8 `Sub`/`Function`
+declarations plus one `Private Declare Function`, so a `Declare` does consume a
+slot. The plan checker's inference was right.
+
+But its `lpProcNamesArray` is **not** null and its entries are **not** null.
+The array sits at file offset `0x1ad4`, occupies exactly nine dwords, and ends
+where the string `frmFractal` begins, so the location is certainly right. The
+nine dwords read as `0x0044006D`, `0x00740061`, `0x005C0061` and so on, which
+is UTF-16 text spelling `mData\Oracle\Java\`. That is a fragment of a path from
+the machine that built the program.
+
+**The region was never written, and it retains whatever the compiler's buffer
+held.** Every procedure in that form is `Private`.
+
+### What this means for plan 02-03
+
+**Do not assert that `Mandelbrot` has nine null entries. It has nine
+uninitialised ones, and the assertion as planned would fail on first run.**
+
+The rule "null means private" is safe in the direction it is used: a null entry
+never names a procedure. The converse does not hold. A non-null entry is not
+necessarily a name, so **every entry must be validated before it is trusted**,
+and an entry that does not resolve to a plausible identifier is an uninitialised
+slot, not a recovered name.
+
+The measurement above used a deliberately strict test for a plausible name: it
+must resolve inside a section, be NUL terminated within 64 bytes, start with a
+letter or underscore, and contain only alphanumerics and underscores. 193
+entries pass it, which agrees exactly with the 193 `FuncTypDesc` records the
+research counted independently. That agreement is the reason to trust the
+number.
+
+**This is an open question, not a settled rule.** Whether the 428 unusable
+entries are all uninitialised, or whether some carry an encoding this project
+has not recognised, is not established. Plan 02-03's executor owns it. Report
+an unresolvable entry as a gap with its raw value, never as a name and never
+silently as a private procedure.
