@@ -47,16 +47,6 @@ impl Journal {
         }
     }
 
-    /// The mode this run applies.
-    ///
-    /// The report names the mode. A parse site does not, and a parse site
-    /// that branched on the result of this method would have to name
-    /// [`Mode`], which no file outside this module does.
-    #[must_use]
-    pub const fn mode(&self) -> Mode {
-        self.mode
-    }
-
     /// Every defect the run recorded, in the order it recorded them.
     #[must_use]
     pub fn defects(&self) -> &[Defect] {
@@ -213,11 +203,5 @@ mod tests {
             second.contains("0x22"),
             "the second defect recorded must be the second in the journal: {second}"
         );
-    }
-
-    #[test]
-    fn the_journal_reports_the_mode_it_was_built_with() {
-        assert_eq!(Journal::new(Mode::Strict).mode(), Mode::Strict);
-        assert_eq!(Journal::new(Mode::Salvage).mode(), Mode::Salvage);
     }
 }
