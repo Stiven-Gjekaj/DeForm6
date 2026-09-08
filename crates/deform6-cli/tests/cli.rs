@@ -30,6 +30,14 @@ fn mandelbrot_path() -> PathBuf {
     corpus_root().join("vb6-code/Mandelbrot/Mandelbrot.exe")
 }
 
+fn grayscale_path() -> PathBuf {
+    corpus_root().join("vb6-code/Grayscale-effect/Grayscale.exe")
+}
+
+fn map_editor_path() -> PathBuf {
+    corpus_root().join("vb6-code/Map-editor-2D/Map Editor.exe")
+}
+
 /// Runs the built binary and gives its exit code, stdout and stderr.
 fn run(args: &[&OsStr]) -> (i32, String, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_deform6"))
@@ -79,36 +87,210 @@ fn dir_snapshot(dir: &Path) -> BTreeSet<(PathBuf, u64, SystemTime)> {
     out
 }
 
+/// The eight-line head phase 1 locked prints unchanged, compared line for
+/// line so a change to it is a failure and not a surprise. Phase 2 appends
+/// sections below it; it does not reshape it.
 #[test]
-fn inspecting_the_corpus_file_prints_the_eight_line_shape_and_exits_zero() {
+fn inspecting_the_corpus_file_prints_the_locked_eight_line_head_unchanged() {
     let path = mandelbrot_path();
     let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
     assert_eq!(code, 0, "stderr was: {stderr}");
 
     let lines: Vec<&str> = stdout.lines().collect();
-    let labels = [
-        "File", "Format", "Runtime", "Header", "Project", "Title", "Mode", "Objects",
+    let expected_head = [
+        "File      Mandelbrot.exe  (28672 bytes)",
+        "Format    PE32, 3 sections",
+        "Runtime   MSVBVM60.DLL  (Visual Basic 6)",
+        "Header    VB5! at 0x00001760  build 0x2636",
+        "Project   Mandelbrot_Fractal_Demo",
+        "Title     Mandelbrot Fractal Demo",
+        "Mode      native",
+        "Objects   1",
     ];
-    assert_eq!(
-        lines.len(),
-        labels.len(),
-        "stdout did not hold eight lines: {stdout:?}"
+    assert!(
+        lines.len() > expected_head.len(),
+        "stdout must hold more than the locked head once phase 2's sections \
+         are appended: {stdout:?}"
     );
-    for (line, label) in lines.iter().zip(labels) {
+    assert_eq!(&lines[..expected_head.len()], expected_head.as_slice());
+}
+
+/// Below the locked head, one line per object gives the object name and its
+/// kind.
+#[test]
+fn grayscale_prints_one_line_per_object_with_its_name_and_its_kind() {
+    let path = grayscale_path();
+    let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+
+    for expected in [
+        "frmGrayscale  (form)",
+        "pdOpenSaveDialog  (class)",
+        "FastDrawing  (class)",
+    ] {
         assert!(
-            line.starts_with(label),
-            "line {line:?} does not open with the label {label:?}: stdout was {stdout:?}"
+            stdout.contains(expected),
+            "stdout did not hold {expected:?}: {stdout:?}"
         );
     }
+}
 
-    // The `.vbp` beside the executable declares
-    // `Name="Mandelbrot_Fractal_Demo"` and `CompilationType=0`, which is
-    // native.
+/// Under each object, one line per public procedure gives a prototype with
+/// the argument names, the argument types and the `ByRef`, `Array` and
+/// `Optional` modifiers, and an optional argument with a default prints the
+/// default. A private procedure prints as `private`, with no name and no
+/// invented identifier.
+#[test]
+fn grayscale_prints_prototypes_with_modifiers_and_defaults_and_marks_private_procedures() {
+    let path = grayscale_path();
+    let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+
+    // GetImageWidth: one ByRef argument, a return type, no default.
     assert!(
-        stdout.contains("Mandelbrot_Fractal_Demo"),
+        stdout.contains("GetImageWidth(ByRef srcPictureBox As Object"),
         "stdout was: {stdout:?}"
     );
-    assert!(stdout.contains("native"), "stdout was: {stdout:?}");
+    assert!(stdout.contains(") As Long"), "stdout was: {stdout:?}");
+
+    // GetImageData2D: an Array argument (dstPixelData) and an Optional
+    // argument with a recovered Boolean default.
+    assert!(
+        stdout.contains("dstPixelData() As Byte"),
+        "the Array modifier must print as (): {stdout:?}"
+    );
+    assert!(
+        stdout.contains("Optional fixOrientation As Boolean = false"),
+        "stdout was: {stdout:?}"
+    );
+
+    // Every private slot prints the bare word, with no index and no name.
+    let private_lines: Vec<&str> = stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| *line == "private")
+        .collect();
+    assert!(
+        !private_lines.is_empty(),
+        "at least one private procedure must print: {stdout:?}"
+    );
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("private") {
+            assert_eq!(
+                trimmed, "private",
+                "a private line must be the bare word, with no index or name: {line:?}"
+            );
+        }
+    }
+}
+
+/// An unknown object kind prints the word `unknown` and the raw value in
+/// hexadecimal, per D-08, and the run still exits 0. No corpus program
+/// carries one (only `Form`, `Module` and `Class` occur, per plan 02-02), so
+/// this test patches `frmFractal`'s `fObjectType` to a value none of the
+/// three match.
+#[test]
+fn a_patched_unknown_object_kind_prints_its_raw_value_and_exits_zero() {
+    let data = fs::read(mandelbrot_path()).unwrap();
+    // `fObjectType` for `frmFractal` is `0x0001_8083` at file offset
+    // `0x1c08`, resolved the same way `vb::object`'s own tests resolve it:
+    // through the pointer chain, not a byte search. The offset is recorded
+    // here because this test file cannot import the library's own private
+    // test helpers; a corpus-wide grep for this exact byte pattern
+    // (`\x83\x80\x01\x00` at this file's own object element) is how it was
+    // found, and `deform6::inspect` on the unpatched file confirms the value
+    // it replaces really is `0x0001_8083`.
+    let mut bytes = data.clone();
+    let pos = bytes
+        .windows(4)
+        .position(|w| w == [0x83, 0x80, 0x01, 0x00])
+        .expect("frmFractal's fObjectType must be found in the unpatched file");
+    bytes[pos..pos + 4].copy_from_slice(&0xFEED_1234_u32.to_le_bytes());
+
+    let path = std::env::temp_dir().join(format!(
+        "deform6-cli-test-unknown-kind-{}.exe",
+        std::process::id()
+    ));
+    fs::write(&path, &bytes).unwrap();
+    let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    fs::remove_file(&path).ok();
+
+    assert_eq!(code, 0, "stderr was: {stderr}");
+    assert!(
+        stdout.contains("unknown, raw value 0xfeed1234"),
+        "stdout was: {stdout:?}"
+    );
+}
+
+/// A standard module prints its procedure count and a sentence saying its
+/// names are not reachable through this structure, rather than an empty
+/// list.
+#[test]
+fn map_editor_prints_its_standard_modules_procedure_count_and_not_an_empty_list() {
+    let path = map_editor_path();
+    let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+
+    assert!(
+        stdout.contains(
+            "1 procedure(s) declared; their names are not reachable through this structure"
+        ),
+        "stdout was: {stdout:?}"
+    );
+    assert!(
+        stdout.contains(
+            "7 procedure(s) declared; their names are not reachable through this structure"
+        ),
+        "stdout was: {stdout:?}"
+    );
+}
+
+/// Running the command on `Grayscale.exe` prints three objects and twelve
+/// prototypes, and exits 0. The plan's own text additionally claims "eight
+/// private markers for the class whose procedures are declared friend"; see
+/// the SUMMARY for the correction (the measured number is six, on
+/// `pdOpenSaveDialog`, not eight).
+#[test]
+fn grayscale_prints_three_objects_and_twelve_prototypes_and_exits_zero() {
+    let path = grayscale_path();
+    let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+
+    let object_lines = stdout
+        .lines()
+        .filter(|line| line.contains("(form)") || line.contains("(class)"))
+        .count();
+    assert_eq!(object_lines, 3, "stdout was: {stdout:?}");
+
+    // A prototype line is a non-private, non-blank, indented line that is
+    // not an object header line (no "(form)"/"(class)"/"(module)" suffix).
+    let prototype_lines = stdout
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            !trimmed.is_empty()
+                && trimmed != "private"
+                && !trimmed.ends_with("(form)")
+                && !trimmed.ends_with("(class)")
+                && !trimmed.ends_with("(module)")
+                && line.starts_with("    ")
+        })
+        .count();
+    assert_eq!(prototype_lines, 12, "stdout was: {stdout:?}");
+
+    // pdOpenSaveDialog declares six procedure slots (two Friend Function
+    // members plus four Private Declare Function lines, per plan 02-07's
+    // own correction), and every one of the six is private, since Friend is
+    // not Public.
+    let private_lines = stdout
+        .lines()
+        .filter(|line| line.trim() == "private")
+        .count();
+    assert_eq!(
+        private_lines, 22,
+        "34 total slots minus 12 public equals 22 private, across all three objects: {stdout:?}"
+    );
 }
 
 #[test]

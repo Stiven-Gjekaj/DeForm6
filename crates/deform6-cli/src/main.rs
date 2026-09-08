@@ -27,6 +27,9 @@ use std::process::ExitCode;
 use clap::Parser as _;
 
 use deform6::Report;
+use deform6::vb::classify::ObjectKind;
+use deform6::vb::functyp::{Argument, DefaultValue, Prototype, TypeEntry, VbType};
+use deform6::vb::{ObjectProcedures, ProcedureEntry};
 
 /// `deform6`: reads a compiled Visual Basic 6 executable and reports what it
 /// holds.
@@ -146,12 +149,16 @@ fn exit_for(refusal: deform6::Refusal) -> Exit {
     }
 }
 
-/// Prints the locked eight-line shape.
+/// Prints the locked eight-line shape, then the object graph below it.
 ///
 /// The Runtime and Header lines print `report.runtime_dll` and
 /// `report.signature`, which are values [`deform6::inspect`] read out of the
 /// file. Nothing here writes what a Visual Basic 6 file is supposed to hold;
 /// it prints what this one does.
+///
+/// The eight-line head phase 1 locked stays exactly as it was: this task
+/// appends a section below it rather than reshaping it. `crates/deform6-cli/
+/// tests/cli.rs` compares the head line for line.
 fn print_report(path: &Path, report: &Report) {
     let name = path
         .file_name()
@@ -181,9 +188,151 @@ fn print_report(path: &Path, report: &Report) {
     print_line("Title", &report.title);
     print_line("Mode", mode);
     print_line("Objects", &report.object_count.to_string());
+
+    println!();
+    print_objects(report);
 }
 
 /// Prints one line of the report, with the label padded to ten columns.
 fn print_line(label: &str, value: &str) {
     println!("{label:<10}{value}");
+}
+
+/// Prints one line per object, giving its name and its kind, then one line
+/// per procedure slot beneath it.
+///
+/// Per D-08 an unknown kind prints the word `unknown` and the raw value in
+/// hexadecimal, and the run still exits 0: refusing a file over a type value
+/// nobody has documented is the failure this phase exists to avoid.
+fn print_objects(report: &Report) {
+    println!("Object graph");
+    for object in &report.objects {
+        println!("  {}  ({})", object.name, format_kind(&object.kind));
+        print_procedures(&object.procedures);
+    }
+}
+
+/// Prints the word a reader sees for one object's kind.
+fn format_kind(kind: &ObjectKind) -> String {
+    match kind {
+        ObjectKind::Form => "form".to_owned(),
+        ObjectKind::Module => "module".to_owned(),
+        ObjectKind::Class => "class".to_owned(),
+        ObjectKind::Unknown(value) => format!("unknown, raw value {value:#010x}"),
+    }
+}
+
+/// Prints one line per procedure slot an object declares, or, for a
+/// standard module, the sentence D-13 asks for instead of an empty list.
+fn print_procedures(procedures: &ObjectProcedures) {
+    match procedures {
+        ObjectProcedures::NoNameArray { proc_count } => {
+            println!(
+                "    {proc_count} procedure(s) declared; their names are not reachable through this structure"
+            );
+        }
+        ObjectProcedures::Slots(entries) => {
+            for entry in entries {
+                match entry {
+                    ProcedureEntry::Private => println!("    private"),
+                    ProcedureEntry::Public { name, prototype } => {
+                        println!("    {}", format_prototype(name, prototype.as_ref()));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Prints a public procedure as a prototype: its name, its argument list and
+/// its return type when the descriptor says the member returns a value.
+///
+/// `prototype` is `None` when the name resolved but the type descriptor at
+/// the same slot did not; the name still prints, with an empty argument
+/// list, rather than being withheld.
+fn format_prototype(name: &str, prototype: Option<&Prototype>) -> String {
+    let Some(prototype) = prototype else {
+        return format!("{name}()");
+    };
+    let args: Vec<String> = prototype.arguments.iter().map(format_argument).collect();
+    let mut line = format!("{name}({})", args.join(", "));
+    if let Some(return_type) = &prototype.return_type {
+        line.push_str(" As ");
+        line.push_str(&format_type_entry(return_type));
+    }
+    line
+}
+
+/// Prints one argument: its `Optional` and `ByRef` modifiers, its name, its
+/// `Array` modifier, its type, and its recovered default when it has one.
+fn format_argument(arg: &Argument) -> String {
+    let mut prefix = String::new();
+    if arg.entry.optional {
+        prefix.push_str("Optional ");
+    }
+    if arg.entry.by_ref {
+        prefix.push_str("ByRef ");
+    }
+
+    let mut piece = format!("{prefix}{}", arg.name);
+    if arg.entry.array {
+        piece.push_str("()");
+    }
+    piece.push_str(" As ");
+    piece.push_str(&format_type_entry(&arg.entry));
+    if let Some(default) = &arg.default {
+        piece.push_str(" = ");
+        piece.push_str(&format_default(default));
+    }
+    piece
+}
+
+/// Prints a type entry's base type. Modifiers are printed by the caller,
+/// which knows whether it is printing an argument or a return type.
+fn format_type_entry(entry: &TypeEntry) -> String {
+    format_vb_type(&entry.vb_type)
+}
+
+/// Prints a `VbType`. Per D-07, an unrecognised type code prints the raw
+/// byte and a marker, never a guessed name.
+fn format_vb_type(vb_type: &VbType) -> String {
+    match vb_type {
+        VbType::Boolean => "Boolean".to_owned(),
+        VbType::Byte => "Byte".to_owned(),
+        VbType::Integer => "Integer".to_owned(),
+        VbType::Long => "Long".to_owned(),
+        VbType::Single => "Single".to_owned(),
+        VbType::Double => "Double".to_owned(),
+        VbType::Date => "Date".to_owned(),
+        VbType::Currency => "Currency".to_owned(),
+        VbType::Variant => "Variant".to_owned(),
+        VbType::Str => "String".to_owned(),
+        VbType::Object => "Object".to_owned(),
+        VbType::HResult => "HResult".to_owned(),
+        VbType::Internal(va) => format!(
+            "Object (an internal class; its name is not resolved through this path, raw address {:#010x})",
+            va.get()
+        ),
+        VbType::ComIFace(va) => format!(
+            "Object (an external COM interface, unresolved, raw address {:#010x})",
+            va.get()
+        ),
+        VbType::ComObj(va) => format!(
+            "Object (an external COM object, unresolved, raw address {:#010x})",
+            va.get()
+        ),
+        VbType::Unknown(code) => format!("unrecognised type, raw value {code:#04x}"),
+    }
+}
+
+/// Prints an `Optional` argument's recovered default value.
+fn format_default(default: &DefaultValue) -> String {
+    match default {
+        DefaultValue::Empty => "Empty".to_owned(),
+        DefaultValue::Integer(value) => value.to_string(),
+        DefaultValue::Single(value) => value.to_string(),
+        DefaultValue::Boolean(value) => value.to_string(),
+        DefaultValue::Byte(value) => value.to_string(),
+        DefaultValue::Text(value) => format!("{value:?}"),
+    }
 }
