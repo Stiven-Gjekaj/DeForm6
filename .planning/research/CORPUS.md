@@ -113,3 +113,63 @@ This is the first link in the chain the parser depends on, and it is now
 measured on this corpus rather than taken from a document. The entry point
 addresses vary (`0x1424`, `0x116C`, `0x195C` and so on), so the offset is not
 constant and must be resolved through the section table each time.
+
+## What the corpus holds for phase 3, measured 2026-09-08
+
+Counted by reading every `.frm` in `corpus/`, not by assumption.
+
+### Control instances
+
+| Control | Instances |
+|---|---|
+| `VB.Label` | 143 |
+| `VB.CommandButton` | 90 |
+| `VB.TextBox` | 88 |
+| `VB.PictureBox` | 87 |
+| **`VB.Menu`** | **76** |
+| `VB.CheckBox` | 71 |
+| `VB.Form` | 54 |
+| `VB.Frame` | 31 |
+| `VB.HScrollBar` | 25 |
+| `VB.ComboBox` | 13 |
+| `VB.OptionButton` | 12 |
+| `VB.Timer` | 7 |
+| `VB.Line` | 7 |
+| `VB.ListBox` | 4 |
+| **`MSWinsockLib.Winsock`** | **3** |
+| `VB.VScrollBar`, `VB.FileListBox`, `VB.DriveListBox` | 1 each |
+
+### What this means for phase 3
+
+**Well covered.** The intrinsic control set is exercised heavily, so FRM-01,
+FRM-02 and FRM-03 have real ground truth. Nesting is real too: 31 `Frame`
+controls and 87 `PictureBox` controls are both container types.
+
+**Menus are well covered**, which matters more than the raw count suggests.
+76 menu entries across 22 form files. `FILE-FORMATS.md` records that the IDE
+refuses a form whose menus are not written last, so WRT-04 in phase 4 has a
+real corpus to prove itself against rather than one contrived case.
+
+**Control arrays are covered.** 48 controls carry an `Index` property.
+`STRUCTURES.md` gap 5 records that the control array index location is
+unresolved, and the corpus can settle it.
+
+**Third party controls are barely covered, and this is the real hole.**
+The whole corpus declares **two** `Object=` lines:
+
+    {248DD890-BB45-11CF-9ABC-0080C7E7B78D}#1.0#0; MSWINSCK.OCX
+    {F9043C88-F6F2-101A-A3C9-08002B2F49FB}#1.2#0; COMDLG32.OCX
+
+and holds **3** third party control instances, all `MSWinsockLib.Winsock`.
+FRM-04 requires recovering an OCX CLSID and saying plainly that the control's
+property blob cannot be interpreted without its type library. Three instances
+of one control is thin. Phase 3 needs a synthetic fixture here, built the way
+`has_clr_header` and the event descriptor walk were, and it must not present a
+synthetic result as a corpus result.
+
+**Three object kinds are absent entirely: 0 MDIForm, 0 UserControl, 0
+PropertyPage.** `STRUCTURES.md` gap 3 records that the MDIForm `fObjectType`
+value appears in no public source. The corpus cannot close it. An object of an
+unknown kind is classified `Unknown` and flagged, which plan 02-02 built and
+proved with a synthetic value, so an MDIForm will be reported rather than
+refused.
