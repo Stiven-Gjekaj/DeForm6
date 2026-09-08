@@ -37,13 +37,18 @@
 //! over-count. [`fabricated_object_passes_a_subset_check_and_fails_the_two_directional_check`]
 //! is the test that would have caught it.
 
+// `pub(crate)`, not private: `tests/ratios.rs` (plan 02-09) reaches this
+// module, and every item it needs from it, through the same `#[path]`
+// embedding that brings in `program_counts` below -- a private module here
+// would block that access outright, since a private item is invisible to
+// the parent module an embedding `#[path]` creates.
 #[path = "support/mod.rs"]
 #[allow(
     dead_code,
     reason = "cargo compiles this shared module into every test binary and each binary uses a \
               different subset"
 )]
-mod support;
+pub(crate) mod support;
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -142,7 +147,11 @@ fn object_table_va(image: &PeImage<'_>) -> Va {
 /// Walks the object array of one executable's bytes. This is the recovered
 /// side of every comparison in this file, read through the library and
 /// nothing else.
-fn recovered_objects(image: &PeImage<'_>) -> Vec<Object> {
+///
+/// `pub(crate)`: `tests/ratios.rs` (plan 02-09) reaches this through the
+/// same `#[path]` embedding as [`program_counts`], so it never opens a
+/// second, independent path to the same object array.
+pub(crate) fn recovered_objects(image: &PeImage<'_>) -> Vec<Object> {
     let lp_object_table = object_table_va(image);
     let head = ObjectTableHead::read(image, lp_object_table).unwrap();
     ObjectTable::walk(image, lp_object_table, &head)
@@ -431,26 +440,33 @@ fn removing_a_recovered_object_fails_the_two_directional_check_in_the_other_dire
 /// `#[path = "../differential.rs"] mod differential;`, the same mechanism
 /// `support/mod.rs` already uses to share a file across binaries, pointed
 /// at a file that is not literally named `mod.rs`.
+///
+/// `pub(crate)`, not private: plan 02-09's `tests/ratios.rs` and
+/// `crates/xtask` both reach this exact function through that `#[path]`
+/// mechanism, per T-02-45 ("both take their counts from the one function
+/// plan 02-08 wrote"), and a private item is invisible to the parent module
+/// an embedding `#[path]` creates. No behaviour changes; only the
+/// visibility widens.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct ProgramCounts {
+pub(crate) struct ProgramCounts {
     /// Procedures the library recovered as [`Procedure::Public`], over the
     /// objects the standard-module and absent-source rules keep.
-    recovered: u32,
+    pub(crate) recovered: u32,
     /// Procedure slots the compiled binary's object table declares
     /// (`Object.proc_count`), over the same kept objects. This is the
     /// binary's own count, not the source's: the two agree in total across
     /// the corpus only because every slot the binary declares that the
     /// source keeps private is still counted here, and only the *recovered*
     /// side is asserted equal to the source's own public-procedure count.
-    declared_by_binary: u32,
+    pub(crate) declared_by_binary: u32,
     /// Procedure slots the standard-module rule caps: the `proc_count` of
     /// every object this program declares as a `.bas` module, which has no
     /// procedure name array to recover a name through at all.
-    capped_by_standard_module: u32,
+    pub(crate) capped_by_standard_module: u32,
     /// Objects excluded from this program's comparison: every standard
     /// module, plus one if this program carries the corpus's one
     /// absent-source object.
-    objects_excluded: u32,
+    pub(crate) objects_excluded: u32,
 }
 
 /// Computes [`ProgramCounts`] for one program, from its already-read
@@ -461,7 +477,7 @@ struct ProgramCounts {
 /// performs; per D-02's own already-proven claim (105 of 105, both
 /// directions), every declared object with a name finds exactly one
 /// recovered match here, on the real corpus.
-fn program_counts(
+pub(crate) fn program_counts(
     image: &PeImage<'_>,
     declared: &[vbp::DeclaredObject],
     recovered: &[Object],
