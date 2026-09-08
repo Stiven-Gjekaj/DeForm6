@@ -29,6 +29,8 @@ use clap::Parser as _;
 use deform6::Report;
 use deform6::vb::classify::ObjectKind;
 use deform6::vb::functyp::{Argument, DefaultValue, Prototype, TypeEntry, VbType};
+use deform6::vb::privateobj::Gap;
+use deform6::vb::project::{Declaration, ExportName};
 use deform6::vb::{ObjectProcedures, ProcedureEntry};
 
 /// `deform6`: reads a compiled Visual Basic 6 executable and reports what it
@@ -149,16 +151,25 @@ fn exit_for(refusal: deform6::Refusal) -> Exit {
     }
 }
 
-/// Prints the locked eight-line shape, then the object graph below it.
+/// Prints the locked eight-line shape, then the gaps, the object graph and
+/// the external declarations below it, in that order.
 ///
 /// The Runtime and Header lines print `report.runtime_dll` and
 /// `report.signature`, which are values [`deform6::inspect`] read out of the
 /// file. Nothing here writes what a Visual Basic 6 file is supposed to hold;
 /// it prints what this one does.
 ///
-/// The eight-line head phase 1 locked stays exactly as it was: this task
-/// appends a section below it rather than reshaping it. `crates/deform6-cli/
+/// The eight-line head phase 1 locked stays exactly as it was: this phase
+/// appends sections below it rather than reshaping it. `crates/deform6-cli/
 /// tests/cli.rs` compares the head line for line.
+///
+/// # Gaps come first, per D-10
+///
+/// The gaps section, including the standard-module cap, prints immediately
+/// after the head and before the object graph. A reader meets the cap
+/// before they meet the per-object procedure counts the cap explains,
+/// rather than discovering the cap only after wondering why a module's
+/// procedures carry no names.
 fn print_report(path: &Path, report: &Report) {
     let name = path
         .file_name()
@@ -190,7 +201,11 @@ fn print_report(path: &Path, report: &Report) {
     print_line("Objects", &report.object_count.to_string());
 
     println!();
+    print_gaps(report);
+    println!();
     print_objects(report);
+    println!();
+    print_declarations(report);
 }
 
 /// Prints one line of the report, with the label padded to ten columns.
@@ -334,5 +349,141 @@ fn format_default(default: &DefaultValue) -> String {
         DefaultValue::Boolean(value) => value.to_string(),
         DefaultValue::Byte(value) => value.to_string(),
         DefaultValue::Text(value) => format!("{value:?}"),
+    }
+}
+
+/// Prints the gaps section: every open question this run found, per D-10.
+///
+/// This prints before [`print_objects`], so a reader meets the
+/// standard-module cap before they meet the per-object procedure counts it
+/// explains. The standard-module cap always prints, even at zero, because
+/// D-10 asks for it to be stated, not only reached for when a count looks
+/// low.
+fn print_gaps(report: &Report) {
+    println!("Gaps");
+
+    let (cap_objects, cap_slots) = standard_module_cap(report);
+    println!(
+        "  the standard-module cap applies to {cap_objects} object(s) and {cap_slots} \
+         procedure slot(s) in this file; a standard module's procedure names are not \
+         reachable through this structure at all"
+    );
+
+    for object in &report.objects {
+        if let ObjectKind::Unknown(value) = object.kind {
+            println!(
+                "  {:?} has an unrecognised type value {value:#010x}",
+                object.name
+            );
+        }
+    }
+
+    for object in &report.objects {
+        for prototype in prototype_entries(&object.procedures) {
+            for arg in &prototype.arguments {
+                if let VbType::Unknown(code) = arg.entry.vb_type {
+                    println!(
+                        "  {:?}'s argument {:?} has an unrecognised type code {code:#04x}",
+                        object.name, arg.name
+                    );
+                }
+            }
+            if let Some(TypeEntry {
+                vb_type: VbType::Unknown(code),
+                ..
+            }) = prototype.return_type
+            {
+                println!(
+                    "  {:?}'s return type has an unrecognised type code {code:#04x}",
+                    object.name
+                );
+            }
+        }
+    }
+
+    for object in &report.objects {
+        for gap in &object.gaps {
+            let Gap::UnexplainedPublicVarCount(count) = gap;
+            println!(
+                "  {:?}: cntPublicVars is {count}, and its meaning is unresolved",
+                object.name
+            );
+        }
+    }
+
+    for defect in &report.defects {
+        if defect.site.structure == "FuncTypDesc"
+            || (defect.site.structure == "PrivateObj" && defect.site.field == "lpFuncTypeInfo")
+        {
+            println!("  a procedure's type descriptor was reported unrecoverable: {defect}");
+        }
+    }
+}
+
+/// Sums the standard-module cap over every object in the report: how many
+/// objects carry no procedure name array at all, and how many procedure
+/// slots that applies to.
+fn standard_module_cap(report: &Report) -> (usize, u32) {
+    let mut objects = 0_usize;
+    let mut slots = 0_u32;
+    for object in &report.objects {
+        if let ObjectProcedures::NoNameArray { proc_count } = object.procedures {
+            objects = objects.saturating_add(1);
+            slots = slots.saturating_add(proc_count);
+        }
+    }
+    (objects, slots)
+}
+
+/// Gives every resolved [`Prototype`] an object's procedures carry, skipping
+/// a private slot and a slot whose type descriptor did not resolve.
+fn prototype_entries(procedures: &ObjectProcedures) -> Vec<&Prototype> {
+    match procedures {
+        ObjectProcedures::Slots(entries) => entries
+            .iter()
+            .filter_map(|entry| match entry {
+                ProcedureEntry::Public {
+                    prototype: Some(prototype),
+                    ..
+                } => Some(prototype),
+                ProcedureEntry::Public {
+                    prototype: None, ..
+                }
+                | ProcedureEntry::Private => None,
+            })
+            .collect(),
+        ObjectProcedures::NoNameArray { .. } => Vec::new(),
+    }
+}
+
+/// Prints the declarations section: one line per external `Declare`
+/// statement, per OBJ-05.
+///
+/// Only an external (`dwEntryType == 7`) entry ever reaches
+/// `Report.declarations`; an internal entry is resolved inside the runtime
+/// and is never in this list, per `vb/project.rs`'s own `DeclareTable::read`.
+/// A program with no external import prints the heading and a line saying
+/// there are none, rather than printing nothing: silence reads as "the tool
+/// did not look."
+fn print_declarations(report: &Report) {
+    println!("Declarations");
+    if report.declarations.is_empty() {
+        println!("  there are no external declarations in this file");
+        return;
+    }
+    for declaration in &report.declarations {
+        let export = match &declaration.export {
+            ExportName::Name(name) => name.clone(),
+            // Per D-09, an inferred item prints with its marker: no corpus
+            // program has ever produced this path (a corpus-wide script
+            // found zero ordinal exports across 220 external entries), so
+            // it is exercised only by this branch's own logic, never by a
+            // real run.
+            ExportName::OrdinalInferred(ordinal) => format!("#{ordinal} (inferred alias)"),
+        };
+        println!("  {}!{export}", declaration.library);
+        println!("    {}", Declaration::NAME_MARKER);
+        println!("    {}", Declaration::ARGUMENTS_MARKER);
+        println!("    {}", Declaration::SCOPE_MARKER);
     }
 }

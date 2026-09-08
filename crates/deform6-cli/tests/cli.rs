@@ -38,6 +38,12 @@ fn map_editor_path() -> PathBuf {
     corpus_root().join("vb6-code/Map-editor-2D/Map Editor.exe")
 }
 
+/// The corpus's smallest program: one form, one procedure, and no external
+/// `Declare` table at all.
+fn lock_work_station_path() -> PathBuf {
+    corpus_root().join("public-domain/LockWorkStation/LockWorkStation.exe")
+}
+
 /// Runs the built binary and gives its exit code, stdout and stderr.
 fn run(args: &[&OsStr]) -> (i32, String, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_deform6"))
@@ -257,15 +263,26 @@ fn grayscale_prints_three_objects_and_twelve_prototypes_and_exits_zero() {
     let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
     assert_eq!(code, 0, "stderr was: {stderr}");
 
-    let object_lines = stdout
+    // Scoped to the Object graph section alone: the Declarations section
+    // below it prints its own indented marker lines, which must not be
+    // counted as procedure prototypes.
+    let graph_start = stdout
+        .find("Object graph\n")
+        .expect("stdout must hold an Object graph section");
+    let declarations_start = stdout
+        .find("\nDeclarations\n")
+        .expect("stdout must hold a Declarations section");
+    let graph = &stdout[graph_start..declarations_start];
+
+    let object_lines = graph
         .lines()
         .filter(|line| line.contains("(form)") || line.contains("(class)"))
         .count();
-    assert_eq!(object_lines, 3, "stdout was: {stdout:?}");
+    assert_eq!(object_lines, 3, "graph was: {graph:?}");
 
     // A prototype line is a non-private, non-blank, indented line that is
     // not an object header line (no "(form)"/"(class)"/"(module)" suffix).
-    let prototype_lines = stdout
+    let prototype_lines = graph
         .lines()
         .filter(|line| {
             let trimmed = line.trim();
@@ -277,19 +294,156 @@ fn grayscale_prints_three_objects_and_twelve_prototypes_and_exits_zero() {
                 && line.starts_with("    ")
         })
         .count();
-    assert_eq!(prototype_lines, 12, "stdout was: {stdout:?}");
+    assert_eq!(prototype_lines, 12, "graph was: {graph:?}");
 
     // pdOpenSaveDialog declares six procedure slots (two Friend Function
     // members plus four Private Declare Function lines, per plan 02-07's
     // own correction), and every one of the six is private, since Friend is
     // not Public.
-    let private_lines = stdout
+    let private_lines = graph
         .lines()
         .filter(|line| line.trim() == "private")
         .count();
     assert_eq!(
         private_lines, 22,
-        "34 total slots minus 12 public equals 22 private, across all three objects: {stdout:?}"
+        "34 total slots minus 12 public equals 22 private, across all three objects: {graph:?}"
+    );
+}
+
+/// One declaration line prints per external import entry, holding the
+/// library name and the export name. `Grayscale.exe` declares nine
+/// `Declare` entries, of which one is internal (resolved inside the
+/// runtime), so eight lines print and none for the internal entry.
+#[test]
+fn grayscale_prints_one_declaration_line_per_external_import_and_none_for_the_internal_one() {
+    let path = grayscale_path();
+    let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+
+    let declaration_lines = stdout
+        .lines()
+        .filter(|line| {
+            line.trim_start().contains('!') && line.starts_with("  ") && !line.starts_with("    ")
+        })
+        .count();
+    assert_eq!(declaration_lines, 8, "stdout was: {stdout:?}");
+
+    for expected in [
+        "gdi32!StretchDIBits",
+        "gdi32!GetDIBits",
+        "gdi32!SetStretchBltMode",
+        "gdi32!GetObjectA",
+        "kernel32!lstrlenW",
+        "comdlg32!CommDlgExtendedError",
+        "comdlg32!GetSaveFileNameW",
+        "comdlg32!GetOpenFileNameW",
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "stdout did not hold {expected:?}: {stdout:?}"
+        );
+    }
+}
+
+/// Each declaration carries a marker saying the Visual Basic level procedure
+/// name and the alias are not in the file, that the argument list is not in
+/// the file, and that the owning module and the scope are not in the file.
+#[test]
+fn mandelbrot_prints_one_declaration_with_its_three_markers() {
+    let path = mandelbrot_path();
+    let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+
+    assert!(stdout.contains("gdi32!SetPixelV"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("the Visual Basic procedure name and its Alias are not in this file"),
+        "stdout was: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("the argument names and types of this Declare are not in this file"),
+        "stdout was: {stdout:?}"
+    );
+    assert!(
+        stdout.contains(
+            "the owning module and the Public or Private marker of this Declare are not in \
+             this file"
+        ),
+        "stdout was: {stdout:?}"
+    );
+}
+
+/// A gaps section prints below the graph, listing every open gap the run
+/// found: `Map Editor.exe` carries a non-zero `cntPublicVars` on
+/// `pdOpenSaveDialog` and a standard-module cap over its two modules.
+#[test]
+fn map_editor_gaps_section_lists_the_cap_and_the_unexplained_public_var_count() {
+    let path = map_editor_path();
+    let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+
+    assert!(
+        stdout.contains("the standard-module cap applies to 2 object(s) and 8 procedure slot(s)"),
+        "stdout was: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("cntPublicVars is 4, and its meaning is unresolved"),
+        "stdout was: {stdout:?}"
+    );
+}
+
+/// The gaps section prints before any recovery number, so a reader meets
+/// the cap before they meet the ratio: it comes before the object graph,
+/// which is where a standard module's procedure count (the number the cap
+/// explains) is printed.
+#[test]
+fn the_gaps_section_prints_before_the_object_graph() {
+    let path = map_editor_path();
+    let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+
+    let gaps_at = stdout
+        .find("Gaps")
+        .expect("stdout must hold a Gaps section");
+    let graph_at = stdout
+        .find("Object graph")
+        .expect("stdout must hold an Object graph section");
+    assert!(
+        gaps_at < graph_at,
+        "the Gaps section must print before the Object graph section: {stdout:?}"
+    );
+}
+
+/// Every inferred item prints with its marker: per D-09, the ordinal alias
+/// path is the only inferred item this phase produces, and no corpus
+/// program has ever produced one (a corpus-wide script found zero ordinal
+/// exports across 220 external entries). A real run's declarations
+/// therefore never carry the inferred marker, which this test checks over
+/// `Grayscale.exe`'s eight declarations directly, rather than only
+/// asserting the claim in a comment.
+#[test]
+fn no_declaration_in_a_real_run_carries_the_inferred_marker() {
+    let path = grayscale_path();
+    let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+    assert!(
+        !stdout.contains("inferred"),
+        "no real export in this corpus is an ordinal alias, so nothing should print the \
+         inferred marker: {stdout:?}"
+    );
+}
+
+/// `A program with no external import prints the section with a line saying
+/// there are none, rather than printing nothing.
+#[test]
+fn lock_work_station_prints_an_empty_declarations_section_and_not_nothing() {
+    let path = lock_work_station_path();
+    let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+
+    assert!(stdout.contains("Declarations"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("there are no external declarations in this file"),
+        "stdout was: {stdout:?}"
     );
 }
 
