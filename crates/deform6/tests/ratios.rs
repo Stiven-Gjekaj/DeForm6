@@ -57,8 +57,32 @@
 //! this one embeds. Documented here rather than left as a silent surprise
 //! in the test count.
 
+// `pub(crate)`: `crates/xtask` reaches `program_counts` and the rest
+// through this exact module, `ratios::differential`, rather than a second,
+// parallel `#[path]` embedding of its own -- one embedding of
+// `differential.rs`, not two, so there is only ever one `ProgramCounts`
+// type in this binary's build graph. Two independent embeddings of the
+// same file compile as two distinct, incompatible types with the same
+// name, which a second, parallel `#[path] mod differential;` in
+// `crates/xtask` hit directly (E0308) before this was worked out.
+//
+// `#[allow(unused_imports, dead_code, ...)]`: this same module gets
+// embedded into two different binaries -- this file's own `--test`
+// target, where `differential.rs`'s own `#[test]` functions run and use
+// every import, and `crates/xtask`'s plain, non-test binary, where those
+// `#[test]` function bodies compile out entirely and the handful of
+// imports they alone used (`HashMap`, `classify`, `support::source`)
+// would otherwise warn as unused. The same shape `support/mod.rs`
+// documents on its own module doc comment, one level up.
 #[path = "differential.rs"]
-mod differential;
+#[allow(
+    unused_imports,
+    dead_code,
+    reason = "differential.rs's own #[test] functions, and the imports only they use, compile \
+              out entirely in a non-test embed (crates/xtask); the plain functions a non-test \
+              embed needs, program_counts and recovered_objects, stay live either way"
+)]
+pub(crate) mod differential;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -99,9 +123,52 @@ fn corpus_root() -> PathBuf {
 /// note, neither this file nor `crates/xtask` should reach into the
 /// other's own `tests/` directory, so the pin lives at the workspace root,
 /// one level above every crate.
-fn ratios_toml_path() -> PathBuf {
+///
+/// `pub(crate)`: `crates/xtask` reaches this through the same `#[path]`
+/// embedding used for [`format_entry`], so the writer and the gate can
+/// never disagree about which file either one means.
+pub(crate) fn ratios_toml_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/ratios.toml")
 }
+
+/// The exact header block `tests/ratios.toml` carries above its first
+/// entry, reproduced verbatim so `crates/xtask update-ratios` writes the
+/// identical bytes on every run. This file owns the constant; `xtask`
+/// reaches it through the same `#[path]` embedding as [`format_entry`].
+pub(crate) const HEADER: &str = r#"# The pinned procedure recovery ratio, one entry per corpus program.
+#
+# Object recovery is NOT pinned here. It is 105 of 105 across the whole
+# corpus with no variance (D-11): a pin on it could never move, so it could
+# never fail, and AGENTS.md calls a test that cannot fail worse than none.
+# `crates/deform6/tests/differential.rs` asserts object recovery as a
+# two-directional equality instead. The ratio this file pins is over
+# public procedures, where the variance is real: 24 distinct values from
+# 0.00 to 0.71 across these 44 programs.
+#
+# Each entry is keyed by the executable's path relative to `corpus/`,
+# quoted because a path holds spaces and forward slashes. Three corpus
+# directories hold more than one compiled program, so a key built from the
+# leaf directory name would collide; the full relative path never does.
+#
+# `recovered` is the count of public procedure names the library recovered.
+# `declared` is the count of procedure slots the compiled binary declares
+# over the same objects, including the slots the standard-module rule caps
+# (a `.bas` module carries no procedure name array at all, so its
+# procedures are name-less through the object table, not merely
+# prototype-less; stating the cap here rather than excluding it from the
+# denominator is the honest number, per CONTEXT.md's "What this phase must
+# not do"). `ratio` is `recovered / declared`, rounded to two decimal
+# places and recomputed from the two counts on every run: a hand-edited
+# ratio that disagrees with its own counts fails the same as an edited
+# count does.
+#
+# The totals over all 44 programs are 185 recovered and 904 declared.
+#
+# Rewrite this file with `cargo run -p xtask -- update-ratios`. Never edit
+# the counts by hand; a rewrite on a clean tree produces no diff, and that
+# is the check that the file and the tool agree.
+
+"#;
 
 /// One pinned entry: the two counts and the ratio text exactly as the file
 /// holds it, so a hand-edited ratio can be compared as text against the
@@ -289,7 +356,11 @@ fn counts_for(program: &Program, projects: &[PathBuf]) -> ProgramCounts {
 /// "declared": the binary's own procedure slots, plus the slots the
 /// standard-module rule caps. See `tests/ratios.toml`'s own header
 /// comment for why the cap is stated rather than excluded.
-fn declared_total(counts: &ProgramCounts) -> u32 {
+///
+/// `pub(crate)`: `crates/xtask` reaches this the same way it reaches
+/// [`format_entry`], so the writer never repeats this addition under its
+/// own, un-allow-listed `arithmetic_side_effects` lint.
+pub(crate) fn declared_total(counts: &ProgramCounts) -> u32 {
     counts.declared_by_binary + counts.capped_by_standard_module
 }
 
@@ -470,6 +541,18 @@ fn declared_mismatch_message(
             format_entry(key, measured_recovered, measured_declared)
         ),
     }
+}
+
+#[test]
+fn the_header_constant_matches_the_committed_files_own_header() {
+    let text = std::fs::read_to_string(ratios_toml_path())
+        .unwrap_or_else(|err| panic!("{}: {err}", ratios_toml_path().display()));
+    assert!(
+        text.starts_with(HEADER),
+        "HEADER must reproduce tests/ratios.toml's own header byte for byte, so \
+         crates/xtask update-ratios writes the identical file; HEADER holds {} bytes",
+        HEADER.len()
+    );
 }
 
 #[test]
