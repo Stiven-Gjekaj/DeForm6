@@ -1,0 +1,252 @@
+# The pinned procedure recovery ratio, one entry per corpus program.
+#
+# Object recovery is NOT pinned here. It is 105 of 105 across the whole
+# corpus with no variance (D-11): a pin on it could never move, so it could
+# never fail, and AGENTS.md calls a test that cannot fail worse than none.
+# `crates/deform6/tests/differential.rs` asserts object recovery as a
+# two-directional equality instead. The ratio this file pins is over
+# public procedures, where the variance is real: 24 distinct values from
+# 0.00 to 0.71 across these 44 programs.
+#
+# Each entry is keyed by the executable's path relative to `corpus/`,
+# quoted because a path holds spaces and forward slashes. Three corpus
+# directories hold more than one compiled program, so a key built from the
+# leaf directory name would collide; the full relative path never does.
+#
+# `recovered` is the count of public procedure names the library recovered.
+# `declared` is the count of procedure slots the compiled binary declares
+# over the same objects, including the slots the standard-module rule caps
+# (a `.bas` module carries no procedure name array at all, so its
+# procedures are name-less through the object table, not merely
+# prototype-less; stating the cap here rather than excluding it from the
+# denominator is the honest number, per CONTEXT.md's "What this phase must
+# not do"). `ratio` is `recovered / declared`, rounded to two decimal
+# places and recomputed from the two counts on every run: a hand-edited
+# ratio that disagrees with its own counts fails the same as an edited
+# count does.
+#
+# The totals over all 44 programs are 185 recovered and 904 declared.
+#
+# Rewrite this file with `cargo run -p xtask -- update-ratios`. Never edit
+# the counts by hand; a rewrite on a clean tree produces no diff, and that
+# is the check that the file and the tool agree.
+
+["public-domain/HexScroll/Hex Scroll.exe"]
+recovered = 0
+declared = 23
+ratio = 0.00
+
+["public-domain/LockWorkStation/LockWorkStation.exe"]
+recovered = 0
+declared = 1
+ratio = 0.00
+
+["public-domain/PassGen/PassGen.exe"]
+recovered = 5
+declared = 83
+ratio = 0.06
+
+["public-domain/SK-Gradient-Sample__VB6/demo/Project1.exe"]
+recovered = 0
+declared = 3
+ratio = 0.00
+
+["public-domain/SK-MCI-Sample__VB6/demo/Project1.exe"]
+recovered = 0
+declared = 33
+ratio = 0.00
+
+["public-domain/SK-TFTP-Sample__VB6/Client/demo/TFTPClient.exe"]
+recovered = 0
+declared = 15
+ratio = 0.00
+
+["public-domain/SK-TFTP-Sample__VB6/Server/demo/Server.exe"]
+recovered = 0
+declared = 6
+ratio = 0.00
+
+["public-domain/SK-Winsock-Sample__VB6/demo/SubReality_WinsockSample.exe"]
+recovered = 0
+declared = 5
+ratio = 0.00
+
+["public-domain/UUID2/VB6/UUID2.exe"]
+recovered = 4
+declared = 25
+ratio = 0.16
+
+["public-domain/dump/VB6/rot47/Rot47.exe"]
+recovered = 1
+declared = 10
+ratio = 0.10
+
+["public-domain/machineLanguageConversion/ASCII/Ascii.exe"]
+recovered = 1
+declared = 6
+ratio = 0.17
+
+["public-domain/machineLanguageConversion/Hex/Hex.exe"]
+recovered = 1
+declared = 7
+ratio = 0.14
+
+["public-domain/machineLanguageConversion/Octal/Octal.exe"]
+recovered = 1
+declared = 6
+ratio = 0.17
+
+["vb6-code/Artificial-life/Artificial Life.exe"]
+recovered = 13
+declared = 40
+ratio = 0.33
+
+["vb6-code/Blacklight-effect/Blacklight.exe"]
+recovered = 5
+declared = 22
+ratio = 0.23
+
+["vb6-code/Brightness-effect/Part 1 - Pure VB6/vbBrightness.exe"]
+recovered = 5
+declared = 7
+ratio = 0.71
+
+["vb6-code/Brightness-effect/Part 2 - API - GetPixel and SetPixel/apiBrightness.exe"]
+recovered = 5
+declared = 9
+ratio = 0.56
+
+["vb6-code/Brightness-effect/Part 4 - Even faster DIBs/Realtime_Brightness.exe"]
+recovered = 12
+declared = 19
+ratio = 0.63
+
+["vb6-code/Color-shift-effect/ColorShift.exe"]
+recovered = 5
+declared = 20
+ratio = 0.25
+
+["vb6-code/Colorize-effect/Colorize.exe"]
+recovered = 7
+declared = 30
+ratio = 0.23
+
+["vb6-code/Contrast-effect/Contrast.exe"]
+recovered = 5
+declared = 21
+ratio = 0.24
+
+["vb6-code/Curves-effect/Curves.exe"]
+recovered = 5
+declared = 27
+ratio = 0.19
+
+["vb6-code/Custom-image-filters/Custom_Filters.exe"]
+recovered = 6
+declared = 28
+ratio = 0.21
+
+["vb6-code/Diffuse-effect/Diffuse.exe"]
+recovered = 5
+declared = 26
+ratio = 0.19
+
+["vb6-code/Edge-detection/Edge_Detection.exe"]
+recovered = 6
+declared = 21
+ratio = 0.29
+
+["vb6-code/Emboss-engrave-effect/Emboss_Engrave.exe"]
+recovered = 12
+declared = 34
+ratio = 0.35
+
+["vb6-code/Fill-image-region/Filling.exe"]
+recovered = 0
+declared = 4
+ratio = 0.00
+
+["vb6-code/Fire-effect/Fast_Flames.exe"]
+recovered = 4
+declared = 18
+ratio = 0.22
+
+["vb6-code/Game-physics-basic/Physics_Demo.exe"]
+recovered = 1
+declared = 14
+ratio = 0.07
+
+["vb6-code/Gradient-2D/Gradient.exe"]
+recovered = 2
+declared = 11
+ratio = 0.18
+
+["vb6-code/Grayscale-effect/Grayscale.exe"]
+recovered = 12
+declared = 34
+ratio = 0.35
+
+["vb6-code/Hidden-Markov-model/HMM.exe"]
+recovered = 0
+declared = 12
+ratio = 0.00
+
+["vb6-code/Histograms-advanced/Advanced Histogram Viewer.exe"]
+recovered = 9
+declared = 37
+ratio = 0.24
+
+["vb6-code/Histograms-basic/Basic Histogram Viewer.exe"]
+recovered = 5
+declared = 26
+ratio = 0.19
+
+["vb6-code/Levels-effect/Image Levels.exe"]
+recovered = 5
+declared = 42
+ratio = 0.12
+
+["vb6-code/Mandelbrot/Mandelbrot.exe"]
+recovered = 0
+declared = 9
+ratio = 0.00
+
+["vb6-code/Map-editor-2D/Map Editor.exe"]
+recovered = 0
+declared = 36
+ratio = 0.00
+
+["vb6-code/Nature-effects/Nature_Filters.exe"]
+recovered = 16
+declared = 34
+ratio = 0.47
+
+["vb6-code/Randomize-effects/RandomizationFX.exe"]
+recovered = 12
+declared = 29
+ratio = 0.41
+
+["vb6-code/Scanner-TWAIN/VB_Scanner_Support.exe"]
+recovered = 0
+declared = 11
+ratio = 0.00
+
+["vb6-code/Screen-capture/ScreenCapture.exe"]
+recovered = 0
+declared = 5
+ratio = 0.00
+
+["vb6-code/Sepia-effect/Sepia.exe"]
+recovered = 5
+declared = 20
+ratio = 0.25
+
+["vb6-code/Threshold-effect/Threshold.exe"]
+recovered = 5
+declared = 23
+ratio = 0.22
+
+["vb6-code/Transparency-2D/Transparency.exe"]
+recovered = 5
+declared = 12
+ratio = 0.42
