@@ -1,0 +1,16 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+toml.workspace = true
+
+# The wall is opt-in per crate through this section. `xtask` carries it for
+# the same reason every other crate in this workspace does: a broken
+# developer tool should fail the gate like anything else here, and this is
+# the one place in the tree that would otherwise carry no wall at all.
+[lints]
+workspace = true
