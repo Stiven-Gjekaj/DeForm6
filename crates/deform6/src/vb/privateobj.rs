@@ -2,7 +2,16 @@
 //!
 //! This is OBJ-03 and OBJ-06: recover every public procedure name an object
 //! carries, and report a private procedure as private rather than inventing a
-//! name for it.
+//! name for it. It also carries `PrivateObj`'s `cnt_public_vars` field,
+//! explained rather than walked: see [`PrivateObj::gaps`].
+//!
+//! # A count this file cannot explain, carried as an open question
+//!
+//! Plan 02-05 owns the public variable half of this file, and it does not
+//! ship a `PubVarDesc` walk. `cnt_public_vars` does not count source-level
+//! `Public` declarations (D-14): [`PrivateObj::gaps`] carries a non-zero
+//! value to the report as an open question rather than an answer, and no
+//! function anywhere in this crate walks `lpPublicVars`.
 //!
 //! # Two null cases, not one
 //!
@@ -149,16 +158,36 @@ impl ObjectInfo {
 pub enum PrivateObj {
     /// The object carries a real `PrivateObj`.
     Present {
-        /// The number of entries in the `PubVarDesc` array.
+        /// The number of entries in the `PubVarDesc` array, as
+        /// `STRUCTURES.md` section 6.1 names it.
         ///
         /// **Distrust this field.** Per decision D-14, it does not count
-        /// source-level `Public variable As Type` declarations. Measured:
-        /// `pdOpenSaveDialog.cls`, present in 15 of the 44 corpus programs,
-        /// declares zero such lines (only a `Public Enum`), and every corpus
-        /// binary reports `cnt_public_vars` of `4` for it regardless. This
-        /// field is carried, unexplained, for plan 02-05 to own. Nothing
-        /// downstream should be built on the assumption that it means what
-        /// its name says.
+        /// source-level `Public variable As Type` declarations, and no
+        /// stride hypothesis over `lpPublicVars` ever converges against it
+        /// (`STRUCTURES.md` section 11, gap 8, stays open). Three measured
+        /// counter-examples, each against a source file this repository
+        /// vendors beside the binary that reports it:
+        ///
+        /// - `pdOpenSaveDialog.cls`, present in 15 of the 44 corpus
+        ///   programs, declares zero `Public variable As Type` lines (only
+        ///   a `Public Enum`), and every corpus binary reports `4`.
+        /// - `frmMain.frm` in `Artificial-life` declares zero `Public`
+        ///   anything and reports `5`, while carrying 10 top-level named
+        ///   controls.
+        /// - `Organism.cls` in `Artificial-life` declares 17 real public
+        ///   variables, some on comma-joined lines, and reports `23`.
+        ///
+        /// This is the same shape `wCompiledObjects` turned out to be
+        /// (`CONTEXT.md`, "One field to distrust by default"): a rounded
+        /// capacity, not a count, found only because a project declaring
+        /// one or two objects reported four. The resolution path is a
+        /// controlled compile-and-diff experiment against a class with a
+        /// known, isolated set of `Public` declarations, never more reading
+        /// of this document. This field is carried, unexplained;
+        /// [`PrivateObj::gaps`] surfaces a non-zero value to the report as
+        /// an open question rather than an answer. Nothing downstream
+        /// should be built on the assumption that it means what its name
+        /// says.
         cnt_public_vars: u16,
         /// The number of entries in the `EventDesc` array.
         ///
@@ -181,9 +210,11 @@ pub enum PrivateObj {
         lp_events_type_info: Va,
         /// The address of the `PubVarDesc` array.
         ///
-        /// Carried for plan 02-05, which owns the record stride and the
-        /// explanation of `cnt_public_vars`. This file claims nothing about
-        /// either.
+        /// `STRUCTURES.md` gap 8 records that no record stride hypothesis
+        /// over this array converges against the corpus. No function in
+        /// this crate walks it; [`PrivateObj::gaps`] is the only thing this
+        /// file does with it, and that is to say a non-zero
+        /// `cnt_public_vars` is a fact nobody has explained yet.
         lp_public_vars: Va,
     },
     /// The object carries no `PrivateObj`. This is the standard-module case.
@@ -239,6 +270,65 @@ impl PrivateObj {
             )?,
         })
     }
+
+    /// Gives the raw `cntPublicVars` field this object's `PrivateObj`
+    /// carries, or `None` for a standard module, which has no `PrivateObj`
+    /// to carry it.
+    ///
+    /// Named after the field, not after what the field is supposed to
+    /// mean: this gives the count the structure holds, and per D-14 that
+    /// count is not a number of recovered public variables. See the doc
+    /// comment on `cnt_public_vars` inside [`PrivateObj::Present`] for the
+    /// three measured counter-examples that make the distrust necessary.
+    #[must_use]
+    pub fn public_var_field(&self) -> Option<u16> {
+        match self {
+            Self::Present {
+                cnt_public_vars, ..
+            } => Some(*cnt_public_vars),
+            Self::Absent => None,
+        }
+    }
+
+    /// Gives this object's open questions about its `PrivateObj` fields.
+    ///
+    /// Today this is exactly one question, when it applies at all: per
+    /// D-14, [`Self::public_var_field`] does not count source-level
+    /// `Public` declarations, and this file does not know what it counts.
+    /// A standard module and an object whose count is `0` both give an
+    /// empty list. A `0` agrees, trivially, with "zero declared public
+    /// variables", so it raises no question worth reporting; a non-zero
+    /// count is the fact this plan cannot explain, and it reaches the
+    /// report as a [`Gap`] rather than silently.
+    ///
+    /// Plan 02-10 prints this list next to the object it belongs to. This
+    /// function resolves nothing about the gap; it only says that one
+    /// exists.
+    #[must_use]
+    pub fn gaps(&self) -> Vec<Gap> {
+        match self.public_var_field() {
+            Some(count) if count != 0 => vec![Gap::UnexplainedPublicVarCount(count)],
+            Some(_) | None => Vec::new(),
+        }
+    }
+}
+
+/// An open question one object's `PrivateObj` fields raise, carried to the
+/// report as a fact to investigate rather than answered by a guess.
+///
+/// Nothing in this crate resolves a `Gap`. It exists so the report can say
+/// plainly what DeForm6 does not know, per D-07: an unresolved structure is
+/// a reported gap, not an implementation written from a figure and never
+/// exercised.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gap {
+    /// `cnt_public_vars` is non-zero, and per D-14 that count does not name
+    /// a number of source-level `Public` declarations. `STRUCTURES.md`
+    /// gap 8 records the record stride behind `lpPublicVars` as unresolved:
+    /// no fixed or type-conditional stride closes cleanly over the corpus.
+    /// This carries the raw count and nothing else; no variable name is
+    /// claimed from it.
+    UnexplainedPublicVarCount(u16),
 }
 
 /// One procedure slot: a recovered public name, or a private procedure.
@@ -562,7 +652,7 @@ fn va_at(window: &Region<'_>, at: u32, what: &'static str) -> Result<Va, Refusal
 )]
 mod tests {
     use super::{
-        OBJECT_INFO_SIZE, ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureCounts,
+        Gap, OBJECT_INFO_SIZE, ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureCounts,
         ProcedureList,
     };
     use crate::error::Refusal;
@@ -596,6 +686,64 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/../../corpus/vb6-code/Mandelbrot/Mandelbrot.exe"
     ));
+
+    /// The program this plan's `cnt_public_vars` counter-examples are
+    /// measured against, alongside `Grayscale.exe` above. `frmMain` and
+    /// `Organism` are two of its objects.
+    const ARTIFICIAL_LIFE: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/vb6-code/Artificial-life/Artificial Life.exe"
+    ));
+
+    /// `Artificial-life`'s `frmMain.frm`, read directly per `AGENTS.md`'s
+    /// "build the state that a test needs inside the test": the declared
+    /// count below is counted from these bytes, not copied from a document.
+    const ARTIFICIAL_LIFE_FRM_MAIN_SRC: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/vb6-code/Artificial-life/frmMain.frm"
+    ));
+
+    /// `Artificial-life`'s `Organism.cls`, read for the same reason.
+    const ARTIFICIAL_LIFE_ORGANISM_SRC: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/vb6-code/Artificial-life/Organism.cls"
+    ));
+
+    /// `Grayscale-effect`'s `pdOpenSaveDialog.cls`, read for the same
+    /// reason.
+    const GRAYSCALE_PD_OPEN_SAVE_DIALOG_SRC: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/vb6-code/Grayscale-effect/pdOpenSaveDialog.cls"
+    ));
+
+    /// Counts source-level `Public variable As Type` declarations in a
+    /// `.frm`/`.cls` source file, the way `CONTEXT.md`'s own measurement
+    /// script counted them: a line beginning `Public `, whose next word is
+    /// not a declaration keyword that is not a variable (`Sub`, `Function`,
+    /// `Property`, `Enum`, `Type`, `Const`, `Event`, `Declare`), counts one
+    /// variable per comma-separated name on that line, matching lines such
+    /// as `Public oX As Long, oY As Long`.
+    ///
+    /// Read with `char::from(byte)`, per phase 1's Latin-1 rule, matching
+    /// every other string read in this crate.
+    fn count_declared_public_variables(source: &[u8]) -> usize {
+        const NOT_A_VARIABLE: [&str; 8] = [
+            "Sub", "Function", "Property", "Enum", "Type", "Const", "Event", "Declare",
+        ];
+        let text: String = source.iter().copied().map(char::from).collect();
+        let mut count = 0_usize;
+        for line in text.lines() {
+            let Some(rest) = line.trim_start().strip_prefix("Public ") else {
+                continue;
+            };
+            let keyword = rest.split_whitespace().next().unwrap_or("");
+            if NOT_A_VARIABLE.contains(&keyword) {
+                continue;
+            }
+            count += 1 + rest.matches(',').count();
+        }
+        count
+    }
 
     /// Gives the address of `ProjectInfo` that the file itself holds.
     fn project_data_va(data: &[u8]) -> Va {
@@ -945,5 +1093,110 @@ mod tests {
                 no_name_array: true,
             }
         );
+    }
+
+    /// Gives the `PrivateObj` one named object of one program carries.
+    /// Panics if the object is a module (no `PrivateObj` to give) or if the
+    /// name does not appear in the program at all, both of which would be a
+    /// broken fixture rather than a measured result.
+    fn private_obj_of(data: &[u8], name: &str) -> PrivateObj {
+        let objs = objects(data);
+        let object = objs
+            .iter()
+            .find(|object| object.name == name)
+            .unwrap_or_else(|| panic!("no object named {name} in this fixture"));
+        let image = PeImage::parse(data).unwrap();
+        let info = ObjectInfo::read(&image, object.lp_object_info).unwrap();
+        PrivateObj::read(&image, info.lp_private_object).unwrap()
+    }
+
+    /// `pdOpenSaveDialog.cls`, present in 15 of the 44 corpus programs,
+    /// declares zero source-level `Public variable As Type` lines, only a
+    /// `Public Enum`. Every corpus binary, `Grayscale.exe` included, reports
+    /// `cnt_public_vars` of `4` for it regardless. Per D-14, this is the
+    /// first of the three measured counter-examples that prove the field
+    /// does not count what its name says.
+    #[test]
+    fn grayscale_pd_open_save_dialog_public_var_count_disagrees_with_its_source() {
+        let declared = count_declared_public_variables(GRAYSCALE_PD_OPEN_SAVE_DIALOG_SRC);
+        assert_eq!(
+            declared, 0,
+            "pdOpenSaveDialog.cls declares no source-level Public variable, only a Public Enum"
+        );
+
+        match private_obj_of(GRAYSCALE, "pdOpenSaveDialog") {
+            PrivateObj::Present {
+                cnt_public_vars, ..
+            } => assert_eq!(cnt_public_vars, 4),
+            PrivateObj::Absent => panic!("pdOpenSaveDialog is a class, not a module"),
+        }
+    }
+
+    /// `frmMain.frm` in `Artificial-life` declares zero `Public` anything,
+    /// while carrying 10 top-level named controls, and reports
+    /// `cnt_public_vars` of `5`. The second measured counter-example.
+    #[test]
+    fn artificial_life_frm_main_public_var_count_disagrees_with_its_source() {
+        let declared = count_declared_public_variables(ARTIFICIAL_LIFE_FRM_MAIN_SRC);
+        assert_eq!(
+            declared, 0,
+            "frmMain.frm declares no source-level Public variable at all"
+        );
+
+        match private_obj_of(ARTIFICIAL_LIFE, "frmMain") {
+            PrivateObj::Present {
+                cnt_public_vars, ..
+            } => assert_eq!(cnt_public_vars, 5),
+            PrivateObj::Absent => panic!("frmMain is a form, not a module"),
+        }
+    }
+
+    /// `Organism.cls` in `Artificial-life` declares 17 real public
+    /// variables, some on comma-joined lines, and reports `cnt_public_vars`
+    /// of `23`. The third measured counter-example: not merely absent from
+    /// an over-count, but a genuine, non-zero declared count that still
+    /// disagrees with the binary's number.
+    #[test]
+    fn artificial_life_organism_public_var_count_disagrees_with_its_source() {
+        let declared = count_declared_public_variables(ARTIFICIAL_LIFE_ORGANISM_SRC);
+        assert_eq!(
+            declared, 17,
+            "Organism.cls declares 17 real Public variables, some on comma-joined lines"
+        );
+
+        match private_obj_of(ARTIFICIAL_LIFE, "Organism") {
+            PrivateObj::Present {
+                cnt_public_vars, ..
+            } => assert_eq!(cnt_public_vars, 23),
+            PrivateObj::Absent => panic!("Organism is a class, not a module"),
+        }
+    }
+
+    /// The covering test this plan's own deliberate breakage found missing:
+    /// see this plan's SUMMARY for the breakage that produced no failure
+    /// without this test. A non-zero `cnt_public_vars` produces exactly one
+    /// [`Gap`], naming that count; a zero count, and the absent state, both
+    /// produce no gap at all.
+    #[test]
+    fn the_gap_list_is_non_empty_exactly_when_the_public_var_count_is_non_zero() {
+        let non_zero = PrivateObj::Present {
+            cnt_public_vars: 4,
+            cnt_events: 0,
+            lp_func_type_info: Va::new(0),
+            lp_events_type_info: Va::new(0),
+            lp_public_vars: Va::new(0),
+        };
+        assert_eq!(non_zero.gaps(), vec![Gap::UnexplainedPublicVarCount(4)]);
+
+        let zero = PrivateObj::Present {
+            cnt_public_vars: 0,
+            cnt_events: 0,
+            lp_func_type_info: Va::new(0),
+            lp_events_type_info: Va::new(0),
+            lp_public_vars: Va::new(0),
+        };
+        assert!(zero.gaps().is_empty());
+
+        assert!(PrivateObj::Absent.gaps().is_empty());
     }
 }
