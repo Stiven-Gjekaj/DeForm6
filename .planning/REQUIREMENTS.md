@@ -111,7 +111,7 @@ Version 1 recovers metadata. It does not recover statements.
       selects the one whose `ExeName32` names the executable under test.
 - [x] **VER-04**: What the compiler does not keep is excluded by a written
       rule, not by a per-program allowance.
-- [ ] **VER-05**: A recovery ratio per program is pinned in the repository. A
+- [x] **VER-05**: A recovery ratio per program is pinned in the repository. A
       fall fails the build and names what went missing. A rise fails the build
       and prints the new value to record.
 - [ ] **VER-06**: The known defect in `frmHMM.frx` is excluded by name, with
@@ -157,8 +157,8 @@ Deferred. Tracked, not in this roadmap.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | DET-01 to DET-06 | Phase 1 | Complete |
-| OBJ-01 to OBJ-06 | Phase 2 | In Progress |
-| VER-01 to VER-05 | Phase 2 | Pending |
+| OBJ-01 to OBJ-06 | Phase 2 | Complete |
+| VER-01 to VER-05 | Phase 2 | Complete |
 | FRM-01 to FRM-06 | Phase 3 | Pending |
 | VER-06 | Phase 3 | Pending |
 | WRT-01 to WRT-07 | Phase 4 | Pending |

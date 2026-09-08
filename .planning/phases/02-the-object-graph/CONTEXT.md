@@ -284,3 +284,22 @@ entries are all uninitialised, or whether some carry an encoding this project
 has not recognised, is not established. Plan 02-03's executor owns it. Report
 an unresolvable entry as a gap with its raw value, never as a name and never
 silently as a private procedure.
+
+## Carried into phase 4: `ByVal` is not printed
+
+Verified after the phase completed, against the original source of
+`Grayscale-effect`:
+
+    source     Public Function ByteMeL(ByVal tempVar As Long) As Byte
+    recovered  ByteMeL(tempVar As Long) As Byte
+
+The convention the tool uses is self consistent. `ByRef` is printed, and
+`ByVal` is implied by its absence, which is correct because Visual Basic 6
+passes by reference when the keyword is missing.
+
+It is not sufficient for phase 4. WRT-07 writes a procedure that VB6 must
+accept, and a reader of the generated source cannot tell an argument the tool
+knew was `ByVal` from one it said nothing about. **The generated signature must
+name `ByVal` explicitly.**
+
+The recovery itself is correct. Only the printed form is short.

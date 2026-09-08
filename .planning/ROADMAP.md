@@ -199,8 +199,8 @@ Plans:
 - [x] 02-06-PLAN.md - The `Declare` import table and the external component table
 - [x] 02-07-PLAN.md - Harness support - `support/vbp.rs`, an independent reader, and `support/rules.rs`, the exclusion rules
 - [x] 02-08-PLAN.md - `differential.rs` - the gate over all 44 corpus programs
-- [ ] 02-09-PLAN.md - `ratios.toml`, the exact pin, the two failure messages, and `xtask update-ratios`
-- [ ] 02-10-PLAN.md - `inspect` reports the object graph
+- [x] 02-09-PLAN.md - `ratios.toml`, the exact pin, the two failure messages, and `xtask update-ratios`
+- [x] 02-10-PLAN.md - `inspect` reports the object graph
 
 **Waves**: [02-01, 02-06, 02-07] then [02-02, 02-03] then [02-04, 02-05] then [02-08] then [02-09, 02-10]
 
