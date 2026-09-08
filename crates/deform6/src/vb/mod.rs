@@ -20,11 +20,81 @@ pub mod runtime;
 
 pub use crate::error::Refusal;
 
+use crate::error::{Defect, DefectKind, Site};
 use crate::read::pe::PeImage;
-use crate::read::region::Off;
+use crate::read::region::{Off, Rva, Va};
+use classify::ObjectKind;
+use functyp::{FuncTypeWalk, ProcedureSignature, Prototype, PrototypeList};
 use header::{VbHeader, header_region};
-use project::{ObjectTableHead, ProjectInfo};
+use object::{Object, ObjectTable};
+use privateobj::{Gap, ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureList};
+use project::{Component, ComponentTable, Declaration, DeclareTable, ObjectTableHead, ProjectInfo};
 use runtime::{Runtime, runtime_of};
+
+/// One procedure slot, composed from two arrays that share one length
+/// (`Object.proc_count`) and resolve independently.
+///
+/// [`privateobj::ProcedureList`] gives the recovered name or the fact that
+/// the slot is private; [`functyp::FuncTypeWalk`] gives the prototype at the
+/// same index, when its own array resolved. One can succeed while the other
+/// does not, so the join keeps the name and the prototype as two facts, not
+/// one.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ProcedureEntry {
+    /// A recovered public procedure name.
+    Public {
+        /// The name, resolved from `Object.lpProcNamesArray`.
+        name: String,
+        /// The argument list, the modifiers and the return type, when
+        /// `PrivateObj.lpFuncTypeInfo`'s entry at the same index resolved.
+        /// `None` when it did not, or when this object carries no
+        /// `PrivateObj` at all to read it from.
+        prototype: Option<Prototype>,
+    },
+    /// A private procedure, or a name-array entry this file could not
+    /// validate as a name. Per OBJ-06, nothing is invented: no name, no
+    /// index number, no placeholder.
+    Private,
+}
+
+/// The procedure slots one object carries, or the fact that it carries none
+/// through this structure at all.
+///
+/// Kept apart per D-13, matching [`privateobj::ProcNames`]'s own two states:
+/// an empty list and "there is no array to read names from" are different
+/// facts about the file, and collapsing them loses the standard-module cap.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ObjectProcedures {
+    /// One [`ProcedureEntry`] per declared slot, in array order.
+    Slots(Vec<ProcedureEntry>),
+    /// The object carries no procedure name array at all. The
+    /// standard-module cap, D-10: `proc_count` is the real number of
+    /// procedures the object declares, and there is nothing here to print a
+    /// name for any of them.
+    NoNameArray {
+        /// The number of procedures the object declares.
+        proc_count: u32,
+    },
+}
+
+/// One object in the object graph: OBJ-01 through OBJ-04 and OBJ-06 in one
+/// value.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ObjectReport {
+    /// The object's name, resolved by `vb/object.rs`. Empty when the name
+    /// pointer did not resolve; see [`Report::defects`] for the reason.
+    pub name: String,
+    /// A form, a standard module, a class, or a raw value this corpus has
+    /// not measured yet. Per D-08, an unknown kind is never a refusal.
+    pub kind: ObjectKind,
+    /// Every procedure slot this object declares, joined from the name array
+    /// and the type descriptor array.
+    pub procedures: ObjectProcedures,
+    /// The open questions this object's `PrivateObj` fields raise, per D-14.
+    /// Empty for a standard module, which carries no `PrivateObj` to raise
+    /// one.
+    pub gaps: Vec<Gap>,
+}
 
 /// What DeForm6 read out of one executable.
 ///
@@ -57,7 +127,14 @@ use runtime::{Runtime, runtime_of};
 /// machine readable form yet. Phase 4 introduces the confidence report, which
 /// is the project's machine readable surface, and one schema introduced once
 /// is cheaper than two kept in step.
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// # `Eq` is not derived
+///
+/// [`functyp::DefaultValue::Single`] carries an `f32`, which has no total
+/// order and does not implement `Eq`. `PartialEq` is enough for every
+/// `assert_eq!` this crate's tests use, on this type and on
+/// `Result<Report, Refusal>` alike.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Report {
     /// The real length of the byte slice the caller gave the library.
     pub file_len: u32,
@@ -95,6 +172,29 @@ pub struct Report {
     /// [`ObjectTableHead`] for the measurement that decided which of the two
     /// count fields in the object table answers this question.
     pub object_count: u16,
+    /// Every object the project declares, in object array order.
+    ///
+    /// Serves OBJ-01 through OBJ-04 and OBJ-06: each one carries the name and
+    /// the kind [`object::ObjectTable::walk`] and [`classify::classify`]
+    /// give it, plus the procedures this phase joined from the name array
+    /// and the type descriptor array.
+    pub objects: Vec<ObjectReport>,
+    /// Every external `Declare` statement the project imports, per OBJ-05.
+    ///
+    /// Only the entries the file marks external; an internal entry is
+    /// resolved inside the runtime and is never in this list.
+    pub declarations: Vec<Declaration>,
+    /// Every OCX or type library component a form in this project
+    /// references, read from the external component table.
+    pub components: Vec<Component>,
+    /// Every recoverable defect this run collected, across every structure
+    /// this phase reads.
+    ///
+    /// `WINDOWS.md` finding 3: before this field existed, `inspect` collected
+    /// these and had nowhere to put them, because `Report` needed to
+    /// `derive(PartialEq)` and `Defect` could not. Fixed in `error.rs`, this
+    /// plan.
+    pub defects: Vec<Defect>,
 }
 
 /// Reads one executable and reports what it holds.
@@ -135,6 +235,30 @@ pub fn inspect(data: &[u8]) -> Result<Report, Refusal> {
     // Read before the name moves out of `table`.
     let object_count = table.object_count();
 
+    let mut defects: Vec<Defect> = Vec::new();
+    defects.extend(table.defects().iter().cloned());
+
+    // The object array walk is on the spine: an unmapped array pointer or a
+    // truncated element refuses the file, unchanged from phase 1's own
+    // `ObjectTableHead::read`. Every recoverable failure inside one already
+    // reached object (a name, a `PrivateObj`, a type descriptor) is a
+    // defect on that object, collected below, and never a refusal.
+    let object_table = ObjectTable::walk(&pe, info.lp_object_table, &table)?;
+    defects.extend(object_table.defects().iter().cloned());
+
+    let objects: Vec<ObjectReport> = object_table
+        .objects
+        .iter()
+        .map(|object| compose_object(&pe, object, &mut defects))
+        .collect();
+
+    let declare_table = DeclareTable::read(&pe, &info);
+    defects.extend(declare_table.defects().iter().cloned());
+
+    let component_table =
+        ComponentTable::read(&pe, header.lp_external_table, header.w_external_count);
+    defects.extend(component_table.defects().iter().cloned());
+
     Ok(Report {
         // The saturating conversions over-report a slice larger than 4 GiB
         // and a section table longer than 65535 entries. Neither is reachable
@@ -153,7 +277,146 @@ pub fn inspect(data: &[u8]) -> Result<Report, Refusal> {
         help_file: header.help_file,
         native: info.mode() == project::CompileMode::Native,
         object_count,
+        objects,
+        declarations: declare_table.declarations,
+        components: component_table.components,
+        defects,
     })
+}
+
+/// Composes one object's kind, its procedures and its open questions.
+///
+/// A leaf-pointer failure anywhere in this function is a defect on `object`,
+/// pushed onto `defects`, and never loses the object's other fields: the
+/// caller still gets the object's name, its kind and whatever this function
+/// could still read.
+fn compose_object(pe: &PeImage<'_>, object: &Object, defects: &mut Vec<Defect>) -> ObjectReport {
+    let kind = classify::classify(object.f_object_type);
+    let private = read_private(pe, object, defects);
+
+    let proc_list = ProcedureList::read(pe, object);
+    defects.extend(proc_list.defects().iter().cloned());
+    let proto_walk = FuncTypeWalk::read(pe, object, &private);
+    defects.extend(proto_walk.defects().iter().cloned());
+
+    let gaps = private.gaps();
+    let procedures = compose_procedures(proc_list.procs, proto_walk.signatures);
+
+    ObjectReport {
+        name: object.name.clone(),
+        kind,
+        procedures,
+        gaps,
+    }
+}
+
+/// Reads `ObjectInfo` and `PrivateObj` for one object, converting either
+/// pointer's failure into a defect rather than a refusal of the whole file.
+///
+/// # No corpus program exercises this path
+///
+/// Every one of the 105 objects across all 44 vendored programs resolves
+/// both `ObjectInfo` and `PrivateObj` cleanly. This function exists for the
+/// hostile file the corpus does not contain, per `AGENTS.md`'s "no panic on
+/// any input, ever": `Object.lpObjectInfo` and `ObjectInfo.lpPrivateObject`
+/// are each a leaf pointer relative to the object that carries them, exactly
+/// like the name pointer `vb/object.rs` already treats as recoverable, and
+/// losing either one must not lose the object.
+fn read_private(pe: &PeImage<'_>, object: &Object, defects: &mut Vec<Defect>) -> PrivateObj {
+    let info = match ObjectInfo::read(pe, object.lp_object_info) {
+        Ok(info) => info,
+        Err(_) => {
+            defects.push(unreadable_pointer(
+                pe,
+                object.lp_object_info,
+                "Object",
+                "lpObjectInfo",
+            ));
+            return PrivateObj::Absent;
+        }
+    };
+
+    match PrivateObj::read(pe, info.lp_private_object) {
+        Ok(private) => private,
+        Err(_) => {
+            defects.push(unreadable_pointer(
+                pe,
+                Va::new(info.lp_private_object),
+                "ObjectInfo",
+                "lpPrivateObject",
+            ));
+            PrivateObj::Absent
+        }
+    }
+}
+
+/// Builds the defect for a leaf pointer this file could not follow.
+///
+/// `offset` is `0`: the byte position the pointer itself was read from is
+/// not carried by [`Object`] or [`ObjectInfo`] once composition reaches this
+/// function. This is the same fallback `vb/object.rs`'s own `read_name` uses
+/// (`.map_or(0, Off::get)`) whenever a file offset is unavailable; the
+/// virtual address, in both `kind.va` and `site.rva`, is what a reader uses
+/// to find the byte in question.
+fn unreadable_pointer(
+    pe: &PeImage<'_>,
+    va: Va,
+    structure: &'static str,
+    field: &'static str,
+) -> Defect {
+    Defect {
+        site: Site {
+            offset: 0,
+            rva: va.to_rva(pe.image_base()).map(Rva::get),
+            structure,
+            field,
+        },
+        kind: DefectKind::UnreadablePointer {
+            offset: 0,
+            va: va.get(),
+        },
+    }
+}
+
+/// Joins the recovered names with the recovered prototypes, by index, over
+/// the same `Object.proc_count` length both arrays share.
+///
+/// A slot's name comes from `Object.lpProcNamesArray`
+/// ([`privateobj::ProcedureList`]) and its prototype comes from
+/// `PrivateObj.lpFuncTypeInfo` ([`functyp::FuncTypeWalk`]): two different
+/// arrays that can resolve independently. When the prototype array itself
+/// carries no slots for this object (`PrototypeList::NoPrivateObject` or
+/// `PrototypeList::NoFuncTypeArray`, neither observed anywhere in this
+/// corpus), every entry's prototype is `None` and its name still prints.
+fn compose_procedures(names: ProcNames, prototypes: PrototypeList) -> ObjectProcedures {
+    let slots = match names {
+        ProcNames::NoNameArray { proc_count } => {
+            return ObjectProcedures::NoNameArray { proc_count };
+        }
+        ProcNames::Slots(slots) => slots,
+    };
+
+    let proto_slots = match prototypes {
+        PrototypeList::Slots(proto_slots) => proto_slots,
+        PrototypeList::NoPrivateObject { .. } | PrototypeList::NoFuncTypeArray { .. } => Vec::new(),
+    };
+
+    let entries = slots
+        .into_iter()
+        .enumerate()
+        .map(|(index, proc)| match proc {
+            Procedure::Public(name) => {
+                let prototype = proto_slots.get(index).and_then(|sig| match sig {
+                    ProcedureSignature::Prototype(prototype) => Some(prototype.clone()),
+                    ProcedureSignature::NoDescriptor | ProcedureSignature::Unrecoverable => None,
+                });
+                ProcedureEntry::Public { name, prototype }
+            }
+            Procedure::Private => ProcedureEntry::Private,
+        })
+        .collect();
+
+    ObjectProcedures::Slots(entries)
 }
 
 #[cfg(test)]
@@ -166,9 +429,14 @@ pub fn inspect(data: &[u8]) -> Result<Report, Refusal> {
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{Refusal, Report, inspect};
+    use super::{ObjectProcedures, ProcedureEntry, Refusal, Report, inspect};
+    use crate::error::DefectKind;
     use crate::read::pe::PeImage;
     use crate::read::region::Off;
+    use crate::vb::classify::ObjectKind;
+    use crate::vb::header::{VbHeader, header_region};
+    use crate::vb::privateobj::Gap;
+    use crate::vb::project::{ObjectTableHead, ProjectInfo};
 
     /// The corpus program this module reads.
     ///
@@ -178,6 +446,24 @@ mod tests {
     const MANDELBROT: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../corpus/vb6-code/Mandelbrot/Mandelbrot.exe"
+    ));
+
+    /// The program whose object count and object capacity differ: one form
+    /// and two classes declared, a capacity of 4. `frmGrayscale` recovers 8
+    /// of its 20 public names, `pdOpenSaveDialog` 0 of 6, `FastDrawing` 4 of
+    /// 8: twelve of thirty-four, and eight of its nine `Declare` entries are
+    /// external. `[VERIFIED: local]` against the real corpus file.
+    const GRAYSCALE: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/vb6-code/Grayscale-effect/Grayscale.exe"
+    ));
+
+    /// The program with two standard modules: `Declaration_Module`
+    /// (`proc_count` 1) and `Sub_Module` (`proc_count` 7), neither reachable
+    /// through this structure at all. `[VERIFIED: local]`
+    const MAP_EDITOR: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/vb6-code/Map-editor-2D/Map Editor.exe"
     ));
 
     /// Gives a copy of `data` whose first imported DLL name is `replacement`.
@@ -300,21 +586,6 @@ mod tests {
         assert_eq!(inspect(&bytes), Err(Refusal::IsVb5));
     }
 
-    /// `assert_eq!` on a `Result<Report, Refusal>` needs both sides to
-    /// compare, so `Report` must derive `PartialEq`, `Eq` and `Debug`.
-    ///
-    /// A missing derive on the success side of the `Result` is a compile
-    /// error that costs a cycle, and RESEARCH.md section 7.2 records it
-    /// happening. This test is the instrument that keeps the derives.
-    #[test]
-    fn a_result_of_a_report_compares_and_prints() {
-        let report = mandelbrot_report();
-        let same: Result<Report, Refusal> = Ok(report.clone());
-        assert_eq!(same, Ok(report.clone()));
-        assert_ne!(same, Err(Refusal::NotPe));
-        assert!(format!("{report:?}").contains("Mandelbrot"));
-    }
-
     /// The report describes the slice the caller handed in.
     #[test]
     fn the_report_measures_the_slice_it_was_given() {
@@ -325,5 +596,277 @@ mod tests {
             report.section_count,
             u16::try_from(image.sections().len()).unwrap()
         );
+    }
+
+    /// Gives the address of `ProjectInfo` that the file itself holds.
+    ///
+    /// A second copy of the helper `vb/object.rs`'s own test module holds,
+    /// written on purpose, per `AGENTS.md`: a test builds the state it
+    /// needs, and a shared fixture module would let a change to one file's
+    /// tests silently break another's.
+    fn project_data_va(data: &[u8]) -> crate::read::region::Va {
+        let image = PeImage::parse(data).unwrap();
+        let hdr = header_region(&image).unwrap();
+        VbHeader::read(&hdr).unwrap().lp_project_data
+    }
+
+    /// Gives the address of the object table that the file itself holds.
+    fn object_table_va(data: &[u8]) -> crate::read::region::Va {
+        let image = PeImage::parse(data).unwrap();
+        ProjectInfo::read(&image, project_data_va(data))
+            .unwrap()
+            .lp_object_table
+    }
+
+    /// Gives the absolute file offset of a field inside the object table.
+    fn object_table_field_offset(data: &[u8], field: u32) -> usize {
+        let image = PeImage::parse(data).unwrap();
+        let window = image.region_at_va(object_table_va(data)).unwrap();
+        let at = window.file_offset(Off::new(field)).unwrap();
+        usize::try_from(at.get()).unwrap()
+    }
+
+    /// Copies `data` and writes a `u16` at an absolute file offset.
+    fn with_u16_at(data: &[u8], at: usize, value: u16) -> Vec<u8> {
+        let mut out = data.to_vec();
+        assert_ne!(
+            out[at..at + 2],
+            value.to_le_bytes(),
+            "the fixture writes the value the field already holds, so it proves nothing"
+        );
+        out[at..at + 2].copy_from_slice(&value.to_le_bytes());
+        out
+    }
+
+    /// `WINDOWS.md` finding 3, closed: `Report` carries the defects
+    /// `inspect` collected instead of dropping them.
+    ///
+    /// `Grayscale.exe` declares three objects (`wTotalObjects` 3) and its
+    /// object array holds room for four (`wCompiledObjects` 4). That
+    /// direction is normal, per `vb/project.rs`'s own `count_defects`, and
+    /// produces no defect on a clean corpus file. The disagreement
+    /// `ObjectTableHead::defects` actually reports is the other direction: a
+    /// capacity **below** the count. Patched here to `1`, which is below the
+    /// real `wTotalObjects` of `3`, this is the one shape of that structure's
+    /// own defect a corpus file can be made to produce, and it is what the
+    /// test proves reaches `Report.defects`.
+    #[test]
+    fn a_capacity_below_the_object_count_reaches_the_caller_as_a_defect() {
+        let at = object_table_field_offset(GRAYSCALE, 0x2C);
+        let bytes = with_u16_at(GRAYSCALE, at, 1);
+
+        let report = inspect(&bytes).unwrap();
+        let defect = report
+            .defects
+            .iter()
+            .find(|d| matches!(d.kind, DefectKind::CountMismatch { .. }))
+            .expect("the patched capacity must produce a CountMismatch defect on Report.defects");
+        assert!(matches!(
+            defect.kind,
+            DefectKind::CountMismatch {
+                count: 1,
+                expected: 3,
+                ..
+            }
+        ));
+    }
+
+    /// `assert_eq!` on a `Result<Report, Refusal>` needs both sides to
+    /// compare, so `Report` must derive `PartialEq` and `Debug`. `Report`
+    /// does not derive `Eq`: `functyp::DefaultValue::Single` carries an
+    /// `f32`, which has none, and `assert_eq!` never needs it.
+    ///
+    /// A missing derive on the success side of the `Result` is a compile
+    /// error that costs a cycle, and RESEARCH.md section 7.2 records it
+    /// happening. This test is the instrument that keeps the derive.
+    #[test]
+    fn a_report_with_the_full_object_graph_still_compares_and_prints() {
+        let report = mandelbrot_report();
+        let same: Result<Report, Refusal> = Ok(report.clone());
+        assert_eq!(same, Ok(report.clone()));
+        assert_ne!(same, Err(Refusal::NotPe));
+        assert!(format!("{report:?}").contains("frmFractal"));
+    }
+
+    /// `Report` carries the object graph, the external imports and the
+    /// components, per this task's third behaviour.
+    ///
+    /// `Mandelbrot.exe`'s one object, `frmFractal`, gives every one of the
+    /// four new pieces this task adds: a kind, a procedure list (nine
+    /// slots, every one private, per `CONTEXT.md`'s corrected worked
+    /// example), an open gap (`cnt_public_vars` is `9`, non-zero, so
+    /// D-14 carries it as unexplained rather than as a count), and one
+    /// external `Declare` (`gdi32!SetPixelV`). It references no OCX
+    /// component, so `components` is empty without being absent.
+    #[test]
+    fn the_object_graph_the_declarations_and_the_components_reach_the_caller() {
+        let report = mandelbrot_report();
+
+        assert_eq!(report.objects.len(), 1);
+        let object = &report.objects[0];
+        assert_eq!(object.name, "frmFractal");
+        assert_eq!(object.kind, ObjectKind::Form);
+        assert_eq!(object.gaps, vec![Gap::UnexplainedPublicVarCount(9)]);
+
+        let ObjectProcedures::Slots(slots) = &object.procedures else {
+            panic!("frmFractal carries a PrivateObj, so this must be Slots");
+        };
+        assert_eq!(slots.len(), 9);
+        assert!(
+            slots.iter().all(|slot| *slot == ProcedureEntry::Private),
+            "every one of frmFractal's nine procedures is Private: {slots:?}"
+        );
+
+        assert_eq!(report.declarations.len(), 1);
+        assert_eq!(report.declarations[0].library, "gdi32");
+
+        assert!(report.components.is_empty());
+    }
+
+    /// One recoverable failure must not lose the rest: an object whose
+    /// `PrivateObj` does not resolve keeps its name, its kind and its
+    /// procedure names, and loses only its prototypes.
+    ///
+    /// No corpus program exercises this path (every `ObjectInfo` and every
+    /// `PrivateObj` resolves cleanly across all 44 vendored programs), so
+    /// this test patches `frmGrayscale`'s `ObjectInfo.lpPrivateObject` field
+    /// to an address in no section. This is also the instrument for this
+    /// task's second deliberate breakage: turning `read_private`'s recovery
+    /// into a `?`-propagated refusal makes this test fail, because `inspect`
+    /// then refuses the whole file over one object's leaf pointer.
+    #[test]
+    fn an_unresolved_private_obj_loses_only_its_own_objects_prototypes() {
+        let image = PeImage::parse(GRAYSCALE).unwrap();
+        let head = ObjectTableHead::read(&image, object_table_va(GRAYSCALE)).unwrap();
+        let table = crate::vb::object::ObjectTable::walk(&image, object_table_va(GRAYSCALE), &head)
+            .unwrap();
+        let frm_grayscale = &table.objects[0];
+        assert_eq!(frm_grayscale.name, "frmGrayscale");
+
+        let object_info = image.region_at_va(frm_grayscale.lp_object_info).unwrap();
+        let at = object_info.file_offset(Off::new(0x0C)).unwrap();
+        let at = usize::try_from(at.get()).unwrap();
+        let nowhere = image.image_base() + 0x00F0_0000;
+        assert!(
+            image
+                .region_at_va(crate::read::region::Va::new(nowhere))
+                .is_none()
+        );
+        let mut bytes = GRAYSCALE.to_vec();
+        bytes[at..at + 4].copy_from_slice(&nowhere.to_le_bytes());
+
+        let report = inspect(&bytes).unwrap();
+        let object = report
+            .objects
+            .iter()
+            .find(|o| o.name == "frmGrayscale")
+            .unwrap();
+
+        // The name and the kind still stand.
+        assert_eq!(object.kind, ObjectKind::Form);
+        // No open gap: `PrivateObj::Absent` raises none.
+        assert!(object.gaps.is_empty());
+        // The procedure names still resolve (they come from a different
+        // array, `Object.lpProcNamesArray`, untouched by this patch), but
+        // every prototype is now `None`.
+        let ObjectProcedures::Slots(slots) = &object.procedures else {
+            panic!("frmGrayscale's proc_count is non-zero and its array pointer is real");
+        };
+        let public_names: Vec<&str> = slots
+            .iter()
+            .filter_map(|slot| match slot {
+                ProcedureEntry::Public { name, prototype } => {
+                    assert!(
+                        prototype.is_none(),
+                        "a prototype must not survive: {slot:?}"
+                    );
+                    Some(name.as_str())
+                }
+                ProcedureEntry::Private => None,
+            })
+            .collect();
+        assert_eq!(
+            public_names.len(),
+            8,
+            "frmGrayscale recovers 8 public names"
+        );
+
+        // The defect names the leaf pointer that did not resolve.
+        let defect = report
+            .defects
+            .iter()
+            .find(|d| d.site.structure == "ObjectInfo" && d.site.field == "lpPrivateObject")
+            .expect("the patched ObjectInfo.lpPrivateObject must produce a defect");
+        assert!(matches!(
+            defect.kind,
+            DefectKind::UnreadablePointer { va, .. } if va == nowhere
+        ));
+    }
+
+    /// On `Grayscale.exe`, `inspect` gives three objects with the right
+    /// kinds, twelve recovered public procedure names and eight external
+    /// imports, per this task's fourth behaviour.
+    #[test]
+    fn grayscale_gives_three_objects_twelve_public_names_and_eight_imports() {
+        let report = inspect(GRAYSCALE).unwrap();
+
+        assert_eq!(report.objects.len(), 3);
+        let kinds: Vec<ObjectKind> = report.objects.iter().map(|o| o.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![ObjectKind::Form, ObjectKind::Class, ObjectKind::Class]
+        );
+
+        let public_count: usize = report
+            .objects
+            .iter()
+            .map(|object| match &object.procedures {
+                ObjectProcedures::Slots(slots) => slots
+                    .iter()
+                    .filter(|slot| matches!(slot, ProcedureEntry::Public { .. }))
+                    .count(),
+                ObjectProcedures::NoNameArray { .. } => 0,
+            })
+            .sum();
+        assert_eq!(public_count, 12);
+
+        assert_eq!(report.declarations.len(), 8);
+    }
+
+    /// On `Map Editor.exe`, `inspect` gives two objects whose procedures are
+    /// reported unreachable rather than as an empty list, per this task's
+    /// fifth behaviour: `Declaration_Module` (`proc_count` 1) and
+    /// `Sub_Module` (`proc_count` 7), both standard modules, per D-13.
+    #[test]
+    fn map_editor_reports_its_two_modules_as_unreachable_and_not_as_empty() {
+        let report = inspect(MAP_EDITOR).unwrap();
+
+        let modules: Vec<(&str, &ObjectProcedures)> = report
+            .objects
+            .iter()
+            .filter(|object| object.kind == ObjectKind::Module)
+            .map(|object| (object.name.as_str(), &object.procedures))
+            .collect();
+
+        assert_eq!(
+            modules.iter().map(|(name, _)| *name).collect::<Vec<&str>>(),
+            vec!["Declaration_Module", "Sub_Module"]
+        );
+        for (name, procedures) in &modules {
+            assert!(
+                matches!(procedures, ObjectProcedures::NoNameArray { proc_count } if *proc_count > 0),
+                "{name} must report a non-zero proc_count with no name array, not an empty list"
+            );
+        }
+    }
+
+    /// `inspect` still takes only a byte slice and returns a value, per this
+    /// task's sixth behaviour. The grep the plan's own `<verify>` runs is
+    /// the acceptance instrument for "no file system type anywhere under
+    /// `src/`"; this test is the type-level half of the same claim.
+    #[test]
+    fn inspect_still_takes_a_byte_slice_and_returns_a_value() {
+        fn assert_signature(_f: fn(&[u8]) -> Result<Report, Refusal>) {}
+        assert_signature(inspect);
     }
 }

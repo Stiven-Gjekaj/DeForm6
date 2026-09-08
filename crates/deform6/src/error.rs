@@ -15,7 +15,16 @@
 //! the command line, which is the only part of the system that has one.
 
 /// Where a problem is, and what the code wanted to find there.
-#[derive(Clone, Debug, serde::Serialize)]
+///
+/// `PartialEq` and `Eq` are derived so a [`Defect`] can sit inside [`Report`],
+/// which itself derives `PartialEq` for the `Result<Report, Refusal>`
+/// comparison the phase 1 test suite needs. `WINDOWS.md` finding 3 records
+/// that this derive was the reason `inspect` used to drop the defects it
+/// collected; every field here is plain data (a number or static text), so
+/// the derive costs nothing.
+///
+/// [`Report`]: crate::vb::Report
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Site {
     /// The absolute file offset. `Region::file_offset` gives this value.
     pub offset: u32,
@@ -31,7 +40,13 @@ pub struct Site {
 ///
 /// Every message names the byte offset in hexadecimal. A person who reads a
 /// defect opens the file at that offset and sees the same bytes.
-#[derive(Clone, Debug, serde::Serialize, thiserror::Error)]
+///
+/// `PartialEq` and `Eq` are derived for the same reason [`Site`] derives
+/// them: every variant holds plain data, and the derive is what lets
+/// [`Defect`], and in turn [`Report`], compare with `assert_eq!`.
+///
+/// [`Report`]: crate::vb::Report
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, thiserror::Error)]
 pub enum DefectKind {
     /// A signature does not hold the bytes the format requires.
     #[error("expected {expected} at offset {offset:#x}, found {found:#x}")]
@@ -191,7 +206,15 @@ impl DefectKind {
 /// This value is the error and the evidence at the same time. The Phase 4
 /// report serialises the value that the failure message prints, so the two do
 /// not drift apart.
-#[derive(Clone, Debug, serde::Serialize, thiserror::Error)]
+///
+/// `PartialEq` and `Eq` are derived so [`Report`] can carry a `Vec<Defect>`
+/// and still derive `PartialEq` itself. `WINDOWS.md` finding 3: this is the
+/// fix. Before this derive existed, `inspect` collected defects and had
+/// nowhere to put them, because `Report` needed to compare and `Defect` could
+/// not.
+///
+/// [`Report`]: crate::vb::Report
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, thiserror::Error)]
 #[error("{site:?}: {kind}")]
 pub struct Defect {
     /// Where the problem is.
@@ -558,5 +581,45 @@ mod tests {
             Refusal::NoVbRuntime { dot_net: true },
             Refusal::NoVbRuntime { dot_net: true }
         );
+    }
+
+    /// `WINDOWS.md` finding 3: `Report` derives `PartialEq`, and `Defect`
+    /// used to be unable to. Two equal defects must compare equal, and two
+    /// defects that differ in either their site or their kind must not, or a
+    /// `Vec<Defect>` inside `Report` would compare as equal when it should
+    /// not.
+    #[test]
+    fn a_defect_compares_by_its_site_and_its_kind() {
+        let one = Defect {
+            site: a_site(),
+            kind: DefectKind::UnreadablePointer {
+                offset: 0x99,
+                va: 0x0040_2000,
+            },
+        };
+        let same = Defect {
+            site: a_site(),
+            kind: DefectKind::UnreadablePointer {
+                offset: 0x99,
+                va: 0x0040_2000,
+            },
+        };
+        let different_site = Defect {
+            site: Site {
+                offset: 0x2000,
+                ..a_site()
+            },
+            kind: one.kind.clone(),
+        };
+        let different_kind = Defect {
+            site: a_site(),
+            kind: DefectKind::UnreadablePointer {
+                offset: 0x99,
+                va: 0x0040_3000,
+            },
+        };
+        assert_eq!(one, same);
+        assert_ne!(one, different_site);
+        assert_ne!(one, different_kind);
     }
 }
