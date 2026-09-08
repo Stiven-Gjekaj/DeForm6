@@ -751,7 +751,7 @@ fn va_at(window: &Region<'_>, at: u32, what: &'static str) -> Result<Va, Refusal
 mod tests {
     use super::{
         Gap, OBJECT_INFO_SIZE, ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureCounts,
-        ProcedureList, event_descriptor_addresses,
+        ProcedureList, event_descriptor_addresses, is_plausible_identifier,
     };
     use crate::error::Refusal;
     use crate::read::pe::PeImage;
@@ -1431,5 +1431,44 @@ mod tests {
         };
 
         assert_eq!(event_descriptor_addresses(&image, &private), Vec::new());
+    }
+
+    /// The character shape rule had no test until the phase 2 verifier broke it
+    /// and nothing failed.
+    ///
+    /// No corpus program reaches this rule. All 428 unresolvable name array
+    /// entries fail earlier, at address resolution, so the whole corpus is
+    /// blind to this branch. It still has to hold, because it is the guard
+    /// that stops a fragment of a build machine path being reported as a
+    /// recovered procedure name.
+    #[test]
+    fn the_identifier_rule_refuses_what_is_not_an_identifier() {
+        assert!(is_plausible_identifier(b"Form_Load"));
+        assert!(is_plausible_identifier(b"_private"));
+        assert!(is_plausible_identifier(b"ByteMeL"));
+        assert!(is_plausible_identifier(b"a1"));
+
+        assert!(!is_plausible_identifier(b""), "an empty name is not a name");
+        assert!(
+            !is_plausible_identifier(b"1abc"),
+            "a name cannot begin with a digit"
+        );
+        assert!(
+            !is_plausible_identifier(b"mData\\Oracle\\Java\\"),
+            "this is the build machine path fragment that Mandelbrot.exe holds \
+             where its name array should be, and it must never be a name"
+        );
+        assert!(
+            !is_plausible_identifier(b"has space"),
+            "a name holds no space"
+        );
+        assert!(
+            !is_plausible_identifier(b"has-dash"),
+            "a name holds no punctuation"
+        );
+        assert!(
+            !is_plausible_identifier(&[0x6d, 0x00, 0x44, 0x00]),
+            "UTF-16 text has a NUL between its characters and is not a name"
+        );
     }
 }
