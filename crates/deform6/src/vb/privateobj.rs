@@ -2,16 +2,25 @@
 //!
 //! This is OBJ-03 and OBJ-06: recover every public procedure name an object
 //! carries, and report a private procedure as private rather than inventing a
-//! name for it. It also carries `PrivateObj`'s `cnt_public_vars` field,
-//! explained rather than walked: see [`PrivateObj::gaps`].
+//! name for it. It also carries [`PrivateObj`]'s two open counts,
+//! `cnt_public_vars` and `cnt_events`, and the one array plan 02-05 adds a
+//! walk for: [`event_descriptor_addresses`].
 //!
-//! # A count this file cannot explain, carried as an open question
+//! # Two structures this file is named for and does not implement
 //!
-//! Plan 02-05 owns the public variable half of this file, and it does not
-//! ship a `PubVarDesc` walk. `cnt_public_vars` does not count source-level
-//! `Public` declarations (D-14): [`PrivateObj::gaps`] carries a non-zero
-//! value to the report as an open question rather than an answer, and no
-//! function anywhere in this crate walks `lpPublicVars`.
+//! Plan 02-05 owns the public variable and event half of this file, and it
+//! ships neither a `PubVarDesc` walk nor an event decoder. Both are measured
+//! absences in this corpus, not unfinished work:
+//!
+//! - `cnt_public_vars` does not count source-level `Public` declarations
+//!   (D-14). [`PrivateObj::gaps`] carries a non-zero value to the report as
+//!   an open question, and no function anywhere in this crate walks
+//!   `lpPublicVars`.
+//! - No corpus program carries a single `EventDesc`: `cnt_events` is `0` in
+//!   97 of 97 objects that hold a `PrivateObj`. [`event_descriptor_addresses`]
+//!   walks the pointer array anyway, proven only by synthetic fixtures, and
+//!   a named test in this file's own test module fires the day a real
+//!   sample arrives. No event name is ever produced (D-09).
 //!
 //! # Two null cases, not one
 //!
@@ -78,6 +87,14 @@ const NO_PRIVATE_OBJECT: u32 = 0xFFFF_FFFF;
 
 /// The width of one entry in `Object.lpProcNamesArray`.
 const PROC_NAME_PTR_SIZE: u32 = 4;
+
+/// The width of one entry in `PrivateObj.lpEventsTypeInfo`.
+///
+/// Both arrays hold a 32-bit virtual address per entry, so this equals
+/// [`PROC_NAME_PTR_SIZE`]; it is a separate constant because the two arrays
+/// are unrelated facts about the file that happen to share a width, not the
+/// same fact under two names.
+const EVENT_DESC_PTR_SIZE: u32 = 4;
 
 /// The bound on a procedure name string.
 ///
@@ -191,10 +208,14 @@ pub enum PrivateObj {
         cnt_public_vars: u16,
         /// The number of entries in the `EventDesc` array.
         ///
-        /// Measured `0` for every object in every one of the 44 corpus
-        /// programs. `[VERIFIED: local]` Plan 02-05 ships the address walk
-        /// against synthetic fixtures for exactly this reason: the corpus
-        /// carries no sample of a non-zero value.
+        /// Measured `0` in 97 of 97 corpus objects that carry a
+        /// `PrivateObj` at all (the other 8 of the 105 corpus objects are
+        /// standard modules and have no `PrivateObj` to carry this field).
+        /// `[VERIFIED: local]` [`event_descriptor_addresses`] walks the
+        /// pointer array this count sizes, against synthetic fixtures only,
+        /// for exactly this reason: the corpus carries no sample of a
+        /// non-zero value, and this file's own test module carries a named
+        /// test that fires the day one does.
         cnt_events: u16,
         /// The address of the `FuncTypDesc` pointer array.
         ///
@@ -207,6 +228,11 @@ pub enum PrivateObj {
         /// count for it.
         lp_func_type_info: Va,
         /// The address of the `EventDesc` pointer array.
+        ///
+        /// An array of `cnt_events` pointers, per `STRUCTURES.md` section
+        /// 6.2's asymmetry note, never inline records. Walked by
+        /// [`event_descriptor_addresses`], which gives the address of each
+        /// entry and decodes none of them.
         lp_events_type_info: Va,
         /// The address of the `PubVarDesc` array.
         ///
@@ -626,6 +652,78 @@ fn is_plausible_identifier(bytes: &[u8]) -> bool {
         .all(|&b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
+/// Gives the address of each `EventDesc` one object's `PrivateObj` carries,
+/// read from the pointer array at `lp_events_type_info`.
+///
+/// A module (`PrivateObj::Absent`) gives an empty list; there is no
+/// `PrivateObj` to hold the array in the first place.
+///
+/// # Addresses only, never a decoder
+///
+/// `STRUCTURES.md` section 6.4 records that an `EventDesc` has the same
+/// layout as a `FuncTypDesc`. Plan 02-04's `functyp.rs` writes that decoder,
+/// so Phase 3 can call it on the addresses this function gives; carrying a
+/// second copy of that decoder in this file would let the two drift apart,
+/// and the two plans of this wave must not depend on each other. Neither
+/// does this function recover an event's *name*: `STRUCTURES.md` records
+/// that the name strings are present with no pointer to them, and
+/// recovering one means scanning the run of strings after the last
+/// procedure name and matching by position, a heuristic that belongs to
+/// Phase 3. Gap 9 stays open and unreached here, per D-09.
+///
+/// # This corpus carries no event descriptor at all
+///
+/// A script run over all 44 vendored programs read `cnt_events` from every
+/// one of the 97 objects that carry a `PrivateObj`, and found `0` in 97 of
+/// 97. The other 8 objects are standard modules and have no `PrivateObj` at
+/// all. So this function's loop is exercised only by the two synthetic
+/// fixtures in this file's own test module; no corpus file reaches it.
+///
+/// # The pointer is checked before the loop
+///
+/// The same shape [`ProcedureList::read`] found real and common for
+/// `Object.lpProcNamesArray`: a null array pointer with a non-zero count
+/// dereferences address zero unless the pointer is resolved, and rejected,
+/// before anything trusts the count as a loop bound. `cnt_events * 4` is
+/// bounded with a checked multiply and the window is taken with
+/// `Region::subregion`, so it can never exceed the real mapped length at
+/// `lp_events_type_info`.
+#[must_use]
+pub fn event_descriptor_addresses(pe: &PeImage<'_>, private: &PrivateObj) -> Vec<Va> {
+    let PrivateObj::Present {
+        cnt_events,
+        lp_events_type_info,
+        ..
+    } = private
+    else {
+        return Vec::new();
+    };
+    if lp_events_type_info.is_null() {
+        return Vec::new();
+    }
+    let Some(array) = pe.region_at_va(*lp_events_type_info) else {
+        return Vec::new();
+    };
+    let Some(window_size) = u32::from(*cnt_events).checked_mul(EVENT_DESC_PTR_SIZE) else {
+        return Vec::new();
+    };
+    let Some(window) = array.subregion(Off::new(0), window_size) else {
+        return Vec::new();
+    };
+
+    let mut addresses = Vec::with_capacity(usize::from(*cnt_events));
+    for index in 0..u32::from(*cnt_events) {
+        let Some(entry_off) = index.checked_mul(EVENT_DESC_PTR_SIZE) else {
+            break;
+        };
+        let Some(va) = window.va_le(Off::new(entry_off)) else {
+            break;
+        };
+        addresses.push(va);
+    }
+    addresses
+}
+
 /// Reads an unsigned 16-bit value out of a structure window.
 fn u16_at(window: &Region<'_>, at: u32, what: &'static str) -> Result<u16, Refusal> {
     window.u16_le(Off::new(at)).ok_or(Refusal::Damaged(what))
@@ -653,7 +751,7 @@ fn va_at(window: &Region<'_>, at: u32, what: &'static str) -> Result<Va, Refusal
 mod tests {
     use super::{
         Gap, OBJECT_INFO_SIZE, ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureCounts,
-        ProcedureList,
+        ProcedureList, event_descriptor_addresses,
     };
     use crate::error::Refusal;
     use crate::read::pe::PeImage;
@@ -1198,5 +1296,140 @@ mod tests {
         assert!(zero.gaps().is_empty());
 
         assert!(PrivateObj::Absent.gaps().is_empty());
+    }
+
+    /// `event_descriptor_addresses` gives the empty list for every object of
+    /// the three vendored programs this module reads, because every one of
+    /// them reports an event count of `0`.
+    #[test]
+    fn event_descriptor_addresses_is_empty_for_every_object_of_the_three_vendored_programs() {
+        for data in [GRAYSCALE, MAP_EDITOR, MANDELBROT] {
+            let image = PeImage::parse(data).unwrap();
+            for object in objects(data) {
+                let info = ObjectInfo::read(&image, object.lp_object_info).unwrap();
+                let private = PrivateObj::read(&image, info.lp_private_object).unwrap();
+                assert_eq!(event_descriptor_addresses(&image, &private), Vec::new());
+            }
+        }
+    }
+
+    /// The instrument. `RESEARCH.md` and `CONTEXT.md` both record it: no
+    /// corpus program carries a single event descriptor, 97 of 97 objects
+    /// that hold a `PrivateObj`. This test is what watches for the day that
+    /// changes: its failure message names the file and the object, because
+    /// a program carrying an event descriptor has entered the corpus and
+    /// the decode path this phase leaves unbuilt now needs a real sample.
+    #[test]
+    fn no_corpus_program_in_this_module_carries_an_event_descriptor() {
+        for (label, data) in [
+            ("Grayscale.exe", GRAYSCALE),
+            ("Map Editor.exe", MAP_EDITOR),
+            ("Mandelbrot.exe", MANDELBROT),
+        ] {
+            let image = PeImage::parse(data).unwrap();
+            for object in objects(data) {
+                let info = ObjectInfo::read(&image, object.lp_object_info).unwrap();
+                let private = PrivateObj::read(&image, info.lp_private_object).unwrap();
+                if let PrivateObj::Present { cnt_events, .. } = private {
+                    assert_eq!(
+                        cnt_events, 0,
+                        "{label}'s {} reports a non-zero event count ({cnt_events}): a real \
+                         event descriptor has entered the corpus, and the decode path plan \
+                         02-05 left unbuilt now needs a test against a real sample",
+                        object.name
+                    );
+                }
+            }
+        }
+    }
+
+    /// Builds a minimal 32 bit i386 portable executable with one section at
+    /// RVA `0x1000` / file offset `0x400`, so [`event_descriptor_addresses`]
+    /// has real mapped bytes to walk. This fixture tests the pointer walk
+    /// itself, not the RVA-to-file-offset map: `vb/object.rs`'s own
+    /// synthetic fixture already exercises the case where the two disagree,
+    /// and duplicating that concern here would test the same fact twice
+    /// under a different name.
+    fn synthetic_image_with_event_pointers(pointers: &[u32]) -> Vec<u8> {
+        const LFANEW: usize = 0x40;
+        const OPTIONAL: usize = LFANEW + 24;
+        const SECTION: usize = OPTIONAL + 224;
+
+        let mut out = vec![0_u8; 0x600];
+        out[0] = b'M';
+        out[1] = b'Z';
+        out[0x3c..0x40].copy_from_slice(&u32::try_from(LFANEW).unwrap().to_le_bytes());
+        out[LFANEW..LFANEW + 4].copy_from_slice(b"PE\0\0");
+
+        // The COFF file header.
+        out[LFANEW + 4..LFANEW + 6].copy_from_slice(&0x014c_u16.to_le_bytes());
+        out[LFANEW + 6..LFANEW + 8].copy_from_slice(&1_u16.to_le_bytes());
+        out[LFANEW + 20..LFANEW + 22].copy_from_slice(&224_u16.to_le_bytes());
+        out[LFANEW + 22..LFANEW + 24].copy_from_slice(&0x0102_u16.to_le_bytes());
+
+        // The PE32 optional header.
+        out[OPTIONAL..OPTIONAL + 2].copy_from_slice(&0x010b_u16.to_le_bytes());
+        out[OPTIONAL + 0x1c..OPTIONAL + 0x20].copy_from_slice(&0x0040_0000_u32.to_le_bytes());
+
+        // One section: RVA 0x1000, file offset 0x400, mapped length 0x100.
+        out[SECTION..SECTION + 8].copy_from_slice(b".text\0\0\0");
+        out[SECTION + 8..SECTION + 12].copy_from_slice(&0x100_u32.to_le_bytes());
+        out[SECTION + 12..SECTION + 16].copy_from_slice(&0x1000_u32.to_le_bytes());
+        out[SECTION + 16..SECTION + 20].copy_from_slice(&0x100_u32.to_le_bytes());
+        out[SECTION + 20..SECTION + 24].copy_from_slice(&0x400_u32.to_le_bytes());
+        out[SECTION + 36..SECTION + 40].copy_from_slice(&0x6000_0020_u32.to_le_bytes());
+
+        for (index, pointer) in pointers.iter().enumerate() {
+            let at = 0x400 + index * 4;
+            out[at..at + 4].copy_from_slice(&pointer.to_le_bytes());
+        }
+
+        out
+    }
+
+    /// A synthetic object with an event count of 3 and a pointer array of
+    /// three real addresses gives back exactly those three addresses: the
+    /// walk is exercised by something, even though no corpus file reaches
+    /// it.
+    #[test]
+    fn a_synthetic_object_with_three_event_pointers_gives_those_three_addresses() {
+        let pointers = [0x0040_1000_u32, 0x0040_1004_u32, 0x0040_1008_u32];
+        let bytes = synthetic_image_with_event_pointers(&pointers);
+        let image = PeImage::parse(&bytes).unwrap();
+        let private = PrivateObj::Present {
+            cnt_public_vars: 0,
+            cnt_events: 3,
+            lp_func_type_info: Va::new(0),
+            lp_events_type_info: Va::new(0x0040_1000),
+            lp_public_vars: Va::new(0),
+        };
+
+        assert_eq!(
+            event_descriptor_addresses(&image, &private),
+            vec![
+                Va::new(0x0040_1000),
+                Va::new(0x0040_1004),
+                Va::new(0x0040_1008)
+            ]
+        );
+    }
+
+    /// A synthetic object with an event count of 3 and a null pointer array
+    /// gives an empty list. No `PeImage` fixture is built for this one: the
+    /// null check happens before [`PeImage::region_at_va`] is ever called,
+    /// so the `Grayscale.exe` image already parsed above is enough to prove
+    /// no byte is read at address zero through any image at all.
+    #[test]
+    fn a_synthetic_object_with_a_null_event_pointer_array_gives_an_empty_list() {
+        let image = PeImage::parse(GRAYSCALE).unwrap();
+        let private = PrivateObj::Present {
+            cnt_public_vars: 0,
+            cnt_events: 3,
+            lp_func_type_info: Va::new(0),
+            lp_events_type_info: Va::new(0),
+            lp_public_vars: Va::new(0),
+        };
+
+        assert_eq!(event_descriptor_addresses(&image, &private), Vec::new());
     }
 }
