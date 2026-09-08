@@ -265,3 +265,26 @@ in this phase), not a mechanical failure.
 
 *Verified: 2026-09-08*
 *Verifier: Claude (gsd-verifier)*
+
+
+## Resolved after verification, 2026-09-08
+
+The verifier's fifth mutation found a real, previously undocumented gap:
+`is_plausible_identifier` in `vb/privateobj.rs` had **no test anywhere in the
+307 test suite**. Weakening it to accept any non-empty byte string passed the
+entire workspace.
+
+The orchestrator reproduced it: replacing the whole rule with `true` left all
+307 tests green.
+
+That branch is not cosmetic. It is the guard that stops a fragment of a build
+machine path being reported as a recovered Visual Basic procedure name.
+`Mandelbrot.exe` holds `mData\Oracle\Java\` in UTF-16 where its name array
+should be, and that string is what the rule exists to reject.
+
+No corpus program reaches the rule. All 428 unresolvable entries fail earlier,
+at address resolution, so the corpus is blind to this branch by construction.
+
+`the_identifier_rule_refuses_what_is_not_an_identifier` now covers it, including
+the real `Mandelbrot` path fragment and a UTF-16 byte pattern. It was broken on
+purpose and observed to fail before it was kept. The suite stands at 308.
