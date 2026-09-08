@@ -194,8 +194,8 @@ Plans:
 - [x] 02-01-PLAN.md - `ObjectTable` and the `Object` array - every object recovered by name
 - [x] 02-02-PLAN.md - `fObjectType` classification - form, module, class, and `Unknown` with a fallback
 - [x] 02-03-PLAN.md - `ObjectInfo` and `PrivateObj` - public procedure names, and a null name reported as private
-- [ ] 02-04-PLAN.md - `FuncTypDesc` and the type code table - prototypes with argument names, types and modifiers
-- [ ] 02-05-PLAN.md - `PubVarDesc` and `EventDesc` - the two counts explained and the event descriptor addresses
+- [x] 02-04-PLAN.md - `FuncTypDesc` and the type code table - prototypes with argument names, types and modifiers
+- [x] 02-05-PLAN.md - `PubVarDesc` and `EventDesc` - the two counts explained and the event descriptor addresses
 - [x] 02-06-PLAN.md - The `Declare` import table and the external component table
 - [x] 02-07-PLAN.md - Harness support - `support/vbp.rs`, an independent reader, and `support/rules.rs`, the exclusion rules
 - [ ] 02-08-PLAN.md - `differential.rs` - the gate over all 44 corpus programs

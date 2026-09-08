@@ -31,7 +31,7 @@ Version 1 recovers metadata. It does not recover statements.
       every compiled object.
 - [x] **OBJ-02**: The tool tells a form, a module, and a class apart.
 - [x] **OBJ-03**: The tool recovers public procedure names for every object.
-- [ ] **OBJ-04**: The tool recovers procedure signatures with argument names
+- [x] **OBJ-04**: The tool recovers procedure signatures with argument names
       and types, and the ByRef, Array, Optional and ParamArray modifiers.
 - [x] **OBJ-05**: The tool recovers the `Declare` statements for external API
       calls from the external table.
