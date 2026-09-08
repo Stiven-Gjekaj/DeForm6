@@ -8,9 +8,10 @@
     reason = "a test builds the state it needs and must fail loudly when that state is wrong"
 )]
 
-//! Exercises `support::vbp` and `support::rules` against the real
-//! corpus, independent of `cargo test -p deform6 --test differential`
-//! (plan 02-08), so a bug in the harness itself is caught here first.
+//! Exercises `support::vbp`, `support::rules` and `support::source` against
+//! the real corpus, independent of `cargo test -p deform6 --test
+//! differential` (plan 02-08), so a bug in the harness itself is caught
+//! here first.
 
 #[path = "support/mod.rs"]
 #[allow(
@@ -23,7 +24,7 @@ mod support;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use support::vbp;
+use support::{source, vbp};
 
 /// Reads a file as Latin-1 bytes, the same rule every reader in this
 /// harness uses. `std::fs::read_to_string` would refuse a source file
@@ -796,5 +797,153 @@ fn the_absent_source_rule_excludes_from_both_sides_and_never_lets_recovered_exce
         "the absent-source rule must exclude its match from both sides; a one-sided exclusion \
          would let the recovered count ({recovered_after}) exceed the declared count \
          ({declared_after})"
+    );
+}
+
+// `support::source`: the second, independent reader for the source an
+// executable was built from.
+
+#[test]
+fn fast_drawing_gives_exactly_its_four_public_names_in_file_order() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../corpus/vb6-code/Grayscale-effect/FastDrawing.cls");
+    assert!(
+        path.exists(),
+        "the corpus vendors Grayscale-effect/FastDrawing.cls"
+    );
+
+    let names = source::declared_public_procedures(&path);
+    assert_eq!(
+        names,
+        vec![
+            "GetImageWidth".to_owned(),
+            "GetImageHeight".to_owned(),
+            "GetImageData2D".to_owned(),
+            "SetImageData2D".to_owned(),
+        ],
+        "FastDrawing.cls declares four public members and four private Declare lines and Type \
+         blocks; only the four public members belong in this list, in the order the file \
+         declares them"
+    );
+}
+
+#[test]
+fn pd_open_save_dialog_gives_an_empty_list_because_both_its_procedures_are_friend() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../corpus/vb6-code/Grayscale-effect/pdOpenSaveDialog.cls");
+    assert!(
+        path.exists(),
+        "the corpus vendors Grayscale-effect/pdOpenSaveDialog.cls"
+    );
+
+    let names = source::declared_public_procedures(&path);
+    assert!(
+        names.is_empty(),
+        "pdOpenSaveDialog.cls declares GetOpenFileName and GetSaveFileName as Friend, plus four \
+         Private Declare lines; none of the six is Public, so the list must be empty, found \
+         {names:?}"
+    );
+}
+
+#[test]
+fn a_procedure_the_source_declares_private_or_friend_is_not_in_the_list() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../corpus/vb6-code/Grayscale-effect/pdOpenSaveDialog.cls");
+    let names = source::declared_public_procedures(&path);
+    assert!(
+        !names
+            .iter()
+            .any(|n| n == "GetOpenFileName" || n == "GetSaveFileName")
+    );
+
+    let fast_drawing = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../corpus/vb6-code/Grayscale-effect/FastDrawing.cls");
+    let fast_drawing_names = source::declared_public_procedures(&fast_drawing);
+    // FastDrawing.cls's four `Private Declare Function` API imports must
+    // not appear either.
+    assert!(
+        !fast_drawing_names
+            .iter()
+            .any(|n| n == "GetObject" || n == "GetDIBits" || n == "StretchDIBits")
+    );
+}
+
+#[test]
+fn a_continued_declaration_is_counted_once_from_its_first_line() {
+    // `Hidden-Markov-model/cCommonDialog.cls` is one of the two corpus
+    // orphan classes (per `support::rules`'s unlisted-source rule); this
+    // reader operates on a path directly and knows nothing about that
+    // rule, so reading it here is legitimate regardless. `VBGetOpenFileName`
+    // carries no scope keyword (public by VB6's own default) and its
+    // argument list runs across nine continuation lines.
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../corpus/vb6-code/Hidden-Markov-model/cCommonDialog.cls");
+    assert!(
+        path.exists(),
+        "the corpus vendors Hidden-Markov-model/cCommonDialog.cls"
+    );
+
+    let names = source::declared_public_procedures(&path);
+    let occurrences = names.iter().filter(|n| *n == "VBGetOpenFileName").count();
+    assert_eq!(
+        occurrences, 1,
+        "VBGetOpenFileName's argument list continues across nine lines with a trailing ` _`; \
+         counting it once, from its first line, means the continuation lines must never reach \
+         the declaration matcher at all. Found it {occurrences} times in {names:?}"
+    );
+}
+
+/// A continuation line that itself starts with a token the declaration
+/// matcher would treat as an opener, built inline rather than read out of
+/// a corpus file: no real VB6 source in this corpus happens to continue a
+/// declaration onto a line that starts this way, so a corpus-only test
+/// cannot tell a reader that skips continuation lines apart from one that
+/// does not. `AGENTS.md`'s "What a test can hold on to" asks for exactly
+/// this: build the state a test needs inside the test.
+#[test]
+fn a_continuation_line_that_looks_like_a_declaration_opener_is_still_skipped() {
+    let path = std::env::temp_dir().join("deform6_source_rs_continuation_opener_fixture.bas");
+    std::fs::write(
+        &path,
+        "Public Sub Example(ByVal x As Long, _\nFunction Bogus() As Long\nEnd Sub\n",
+    )
+    .expect("writing the temporary fixture");
+
+    let names = source::declared_public_procedures(&path);
+
+    std::fs::remove_file(&path).ok();
+
+    assert_eq!(
+        names,
+        vec!["Example".to_owned()],
+        "the second physical line continues Example's argument list and starts with the token \
+         \"Function\", which the matcher would treat as a second declaration if continuation \
+         lines were not skipped by construction; found {names:?}"
+    );
+}
+
+#[test]
+fn the_corpus_declares_one_hundred_and_eighty_five_public_procedures_over_the_objects_the_rules_keep()
+ {
+    let declared = all_declared_objects();
+    let mut total = 0usize;
+    for (_, object) in &declared {
+        if object.kind == support::vbp::ObjectKind::Module {
+            // The standard-module rule: no procedure name array exists for
+            // a .bas module, so its procedures are excluded from both
+            // sides, never read here.
+            continue;
+        }
+        if !object.source_file.exists() {
+            // The absent-source rule: Edge-detection's orphan
+            // cCommonDialog.cls, excluded from both sides.
+            continue;
+        }
+        total += source::declared_public_procedures(&object.source_file).len();
+    }
+    assert_eq!(
+        total, 185,
+        "the corpus source declares {total} public procedures over the objects the standard- \
+         module and absent-source rules keep, wanted 185"
     );
 }
