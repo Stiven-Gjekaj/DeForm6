@@ -101,7 +101,7 @@ Version 1 recovers metadata. It does not recover statements.
 
 ### Verification
 
-- [ ] **VER-01**: A differential test decompiles each corpus program and
+- [x] **VER-01**: A differential test decompiles each corpus program and
       compares the result against the original source that the executable was
       built from.
 - [x] **VER-02**: The expectation for each program comes from the file list the

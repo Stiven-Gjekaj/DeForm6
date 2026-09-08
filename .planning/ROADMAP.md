@@ -198,7 +198,7 @@ Plans:
 - [x] 02-05-PLAN.md - `PubVarDesc` and `EventDesc` - the two counts explained and the event descriptor addresses
 - [x] 02-06-PLAN.md - The `Declare` import table and the external component table
 - [x] 02-07-PLAN.md - Harness support - `support/vbp.rs`, an independent reader, and `support/rules.rs`, the exclusion rules
-- [ ] 02-08-PLAN.md - `differential.rs` - the gate over all 44 corpus programs
+- [x] 02-08-PLAN.md - `differential.rs` - the gate over all 44 corpus programs
 - [ ] 02-09-PLAN.md - `ratios.toml`, the exact pin, the two failure messages, and `xtask update-ratios`
 - [ ] 02-10-PLAN.md - `inspect` reports the object graph
 
