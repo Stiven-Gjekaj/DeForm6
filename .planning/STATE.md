@@ -2,56 +2,52 @@
 gsd_state_version: "1.0"
 current_phase: 2
 current_phase_name: The object graph
-status: executing
-stopped_at: "Phase 2 wave 2 complete and merged: 02-02, 02-03"
+status: complete
+stopped_at: "Phase 2 complete, verified, gaps audited"
 last_updated: "2026-09-08T00:00:00.000Z"
 last_activity: 2026-09-08
-last_activity_desc: "Phase 2 wave 2 executed and merged. Object kind classification with a proved Unknown path, and the procedure name recovery that validates every array entry before trusting it. 209 tests pass: 169 library, 21 support_selftest, 9 refusal, 9 cli, 1 corpus_sweep."
-state_head: efaa29f2198233cbb6cbbeef486d8ce3452a1583
+last_activity_desc: "Phase 2 complete. inspect reports the object graph: 105 of 105 objects by name and kind, 185 of 185 public procedures, prototypes with argument names, types, ByRef and recovered Optional defaults, and the Declare table. The differential gate compares all 44 programs against their original source in both directions. 308 tests. Verified PASS, gaps audited, and one untested branch found and closed."
+state_head: 3fd74203b151c48646077d52bf13138a07f4f9a4
 progress:
   total_phases: 6
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 50
-  completed_plans: 13
-  percent: 26
+  completed_plans: 18
+  percent: 36
 ---
 
 ## Continue
 
-**Phase 2, waves 1 and 2 are complete and merged.** Next is wave 3, plans
-02-04 and 02-05.
+**Phase 2 is complete, verified and audited.** Next is phase 3, Forms.
 
-    /gsd-execute-phase 2
+    /gsd-plan-phase 3
 
-Wave order, which the tooling does not know and will not tell you:
+**What phase 3 inherits, measured rather than assumed.**
 
-    [02-01 done, 02-06 done, 02-07 done]
-    [02-02 done, 02-03 done]
-    [02-04, 02-05]
-    [02-08]
-    [02-09, 02-10]
+The corpus is strong for the intrinsic control set and weak in one named place.
+`.planning/research/CORPUS.md` holds the counts: 143 Label, 90 CommandButton,
+88 TextBox, 87 PictureBox, 76 Menu across 22 forms, 71 CheckBox, 54 Form,
+31 Frame. Container nesting is real. **48 controls carry an `Index` property**,
+so the unresolved control array index location can be settled from the corpus.
 
-**Three things wave 1 established that later plans depend on.**
+**The hole is third party controls.** The whole corpus declares two `Object=`
+lines and holds three control instances, all `MSWinsockLib.Winsock`. FRM-04
+needs a synthetic fixture, built the way `has_clr_header` and the event
+descriptor walk were, and a synthetic result must never be presented as a
+corpus result.
 
-- `DefectKind::UnreadablePointer` now exists, `Recoverable`, as the leaf-pointer
-  twin of `UnmappedAddress`, which stays `Fatal` because a spine pointer that
-  maps nowhere stops the walk. Plans 02-01 and 02-06 both hit this; 02-06
-  worked around it and its workaround can now be simplified.
-- The harness reader is independent and proved so by grep. It must stay that
-  way. A harness that shares a reader agrees with a bug in that reader.
-- Two corpus numbers were corrected by measurement and later plans reuse them:
-  the 40-line prefix scan matches 2 of 53 forms, not zero, and
-  `Grayscale-effect/pdOpenSaveDialog.cls` declares six non-public procedure
-  slots, not two.
+**Absent entirely: 0 MDIForm, 0 UserControl, 0 PropertyPage.** The MDIForm type
+value is in no public source and the corpus cannot close it. Plan 02-02 built
+and proved the `Unknown` path with a synthetic value, so an unknown kind is
+reported rather than refused.
 
-**A tooling defect to work around.** `gsd-tools query state.*` recalculates the
-global progress block as a side effect, and a worktree agent cannot see its
-siblings, so every parallel-wave agent writes a wrong global figure. All three
-wave 1 agents corrupted it independently. The orchestrator owns this file after
-a parallel wave; do not trust an agent's edit to it.
+**A defect species to keep hunting.** The phase 2 verifier found a branch with
+no test at all: `is_plausible_identifier` could be replaced with `true` and all
+307 tests still passed, because every corpus program fails earlier at address
+resolution. It is closed now. Phase 3 has the same shape of risk wherever a
+validation rule guards against data the corpus does not contain.
 
-**Executors run in a worktree.** Verify what lands on `main` after each wave
-rather than assuming the merge did the right thing.
+**Open in `.planning/WINDOWS.md`:** four findings, none blocking phase 3.
 
 # Project State
 
