@@ -2,7 +2,25 @@
 //!
 //! This is OBJ-03 and OBJ-06: recover every public procedure name an object
 //! carries, and report a private procedure as private rather than inventing a
-//! name for it.
+//! name for it. It also carries [`PrivateObj`]'s two open counts,
+//! `cnt_public_vars` and `cnt_events`, and the one array plan 02-05 adds a
+//! walk for: [`event_descriptor_addresses`].
+//!
+//! # Two structures this file is named for and does not implement
+//!
+//! Plan 02-05 owns the public variable and event half of this file, and it
+//! ships neither a `PubVarDesc` walk nor an event decoder. Both are measured
+//! absences in this corpus, not unfinished work:
+//!
+//! - `cnt_public_vars` does not count source-level `Public` declarations
+//!   (D-14). [`PrivateObj::gaps`] carries a non-zero value to the report as
+//!   an open question, and no function anywhere in this crate walks
+//!   `lpPublicVars`.
+//! - No corpus program carries a single `EventDesc`: `cnt_events` is `0` in
+//!   97 of 97 objects that hold a `PrivateObj`. [`event_descriptor_addresses`]
+//!   walks the pointer array anyway, proven only by synthetic fixtures, and
+//!   a named test in this file's own test module fires the day a real
+//!   sample arrives. No event name is ever produced (D-09).
 //!
 //! # Two null cases, not one
 //!
@@ -69,6 +87,14 @@ const NO_PRIVATE_OBJECT: u32 = 0xFFFF_FFFF;
 
 /// The width of one entry in `Object.lpProcNamesArray`.
 const PROC_NAME_PTR_SIZE: u32 = 4;
+
+/// The width of one entry in `PrivateObj.lpEventsTypeInfo`.
+///
+/// Both arrays hold a 32-bit virtual address per entry, so this equals
+/// [`PROC_NAME_PTR_SIZE`]; it is a separate constant because the two arrays
+/// are unrelated facts about the file that happen to share a width, not the
+/// same fact under two names.
+const EVENT_DESC_PTR_SIZE: u32 = 4;
 
 /// The bound on a procedure name string.
 ///
@@ -149,23 +175,47 @@ impl ObjectInfo {
 pub enum PrivateObj {
     /// The object carries a real `PrivateObj`.
     Present {
-        /// The number of entries in the `PubVarDesc` array.
+        /// The number of entries in the `PubVarDesc` array, as
+        /// `STRUCTURES.md` section 6.1 names it.
         ///
         /// **Distrust this field.** Per decision D-14, it does not count
-        /// source-level `Public variable As Type` declarations. Measured:
-        /// `pdOpenSaveDialog.cls`, present in 15 of the 44 corpus programs,
-        /// declares zero such lines (only a `Public Enum`), and every corpus
-        /// binary reports `cnt_public_vars` of `4` for it regardless. This
-        /// field is carried, unexplained, for plan 02-05 to own. Nothing
-        /// downstream should be built on the assumption that it means what
-        /// its name says.
+        /// source-level `Public variable As Type` declarations, and no
+        /// stride hypothesis over `lpPublicVars` ever converges against it
+        /// (`STRUCTURES.md` section 11, gap 8, stays open). Three measured
+        /// counter-examples, each against a source file this repository
+        /// vendors beside the binary that reports it:
+        ///
+        /// - `pdOpenSaveDialog.cls`, present in 15 of the 44 corpus
+        ///   programs, declares zero `Public variable As Type` lines (only
+        ///   a `Public Enum`), and every corpus binary reports `4`.
+        /// - `frmMain.frm` in `Artificial-life` declares zero `Public`
+        ///   anything and reports `5`, while carrying 10 top-level named
+        ///   controls.
+        /// - `Organism.cls` in `Artificial-life` declares 17 real public
+        ///   variables, some on comma-joined lines, and reports `23`.
+        ///
+        /// This is the same shape `wCompiledObjects` turned out to be
+        /// (`CONTEXT.md`, "One field to distrust by default"): a rounded
+        /// capacity, not a count, found only because a project declaring
+        /// one or two objects reported four. The resolution path is a
+        /// controlled compile-and-diff experiment against a class with a
+        /// known, isolated set of `Public` declarations, never more reading
+        /// of this document. This field is carried, unexplained;
+        /// [`PrivateObj::gaps`] surfaces a non-zero value to the report as
+        /// an open question rather than an answer. Nothing downstream
+        /// should be built on the assumption that it means what its name
+        /// says.
         cnt_public_vars: u16,
         /// The number of entries in the `EventDesc` array.
         ///
-        /// Measured `0` for every object in every one of the 44 corpus
-        /// programs. `[VERIFIED: local]` Plan 02-05 ships the address walk
-        /// against synthetic fixtures for exactly this reason: the corpus
-        /// carries no sample of a non-zero value.
+        /// Measured `0` in 97 of 97 corpus objects that carry a
+        /// `PrivateObj` at all (the other 8 of the 105 corpus objects are
+        /// standard modules and have no `PrivateObj` to carry this field).
+        /// `[VERIFIED: local]` [`event_descriptor_addresses`] walks the
+        /// pointer array this count sizes, against synthetic fixtures only,
+        /// for exactly this reason: the corpus carries no sample of a
+        /// non-zero value, and this file's own test module carries a named
+        /// test that fires the day one does.
         cnt_events: u16,
         /// The address of the `FuncTypDesc` pointer array.
         ///
@@ -178,12 +228,19 @@ pub enum PrivateObj {
         /// count for it.
         lp_func_type_info: Va,
         /// The address of the `EventDesc` pointer array.
+        ///
+        /// An array of `cnt_events` pointers, per `STRUCTURES.md` section
+        /// 6.2's asymmetry note, never inline records. Walked by
+        /// [`event_descriptor_addresses`], which gives the address of each
+        /// entry and decodes none of them.
         lp_events_type_info: Va,
         /// The address of the `PubVarDesc` array.
         ///
-        /// Carried for plan 02-05, which owns the record stride and the
-        /// explanation of `cnt_public_vars`. This file claims nothing about
-        /// either.
+        /// `STRUCTURES.md` gap 8 records that no record stride hypothesis
+        /// over this array converges against the corpus. No function in
+        /// this crate walks it; [`PrivateObj::gaps`] is the only thing this
+        /// file does with it, and that is to say a non-zero
+        /// `cnt_public_vars` is a fact nobody has explained yet.
         lp_public_vars: Va,
     },
     /// The object carries no `PrivateObj`. This is the standard-module case.
@@ -239,6 +296,65 @@ impl PrivateObj {
             )?,
         })
     }
+
+    /// Gives the raw `cntPublicVars` field this object's `PrivateObj`
+    /// carries, or `None` for a standard module, which has no `PrivateObj`
+    /// to carry it.
+    ///
+    /// Named after the field, not after what the field is supposed to
+    /// mean: this gives the count the structure holds, and per D-14 that
+    /// count is not a number of recovered public variables. See the doc
+    /// comment on `cnt_public_vars` inside [`PrivateObj::Present`] for the
+    /// three measured counter-examples that make the distrust necessary.
+    #[must_use]
+    pub fn public_var_field(&self) -> Option<u16> {
+        match self {
+            Self::Present {
+                cnt_public_vars, ..
+            } => Some(*cnt_public_vars),
+            Self::Absent => None,
+        }
+    }
+
+    /// Gives this object's open questions about its `PrivateObj` fields.
+    ///
+    /// Today this is exactly one question, when it applies at all: per
+    /// D-14, [`Self::public_var_field`] does not count source-level
+    /// `Public` declarations, and this file does not know what it counts.
+    /// A standard module and an object whose count is `0` both give an
+    /// empty list. A `0` agrees, trivially, with "zero declared public
+    /// variables", so it raises no question worth reporting; a non-zero
+    /// count is the fact this plan cannot explain, and it reaches the
+    /// report as a [`Gap`] rather than silently.
+    ///
+    /// Plan 02-10 prints this list next to the object it belongs to. This
+    /// function resolves nothing about the gap; it only says that one
+    /// exists.
+    #[must_use]
+    pub fn gaps(&self) -> Vec<Gap> {
+        match self.public_var_field() {
+            Some(count) if count != 0 => vec![Gap::UnexplainedPublicVarCount(count)],
+            Some(_) | None => Vec::new(),
+        }
+    }
+}
+
+/// An open question one object's `PrivateObj` fields raise, carried to the
+/// report as a fact to investigate rather than answered by a guess.
+///
+/// Nothing in this crate resolves a `Gap`. It exists so the report can say
+/// plainly what DeForm6 does not know, per D-07: an unresolved structure is
+/// a reported gap, not an implementation written from a figure and never
+/// exercised.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gap {
+    /// `cnt_public_vars` is non-zero, and per D-14 that count does not name
+    /// a number of source-level `Public` declarations. `STRUCTURES.md`
+    /// gap 8 records the record stride behind `lpPublicVars` as unresolved:
+    /// no fixed or type-conditional stride closes cleanly over the corpus.
+    /// This carries the raw count and nothing else; no variable name is
+    /// claimed from it.
+    UnexplainedPublicVarCount(u16),
 }
 
 /// One procedure slot: a recovered public name, or a private procedure.
@@ -536,6 +652,78 @@ fn is_plausible_identifier(bytes: &[u8]) -> bool {
         .all(|&b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
+/// Gives the address of each `EventDesc` one object's `PrivateObj` carries,
+/// read from the pointer array at `lp_events_type_info`.
+///
+/// A module (`PrivateObj::Absent`) gives an empty list; there is no
+/// `PrivateObj` to hold the array in the first place.
+///
+/// # Addresses only, never a decoder
+///
+/// `STRUCTURES.md` section 6.4 records that an `EventDesc` has the same
+/// layout as a `FuncTypDesc`. Plan 02-04's `functyp.rs` writes that decoder,
+/// so Phase 3 can call it on the addresses this function gives; carrying a
+/// second copy of that decoder in this file would let the two drift apart,
+/// and the two plans of this wave must not depend on each other. Neither
+/// does this function recover an event's *name*: `STRUCTURES.md` records
+/// that the name strings are present with no pointer to them, and
+/// recovering one means scanning the run of strings after the last
+/// procedure name and matching by position, a heuristic that belongs to
+/// Phase 3. Gap 9 stays open and unreached here, per D-09.
+///
+/// # This corpus carries no event descriptor at all
+///
+/// A script run over all 44 vendored programs read `cnt_events` from every
+/// one of the 97 objects that carry a `PrivateObj`, and found `0` in 97 of
+/// 97. The other 8 objects are standard modules and have no `PrivateObj` at
+/// all. So this function's loop is exercised only by the two synthetic
+/// fixtures in this file's own test module; no corpus file reaches it.
+///
+/// # The pointer is checked before the loop
+///
+/// The same shape [`ProcedureList::read`] found real and common for
+/// `Object.lpProcNamesArray`: a null array pointer with a non-zero count
+/// dereferences address zero unless the pointer is resolved, and rejected,
+/// before anything trusts the count as a loop bound. `cnt_events * 4` is
+/// bounded with a checked multiply and the window is taken with
+/// `Region::subregion`, so it can never exceed the real mapped length at
+/// `lp_events_type_info`.
+#[must_use]
+pub fn event_descriptor_addresses(pe: &PeImage<'_>, private: &PrivateObj) -> Vec<Va> {
+    let PrivateObj::Present {
+        cnt_events,
+        lp_events_type_info,
+        ..
+    } = private
+    else {
+        return Vec::new();
+    };
+    if lp_events_type_info.is_null() {
+        return Vec::new();
+    }
+    let Some(array) = pe.region_at_va(*lp_events_type_info) else {
+        return Vec::new();
+    };
+    let Some(window_size) = u32::from(*cnt_events).checked_mul(EVENT_DESC_PTR_SIZE) else {
+        return Vec::new();
+    };
+    let Some(window) = array.subregion(Off::new(0), window_size) else {
+        return Vec::new();
+    };
+
+    let mut addresses = Vec::with_capacity(usize::from(*cnt_events));
+    for index in 0..u32::from(*cnt_events) {
+        let Some(entry_off) = index.checked_mul(EVENT_DESC_PTR_SIZE) else {
+            break;
+        };
+        let Some(va) = window.va_le(Off::new(entry_off)) else {
+            break;
+        };
+        addresses.push(va);
+    }
+    addresses
+}
+
 /// Reads an unsigned 16-bit value out of a structure window.
 fn u16_at(window: &Region<'_>, at: u32, what: &'static str) -> Result<u16, Refusal> {
     window.u16_le(Off::new(at)).ok_or(Refusal::Damaged(what))
@@ -562,8 +750,8 @@ fn va_at(window: &Region<'_>, at: u32, what: &'static str) -> Result<Va, Refusal
 )]
 mod tests {
     use super::{
-        OBJECT_INFO_SIZE, ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureCounts,
-        ProcedureList,
+        Gap, OBJECT_INFO_SIZE, ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureCounts,
+        ProcedureList, event_descriptor_addresses,
     };
     use crate::error::Refusal;
     use crate::read::pe::PeImage;
@@ -596,6 +784,64 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/../../corpus/vb6-code/Mandelbrot/Mandelbrot.exe"
     ));
+
+    /// The program this plan's `cnt_public_vars` counter-examples are
+    /// measured against, alongside `Grayscale.exe` above. `frmMain` and
+    /// `Organism` are two of its objects.
+    const ARTIFICIAL_LIFE: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/vb6-code/Artificial-life/Artificial Life.exe"
+    ));
+
+    /// `Artificial-life`'s `frmMain.frm`, read directly per `AGENTS.md`'s
+    /// "build the state that a test needs inside the test": the declared
+    /// count below is counted from these bytes, not copied from a document.
+    const ARTIFICIAL_LIFE_FRM_MAIN_SRC: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/vb6-code/Artificial-life/frmMain.frm"
+    ));
+
+    /// `Artificial-life`'s `Organism.cls`, read for the same reason.
+    const ARTIFICIAL_LIFE_ORGANISM_SRC: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/vb6-code/Artificial-life/Organism.cls"
+    ));
+
+    /// `Grayscale-effect`'s `pdOpenSaveDialog.cls`, read for the same
+    /// reason.
+    const GRAYSCALE_PD_OPEN_SAVE_DIALOG_SRC: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/vb6-code/Grayscale-effect/pdOpenSaveDialog.cls"
+    ));
+
+    /// Counts source-level `Public variable As Type` declarations in a
+    /// `.frm`/`.cls` source file, the way `CONTEXT.md`'s own measurement
+    /// script counted them: a line beginning `Public `, whose next word is
+    /// not a declaration keyword that is not a variable (`Sub`, `Function`,
+    /// `Property`, `Enum`, `Type`, `Const`, `Event`, `Declare`), counts one
+    /// variable per comma-separated name on that line, matching lines such
+    /// as `Public oX As Long, oY As Long`.
+    ///
+    /// Read with `char::from(byte)`, per phase 1's Latin-1 rule, matching
+    /// every other string read in this crate.
+    fn count_declared_public_variables(source: &[u8]) -> usize {
+        const NOT_A_VARIABLE: [&str; 8] = [
+            "Sub", "Function", "Property", "Enum", "Type", "Const", "Event", "Declare",
+        ];
+        let text: String = source.iter().copied().map(char::from).collect();
+        let mut count = 0_usize;
+        for line in text.lines() {
+            let Some(rest) = line.trim_start().strip_prefix("Public ") else {
+                continue;
+            };
+            let keyword = rest.split_whitespace().next().unwrap_or("");
+            if NOT_A_VARIABLE.contains(&keyword) {
+                continue;
+            }
+            count += 1 + rest.matches(',').count();
+        }
+        count
+    }
 
     /// Gives the address of `ProjectInfo` that the file itself holds.
     fn project_data_va(data: &[u8]) -> Va {
@@ -945,5 +1191,245 @@ mod tests {
                 no_name_array: true,
             }
         );
+    }
+
+    /// Gives the `PrivateObj` one named object of one program carries.
+    /// Panics if the object is a module (no `PrivateObj` to give) or if the
+    /// name does not appear in the program at all, both of which would be a
+    /// broken fixture rather than a measured result.
+    fn private_obj_of(data: &[u8], name: &str) -> PrivateObj {
+        let objs = objects(data);
+        let object = objs
+            .iter()
+            .find(|object| object.name == name)
+            .unwrap_or_else(|| panic!("no object named {name} in this fixture"));
+        let image = PeImage::parse(data).unwrap();
+        let info = ObjectInfo::read(&image, object.lp_object_info).unwrap();
+        PrivateObj::read(&image, info.lp_private_object).unwrap()
+    }
+
+    /// `pdOpenSaveDialog.cls`, present in 15 of the 44 corpus programs,
+    /// declares zero source-level `Public variable As Type` lines, only a
+    /// `Public Enum`. Every corpus binary, `Grayscale.exe` included, reports
+    /// `cnt_public_vars` of `4` for it regardless. Per D-14, this is the
+    /// first of the three measured counter-examples that prove the field
+    /// does not count what its name says.
+    #[test]
+    fn grayscale_pd_open_save_dialog_public_var_count_disagrees_with_its_source() {
+        let declared = count_declared_public_variables(GRAYSCALE_PD_OPEN_SAVE_DIALOG_SRC);
+        assert_eq!(
+            declared, 0,
+            "pdOpenSaveDialog.cls declares no source-level Public variable, only a Public Enum"
+        );
+
+        match private_obj_of(GRAYSCALE, "pdOpenSaveDialog") {
+            PrivateObj::Present {
+                cnt_public_vars, ..
+            } => assert_eq!(cnt_public_vars, 4),
+            PrivateObj::Absent => panic!("pdOpenSaveDialog is a class, not a module"),
+        }
+    }
+
+    /// `frmMain.frm` in `Artificial-life` declares zero `Public` anything,
+    /// while carrying 10 top-level named controls, and reports
+    /// `cnt_public_vars` of `5`. The second measured counter-example.
+    #[test]
+    fn artificial_life_frm_main_public_var_count_disagrees_with_its_source() {
+        let declared = count_declared_public_variables(ARTIFICIAL_LIFE_FRM_MAIN_SRC);
+        assert_eq!(
+            declared, 0,
+            "frmMain.frm declares no source-level Public variable at all"
+        );
+
+        match private_obj_of(ARTIFICIAL_LIFE, "frmMain") {
+            PrivateObj::Present {
+                cnt_public_vars, ..
+            } => assert_eq!(cnt_public_vars, 5),
+            PrivateObj::Absent => panic!("frmMain is a form, not a module"),
+        }
+    }
+
+    /// `Organism.cls` in `Artificial-life` declares 17 real public
+    /// variables, some on comma-joined lines, and reports `cnt_public_vars`
+    /// of `23`. The third measured counter-example: not merely absent from
+    /// an over-count, but a genuine, non-zero declared count that still
+    /// disagrees with the binary's number.
+    #[test]
+    fn artificial_life_organism_public_var_count_disagrees_with_its_source() {
+        let declared = count_declared_public_variables(ARTIFICIAL_LIFE_ORGANISM_SRC);
+        assert_eq!(
+            declared, 17,
+            "Organism.cls declares 17 real Public variables, some on comma-joined lines"
+        );
+
+        match private_obj_of(ARTIFICIAL_LIFE, "Organism") {
+            PrivateObj::Present {
+                cnt_public_vars, ..
+            } => assert_eq!(cnt_public_vars, 23),
+            PrivateObj::Absent => panic!("Organism is a class, not a module"),
+        }
+    }
+
+    /// The covering test this plan's own deliberate breakage found missing:
+    /// see this plan's SUMMARY for the breakage that produced no failure
+    /// without this test. A non-zero `cnt_public_vars` produces exactly one
+    /// [`Gap`], naming that count; a zero count, and the absent state, both
+    /// produce no gap at all.
+    #[test]
+    fn the_gap_list_is_non_empty_exactly_when_the_public_var_count_is_non_zero() {
+        let non_zero = PrivateObj::Present {
+            cnt_public_vars: 4,
+            cnt_events: 0,
+            lp_func_type_info: Va::new(0),
+            lp_events_type_info: Va::new(0),
+            lp_public_vars: Va::new(0),
+        };
+        assert_eq!(non_zero.gaps(), vec![Gap::UnexplainedPublicVarCount(4)]);
+
+        let zero = PrivateObj::Present {
+            cnt_public_vars: 0,
+            cnt_events: 0,
+            lp_func_type_info: Va::new(0),
+            lp_events_type_info: Va::new(0),
+            lp_public_vars: Va::new(0),
+        };
+        assert!(zero.gaps().is_empty());
+
+        assert!(PrivateObj::Absent.gaps().is_empty());
+    }
+
+    /// `event_descriptor_addresses` gives the empty list for every object of
+    /// the three vendored programs this module reads, because every one of
+    /// them reports an event count of `0`.
+    #[test]
+    fn event_descriptor_addresses_is_empty_for_every_object_of_the_three_vendored_programs() {
+        for data in [GRAYSCALE, MAP_EDITOR, MANDELBROT] {
+            let image = PeImage::parse(data).unwrap();
+            for object in objects(data) {
+                let info = ObjectInfo::read(&image, object.lp_object_info).unwrap();
+                let private = PrivateObj::read(&image, info.lp_private_object).unwrap();
+                assert_eq!(event_descriptor_addresses(&image, &private), Vec::new());
+            }
+        }
+    }
+
+    /// The instrument. `RESEARCH.md` and `CONTEXT.md` both record it: no
+    /// corpus program carries a single event descriptor, 97 of 97 objects
+    /// that hold a `PrivateObj`. This test is what watches for the day that
+    /// changes: its failure message names the file and the object, because
+    /// a program carrying an event descriptor has entered the corpus and
+    /// the decode path this phase leaves unbuilt now needs a real sample.
+    #[test]
+    fn no_corpus_program_in_this_module_carries_an_event_descriptor() {
+        for (label, data) in [
+            ("Grayscale.exe", GRAYSCALE),
+            ("Map Editor.exe", MAP_EDITOR),
+            ("Mandelbrot.exe", MANDELBROT),
+        ] {
+            let image = PeImage::parse(data).unwrap();
+            for object in objects(data) {
+                let info = ObjectInfo::read(&image, object.lp_object_info).unwrap();
+                let private = PrivateObj::read(&image, info.lp_private_object).unwrap();
+                if let PrivateObj::Present { cnt_events, .. } = private {
+                    assert_eq!(
+                        cnt_events, 0,
+                        "{label}'s {} reports a non-zero event count ({cnt_events}): a real \
+                         event descriptor has entered the corpus, and the decode path plan \
+                         02-05 left unbuilt now needs a test against a real sample",
+                        object.name
+                    );
+                }
+            }
+        }
+    }
+
+    /// Builds a minimal 32 bit i386 portable executable with one section at
+    /// RVA `0x1000` / file offset `0x400`, so [`event_descriptor_addresses`]
+    /// has real mapped bytes to walk. This fixture tests the pointer walk
+    /// itself, not the RVA-to-file-offset map: `vb/object.rs`'s own
+    /// synthetic fixture already exercises the case where the two disagree,
+    /// and duplicating that concern here would test the same fact twice
+    /// under a different name.
+    fn synthetic_image_with_event_pointers(pointers: &[u32]) -> Vec<u8> {
+        const LFANEW: usize = 0x40;
+        const OPTIONAL: usize = LFANEW + 24;
+        const SECTION: usize = OPTIONAL + 224;
+
+        let mut out = vec![0_u8; 0x600];
+        out[0] = b'M';
+        out[1] = b'Z';
+        out[0x3c..0x40].copy_from_slice(&u32::try_from(LFANEW).unwrap().to_le_bytes());
+        out[LFANEW..LFANEW + 4].copy_from_slice(b"PE\0\0");
+
+        // The COFF file header.
+        out[LFANEW + 4..LFANEW + 6].copy_from_slice(&0x014c_u16.to_le_bytes());
+        out[LFANEW + 6..LFANEW + 8].copy_from_slice(&1_u16.to_le_bytes());
+        out[LFANEW + 20..LFANEW + 22].copy_from_slice(&224_u16.to_le_bytes());
+        out[LFANEW + 22..LFANEW + 24].copy_from_slice(&0x0102_u16.to_le_bytes());
+
+        // The PE32 optional header.
+        out[OPTIONAL..OPTIONAL + 2].copy_from_slice(&0x010b_u16.to_le_bytes());
+        out[OPTIONAL + 0x1c..OPTIONAL + 0x20].copy_from_slice(&0x0040_0000_u32.to_le_bytes());
+
+        // One section: RVA 0x1000, file offset 0x400, mapped length 0x100.
+        out[SECTION..SECTION + 8].copy_from_slice(b".text\0\0\0");
+        out[SECTION + 8..SECTION + 12].copy_from_slice(&0x100_u32.to_le_bytes());
+        out[SECTION + 12..SECTION + 16].copy_from_slice(&0x1000_u32.to_le_bytes());
+        out[SECTION + 16..SECTION + 20].copy_from_slice(&0x100_u32.to_le_bytes());
+        out[SECTION + 20..SECTION + 24].copy_from_slice(&0x400_u32.to_le_bytes());
+        out[SECTION + 36..SECTION + 40].copy_from_slice(&0x6000_0020_u32.to_le_bytes());
+
+        for (index, pointer) in pointers.iter().enumerate() {
+            let at = 0x400 + index * 4;
+            out[at..at + 4].copy_from_slice(&pointer.to_le_bytes());
+        }
+
+        out
+    }
+
+    /// A synthetic object with an event count of 3 and a pointer array of
+    /// three real addresses gives back exactly those three addresses: the
+    /// walk is exercised by something, even though no corpus file reaches
+    /// it.
+    #[test]
+    fn a_synthetic_object_with_three_event_pointers_gives_those_three_addresses() {
+        let pointers = [0x0040_1000_u32, 0x0040_1004_u32, 0x0040_1008_u32];
+        let bytes = synthetic_image_with_event_pointers(&pointers);
+        let image = PeImage::parse(&bytes).unwrap();
+        let private = PrivateObj::Present {
+            cnt_public_vars: 0,
+            cnt_events: 3,
+            lp_func_type_info: Va::new(0),
+            lp_events_type_info: Va::new(0x0040_1000),
+            lp_public_vars: Va::new(0),
+        };
+
+        assert_eq!(
+            event_descriptor_addresses(&image, &private),
+            vec![
+                Va::new(0x0040_1000),
+                Va::new(0x0040_1004),
+                Va::new(0x0040_1008)
+            ]
+        );
+    }
+
+    /// A synthetic object with an event count of 3 and a null pointer array
+    /// gives an empty list. No `PeImage` fixture is built for this one: the
+    /// null check happens before [`PeImage::region_at_va`] is ever called,
+    /// so the `Grayscale.exe` image already parsed above is enough to prove
+    /// no byte is read at address zero through any image at all.
+    #[test]
+    fn a_synthetic_object_with_a_null_event_pointer_array_gives_an_empty_list() {
+        let image = PeImage::parse(GRAYSCALE).unwrap();
+        let private = PrivateObj::Present {
+            cnt_public_vars: 0,
+            cnt_events: 3,
+            lp_func_type_info: Va::new(0),
+            lp_events_type_info: Va::new(0),
+            lp_public_vars: Va::new(0),
+        };
+
+        assert_eq!(event_descriptor_addresses(&image, &private), Vec::new());
     }
 }
