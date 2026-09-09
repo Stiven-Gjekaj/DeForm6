@@ -278,16 +278,29 @@ control.
 **Plans**: 10 plans
 
 Plans:
+**Wave 1**
 
 - [ ] 03-01-PLAN.md - The GUI table, `GUIObjectInfo`, the `lPropertiesLength` tiling invariant, the end to end tracer, and the module set
-- [ ] 03-02-PLAN.md - `OpcodeTable`, the never-committed derived table, the `--opcode-table` flag, and the safe-provenance subset
 - [ ] 03-03-PLAN.md - `support/frm.rs`, the independent `.frm` reader, and the `frmHMM.frx` exclusion by name
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 03-02-PLAN.md - `OpcodeTable`, the never-committed derived table, the `--opcode-table` flag, and the safe-provenance subset
 - [ ] 03-04-PLAN.md - Scope separators, the control tree, control types, control names, and the control array index at offset `0x05`
 - [ ] 03-05-PLAN.md - `VbStr` - the encoding parameter, the landing point validation, and the refusal
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 03-06-PLAN.md - The property stream reader - typed payloads, the position block escape, the `Font` block, the special opcodes
-- [ ] 03-07-PLAN.md - `.frx` blob extraction from the inline property stream, with image format detection
 - [ ] 03-08-PLAN.md - External OCX controls - `cType 255`, the class name, the CLSID join, `_ExtentX` and `_ExtentY`, the opaque blob
 - [ ] 03-09-PLAN.md - `ControlInfo` and the event handler table - event handler names and the honest report for a slot with no name
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 03-07-PLAN.md - `.frx` blob extraction from the inline property stream, with image format detection
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 03-10-PLAN.md - `inspect` reports the form tree, and the differential gate extends to forms and controls
 
 **Waves**: [03-01, 03-03] then [03-02, 03-04, 03-05] then [03-06, 03-08, 03-09] then [03-07] then [03-10]

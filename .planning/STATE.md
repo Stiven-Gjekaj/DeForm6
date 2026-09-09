@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 2
-current_phase_name: The object graph
+current_phase: 3
+current_phase_name: Forms
 status: complete
-stopped_at: "Phase 2 complete, verified, gaps audited"
-last_updated: "2026-09-08T00:00:00.000Z"
+stopped_at: Phase 2 complete, verified, gaps audited
+last_updated: "2026-09-09T12:18:00.365Z"
 last_activity: 2026-09-08
 last_activity_desc: "Phase 2 complete. inspect reports the object graph: 105 of 105 objects by name and kind, 185 of 185 public procedures, prototypes with argument names, types, ByRef and recovered Optional defaults, and the Declare table. The differential gate compares all 44 programs against their original source in both directions. 308 tests. Verified PASS, gaps audited, and one untested branch found and closed."
-state_head: 3fd74203b151c48646077d52bf13138a07f4f9a4
+state_head: 77f3eb91392f2dd6db53df3f532b68788823f17b
 progress:
   total_phases: 6
   completed_phases: 2
-  total_plans: 50
+  total_plans: 28
   completed_plans: 18
-  percent: 36
+  percent: 0
 ---
 
 ## Continue
@@ -63,7 +63,7 @@ inferred.
 
 ## Current Position
 
-Phase: 1 of 6 (It reads the file) - complete
+Phase: 3 (Forms) — READY TO EXECUTE
 Plan: 8 of 8 in current phase - complete
 Status: Phase 1 done. `deform6 inspect` runs end to end on a real corpus
 file and on all 44. Ready to plan Phase 2.
