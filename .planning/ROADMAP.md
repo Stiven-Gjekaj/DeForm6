@@ -279,18 +279,30 @@ control.
 
 Plans:
 
-- [ ] 03-01: The GUI table, `GUIObjectInfo`, the control block header, and the `lPropertiesLength` tiling invariant
-- [ ] 03-02: The opcode-to-property derived data table, per control type, built from a type library dump
-- [ ] 03-03: `support/frm.rs`, the independent `.frm` reader, and the `frmHMM.frx` exclusion by name
-- [ ] 03-04: Scope separators, the control tree, control types, control names, and the control array index
-- [ ] 03-05: `VbStr` - the encoding parameter, the landing point validation, and the refusal
-- [ ] 03-06: The property stream reader - typed payloads, the position block escape, the `Font` block, the special opcodes
-- [ ] 03-07: `.frx` blob extraction from the inline property stream, with image format detection
-- [ ] 03-08: External OCX controls - `cType 255`, the class name, the CLSID join, `_ExtentX` and `_ExtentY`, the opaque blob
-- [ ] 03-09: `ControlInfo` and the event handler table - event handler names and the per-control event name table
-- [ ] 03-10: `inspect` reports the form tree, and the differential gate extends to forms and controls
+- [ ] 03-01-PLAN.md - The GUI table, `GUIObjectInfo`, the `lPropertiesLength` tiling invariant, the end to end tracer, and the module set
+- [ ] 03-02-PLAN.md - `OpcodeTable`, the never-committed derived table, the `--opcode-table` flag, and the safe-provenance subset
+- [ ] 03-03-PLAN.md - `support/frm.rs`, the independent `.frm` reader, and the `frmHMM.frx` exclusion by name
+- [ ] 03-04-PLAN.md - Scope separators, the control tree, control types, control names, and the control array index at offset `0x05`
+- [ ] 03-05-PLAN.md - `VbStr` - the encoding parameter, the landing point validation, and the refusal
+- [ ] 03-06-PLAN.md - The property stream reader - typed payloads, the position block escape, the `Font` block, the special opcodes
+- [ ] 03-07-PLAN.md - `.frx` blob extraction from the inline property stream, with image format detection
+- [ ] 03-08-PLAN.md - External OCX controls - `cType 255`, the class name, the CLSID join, `_ExtentX` and `_ExtentY`, the opaque blob
+- [ ] 03-09-PLAN.md - `ControlInfo` and the event handler table - event handler names and the honest report for a slot with no name
+- [ ] 03-10-PLAN.md - `inspect` reports the form tree, and the differential gate extends to forms and controls
 
-**Waves**: [03-01, 03-02, 03-03] then [03-04, 03-05] then [03-06, 03-08, 03-09] then [03-07] then [03-10]
+**Waves**: [03-01, 03-03] then [03-02, 03-04, 03-05] then [03-06, 03-08, 03-09] then [03-07] then [03-10]
+
+Plan 03-02 moves from wave 1 to wave 2. Plan 03-01 owns
+`crates/deform6/src/vb/mod.rs` for the whole phase and creates all eight new
+module files, which is the pattern `crates/deform6/src/lib.rs` states in its
+own doc comment: the modules are declared as a set, so that two plans in one
+wave never edit this file. 03-02 edits `vb/opcodes.rs`, a file 03-01 creates,
+so it cannot run in the same wave.
+
+Plan 03-02 also withdraws the "committed as derived data" instruction in the
+gap 15 named risk below, per `03-CONTEXT.md` D-01. `AGENTS.md` bars a fixture
+calculated from a third party file, so the tool is committed and the table
+never is.
 
 ---
 
