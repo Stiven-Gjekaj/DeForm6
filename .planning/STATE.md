@@ -2,25 +2,28 @@
 gsd_state_version: "1.0"
 current_phase: 3
 current_phase_name: Forms
-status: complete
-stopped_at: Phase 2 complete, verified, gaps audited
+status: planned
+stopped_at: "Phase 3 planned. Ten plans in five waves, verified by the plan checker."
 last_updated: "2026-09-09T12:18:00.365Z"
-last_activity: 2026-09-08
-last_activity_desc: "Phase 2 complete. inspect reports the object graph: 105 of 105 objects by name and kind, 185 of 185 public procedures, prototypes with argument names, types, ByRef and recovered Optional defaults, and the Declare table. The differential gate compares all 44 programs against their original source in both directions. 308 tests. Verified PASS, gaps audited, and one untested branch found and closed."
+last_activity: 2026-09-09
+last_activity_desc: "Phase 3 planned. Research closed STRUCTURES gap 11 and found the ROADMAP conflict with the AGENTS.md redistribution rule. Four decisions recorded. Ten plans in five waves. The plan checker passed with no blocker and no warning. 7 of 7 requirements and 4 of 4 decisions covered."
 state_head: 77f3eb91392f2dd6db53df3f532b68788823f17b
 progress:
   total_phases: 6
   completed_phases: 2
-  total_plans: 28
+  total_plans: 50
   completed_plans: 18
-  percent: 0
+  percent: 36
 ---
 
 ## Continue
 
-**Phase 2 is complete, verified and audited.** Next is phase 3, Forms.
+**Phase 3 is planned.** Ten plans in five waves. Next is execution.
 
-    /gsd-plan-phase 3
+    /gsd-execute-phase 3
+
+Read `.planning/phases/03-forms/03-CONTEXT.md` first. Its four decisions bind
+every plan. D-01 withdraws the ROADMAP instruction to commit an opcode table.
 
 **What phase 3 inherits, measured rather than assumed.**
 
@@ -63,18 +66,21 @@ inferred.
 
 ## Current Position
 
-Phase: 3 (Forms) — READY TO EXECUTE
-Plan: 8 of 8 in current phase - complete
-Status: Phase 1 done. `deform6 inspect` runs end to end on a real corpus
-file and on all 44. Ready to plan Phase 2.
+Phase: 3 (Forms) - READY TO EXECUTE
+Plan: 0 of 10 in phase 3 - none executed
+Status: Phase 2 done and audited. Phase 3 is planned and not started.
+`deform6 inspect` reports the object graph. It does not read a form yet.
 Open defects: `.planning/WINDOWS.md` holds three, all of them limits that are
 stated rather than hidden. The section overlap rule has no test because no
 corpus file overlaps. The P-code branch has no real sample because every
 vendored project is native. `inspect` drops the defects it collects, because
 `Report` derives `PartialEq` and `Defect` does not.
-Last activity: 2026-09-07 - Plan 01-08 executed. The `deform6` binary, six exit codes, the locked eight-line report, and the three test files that turn the phase's ROADMAP success criteria into commands. 134 tests pass across the workspace. Nine deliberate breakages; two of the plan's own predicted measurements did not hold and are recorded.
+Last activity: 2026-09-09 - Phase 3 planned in ten plans and five waves.
+Plan 03-01 leads with an end to end tracer. Plan 03-02 withdraws the ROADMAP
+instruction to commit an opcode table built from a type library dump, because
+`AGENTS.md` bars a fixture calculated from a third party file.
 
-Progress: [░░░░░░░░░░] 0% of the plans in phase 1, which is 8 of 8
+Progress: [███░░░░░░░] 36% of the 50 plans in the roadmap, which is 18 of 50
 
 ## Performance Metrics
 
