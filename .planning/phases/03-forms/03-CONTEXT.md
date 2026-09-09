@@ -7,6 +7,26 @@ This file holds the decisions the human took after reading
 this session made that no earlier document holds. Read `03-RESEARCH.md` for
 the evidence behind each one.
 
+<decisions>
+
+- **D-01:** The opcode table is never committed. `AGENTS.md` bars a fixture
+  calculated from a third party file, so `ROADMAP.md` named risk 15 is
+  withdrawn. Plan 03-02 commits the derivation tool, ships the table format
+  and a `--opcode-table` run time loader, and transcribes only the
+  safe-provenance subset. Every other property reports honestly.
+- **D-02:** The event name table takes the same discipline as D-01. Build it
+  from independent public sources and cite each fact. Never dump `VB6.OLB`.
+  Treat the vtable ordering as the part that needs the tool, not the table.
+- **D-03:** Plan 03-04 writes the reference document corrections. It records
+  the gap 11 closure, the control array `Index` at control block offset
+  `0x05`, and the two wrong corpus counts in `GAPS.md`.
+- **D-04:** VER-06 excludes `frmHMM.frx` only, never `frmHMM.frm`. The `.frm`
+  stays in the differential gate and keeps its 14 `Index` lines.
+
+</decisions>
+
+Each decision has its full reasoning below.
+
 ## D-01: `ROADMAP.md` named risk 15 does not stand. `AGENTS.md` wins
 
 `ROADMAP.md` tells plan 03-02 to build the opcode-to-property table from a
