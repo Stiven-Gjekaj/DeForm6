@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Forms
 status: executing
-stopped_at: Completed 03-02-PLAN.md
-last_updated: "2026-09-10T10:22:44.941Z"
+stopped_at: Completed 03-04-PLAN.md
+last_updated: "2026-09-10T11:19:17.000Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 03 execution started
-state_head: b29ece6f80286235634d023a0d65146ba34bd761
+state_head: ef7e55f463ee8ae923cae777164944796ed75679
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 28
-  completed_plans: 21
+  completed_plans: 22
   percent: 0
 ---
 
@@ -67,9 +67,10 @@ inferred.
 ## Current Position
 
 Phase: 03 (Forms) — EXECUTING
-Plan: 4 of 10
+Plan: 5 of 10
 Status: Ready to execute
-`deform6 inspect` reports the object graph. It does not read a form yet.
+`deform6 inspect` reports the object graph. It reads a form's control tree
+now: every control's type, name and array index, gated on the tiling check.
 Open defects: `.planning/WINDOWS.md` holds three, all of them limits that are
 stated rather than hidden. The section overlap rule has no test because no
 corpus file overlaps. The P-code branch has no real sample because every
@@ -78,7 +79,10 @@ vendored project is native. `inspect` drops the defects it collects, because
 Last activity: 2026-09-10 — Phase 03 execution started
 Plan 03-01 leads with an end to end tracer. Plan 03-02 withdraws the ROADMAP
 instruction to commit an opcode table built from a type library dump, because
-`AGENTS.md` bars a fixture calculated from a third party file.
+`AGENTS.md` bars a fixture calculated from a third party file. Plan 03-04
+re-measures the scope-separator grammar directly against Grayscale.exe,
+since the research document's own prose does not reconcile byte-for-byte,
+and closes STRUCTURES.md gap 11.
 
 Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, which is 18 of 50
 
@@ -113,6 +117,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 | Phase 03 P01 | 56min | 3 tasks | 10 files |
 | Phase 03 P03 | 18min | 3 tasks | 3 files |
 | Phase 03 P02 | 46min | 3 tasks | 9 files |
+| Phase 03 P04 | 53min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -143,6 +148,9 @@ Recent decisions affecting current work:
 - [Phase 03]: A full sweep of all 54 corpus .frm forms found LockWorkStation is the only zero-children form; no constant is written for the measured 3-byte tail, per 03-RESEARCH.md's own fallback.
 - [Phase 03]: 03-02: safe-provenance subset leaves out conditional/unwidth-stated STRUCTURES.md rows (ScaleMode, ClientLeft/Top/Width/Height, List, DataSource, DataFormat) rather than guess a payload width.
 - [Phase 03]: 03-02: derive-opcode-table's default output path is derived/opcode-table.toml (not top-level) so git check-ignore, called with the extracted .gitignore path, does not see a leading slash as an OS-absolute path.
+- [Phase 03]: 03-04: the scope-separator grammar is implemented from this session's own byte-level measurement against Grayscale.exe, not from 03-RESEARCH.md's approximate Length+2/Length-2 prose, which does not reconcile against four independent real transitions. A control block's own separator starts at blockStart + Length - 1; 0x02 pops and continues; 0x03 is the sibling terminal with no pop of its own; a menu control (cType 19) reads a bare 0x02 as an OpenChild-equivalent terminal instead.
+- [Phase 03]: 03-04: STRUCTURES.md gap 11 closed. The control array Index is the two byte value at control block offset 0x05, not cId as the published array header table states.
+- [Phase 03]: 03-04: corpus/vb6-code/Custom-image-filters/CustomFilters.exe, named in the plan text, does not exist in this corpus; the real ExeName32 is Custom_Filters.exe.
 
 ### Pending Todos
 
@@ -171,12 +179,12 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T10:22:44.926Z
-Stopped at: Completed 03-02-PLAN.md
+Last session: 2026-09-10T11:19:17.000Z
+Stopped at: Completed 03-04-PLAN.md
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and
 confirmed rather than assumed.
 
-Next: `/gsd-execute-phase 2` to plan and execute Phase 2, The object graph.
+Next: `/gsd-execute-phase 3` to continue Phase 3 execution with plan 03-05.
 Resume file: None
