@@ -371,7 +371,21 @@ fn read_pinned() -> BTreeMap<String, PinnedEntry> {
 /// `recovered / declared`, rounded to two decimal places. The one place
 /// this ratio is computed, so the pinned column, the ratio-consistency
 /// check and the `MOVED UP` paste block can never disagree by accident.
+///
+/// A `declared` of zero is refused before the division, not left to `f64`
+/// division's own behaviour. `f64` division by zero does not panic in Rust;
+/// it gives `NaN`, and `format!("{:.2}", f64::NAN)` renders the literal
+/// text `NaN`, which reads like a number and is not one (review finding
+/// WR-03). No corpus program reaches `declared == 0` today, so a test
+/// drives this branch directly rather than depending on the corpus to grow
+/// one. `"n/a"` is the named result: a reader cannot mistake it for a
+/// measured ratio, and `AGENTS.md`'s own measurement rule says to give the
+/// number that can be proved, not one a division produced from an absent
+/// denominator.
 pub(crate) fn format_ratio(recovered: u32, declared: u32) -> String {
+    if declared == 0 {
+        return "n/a".to_owned();
+    }
     let ratio = f64::from(recovered) / f64::from(declared);
     format!("{ratio:.2}")
 }
@@ -685,6 +699,28 @@ fn declared_mismatch_message(
             )
         ),
     }
+}
+
+#[test]
+fn a_declared_of_zero_gives_the_named_result_and_not_a_division() {
+    assert_eq!(
+        format_ratio(0, 0),
+        "n/a",
+        "a zero denominator must give a result a reader cannot mistake for a measurement"
+    );
+    assert_eq!(
+        format_ratio(7, 0),
+        "n/a",
+        "a non-zero recovered count over a zero declared count is still refused, not divided"
+    );
+}
+
+#[test]
+fn a_declared_above_zero_gives_the_same_text_it_gives_today() {
+    // public-domain/UUID2/VB6/UUID2.exe, as tests/ratios.toml pins it today.
+    assert_eq!(format_ratio(4, 25), "0.16");
+    // public-domain/LockWorkStation/LockWorkStation.exe, as pinned today.
+    assert_eq!(format_ratio(0, 1), "0.00");
 }
 
 #[test]
