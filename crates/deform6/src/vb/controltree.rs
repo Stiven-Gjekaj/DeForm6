@@ -15,10 +15,10 @@
 //! # The scope-separator walk (`STRUCTURES.md` section 8.9)
 //!
 //! `03-RESEARCH.md`'s own words: "the least certain part of the entire
-//! format." [`walk`] implements the recommendation literally — read `0xFF`,
+//! format." [`walk`] implements the recommendation literally: read `0xFF`,
 //! then scope bytes, counting `0x02` as a pop, stopping on `0x01` (open a
 //! child), `0x03` (sibling), `0x04` (end the form), `0x05` (menu), or
-//! anything else (unrecognised) — and gates the result on
+//! anything else (unrecognised). It then gates the result on
 //! [`crate::vb::gui::Tiling`], the byte-accounting invariant plan 03-01
 //! built. A tree whose bytes do not tile `lPropertiesLength` exactly is
 //! refused with the byte offset of the divergence, never emitted mis-nested.
@@ -417,8 +417,8 @@ const MENU_C_TYPE: u8 = 19;
 ///
 /// **`current_is_menu`**: is the control the walk just finished reading
 /// itself a menu? Plan 03-04 measured, over `Grayscale.exe`'s own `mnuFile`
-/// and `mnuOpenImage` menu entries, that a run of exactly `0xFF 0x02` —
-/// with no further byte, and with nothing yet popped in this run — makes
+/// and `mnuOpenImage` menu entries, that a run of exactly `0xFF 0x02`, with
+/// no further byte and with nothing yet popped in this run, makes
 /// the menu control just read the parent of the next one, the same role
 /// `0x01` plays for every other control. Outside a menu control, `0x02`
 /// still adds a pop and continues, confirmed against `Grayscale.exe`'s own
@@ -427,13 +427,13 @@ const MENU_C_TYPE: u8 = 19;
 ///
 /// **`stack_top_is_menu`**: is the control the new sibling or child would
 /// attach to (the current top of the walk's own parent stack) itself a
-/// menu — that is, are we already inside a menu's own child list, rather
+/// menu, that is, are we already inside a menu's own child list, rather
 /// than opening the first child of a menu that has none yet? This session
 /// measured that plan 03-04's own `current_is_menu` special case, applied
 /// on its own, mis-nests a real corpus case: `frmUUID2.frm`'s own
-/// `menuLicense` (a leaf, no children) is followed by a bare `0xFF 0x02` —
+/// `menuLicense` (a leaf, no children) is followed by a bare `0xFF 0x02`,
 /// the identical byte pattern plan 03-04 measured for `mnuFile` opening
-/// `mnuOpenImage` — but the correct role here is `Sibling` (`menuSep`, a
+/// `mnuOpenImage`, but the correct role here is `Sibling` (`menuSep`, a
 /// sibling of `menuLicense`, both children of `menuAbout`), not
 /// `OpenChild`. The one structural fact that tells these two identical byte
 /// patterns apart: `menuFile`'s own parent stack top, at the moment its
@@ -464,11 +464,11 @@ const MENU_C_TYPE: u8 = 19;
 /// - `corpus/public-domain/UUID2/VB6/UUID2.exe`, file offset `0x19cc`:
 ///   `menuLicense` (child of `menuAbout`) to `menuSep` (a sibling of
 ///   `menuLicense`, both children of `menuAbout`). Bytes `0xFF 0x02`, stack
-///   top `menuAbout`: zero pops, then `Sibling` — the bare byte that plan
-///   03-04's own single-condition rule misread as `OpenChild`.
+///   top `menuAbout`: zero pops, then `Sibling`. This is the bare byte that
+///   plan 03-04's own single-condition rule misread as `OpenChild`.
 /// - `corpus/public-domain/HexScroll/Hex Scroll.exe`, file offset `0x1743`:
 ///   `menuLicense` (child of `menuAbout`) to `menuSep` (a sibling of
-///   `menuLicense`, both children of `menuAbout`) — the identical shape to
+///   `menuLicense`, both children of `menuAbout`), the identical shape to
 ///   the transition above, in a second, independent program. Bytes `0xFF
 ///   0x02`, stack top `menuAbout`: zero pops, then `Sibling`.
 ///
@@ -480,7 +480,7 @@ const MENU_C_TYPE: u8 = 19;
 /// block, and is the exact and only cause of the refusal this session
 /// started from (`MAX_UNEXPLAINED_TAIL`, `WINDOWS.md` finding 7). In the
 /// last two, `current_is_menu` alone gives `OpenChild` and silently
-/// mis-nests `menuSep` as `menuLicense`'s own child — a wrong tree with no
+/// mis-nests `menuSep` as `menuLicense`'s own child, a wrong tree with no
 /// refusal at all, the exact failure mode this repository's own gate
 /// exists to catch, and caught here only because a test asserted the
 /// recovered parent by name rather than trusting that recovery without a
@@ -491,11 +491,11 @@ const MENU_C_TYPE: u8 = 19;
 ///
 /// The rule these five bytes support: when the parent stack top is itself a
 /// menu (`stack_top_is_menu`), `0x03` behaves the way `0x02` behaves for
-/// every other control — it adds a pop and the run continues — and `0x02`
+/// every other control: it adds a pop and the run continues, and `0x02`
 /// becomes the run's own `Sibling` terminal, at whatever pop count the run
 /// has accumulated. `current_is_menu`'s own bare-`0x02`-means-`OpenChild`
-/// special case still applies, but only when the stack top is *not* a menu
-/// — that is, only when the menu control just read is opening its own
+/// special case still applies, but only when the stack top is *not* a menu,
+/// that is, only when the menu control just read is opening its own
 /// first child, not adding a further sibling to a menu it is already
 /// nested inside.
 ///
@@ -503,7 +503,7 @@ const MENU_C_TYPE: u8 = 19;
 /// holds a third shape: `menuAbout`, itself a sibling within an
 /// already-open menu (`menuHelp`), that genuinely opens its own child
 /// (`menuAboutForm`). Its own trailing separator, at file offset `0x21d0`,
-/// is a bare `0xFF 0x02` with `stack_top_is_menu` true and zero pops — byte
+/// is a bare `0xFF 0x02` with `stack_top_is_menu` true and zero pops, byte
 /// for byte identical to the two `menuLicense` transitions above, which
 /// need the opposite role. No byte this module reads (the fixed header, or
 /// the property stream up to the separator) distinguishes the two; this
@@ -625,7 +625,7 @@ pub struct ControlTree<'a> {
 /// # Errors
 ///
 /// Returns [`Refusal::Damaged`] when the file ends before the `Length`
-/// field, when `Length` is `0` (which would not advance the cursor — the
+/// field, when `Length` is `0` (which would not advance the cursor; the
 /// research measured this exact value appearing when a flat jump ignores
 /// the scope run), or when the block's own declared span runs past the end
 /// of the file.
@@ -680,7 +680,7 @@ fn apply_pops(stack: &mut Vec<usize>, pops: u8, at_offset: u32) -> Result<(), Re
 /// two-byte `Length` field is present, `Length` is not `0`, and the block's
 /// own declared span (`Length + 2`) does not run past the end of `region`.
 ///
-/// A `Length` of `0` is never treated as "not enough room left" — it is
+/// A `Length` of `0` is never treated as "not enough room left". It is
 /// always the hard refusal [`read_block`] itself gives, because it would not
 /// advance the cursor regardless of how many bytes remain.
 fn block_fits(region: &Region<'_>, at: Off) -> bool {
@@ -747,7 +747,7 @@ const MAX_UNEXPLAINED_TAIL: u32 = 8;
 /// parent stack depth on real corpus data (`Grayscale.exe`, `UUID2.exe`,
 /// `HexScroll.exe` all hit this). Calling [`apply_pops`] here, as the
 /// mid-walk pop discipline does, refuses every one of those closing-out
-/// programs — including `FrmHex` and `frmUUID2`, whose own recovery this
+/// programs, including `FrmHex` and `frmUUID2`, whose own recovery this
 /// plan's own task 1 measured and requires. A terminal pop count closing
 /// the whole tree out is not the same fact a mid-walk pop is: mid-walk, an
 /// excess pop means the byte grammar has drifted from the real tree shape,
@@ -779,7 +779,7 @@ fn close_walk(region: &Region<'_>, end_at: Off, tiling: &mut Tiling) -> Result<(
 /// scope-separator run, apply its pops to the current parent stack, and
 /// either read the next control block (for `OpenChild`, `Sibling`, or
 /// `Menu`) or stop (for `EndForm`, or for a next position that
-/// [`block_fits`] finds implausible — see [`close_walk`]). Every block's own
+/// [`block_fits`] finds implausible; see [`close_walk`]). Every block's own
 /// span and every run's own length is accounted into `tiling`. The walk
 /// ends by calling [`Tiling::finish`]; a tree whose bytes do not tile the
 /// stream's own declared length exactly is refused with the byte offset of
@@ -921,7 +921,7 @@ mod tests {
     /// this session measured for the `TxtF` array's first three elements in
     /// `corpus/vb6-code/Custom-image-filters/Custom_Filters.exe` (the
     /// corpus's real `ExeName32`; the plan's own text names
-    /// `CustomFilters.exe`, which this corpus does not hold — the `.vbp`
+    /// `CustomFilters.exe`, which this corpus does not hold; the `.vbp`
     /// declares `ExeName32="Custom_Filters.exe"`). This is a literal the
     /// test builds in memory, per `AGENTS.md`: a test builds the state it
     /// needs and does not read it out of a file the author edits.
@@ -1221,8 +1221,8 @@ mod tests {
     /// own child level to the form's own. A `0x02` that closes zero levels
     /// instead of one leaves `frameDecompose` nested one level too deep
     /// (a child of `frameShades`, not a sibling of it), which this
-    /// assertion — the form's own direct child list, by name, in stream
-    /// order — is built to catch.
+    /// assertion (the form's own direct child list, by name, in stream
+    /// order) is built to catch.
     #[test]
     fn grayscale_gives_the_form_its_own_nine_direct_children_by_name() {
         let (tree, _) =
@@ -1400,7 +1400,7 @@ mod tests {
     ///
     /// `menuAbout`'s own trailing separator here (`corpus/public-domain/
     /// PassGen/PassGen.exe`, file offset `0x21d0`) is a bare `0xFF 0x02`
-    /// with `stack_top_is_menu` true and zero pops — byte for byte
+    /// with `stack_top_is_menu` true and zero pops, byte for byte
     /// identical to `menuLicense`'s own trailing separator in `HexScroll.exe`
     /// and in `UUID2.exe`, both of which this module's own tests assert
     /// correctly resolve to `Sibling`. Here the correct role is the
@@ -1486,7 +1486,7 @@ mod tests {
     /// pops already use) and measured that it refuses real corpus data:
     /// `Grayscale.exe`, `UUID2.exe` and `HexScroll.exe` all reach `EndForm`
     /// with a `pops` count larger than the real parent stack depth at that
-    /// point, and none of that is a grammar error — no more siblings
+    /// point, and none of that is a grammar error: no more siblings
     /// follow, so an excess terminal pop closes nothing that still
     /// matters, unlike a mid-walk excess pop, which would misplace every
     /// later sibling. The chosen fix is the review finding's second one:
