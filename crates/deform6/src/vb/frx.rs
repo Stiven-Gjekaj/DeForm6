@@ -1,7 +1,10 @@
 //! `.frx` resource blob extraction: the inline blob reader, the running
 //! offset cursor and the image-signature sniff.
 //!
-//! Plan 03-07 fills this module. It serves FRM-05.
+//! Plan 03-07 fills this module. It serves FRM-05. Plan 03-15 corrects
+//! [`BlobCursor::take`]'s own advance against a real committed `.frx`,
+//! wires [`extract_blob`] into `propstream.rs`'s resource blob arm, and
+//! proves both end to end.
 //!
 //! # The `.frx` offset is not in the executable
 //!
@@ -14,6 +17,25 @@
 //! module computes an offset. `AGENTS.md`'s measurement rule says the same
 //! thing in general terms: give the number that can be proved, not one
 //! calculated from a part.
+//!
+//! # Plan 03-15's correction, measured against real `.frx` files
+//!
+//! `STRUCTURES.md` section 8.8 states the advance is `blobLen + 12`,
+//! citing SVBD's own `modFrx`. Plan 03-15 measured eleven real gaps
+//! across two committed `.frx` files this repository vendors
+//! (`corpus/vb6-code/Game-physics-basic/FormPhysics.frx`, nine gaps, and
+//! `corpus/vb6-code/Transparency-2D/frmTransparency.frx`, two gaps) and
+//! found the real advance is `blobLen + 4` in all eleven, with the file
+//! ending exactly at the last item's own end. `Fast_Flames.exe`'s own
+//! inline blob at file offset `0x13d5` is byte for byte identical to the
+//! whole of the committed `frmFire.frx`: the length field, the eight byte
+//! header and the image bytes, with nothing else in between. A `.frx`
+//! item on disk is therefore the four byte length field itself (the same
+//! field the executable already carries inline) followed directly by
+//! `declared_len` bytes (the eight byte header plus the image): `4 +
+//! declared_len` bytes total, never `12 + declared_len`. [`FRX_ITEM_HEADER_LEN`]
+//! keeps its name; its value and its doc comment now state what those four
+//! bytes are.
 //!
 //! # This module recovers bytes into memory. It writes no file.
 //!
@@ -207,11 +229,19 @@ pub fn extract_blob(block: &Region<'_>, at: Off) -> (Option<Blob>, u32, Option<D
     (Some(blob), consumed, None)
 }
 
-/// The size of the `.frx` item header a `.frx` writer adds around every
-/// blob. The executable does not contain it: `STRUCTURES.md` section 8.8
-/// gives its three fields (`dwSizeImageEx`, `dwKey`, `dwSizeImage`) and
-/// credits Brad Martinez, through SVBD's own `modFrx`, for documenting it.
-pub const FRX_ITEM_HEADER_LEN: u32 = 12;
+/// The width of the `.frx` item's own four byte length field: the one part
+/// of an item on disk that `declared_len` does not itself count.
+///
+/// `STRUCTURES.md` section 8.8 names this quantity `12`, the three
+/// `FRXITEMHDR` fields (`dwSizeImageEx`, `dwKey`, `dwSizeImage`), crediting
+/// Brad Martinez through SVBD's own `modFrx`. Plan 03-15 measured eleven
+/// real gaps across two committed `.frx` files this repository vendors and
+/// found the real value is `4`, not `12`: a `.frx` item on disk is the same
+/// four byte length field the executable already carries inline, followed
+/// directly by `declared_len` bytes (the eight byte picture header plus the
+/// image), with no separate twelve byte header in between. See the module
+/// doc comment for the full measurement and the corpus files it names.
+pub const FRX_ITEM_HEADER_LEN: u32 = 4;
 
 /// The running `.frx` offset cursor.
 ///
@@ -514,8 +544,8 @@ mod tests {
     }
 
     #[test]
-    fn frx_item_header_len_is_twelve() {
-        assert_eq!(FRX_ITEM_HEADER_LEN, 12);
+    fn frx_item_header_len_is_four() {
+        assert_eq!(FRX_ITEM_HEADER_LEN, 4);
     }
 
     #[test]
@@ -526,15 +556,16 @@ mod tests {
     }
 
     #[test]
-    fn three_blobs_of_length_8_108_and_8_give_offsets_0_20_and_140() {
+    fn three_blobs_of_length_8_108_and_8_give_offsets_0_12_and_124() {
         let mut cursor = BlobCursor::new();
         let first = cursor.take(&a_blob(8)).unwrap();
         let second = cursor.take(&a_blob(108)).unwrap();
         let third = cursor.take(&a_blob(8)).unwrap();
         assert_eq!(
             [first, second, third],
-            [0, 20, 140],
-            "the plus 12 must apply once per blob, not once per form"
+            [0, 12, 124],
+            "the plus 4 (the length field's own width) must apply once per blob, not once per \
+             form; see the module doc comment's eleven-gap measurement"
         );
     }
 
@@ -555,11 +586,13 @@ mod tests {
     #[test]
     fn take_gives_a_refusal_naming_the_offset_when_the_advance_overflows_a_u32() {
         let mut cursor = BlobCursor::new();
-        // The first take leaves the cursor at u32::MAX - 8: close to the
-        // edge, but a valid offset. The second take's own advance (8 plus
-        // the item header) then overflows.
-        cursor.take(&a_blob(u32::MAX - 20)).unwrap();
-        let err = cursor.take(&a_blob(8)).unwrap_err();
+        // The first take leaves the cursor at exactly u32::MAX: a valid
+        // offset, right at the edge. The second take's own advance (0 plus
+        // the length field's own 4 bytes) then overflows.
+        cursor
+            .take(&a_blob(u32::MAX - FRX_ITEM_HEADER_LEN))
+            .unwrap();
+        let err = cursor.take(&a_blob(0)).unwrap_err();
         let message = format!("{err}");
         assert!(!message.is_empty());
     }
@@ -613,5 +646,100 @@ mod tests {
         assert_eq!(offset, 0);
         let expected_second_offset = FRX_ITEM_HEADER_LEN;
         assert_eq!(cursor.take(&a_blob(0)).unwrap(), expected_second_offset);
+    }
+
+    // --- Plan 03-15, Task 1: the cursor against two committed .frx files --
+
+    /// Gives the absolute path to a file under this repository's own
+    /// vendored `corpus/`.
+    fn corpus_path(relative: &str) -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../corpus")
+            .join(relative)
+    }
+
+    /// Parses every `"name.frx":OFFSET` (or `$"name.frx":OFFSET`) hex
+    /// offset a committed `.frm` declares, in the order the file's own
+    /// lines give them.
+    ///
+    /// Reads the file at run time. This function commits no table of
+    /// offsets: it reads the same committed `.frm` bytes every run, and a
+    /// caller that changed the corpus would see this parse differently
+    /// rather than see a stale literal disagree with it.
+    fn declared_frx_offsets(frm_relative: &str) -> Vec<u32> {
+        let bytes = std::fs::read(corpus_path(frm_relative)).expect("reading the committed .frm");
+        let text: String = bytes.iter().copied().map(char::from).collect();
+        let mut offsets = Vec::new();
+        for line in text.lines() {
+            let Some(colon) = line.find(".frx\":") else {
+                continue;
+            };
+            let hex = &line[colon + 6..];
+            let hex: String = hex.chars().take_while(char::is_ascii_hexdigit).collect();
+            if let Ok(offset) = u32::from_str_radix(&hex, 16) {
+                offsets.push(offset);
+            }
+        }
+        offsets
+    }
+
+    /// Drives every declared offset of one committed `.frx` file through a
+    /// fresh [`BlobCursor`], reading the declared length the real file
+    /// holds at each declared offset, and asserts the cursor reproduces the
+    /// whole sequence exactly.
+    ///
+    /// Both files are read at run time, per `AGENTS.md`'s rule that a
+    /// derived fixture from a corpus binary never enters the repository:
+    /// this function commits no length table and no hash computed from
+    /// either file, only the two relative paths that name them.
+    fn assert_cursor_reproduces_declared_offsets(frm_relative: &str, frx_relative: &str) {
+        let declared_offsets = declared_frx_offsets(frm_relative);
+        assert!(
+            declared_offsets.len() >= 2,
+            "{frm_relative} must declare at least two resource offsets for this test to prove \
+             anything about the gaps between them"
+        );
+        let frx_bytes =
+            std::fs::read(corpus_path(frx_relative)).expect("reading the committed .frx");
+
+        let mut cursor = BlobCursor::new();
+        let mut got = Vec::new();
+        for &offset in &declared_offsets {
+            let at = usize::try_from(offset).expect("a real .frx offset fits in usize");
+            let declared_len = u32::from_le_bytes(
+                frx_bytes[at..at + 4]
+                    .try_into()
+                    .expect("the committed .frx holds 4 bytes at every declared offset"),
+            );
+            got.push(cursor.take(&a_blob(declared_len)).unwrap());
+        }
+        assert_eq!(
+            got, declared_offsets,
+            "{frm_relative}'s own declared offset sequence must round-trip through the cursor \
+             exactly; see the module doc comment for how this was measured"
+        );
+    }
+
+    /// `corpus/vb6-code/Game-physics-basic/FormPhysics.frm` declares ten
+    /// resource offsets into `FormPhysics.frx`. Nine real gaps between them,
+    /// each measured by hand while this plan was written, are `declared
+    /// length + 4`.
+    #[test]
+    fn the_cursor_reproduces_form_physics_frxs_own_ten_declared_offsets() {
+        assert_cursor_reproduces_declared_offsets(
+            "vb6-code/Game-physics-basic/FormPhysics.frm",
+            "vb6-code/Game-physics-basic/FormPhysics.frx",
+        );
+    }
+
+    /// `corpus/vb6-code/Transparency-2D/frmTransparency.frm` declares three
+    /// resource offsets into `frmTransparency.frx`, an independent second
+    /// sample from a different corpus program.
+    #[test]
+    fn the_cursor_reproduces_frm_transparencys_own_three_declared_offsets() {
+        assert_cursor_reproduces_declared_offsets(
+            "vb6-code/Transparency-2D/frmTransparency.frm",
+            "vb6-code/Transparency-2D/frmTransparency.frx",
+        );
     }
 }
