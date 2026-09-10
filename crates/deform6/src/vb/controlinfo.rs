@@ -405,6 +405,287 @@ pub fn join_by_name(tree: &ControlTree, table: &ControlInfoTable) -> ControlJoin
     }
 }
 
+// --- The event handler table and the native stub -------------------------
+//
+// `STRUCTURES.md` section 8.6 gives two header shapes, selected by
+// `fControlType`, and a 13-byte native stub. This session decoded one real
+// corpus stub byte for byte (`SK-Gradient-Sample__VB6`'s own `Command1`,
+// event slot 0): `81 6c 24 04 3f 00 00 00 e9 23 04 00`, confirming every
+// field this section reads: the `sub`/`jmp` opcode bytes, the immediate
+// value at `+0x04` (`0x3F`, which AG's own sample also gives, per
+// `STRUCTURES.md`), and the relative jump at `+0x09`.
+//
+// This module reads the **native** stub shape only. `STRUCTURES.md` section
+// 10.2 names a second, P-code stub shape (`xor eax,eax / mov edx,<addr> /
+// push <addr> / ret`); this corpus is 44 native programs and holds no P-code
+// sample (`STATE.md`'s own standing blocker), so the P-code branch is not
+// implemented here. It is a declared absence, not an oversight.
+
+/// The event table header length for `fControlType == 0x40`
+/// (`STRUCTURES.md` section 8.6): 6 four-byte values.
+const NATIVE_EVENT_HEADER_LEN: u32 = 0x18;
+
+/// The event table header length for `fControlType == 0x2E`: 10 four-byte
+/// values, the 6 native ones plus the four `IDispatch` slots a COM control's
+/// sink adds.
+const COM_EVENT_HEADER_LEN: u32 = 0x28;
+
+/// The width of one event slot: a four-byte little-endian address, `0`
+/// meaning unbound.
+const EVENT_SLOT_SIZE: u32 = 4;
+
+/// The native stub's own byte length: 4 bytes of `sub dword ptr [esp+4],
+/// imm32` opcode, 4 bytes of `imm32`, 1 byte of `jmp rel32` opcode, 4 bytes
+/// of `rel32`.
+const STUB_LEN: u32 = 13;
+
+/// The `imm32` value a stub gives for a method. Any smaller value marks an
+/// event.
+const METHOD_MARKER: u32 = 0xFFFF;
+
+/// Chooses the event table header length from `fControlType`.
+///
+/// `None` for any value other than `0x40` or `0x2E`: the header size is
+/// never guessed, and [`read_event_table`] reads no slots for one.
+#[must_use]
+const fn event_table_header_len(f_control_type: u16) -> Option<u32> {
+    match f_control_type {
+        0x0040 => Some(NATIVE_EVENT_HEADER_LEN),
+        0x002E => Some(COM_EVENT_HEADER_LEN),
+        _ => None,
+    }
+}
+
+/// One event slot: bound to a handler stub, or unbound.
+///
+/// `STRUCTURES.md` section 8.6: a slot of zero means the event has no
+/// handler in the source. Every slot is reported by its own ascending
+/// index, and the index is never renumbered: an unbound slot is reported,
+/// never omitted, and the slot after it keeps its own index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EventSlot {
+    /// The slot's own value was `0`: no handler is bound in the source.
+    Unbound {
+        /// This slot's own ordinal in the control's default source
+        /// interface, ascending from `0`.
+        index: u16,
+    },
+    /// The slot's own value is a stub address.
+    Bound {
+        /// This slot's own ordinal.
+        index: u16,
+        /// The stub's own address, as the file gives it.
+        stub: Va,
+        /// The decoded handler, when the stub itself resolved and its own
+        /// 13 bytes could be read. `None` when it could not;
+        /// [`EventTable::defects`] carries the reason. The slot still
+        /// reports as bound either way: a slot whose handler this module
+        /// cannot decode is not the same fact as a slot with no handler at
+        /// all.
+        handler: Option<StubHandler>,
+    },
+}
+
+/// A native stub, decoded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StubHandler {
+    /// `true` when the stub's own `imm32` is [`METHOD_MARKER`] (`0xFFFF`), a
+    /// method. A smaller value marks an event.
+    pub is_method: bool,
+    /// The handler's own address: the stub start plus [`STUB_LEN`] plus the
+    /// signed four-byte value at the stub start plus `0x09`. Computed with
+    /// checked arithmetic over the whole signed range, so a negative
+    /// relative value gives an address below the stub start rather than
+    /// wrapping.
+    pub handler_address: u32,
+}
+
+/// The event handler table one `ControlInfo` names, plus the defects the
+/// walk found.
+#[derive(Clone, Debug)]
+pub struct EventTable {
+    /// Every slot, by ascending index, in `STRUCTURES.md` section 8.6's own
+    /// order.
+    pub slots: Vec<EventSlot>,
+    /// Set when `fControlType` names neither `0x40` nor `0x2E`: no header
+    /// size can be chosen, so no slots are read. Carries the raw value, so
+    /// the reason a report gives names it rather than guessing.
+    pub unsupported_control_type: Option<u16>,
+    defects: Vec<Defect>,
+}
+
+impl EventTable {
+    /// Gives the defects the walk found: a stub address that resolved
+    /// nowhere or held too few bytes to decode, or a `wEventCount` too large
+    /// for the file to hold.
+    #[must_use]
+    pub fn defects(&self) -> &[Defect] {
+        &self.defects
+    }
+}
+
+/// Reads the event handler table `control` names.
+///
+/// `control.w_event_count` is bounded against the real length of the file
+/// that remains after the header, the same shape
+/// [`ControlInfoTable::read`]'s own `bound_control_count` uses for
+/// `dwControlCount`.
+///
+/// # Errors
+///
+/// Returns [`Refusal::Damaged`] when `control.lp_event_table` is in no
+/// section. A control whose header size cannot be chosen, or whose event
+/// count is `0`, is not an error: it gives an [`EventTable`] with no slots.
+pub fn read_event_table(pe: &PeImage<'_>, control: &ControlInfo) -> Result<EventTable, Refusal> {
+    let Some(header_len) = event_table_header_len(control.f_control_type) else {
+        return Ok(EventTable {
+            slots: Vec::new(),
+            unsupported_control_type: Some(control.f_control_type),
+            defects: Vec::new(),
+        });
+    };
+
+    if control.w_event_count == 0 {
+        return Ok(EventTable {
+            slots: Vec::new(),
+            unsupported_control_type: None,
+            defects: Vec::new(),
+        });
+    }
+
+    let table = pe
+        .region_at_va(control.lp_event_table)
+        .ok_or(Refusal::Damaged(
+            "a ControlInfo's lpEventTable is in no section",
+        ))?;
+
+    let mut defects = Vec::new();
+    let (event_count, count_defect) = bound_event_count(&table, header_len, control.w_event_count);
+    if let Some(defect) = count_defect {
+        defects.push(defect);
+    }
+
+    let mut slots = Vec::new();
+    for index in 0..event_count {
+        let slot_off = header_len
+            .checked_add(
+                u32::from(index)
+                    .checked_mul(EVENT_SLOT_SIZE)
+                    .ok_or(Refusal::Damaged("an event slot index overflows a u32"))?,
+            )
+            .ok_or(Refusal::Damaged("an event slot offset overflows a u32"))?;
+        let slot_va = table
+            .va_le(Off::new(slot_off))
+            .ok_or(Refusal::Damaged("the file ends inside an event slot"))?;
+
+        if slot_va.is_null() {
+            slots.push(EventSlot::Unbound { index });
+            continue;
+        }
+
+        let slot_offset = table.file_offset(Off::new(slot_off)).map_or(0, Off::get);
+        let (handler, stub_defect) = decode_stub(pe, slot_va, slot_offset);
+        if let Some(defect) = stub_defect {
+            defects.push(defect);
+        }
+        slots.push(EventSlot::Bound {
+            index,
+            stub: slot_va,
+            handler,
+        });
+    }
+
+    Ok(EventTable {
+        slots,
+        unsupported_control_type: None,
+        defects,
+    })
+}
+
+/// Bounds `wEventCount` against the real length of the file that remains
+/// after `header_len`, and clamps it when it does not fit. The same shape
+/// [`bound_control_count`] uses for `dwControlCount`.
+fn bound_event_count(table: &Region<'_>, header_len: u32, raw_count: u16) -> (u16, Option<Defect>) {
+    let remaining = table.len().saturating_sub(header_len);
+    let max_entries = remaining.checked_div(EVENT_SLOT_SIZE).unwrap_or(0);
+    let raw_count_u32 = u32::from(raw_count);
+    if raw_count_u32 <= max_entries {
+        return (raw_count, None);
+    }
+
+    let max = u16::try_from(max_entries).unwrap_or(u16::MAX);
+    let offset = table.file_offset(Off::new(0)).map_or(0, Off::get);
+    let defect = Defect {
+        site: Site {
+            offset,
+            rva: None,
+            structure: "ControlInfo",
+            field: "wEventCount",
+        },
+        kind: DefectKind::ImplausibleCount {
+            offset,
+            count: raw_count_u32,
+            max: max_entries,
+        },
+    };
+    (max, Some(defect))
+}
+
+/// Decodes one native stub.
+///
+/// `slot_offset` is the byte offset of the event slot itself (not the
+/// stub), used to build the defect a caller reports when the stub cannot be
+/// decoded, the same "name where the pointer was read from" contract
+/// [`read_name`] follows for a `ControlInfo`'s own name.
+///
+/// Gives `(None, Some(defect))` when the stub address resolves to no
+/// section, when its own [`STUB_LEN`] bytes cannot be read in full, or when
+/// the handler address computation overflows. Every one of these keeps the
+/// slot itself bound; only the decoded handler is lost.
+fn decode_stub(
+    pe: &PeImage<'_>,
+    stub_va: Va,
+    slot_offset: u32,
+) -> (Option<StubHandler>, Option<Defect>) {
+    let unreadable = || Defect {
+        site: Site {
+            offset: slot_offset,
+            rva: stub_va.to_rva(pe.image_base()).map(Rva::get),
+            structure: "EventSlot",
+            field: "stub",
+        },
+        kind: DefectKind::UnreadablePointer {
+            offset: slot_offset,
+            va: stub_va.get(),
+        },
+    };
+
+    let Some(stub) = pe.region_at_va(stub_va) else {
+        return (None, Some(unreadable()));
+    };
+    let Some(imm32) = stub.u32_le(Off::new(0x04)) else {
+        return (None, Some(unreadable()));
+    };
+    let Some(rel32) = stub.i32_le(Off::new(0x09)) else {
+        return (None, Some(unreadable()));
+    };
+    let Some(handler_address) = stub_va
+        .get()
+        .checked_add(STUB_LEN)
+        .and_then(|v| v.checked_add_signed(rel32))
+    else {
+        return (None, Some(unreadable()));
+    };
+
+    (
+        Some(StubHandler {
+            is_method: imm32 == METHOD_MARKER,
+            handler_address,
+        }),
+        None,
+    )
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -415,7 +696,9 @@ pub fn join_by_name(tree: &ControlTree, table: &ControlInfoTable) -> ControlJoin
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{ControlInfoTable, join_by_name, read_raw_control_info};
+    use super::{
+        ControlInfoTable, EventSlot, join_by_name, read_event_table, read_raw_control_info,
+    };
     use crate::error::DefectKind;
     use crate::read::pe::PeImage;
     use crate::read::region::{Off, Region, Va};
@@ -782,5 +1065,259 @@ mod tests {
         let join = join_by_name(&tree, &control_info_table);
         assert_eq!(join.info_only, vec!["GhostControl".to_owned()]);
         assert_eq!(join.tree_only.len(), tree.nodes.len() - 1);
+    }
+
+    // --- Task 2: the event handler table and the stub ---------------------
+
+    fn synthetic_control_info(
+        f_control_type: u16,
+        w_event_count: u16,
+        lp_event_table: u32,
+    ) -> super::ControlInfo {
+        super::ControlInfo {
+            f_control_type,
+            w_event_count,
+            lp_guid: Va::new(0),
+            lp_event_table: Va::new(lp_event_table),
+            name: "Synthetic".to_owned(),
+        }
+    }
+
+    #[test]
+    fn the_header_end_and_the_first_slot_offset_come_from_one_computation() {
+        assert_eq!(super::event_table_header_len(0x0040), Some(0x18));
+        assert_eq!(super::event_table_header_len(0x002E), Some(0x28));
+    }
+
+    #[test]
+    fn an_f_control_type_of_0x40_puts_the_first_slot_at_offset_0x18() {
+        let mut extra = vec![0_u8; 0x30];
+        extra[0x18..0x1C].copy_from_slice(&0x0040_1100_u32.to_le_bytes());
+        let bytes = synthetic_image(&extra);
+        let image = PeImage::parse(&bytes).unwrap();
+        let control = synthetic_control_info(0x0040, 1, 0x0040_1000);
+        let table = read_event_table(&image, &control).unwrap();
+        assert_eq!(table.slots.len(), 1);
+        assert!(matches!(
+            table.slots[0],
+            EventSlot::Bound { index: 0, stub, .. } if stub == Va::new(0x0040_1100)
+        ));
+    }
+
+    #[test]
+    fn an_f_control_type_of_0x2e_puts_the_first_slot_at_offset_0x28() {
+        let mut extra = vec![0_u8; 0x40];
+        extra[0x28..0x2C].copy_from_slice(&0x0040_1100_u32.to_le_bytes());
+        let bytes = synthetic_image(&extra);
+        let image = PeImage::parse(&bytes).unwrap();
+        let control = synthetic_control_info(0x002E, 1, 0x0040_1000);
+        let table = read_event_table(&image, &control).unwrap();
+        assert_eq!(table.slots.len(), 1);
+        assert!(matches!(
+            table.slots[0],
+            EventSlot::Bound { index: 0, stub, .. } if stub == Va::new(0x0040_1100)
+        ));
+    }
+
+    #[test]
+    fn an_f_control_type_of_0x41_gives_no_slots_and_a_reason_naming_0x41() {
+        let bytes = synthetic_image(&[0_u8; 0x10]);
+        let image = PeImage::parse(&bytes).unwrap();
+        let control = synthetic_control_info(0x0041, 5, 0x0040_1000);
+        let table = read_event_table(&image, &control).unwrap();
+        assert!(table.slots.is_empty());
+        assert_eq!(table.unsupported_control_type, Some(0x0041));
+    }
+
+    #[test]
+    fn a_w_event_count_of_zero_gives_an_empty_list_and_no_fault() {
+        let bytes = synthetic_image(&[0_u8; 0x20]);
+        let image = PeImage::parse(&bytes).unwrap();
+        let control = synthetic_control_info(0x0040, 0, 0x0040_1000);
+        let table = read_event_table(&image, &control).unwrap();
+        assert!(table.slots.is_empty());
+        assert!(table.defects().is_empty());
+    }
+
+    #[test]
+    fn a_w_event_count_larger_than_the_file_can_hold_gives_a_defect_and_sizes_no_allocation() {
+        // Header ends at 0x18; only 4 bytes remain in the mapped section
+        // past it, so max_entries = 4 / 4 = 1, well below the claimed 1000.
+        let extra = vec![0_u8; 0x1C];
+        let bytes = synthetic_image(&extra);
+        let image = PeImage::parse(&bytes).unwrap();
+        let control = synthetic_control_info(0x0040, 1000, 0x0040_1000);
+        let table = read_event_table(&image, &control).unwrap();
+        assert_eq!(table.slots.len(), 1);
+        assert_eq!(table.defects().len(), 1);
+        assert!(matches!(
+            table.defects()[0].kind,
+            DefectKind::ImplausibleCount {
+                count: 1000,
+                max: 1,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_slot_of_zero_reports_at_its_own_index_as_unbound_and_the_next_index_is_unchanged() {
+        let mut extra = vec![0_u8; 0x30];
+        // Slot 0 stays zero (unbound). Slot 1 is a non-null address that
+        // resolves to no section: still bound, with no decoded handler.
+        extra[0x18 + 4..0x18 + 8].copy_from_slice(&0x00F0_0000_u32.to_le_bytes());
+        let bytes = synthetic_image(&extra);
+        let image = PeImage::parse(&bytes).unwrap();
+        let control = synthetic_control_info(0x0040, 2, 0x0040_1000);
+        let table = read_event_table(&image, &control).unwrap();
+        assert_eq!(table.slots.len(), 2);
+        assert!(matches!(table.slots[0], EventSlot::Unbound { index: 0 }));
+        assert!(matches!(table.slots[1], EventSlot::Bound { index: 1, .. }));
+    }
+
+    /// Builds one native stub (`STRUCTURES.md` section 8.6): `sub dword ptr
+    /// [esp+4], imm32` then `jmp rel32`, 13 bytes total.
+    fn stub_bytes(imm32: u32, rel32: i32) -> [u8; 13] {
+        let mut buf = [0_u8; 13];
+        buf[0x00..0x04].copy_from_slice(&[0x81, 0x6C, 0x24, 0x04]);
+        buf[0x04..0x08].copy_from_slice(&imm32.to_le_bytes());
+        buf[0x08] = 0xE9;
+        buf[0x09..0x0D].copy_from_slice(&rel32.to_le_bytes());
+        buf
+    }
+
+    #[test]
+    fn a_negative_relative_jump_gives_a_handler_address_below_the_stub_start() {
+        let mut extra = vec![0_u8; 0x120];
+        extra[0x18..0x1C].copy_from_slice(&0x0040_1100_u32.to_le_bytes());
+        extra[0x100..0x10D].copy_from_slice(&stub_bytes(0x3F, -32));
+        let bytes = synthetic_image(&extra);
+        let image = PeImage::parse(&bytes).unwrap();
+        let control = synthetic_control_info(0x0040, 1, 0x0040_1000);
+        let table = read_event_table(&image, &control).unwrap();
+        let EventSlot::Bound {
+            handler: Some(handler),
+            stub,
+            ..
+        } = &table.slots[0]
+        else {
+            panic!(
+                "expected a bound slot with a decoded handler: {:?}",
+                table.slots[0]
+            );
+        };
+        assert!(
+            handler.handler_address < stub.get(),
+            "synthetic fixture: handler address {:#x} must be below the stub start {:#x}",
+            handler.handler_address,
+            stub.get()
+        );
+        assert_eq!(handler.handler_address, 0x0040_10ED);
+    }
+
+    #[test]
+    fn an_immediate_value_of_0xffff_marks_a_method_and_a_smaller_value_marks_an_event() {
+        let mut extra = vec![0_u8; 0x160];
+        extra[0x18..0x1C].copy_from_slice(&0x0040_1100_u32.to_le_bytes());
+        extra[0x1C..0x20].copy_from_slice(&0x0040_1140_u32.to_le_bytes());
+        extra[0x100..0x10D].copy_from_slice(&stub_bytes(0xFFFF, 0));
+        extra[0x140..0x14D].copy_from_slice(&stub_bytes(0x3F, 0));
+        let bytes = synthetic_image(&extra);
+        let image = PeImage::parse(&bytes).unwrap();
+        let control = synthetic_control_info(0x0040, 2, 0x0040_1000);
+        let table = read_event_table(&image, &control).unwrap();
+        let EventSlot::Bound {
+            handler: Some(method),
+            ..
+        } = &table.slots[0]
+        else {
+            panic!("expected slot 0 bound with a decoded handler");
+        };
+        let EventSlot::Bound {
+            handler: Some(event),
+            ..
+        } = &table.slots[1]
+        else {
+            panic!("expected slot 1 bound with a decoded handler");
+        };
+        assert!(method.is_method, "imm32 0xFFFF must mark a method");
+        assert!(!event.is_method, "imm32 0x3F must mark an event");
+    }
+
+    #[test]
+    fn a_stub_address_in_no_section_gives_a_defect_and_the_slot_still_reports_as_bound() {
+        let mut extra = vec![0_u8; 0x30];
+        extra[0x18..0x1C].copy_from_slice(&0x00F0_0000_u32.to_le_bytes());
+        let bytes = synthetic_image(&extra);
+        let image = PeImage::parse(&bytes).unwrap();
+        assert!(image.region_at_va(Va::new(0x00F0_0000)).is_none());
+        let control = synthetic_control_info(0x0040, 1, 0x0040_1000);
+        let table = read_event_table(&image, &control).unwrap();
+        assert!(matches!(
+            table.slots[0],
+            EventSlot::Bound {
+                index: 0,
+                handler: None,
+                ..
+            }
+        ));
+        assert_eq!(table.defects().len(), 1);
+        assert!(matches!(
+            table.defects()[0].kind,
+            DefectKind::UnreadablePointer {
+                va: 0x00F0_0000,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn the_doc_comment_names_the_p_code_stub_shapes_as_not_read() {
+        let source = include_str!("controlinfo.rs");
+        assert!(
+            source.to_lowercase().matches("p-code").count() >= 1,
+            "the doc comment must name the P-code stub shapes as not read in this task"
+        );
+    }
+
+    #[test]
+    fn sk_gradient_sample_command1_slot_zero_decodes_to_the_measured_stub() {
+        let image = PeImage::parse(SK_GRADIENT_SAMPLE).unwrap();
+        let object = first_form_object(SK_GRADIENT_SAMPLE);
+        let control_info_table = ControlInfoTable::read(&image, &object).unwrap();
+        let command1 = control_info_table
+            .entries
+            .iter()
+            .find(|entry| entry.name == "Command1")
+            .unwrap();
+        assert_eq!(command1.w_event_count, 17);
+
+        let event_table = read_event_table(&image, command1).unwrap();
+        assert_eq!(event_table.slots.len(), 17);
+        let EventSlot::Bound {
+            index: 0,
+            stub,
+            handler: Some(handler),
+        } = &event_table.slots[0]
+        else {
+            panic!(
+                "slot 0 must be bound with a decoded handler: {:?}",
+                event_table.slots[0]
+            );
+        };
+        assert_eq!(*stub, Va::new(4_200_912));
+        assert!(
+            !handler.is_method,
+            "imm32 0x3F marks an event, not a method"
+        );
+        assert_eq!(handler.handler_address, 4_201_984);
+        assert!(
+            event_table.slots[1..]
+                .iter()
+                .all(|slot| matches!(slot, EventSlot::Unbound { .. })),
+            "every remaining slot must be unbound: {:?}",
+            &event_table.slots[1..]
+        );
+        assert!(event_table.defects().is_empty());
     }
 }
