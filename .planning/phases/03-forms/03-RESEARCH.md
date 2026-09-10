@@ -886,6 +886,16 @@ fn read_array_index(region: &Region, block_at: Off) -> Option<u16> {
 // escape (every corpus coordinate fits in i16), so this remains
 // [L]/untested-by-construction until a sample is found; implement it
 // anyway, because SAF-01 forbids assuming an untested branch is dead.
+//
+// Correction (plan 03-12, gap closure): this sample used to start the
+// four i32 reads two bytes past `at` (18 bytes read from `at`: 2 for the
+// peek plus 16 for the four i32 values) while still returning 16 as the
+// consumed count, an internal contradiction. Plan 03-06 settled which
+// reading the shipped code uses; see 03-06-SUMMARY.md's key-decisions
+// block. The corrected sample below re-reads the same 16-byte span the
+// short form's own four i16 values would have occupied, starting at
+// `at`, matching crates/deform6/src/vb/propstream.rs's shipped
+// read_position_block.
 enum PositionBlock {
     Short { left: i16, top: i16, width: i16, height: i16 },
     Long { left: i32, top: i32, width: i32, height: i32 },
@@ -894,13 +904,12 @@ enum PositionBlock {
 fn read_position_block(region: &Region, at: Off) -> Option<(PositionBlock, u32)> {
     let first = region.i16_le(at)?;
     if first == -32768 {
-        let block_at = at.checked_add(2)?;
         Some((
             PositionBlock::Long {
-                left: region.i32_le(block_at)?,
-                top: region.i32_le(block_at.checked_add(4)?)?,
-                width: region.i32_le(block_at.checked_add(8)?)?,
-                height: region.i32_le(block_at.checked_add(12)?)?,
+                left: region.i32_le(at)?,
+                top: region.i32_le(at.checked_add(4)?)?,
+                width: region.i32_le(at.checked_add(8)?)?,
+                height: region.i32_le(at.checked_add(12)?)?,
             },
             16,
         ))
