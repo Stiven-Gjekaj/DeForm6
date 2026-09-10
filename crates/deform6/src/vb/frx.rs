@@ -53,7 +53,7 @@
 //! subregion, and it checks the declared length is at least 8 (a checked
 //! subtraction, never a plain one) before it computes the image byte count.
 
-use crate::error::{Defect, DefectKind, Refusal, Site};
+use crate::error::{Defect, DefectKind, Refusal, Site, damaged};
 use crate::read::region::{Off, Region};
 
 /// The four byte little endian length value that means "the property is
@@ -293,18 +293,6 @@ impl BlobCursor {
         self.offset = next;
         Ok(current)
     }
-}
-
-/// Builds a [`Refusal::Damaged`] whose message is computed at runtime.
-///
-/// The same escape hatch `vb/gui.rs::damaged` and `vb/controltree.rs::damaged`
-/// document: `Refusal::Damaged` takes `&'static str`, and this module's own
-/// required refusal (a running offset that overflows a `u32`) must name a
-/// value computed at run time. Every path that reaches this function is
-/// already fatal to the whole form's own blob recovery.
-fn damaged(message: String) -> Refusal {
-    let leaked: &'static str = Box::leak(message.into_boxed_str());
-    Refusal::Damaged(leaked)
 }
 
 /// A resource blob's container format, detected from its own first bytes.

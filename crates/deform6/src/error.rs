@@ -461,6 +461,36 @@ pub enum Refusal {
     Damaged(&'static str),
 }
 
+/// Builds a [`Refusal::Damaged`] whose message is computed at run time.
+///
+/// `Refusal::Damaged` takes `&'static str` crate-wide; the exit code table
+/// in this enum's own doc comment is locked, so this helper does not widen
+/// the variant to carry an owned `String`. `Box::leak` is the narrow,
+/// deliberate escape hatch a caller reaches only when it must name a value
+/// known only at run time (a byte offset, a count) inside an already-fatal
+/// refusal.
+///
+/// This was three byte for byte identical private copies (`vb/gui.rs`,
+/// `vb/controltree.rs`, `vb/frx.rs`) before phase 3 code review finding
+/// WR-01; this is the one shared copy that replaces them.
+///
+/// # Memory cost
+///
+/// The leak is real and it does not reclaim. A single command line run
+/// leaks one short string once, and the process exits soon after, so the
+/// cost is harmless there. A long running host that calls this library in a
+/// loop over many hostile files (a fuzz target, or a batch scanner) grows
+/// this leak without bound, one string per refusal that reaches this
+/// function. This repository has no such host yet: closing the leak for
+/// good needs `Refusal::Damaged` to carry an owned `String` instead, which
+/// touches every one of its construction sites crate-wide, not only this
+/// function's three former callers. Phase 5 owns the fuzz host that would
+/// first turn this cost into a real problem.
+pub(crate) fn damaged(message: String) -> Refusal {
+    let leaked: &'static str = Box::leak(message.into_boxed_str());
+    Refusal::Damaged(leaked)
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,

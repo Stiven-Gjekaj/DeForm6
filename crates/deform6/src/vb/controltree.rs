@@ -48,7 +48,7 @@
 //! one shape (`corpus/public-domain/PassGen/PassGen.exe`) this rule does
 //! not settle.
 
-use crate::error::{Defect, DefectKind, Refusal, Site};
+use crate::error::{Defect, DefectKind, Refusal, Site, damaged};
 use crate::read::region::{Off, Region};
 use crate::vb::gui::{FormStream, Tiling};
 
@@ -395,18 +395,6 @@ pub enum ScopeRun {
         /// Pops seen before this byte.
         pops: u8,
     },
-}
-
-/// Builds a [`Refusal::Damaged`] whose message is computed at runtime.
-///
-/// The same escape hatch `vb/gui.rs::damaged` documents: `Refusal::Damaged`
-/// takes `&'static str`, and this module's own required refusals (an
-/// unreadable control block, a scope run with no terminator) must name a
-/// byte offset a hostile file put the bad value at. Every path that reaches
-/// this function is already fatal to the whole tree.
-fn damaged(message: String) -> Refusal {
-    let leaked: &'static str = Box::leak(message.into_boxed_str());
-    Refusal::Damaged(leaked)
 }
 
 /// The `cType` value `STRUCTURES.md` section 8.4.1 assigns to `Menu`.

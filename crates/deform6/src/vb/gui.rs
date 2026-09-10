@@ -26,7 +26,7 @@
 //! special handling; it is called out here because it is easy to suspect a
 //! missing byte if the first read from a new sample produces garbage.
 
-use crate::error::Refusal;
+use crate::error::{Refusal, damaged};
 use crate::read::pe::PeImage;
 use crate::read::region::{Off, Region, Va};
 use crate::vb::header::VbHeader;
@@ -342,26 +342,6 @@ impl Tiling {
             }
         }
     }
-}
-
-/// Builds a [`Refusal::Damaged`] whose message is computed at runtime.
-///
-/// `Refusal::Damaged` takes `&'static str`. Every other call site in this
-/// crate passes a literal, because `error.rs`'s own module doc states the
-/// rule for the type: "A refusal sentence holds no byte offset and no
-/// path." This module's own required refusals are the first exception: an
-/// out-of-range `lStructSize` and a property stream that tiles the wrong
-/// number of bytes must each name the byte offset a hostile file put the
-/// bad value at, so a person can open the file there. `Box::leak` is the
-/// narrow, deliberate escape hatch: every path that reaches this function
-/// is already fatal to the whole file, `inspect` returns immediately after,
-/// and the small, bounded string this leaks is reclaimed when the process
-/// exits. This is a smaller change than widening `Refusal::Damaged` itself
-/// to `String`, which would touch the eleven existing call sites across two
-/// earlier phases that do not need one.
-fn damaged(message: String) -> Refusal {
-    let leaked: &'static str = Box::leak(message.into_boxed_str());
-    Refusal::Damaged(leaked)
 }
 
 #[cfg(test)]
