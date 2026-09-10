@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Forms
 status: verifying
-stopped_at: Completed 03-12-PLAN.md (03-RESEARCH.md gap-closure corrections, documentation only)
-last_updated: "2026-09-10T21:06:38.007Z"
+stopped_at: "Completed 03-13-PLAN.md (gap closure: Form Caption/BackColor/Icon opcode rows so the property loop reaches the resource blob opcode)"
+last_updated: "2026-09-10T21:30:36.384Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 03 execution started
-state_head: 5125126180d4886d4a1eba179471b0cc3192d22e
+state_head: 220787022f0643c3407c9c64695a4073abb8aee6
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 35
-  completed_plans: 29
+  completed_plans: 31
   percent: 0
 ---
 
@@ -125,6 +125,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 | Phase 03 P07 | 14min | 2 tasks | 2 files |
 | Phase 03 P10 | single session | 3 tasks | 14 files |
 | Phase 03-forms P12 | 35min | 3 tasks | 1 files |
+| Phase 03-forms P13 | 20min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -175,6 +176,9 @@ Recent decisions affecting current work:
 - [Phase 03]: Pinned form/control recovery ratios land at 49 of 53 forms and 607 of 607 controls across the 44-program corpus, added as four new tests/ratios.toml keys per program
 - [Phase 03]: 03-11: FRM-06 and the Phase 3 goal narrowed to event structure (bound slots, index, handler address) in REQUIREMENTS.md and ROADMAP.md, citing D-02. Event names are never recovered; this is a documentation-only correction of an unpassable requirement, not a code change.
 - [Phase 03-forms]: 03-12: Corrected three stale passages in 03-RESEARCH.md that plans 03-04 and 03-06 had disproven against real corpus bytes but never fed back: the Length - 2 property-loop bound (kept, disproven in general, corrected to the shipped Length - 1), the position-block escape's self-contradicting byte count (18 read vs 16 returned, corrected to 16), and the scope-run sample's false 0x02/0x03 symmetry (corrected to match the shipped ScopeRun variants, with a pointer to STRUCTURES.md section 8.9 and WINDOWS.md finding 7). All three corrections keep the original disproven text, marked, next to the correction and its citing SUMMARY.
+- [Phase 03]: 03-13: insert_builtin_rows takes its default provenance string from the caller (default_source param) rather than choosing it from the payload shape, so a mixed-provenance rows array (STRUCTURES.md-transcribed and corpus-measured) is representable; a PayloadType::Position row still always cites SVBD_POSITION_BLOCK regardless.
+- [Phase 03]: 03-13: opcode 35's property name is Icon (the .frm's own name), not Picture (the payload shape's own name), matching every other row's convention of using the .frm's own property name.
+- [Phase 03]: 03-13: fixed a real bug in support/frm.rs's own value parser (doubled quote inside a quoted .frm value did not unescape to one literal quote, VB6's own escaping convention), found via the corpus-wide gate the first time a Text payload reached it.
 
 ### Pending Todos
 
@@ -203,8 +207,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T21:06:37.988Z
-Stopped at: Completed 03-12-PLAN.md (03-RESEARCH.md gap-closure corrections, documentation only)
+Last session: 2026-09-10T21:30:36.366Z
+Stopped at: Completed 03-13-PLAN.md (gap closure: Form Caption/BackColor/Icon opcode rows so the property loop reaches the resource blob opcode)
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and

@@ -283,7 +283,7 @@ bound handler.
   - **STRUCTURES gap 16**: nine dwords in `GUIObjectInfo` at 0x35 to 0x58 have
     no known meaning. Leave them opaque; do not invent a reading.
 
-**Plans**: 10/17 plans executed. Plans 03-11 to 03-17 close the gaps the
+**Plans**: 13/17 plans executed. Plans 03-11 to 03-17 close the gaps the
 phase 3 verification found. They carry `gap_closure: true` and run with
 `/gsd-execute-phase 3 --gaps-only`.
 
@@ -317,7 +317,7 @@ Plans:
 
 - [x] 03-11-PLAN.md - FRM-06 narrowed to event structure in `REQUIREMENTS.md` and `ROADMAP.md`, citing D-02 (documentation only)
 - [x] 03-12-PLAN.md - `03-RESEARCH.md` corrected where plans 03-04 and 03-06 disproved it (documentation only)
-- [ ] 03-13-PLAN.md - The three Form property rows the corpus proves, so the property loop reaches the resource blob opcode
+- [x] 03-13-PLAN.md - The three Form property rows the corpus proves, so the property loop reaches the resource blob opcode
 - [ ] 03-14-PLAN.md - The two-level menu close rule, the defensive tail bound replaced, and code review finding WR-02
 
 **Gap closure wave 2** *(blocked on 03-13)*
@@ -624,7 +624,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 |-------|----------------|--------|-----------|
 | 1. It reads the file | 7/8 | In Progress|  |
 | 2. The object graph | 4/10 | In Progress|  |
-| 3. Forms | 10/10 | In Progress|  |
+| 3. Forms | 13/17 | In Progress|  |
 | 4. It writes a project | 0/9 | Not started | - |
 | 5. Hostility | 0/8 | Not started | - |
 | 6. Version 1.0 | 0/5 | Not started | - |
