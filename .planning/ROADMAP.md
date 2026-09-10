@@ -9,7 +9,7 @@ every later phase reads bytes through. Phase 2 recovers the names: objects,
 procedures, prototypes, and the external `Declare` table, and it builds the
 differential harness that measures every phase after it against the original
 source. Phase 3 recovers the forms: the control tree, the properties, the
-resource blobs, and the event handler names. Phase 4 turns the recovered model
+resource blobs, and the event structure. Phase 4 turns the recovered model
 into files on disk and into a JSON report that grades each item. Phase 5 makes
 the tool hold under a hostile file. Phase 6 finishes the metadata deliverable
 and states its boundary in writing.
@@ -28,7 +28,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: It reads the file** - PE parsing, VB6 detection, the VB header, the refusals, and the safety primitives every later phase depends on
 - [ ] **Phase 2: The object graph** - Objects, kinds, public procedure names, prototypes, the external table, and the differential harness that measures all of it
-- [ ] **Phase 3: Forms** - The control tree, control types and names, property values, the `.frx` blobs, and the event handler names
+- [ ] **Phase 3: Forms** - The control tree, control types and names, property values, the `.frx` blobs, and the event structure
 - [ ] **Phase 4: It writes a project** - `extract` emits `.vbp`, `.frm`, `.frx`, `.bas` and `.cls`, plus the JSON confidence report
 - [ ] **Phase 5: Hostility** - `--salvage`, fuzzing in the gate, and the run-time robustness corpus
 - [ ] **Phase 6: Version 1.0** - The metadata deliverable is finished, measured, and documented with its limits stated
@@ -211,8 +211,9 @@ Plans:
 **Goal**: `deform6 inspect` reports the control tree of every form with the
 correct parent for each control, the type and the name of each control, the
 property values of each control and of the form, the CLSID of each third-party
-OCX control, the resource blobs, and the event handler names bound to each
-control.
+OCX control, the resource blobs, and the event structure of each control:
+which event slots are bound, the index of each slot, and the address of each
+bound handler.
 
 **Depends on**: Phase 2
 
@@ -240,6 +241,13 @@ control.
   5. `corpus/vb6-code/Hidden-Markov-model/frmHMM.frx` is excluded by name and
      the reason is recorded next to the exclusion. Removing the exclusion makes
      the gate fail with a named message, not pass silently.
+  6. `deform6 inspect` on `corpus/vb6-code/Fire-effect/Fast_Flames.exe` prints,
+     for every slot of every control, the slot index and whether that slot is
+     bound. A live run against this program shows one control with slot 8
+     bound and slots 0 through 7 and 9 onward unbound. No slot prints a
+     guessed name. Every slot states `not decoded` and names
+     `--event-name-table` as the way to supply one, per decision D-02 in
+     `.planning/phases/03-forms/03-CONTEXT.md`.
 
 **Named risks**:
 
@@ -295,7 +303,7 @@ Plans:
 
 - [x] 03-06-PLAN.md - The property stream reader - typed payloads, the position block escape, the `Font` block, the special opcodes
 - [x] 03-08-PLAN.md - External OCX controls - `cType 255`, the class name, the CLSID join, `_ExtentX` and `_ExtentY`, the opaque blob
-- [x] 03-09-PLAN.md - `ControlInfo` and the event handler table - event handler names and the honest report for a slot with no name
+- [x] 03-09-PLAN.md - `ControlInfo` and the event handler table - event slot structure and the honest report for a slot with no name
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -345,6 +353,12 @@ Plan 03-02 also withdraws the "committed as derived data" instruction in the
 gap 15 named risk below, per `03-CONTEXT.md` D-01. `AGENTS.md` bars a fixture
 calculated from a third party file, so the tool is committed and the table
 never is.
+
+Plan 03-09 withdraws the event name table named risk above, per
+`03-CONTEXT.md` D-02. `AGENTS.md` bars a fixture calculated from a third
+party file, the same rule D-01 states, so this phase delivers event
+structure only: which slots are bound, their index, and the handler
+address. The name of an event is never recovered.
 
 ---
 
