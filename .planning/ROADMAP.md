@@ -316,7 +316,7 @@ Plans:
 **Gap closure wave 1**
 
 - [x] 03-11-PLAN.md - FRM-06 narrowed to event structure in `REQUIREMENTS.md` and `ROADMAP.md`, citing D-02 (documentation only)
-- [ ] 03-12-PLAN.md - `03-RESEARCH.md` corrected where plans 03-04 and 03-06 disproved it (documentation only)
+- [x] 03-12-PLAN.md - `03-RESEARCH.md` corrected where plans 03-04 and 03-06 disproved it (documentation only)
 - [ ] 03-13-PLAN.md - The three Form property rows the corpus proves, so the property loop reaches the resource blob opcode
 - [ ] 03-14-PLAN.md - The two-level menu close rule, the defensive tail bound replaced, and code review finding WR-02
 
