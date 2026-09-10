@@ -359,7 +359,10 @@ const FORM_ROWS: &[(u8, &str, PayloadType)] = &[
 /// `STRUCTURES.md` section 8.5.1 or from any other prior art. Plan 03-13
 /// adds these three so the property loop reaches the resource blob opcode
 /// (35) instead of stopping at the first one, opcode 1, with no row at all.
-const FORM_CORPUS_ROWS: &[(u8, &str, PayloadType)] = &[(1, "Caption", PayloadType::Text)];
+const FORM_CORPUS_ROWS: &[(u8, &str, PayloadType)] = &[
+    (1, "Caption", PayloadType::Text),
+    (3, "BackColor", PayloadType::Long),
+];
 
 /// The CommandButton rows, `cType` 4.
 const COMMAND_BUTTON_ROWS: &[(u8, &str, PayloadType)] = &[
@@ -674,5 +677,89 @@ mod tests {
             })
             .expect("frmMain's own Caption must now resolve, not stop the loop at opcode 1");
         assert_eq!(caption, "Connect to server");
+    }
+
+    // --- Plan 03-13, Task 2: the Form colour row -------------------------
+
+    #[test]
+    fn form_opcode_3_gives_back_color_with_a_long_payload_and_the_corpus_measured_source() {
+        let table = OpcodeTable::builtin();
+        let entry = table.lookup(super::CT_FORM, 3).unwrap();
+        assert_eq!(entry.name, "BackColor");
+        assert_eq!(entry.payload, PayloadType::Long);
+        assert_eq!(entry.source, super::CORPUS_MEASURED);
+    }
+
+    /// `Fast_Flames.exe`'s own form, `frmFire`, gives the colour
+    /// `frmFire.frm` line 4 declares, `BackColor = &H80000005&`, a system
+    /// colour: read through the production `inspect` path, at the offset
+    /// this session measured by hand (`0x13ca`), the four bytes `05 00 00
+    /// 80` reassemble to `0x8000_0005`, matching the declared hex literal
+    /// bit for bit.
+    #[test]
+    fn fast_flames_form_recovers_the_real_system_back_color_from_the_committed_frm() {
+        let data: &[u8] = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/vb6-code/Fire-effect/Fast_Flames.exe"
+        ));
+        let report = crate::vb::inspect(data, &OpcodeTable::builtin()).unwrap();
+        let form = report
+            .forms
+            .iter()
+            .find(|f| f.name == "frmFire")
+            .expect("Fast_Flames.exe declares a form named frmFire");
+        let root = form
+            .controls
+            .first()
+            .expect("frmFire's own tree must resolve for this corpus measurement to stand");
+        let back_color = root
+            .properties
+            .iter()
+            .find_map(|p| match p {
+                crate::vb::propstream::PropertyValue::Long { name, value }
+                    if name == "BackColor" =>
+                {
+                    Some(*value)
+                }
+                _ => None,
+            })
+            .expect("frmFire's own BackColor must now resolve");
+        assert_eq!(back_color.cast_unsigned(), 0x8000_0005);
+    }
+
+    /// A second, independent corpus program, and a literal colour rather
+    /// than a system one: `vbBrightness.exe`'s own form, `frmBrightness`,
+    /// gives the colour `Brightness.frm` line 4 declares, `BackColor =
+    /// &H00C0C0C0&`. Found by grepping the corpus for a `BackColor` line
+    /// that is not the system colour every other sample so far has carried.
+    #[test]
+    fn brightness_form_recovers_a_real_literal_back_color_from_the_committed_frm() {
+        let data: &[u8] = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/vb6-code/Brightness-effect/Part 1 - Pure VB6/vbBrightness.exe"
+        ));
+        let report = crate::vb::inspect(data, &OpcodeTable::builtin()).unwrap();
+        let form = report
+            .forms
+            .iter()
+            .find(|f| f.name == "frmBrightness")
+            .expect("vbBrightness.exe declares a form named frmBrightness");
+        let root = form
+            .controls
+            .first()
+            .expect("frmBrightness's own tree must resolve for this corpus measurement to stand");
+        let back_color = root
+            .properties
+            .iter()
+            .find_map(|p| match p {
+                crate::vb::propstream::PropertyValue::Long { name, value }
+                    if name == "BackColor" =>
+                {
+                    Some(*value)
+                }
+                _ => None,
+            })
+            .expect("frmBrightness's own BackColor must now resolve");
+        assert_eq!(back_color.cast_unsigned(), 0x00C0_C0C0);
     }
 }

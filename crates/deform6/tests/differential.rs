@@ -907,12 +907,23 @@ fn recovered_property_name(value: &PropertyValue) -> Option<&str> {
 /// gives `None` for the same reason `PropertyValue::undecoded_message`
 /// documents: this repository does not decode it, so there is nothing to
 /// compare, and it is never asked to guess.
+///
+/// `Long` renders as a `.frm` colour literal, `&H{bits:08X}&`, never as a
+/// plain signed decimal. `BackColor` (opcode 3, plan 03-13) is the only
+/// `Long`-typed row this table carries: a `.frm` writes `BackColor =
+/// &H80000005&`, and the recovered value is the same 32 bits read as a
+/// signed `i32` (`-2147483643`). The two texts would differ while the value
+/// is identical, so this puts both sides in the one form a `.frm` actually
+/// writes, per this plan's own hazard note. The bits themselves are never
+/// changed: `value as u32` is a bit-for-bit reinterpretation, not an
+/// arithmetic conversion, so a value that genuinely differs still renders a
+/// different text and the comparison can still fail.
 fn recovered_property_text(value: &PropertyValue) -> Option<String> {
     match value {
         PropertyValue::Byte { value, .. } => Some(value.to_string()),
         PropertyValue::Boolean { value, .. } => Some(value.to_string()),
         PropertyValue::Integer { value, .. } => Some(value.to_string()),
-        PropertyValue::Long { value, .. } => Some(value.to_string()),
+        PropertyValue::Long { value, .. } => Some(format!("&H{:08X}&", (*value).cast_unsigned())),
         PropertyValue::Single { value, .. } => Some(value.to_string()),
         PropertyValue::Text { value, .. } => Some(value.clone()),
         PropertyValue::Position { .. }
@@ -1153,6 +1164,102 @@ pub(crate) fn form_control_mismatches(
     }
 
     failures
+}
+
+// --- Plan 03-13, Task 2: the Form colour row and an honest colour ---------
+// --- comparison ------------------------------------------------------------
+
+/// `recovered_property_text` renders a `Long` value the way a `.frm` writes
+/// a colour: `&H80000005&`, matching `frmFire.frm` line 4 bit for bit, not
+/// the plain signed decimal `-2147483643` the raw `i32` would otherwise
+/// print as.
+#[test]
+fn recovered_property_text_renders_a_long_value_as_the_frm_colour_literal_shape() {
+    let value = PropertyValue::Long {
+        name: "BackColor".to_owned(),
+        value: 0x8000_0005_u32.cast_signed(),
+    };
+    assert_eq!(
+        recovered_property_text(&value).as_deref(),
+        Some("&H80000005&")
+    );
+}
+
+/// The rendering never collapses two distinct values to the same text: a
+/// value one greater than `frmFire.frm`'s own declared colour still renders
+/// a different literal, so the comparison this rendering feeds can still
+/// fail. `AGENTS.md`: "when you add a test, break the thing it covers on
+/// purpose and watch it fail" -- this is the instrument that would catch a
+/// rendering bug collapsing every colour to one canonical text.
+#[test]
+fn a_recovered_colour_one_greater_than_the_declared_value_still_renders_a_different_text() {
+    let declared = "&H80000005&";
+    let matching = PropertyValue::Long {
+        name: "BackColor".to_owned(),
+        value: 0x8000_0005_u32.cast_signed(),
+    };
+    assert_eq!(
+        recovered_property_text(&matching).as_deref(),
+        Some(declared)
+    );
+
+    let differing = PropertyValue::Long {
+        name: "BackColor".to_owned(),
+        value: 0x8000_0006_u32.cast_signed(),
+    };
+    assert_ne!(
+        recovered_property_text(&differing).as_deref(),
+        Some(declared),
+        "a colour that differs by one must still render a different text"
+    );
+}
+
+/// The full pipeline, not only the rendering function in isolation:
+/// doctoring `frmFire`'s own recovered `BackColor` one greater than
+/// `frmFire.frm`'s own declared `&H80000005&` still fails
+/// `form_control_mismatches`, naming `BackColor` in the failure. Proves the
+/// corpus-wide gate this plan wires the rendering into can still fail, not
+/// only the rendering helper it calls.
+#[test]
+fn a_doctored_back_color_one_greater_than_the_declared_value_fails_the_full_comparison() {
+    let exe = corpus_root().join("vb6-code/Fire-effect/Fast_Flames.exe");
+    let data = std::fs::read(&exe).unwrap_or_else(|err| panic!("reading {}: {err}", exe.display()));
+    let table = OpcodeTable::builtin();
+    let report = deform6::inspect(&data, &table).unwrap();
+
+    let mut doctored_report = report;
+    let form = doctored_report
+        .forms
+        .iter_mut()
+        .find(|f| f.name == "frmFire")
+        .expect("Fast_Flames.exe declares a form named frmFire");
+    let root = form
+        .controls
+        .first_mut()
+        .expect("frmFire's own tree must resolve for this test to doctor it");
+    let back_color = root
+        .properties
+        .iter_mut()
+        .find_map(|p| match p {
+            PropertyValue::Long { name, value } if name == "BackColor" => Some(value),
+            _ => None,
+        })
+        .expect("frmFire's own BackColor must resolve for this test to doctor it");
+    *back_color = back_color
+        .checked_add(1)
+        .expect("frmFire's own BackColor is nowhere near i32::MAX");
+
+    let projects = vbp::project_files();
+    let project_path = vbp::select_project_file(&exe, &projects).unwrap();
+    let project = vbp::Project::read(&project_path);
+    let declared = project.declared_objects();
+
+    let failures = form_control_mismatches(&declared, &doctored_report);
+    assert!(
+        failures.iter().any(|f| f.contains("BackColor")),
+        "a BackColor doctored one greater than the declared value must still fail the \
+         comparison: {failures:?}"
+    );
 }
 
 #[test]
