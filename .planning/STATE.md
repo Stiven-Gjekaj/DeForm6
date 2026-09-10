@@ -3,11 +3,11 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Forms
 status: verifying
-stopped_at: Completed 03-11-PLAN.md (FRM-06 gap closure, documentation only)
-last_updated: "2026-09-10T20:59:28.597Z"
+stopped_at: Completed 03-12-PLAN.md (03-RESEARCH.md gap-closure corrections, documentation only)
+last_updated: "2026-09-10T21:06:38.007Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 03 execution started
-state_head: 7f71d8a793dd14243093256b60c022a7f12ccfdc
+state_head: 5125126180d4886d4a1eba179471b0cc3192d22e
 progress:
   total_phases: 6
   completed_phases: 0
@@ -124,6 +124,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 | Phase 03 P09 | 23min | 3 tasks | 1 files |
 | Phase 03 P07 | 14min | 2 tasks | 2 files |
 | Phase 03 P10 | single session | 3 tasks | 14 files |
+| Phase 03-forms P12 | 35min | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -173,6 +174,7 @@ Recent decisions affecting current work:
 - [Phase 03]: The differential gate found a real scope-byte grammar bug: closing a menu nested two levels deep back to a form-level sibling was silently swallowed as an unexplained tail. Fixed defensively with MAX_UNEXPLAINED_TAIL=8, true grammar rule tracked as WINDOWS.md finding 7, not guessed at
 - [Phase 03]: Pinned form/control recovery ratios land at 49 of 53 forms and 607 of 607 controls across the 44-program corpus, added as four new tests/ratios.toml keys per program
 - [Phase 03]: 03-11: FRM-06 and the Phase 3 goal narrowed to event structure (bound slots, index, handler address) in REQUIREMENTS.md and ROADMAP.md, citing D-02. Event names are never recovered; this is a documentation-only correction of an unpassable requirement, not a code change.
+- [Phase 03-forms]: 03-12: Corrected three stale passages in 03-RESEARCH.md that plans 03-04 and 03-06 had disproven against real corpus bytes but never fed back: the Length - 2 property-loop bound (kept, disproven in general, corrected to the shipped Length - 1), the position-block escape's self-contradicting byte count (18 read vs 16 returned, corrected to 16), and the scope-run sample's false 0x02/0x03 symmetry (corrected to match the shipped ScopeRun variants, with a pointer to STRUCTURES.md section 8.9 and WINDOWS.md finding 7). All three corrections keep the original disproven text, marked, next to the correction and its citing SUMMARY.
 
 ### Pending Todos
 
@@ -201,8 +203,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T20:59:23.154Z
-Stopped at: Completed 03-11-PLAN.md (FRM-06 gap closure, documentation only)
+Last session: 2026-09-10T21:06:37.988Z
+Stopped at: Completed 03-12-PLAN.md (03-RESEARCH.md gap-closure corrections, documentation only)
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and
