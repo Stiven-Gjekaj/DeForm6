@@ -275,7 +275,9 @@ control.
   - **STRUCTURES gap 16**: nine dwords in `GUIObjectInfo` at 0x35 to 0x58 have
     no known meaning. Leave them opaque; do not invent a reading.
 
-**Plans**: 10/10 plans executed
+**Plans**: 10/17 plans executed. Plans 03-11 to 03-17 close the gaps the
+phase 3 verification found. They carry `gap_closure: true` and run with
+`/gsd-execute-phase 3 --gaps-only`.
 
 Plans:
 **Wave 1**
@@ -303,7 +305,34 @@ Plans:
 
 - [x] 03-10-PLAN.md - `inspect` reports the form tree, and the differential gate extends to forms and controls
 
+**Gap closure wave 1**
+
+- [ ] 03-11-PLAN.md - FRM-06 narrowed to event structure in `REQUIREMENTS.md` and `ROADMAP.md`, citing D-02 (documentation only)
+- [ ] 03-12-PLAN.md - `03-RESEARCH.md` corrected where plans 03-04 and 03-06 disproved it (documentation only)
+- [ ] 03-13-PLAN.md - The three Form property rows the corpus proves, so the property loop reaches the resource blob opcode
+- [ ] 03-14-PLAN.md - The two-level menu close rule, the defensive tail bound replaced, and code review finding WR-02
+
+**Gap closure wave 2** *(blocked on 03-13)*
+
+- [ ] 03-15-PLAN.md - `frx::extract_blob` wired into the property loop, the blob in the report and on the command line, and the `.frx` offset cursor corrected
+
+**Gap closure wave 3** *(blocked on 03-15)*
+
+- [ ] 03-16-PLAN.md - Which component table field holds a third party control's identifier, settled by measurement, with the honest caveat
+
+**Gap closure wave 4** *(blocked on 03-14, 03-15 and 03-16)*
+
+- [ ] 03-17-PLAN.md - Code review findings WR-01, WR-03 and IN-01, with no change to any value the tool reports
+
 **Waves**: [03-01, 03-03] then [03-02, 03-04, 03-05] then [03-06, 03-08, 03-09] then [03-07] then [03-10]
+
+**Gap closure waves**: [03-11, 03-12, 03-13, 03-14] then [03-15] then [03-16] then [03-17]
+
+The gap closure waves are ordered by file ownership, not only by dependency.
+Plans 03-13, 03-15 and 03-16 form a chain because each needs a file the one
+before it owns: 03-15 needs the resource blob opcode 03-13 measures, and both
+03-15 and 03-16 edit `crates/deform6-cli/src/main.rs`. Plan 03-17 runs last
+because it edits three files that 03-14, 03-15 and 03-16 own.
 
 Plan 03-02 moves from wave 1 to wave 2. Plan 03-01 owns
 `crates/deform6/src/vb/mod.rs` for the whole phase and creates all eight new
