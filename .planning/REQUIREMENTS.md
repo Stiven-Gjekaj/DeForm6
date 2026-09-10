@@ -48,7 +48,7 @@ Version 1 recovers metadata. It does not recover statements.
 - [ ] **FRM-04**: The tool recovers the CLSID of a third party OCX control, and
       says plainly that it cannot interpret that control's property blob
       without the control's own type library.
-- [ ] **FRM-05**: The tool recovers the resource blobs and writes an `.frx`
+- [x] **FRM-05**: The tool recovers the resource blobs and writes an `.frx`
       whose offsets the generated `.frm` agrees with.
 - [x] **FRM-06**: The tool recovers the event handler names bound to each
       control.

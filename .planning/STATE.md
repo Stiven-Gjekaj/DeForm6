@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Forms
 status: executing
-stopped_at: Completed 03-09-PLAN.md
-last_updated: "2026-09-10T13:21:51.081Z"
+stopped_at: Completed 03-07-PLAN.md
+last_updated: "2026-09-10T13:39:05.904Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 03 execution started
-state_head: a2a9ffb44ebc4e254f46560671dc7aa9d6f199a8
+state_head: f33f614b388b58f2608ddd79d02b829cc77602ef
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 28
-  completed_plans: 26
+  completed_plans: 27
   percent: 0
 ---
 
@@ -67,7 +67,7 @@ inferred.
 ## Current Position
 
 Phase: 03 (Forms) — EXECUTING
-Plan: 9 of 10
+Plan: 10 of 10
 Status: Ready to execute
 `deform6 inspect` reports the object graph. It reads a form's control tree
 now: every control's type, name and array index, gated on the tiling check.
@@ -122,6 +122,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 | Phase 03 P06 | 1 session | 3 tasks | 1 files |
 | Phase 03 P08 | 34min | 3 tasks | 3 files |
 | Phase 03 P09 | 23min | 3 tasks | 1 files |
+| Phase 03 P07 | 14min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -164,6 +165,8 @@ Recent decisions affecting current work:
 - [Phase 03]: The join excludes two entries, one on each side: the tree own root and the ControlInfo entry literally named "Form", measured across three independent corpus programs to be the fixed name a form own event-table slot always carries, never its declared name.
 - [Phase 03]: 03-09: EventNameTable ships zero entries with no safe-provenance carve-out, because 03-CONTEXT.md D-02 gives the event vtable ordering no such carve-out the way D-01 gives one for properties.
 - [Phase 03]: 03-09: A control array shares one ControlInfo entry across all of its own elements, not one per element, confirmed on Grayscale.exe two arrays.
+- [Phase 03]: 03-07: extract_blob checks the declared blob length against the remaining bytes of the block before any subregion is taken; a checked subtraction (not a plain one) refuses a declared length below 8, since this workspace's dev profile panics on overflow rather than wrapping.
+- [Phase 03]: 03-07: BlobCursor is the one place a .frx offset is computed: take() advances by declared_len + FRX_ITEM_HEADER_LEN (12), resets to 0 per form, and refuses on u32 overflow naming the running offset.
 
 ### Pending Todos
 
@@ -192,8 +195,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T13:21:51.065Z
-Stopped at: Completed 03-09-PLAN.md
+Last session: 2026-09-10T13:39:05.887Z
+Stopped at: Completed 03-07-PLAN.md
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and
