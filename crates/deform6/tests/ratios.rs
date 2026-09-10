@@ -103,6 +103,17 @@ const EXPECTED_PROGRAM_COUNT: usize = 44;
 const EXPECTED_TOTAL_RECOVERED: u32 = 185;
 const EXPECTED_TOTAL_DECLARED: u32 = 904;
 
+/// The pinned form and control totals over all 44 programs, plan 03-10's
+/// own measurement (49 of 53, 607 of 607) as re-measured this plan: the
+/// scope-separator grammar closure raises `FrmHex`, `frmUUID2` and
+/// `frmPassGen` from refusing to recovered, leaving `Map Editor.exe`'s
+/// `Main` form as the one form still refusing, for a different, separately
+/// diagnosed reason (`WINDOWS.md`).
+const EXPECTED_TOTAL_FORM_DECLARED: u32 = 53;
+const EXPECTED_TOTAL_FORM_RECOVERED: u32 = 52;
+const EXPECTED_TOTAL_CONTROL_DECLARED: u32 = 686;
+const EXPECTED_TOTAL_CONTROL_RECOVERED: u32 = 686;
+
 /// Editing a pinned number **up** means the pin now claims more procedures
 /// than the tool recovers: something the pin expects went missing. This
 /// describes what happened to the tool, never to the file -- reasoning
@@ -180,10 +191,11 @@ pub(crate) const HEADER: &str = r#"# The pinned procedure recovery ratio, one en
 # already the reason `form_recovered` is short one, and counting it twice
 # would double it.
 #
-# The totals over all 44 programs are 49 of 53 forms recovered and 607 of
-# 607 controls recovered, over the forms whose own tree the tool built.
-# `xtask update-ratios` does not yet write these four keys; a future rewrite
-# of this file with that command would drop them, tracked in `WINDOWS.md`.
+# The totals over all 44 programs are 52 of 53 forms recovered and 686 of
+# 686 controls recovered, over the forms whose own tree the tool built. The
+# one form still refusing is named in `WINDOWS.md`, with its own byte
+# offset. `xtask update-ratios` writes these four keys along with the two
+# procedure counts, from the same `Report` `deform6::inspect` builds.
 
 "#;
 
@@ -364,18 +376,31 @@ pub(crate) fn format_ratio(recovered: u32, declared: u32) -> String {
     format!("{ratio:.2}")
 }
 
-/// The exact four-line block `crates/xtask update-ratios` writes for one
+/// The exact eight-line block `crates/xtask update-ratios` writes for one
 /// program, and the exact block a `MOVED UP` message prints to paste back
-/// in. This file, `crates/deform6/tests/ratios.rs`, owns this function;
-/// `crates/xtask` reaches it with `#[path =
+/// in: the two procedure counts plan 02-08 pinned, plus the four form and
+/// control counts plan 03-10 added. This file, `crates/deform6/tests/ratios.rs`,
+/// owns this function; `crates/xtask` reaches it with `#[path =
 /// "../../deform6/tests/ratios.rs"] mod ratios;`, the same embedding this
 /// file itself uses to reach `differential.rs`. Task 3's own behaviour
 /// four ("the block the `MOVED UP` message prints is byte for byte the
 /// block the command writes") holds by construction: there is exactly one
-/// function that renders this shape.
-pub(crate) fn format_entry(key: &str, recovered: u32, declared: u32) -> String {
+/// function that renders this shape, and it is the same function
+/// `xtask update-ratios` calls to write every one of the four new keys
+/// (`WINDOWS.md` finding 8, closed this plan).
+pub(crate) fn format_entry(
+    key: &str,
+    recovered: u32,
+    declared: u32,
+    form_declared: u32,
+    form_recovered: u32,
+    control_declared: u32,
+    control_recovered: u32,
+) -> String {
     format!(
-        "[\"{key}\"]\nrecovered = {recovered}\ndeclared = {declared}\nratio = {}\n",
+        "[\"{key}\"]\nrecovered = {recovered}\ndeclared = {declared}\nratio = {}\n\
+         form_declared = {form_declared}\nform_recovered = {form_recovered}\n\
+         control_declared = {control_declared}\ncontrol_recovered = {control_recovered}\n",
         format_ratio(recovered, declared)
     )
 }
@@ -540,6 +565,7 @@ fn check_program(
     measured_recovered: u32,
     measured_declared: u32,
     missing: &[String],
+    measured_fc: &differential::FormsControlsCounts,
 ) -> Vec<String> {
     let mut failures = Vec::new();
 
@@ -551,6 +577,7 @@ fn check_program(
             measured_recovered,
             measured_declared,
             missing,
+            measured_fc,
         ));
     }
     if let Some(direction) = compare(pinned.declared, measured_declared) {
@@ -560,6 +587,7 @@ fn check_program(
             pinned.declared,
             measured_recovered,
             measured_declared,
+            measured_fc,
         ));
     }
 
@@ -582,6 +610,7 @@ fn recovered_mismatch_message(
     measured: u32,
     measured_declared: u32,
     missing: &[String],
+    measured_fc: &differential::FormsControlsCounts,
 ) -> String {
     match direction {
         Direction::Up => {
@@ -602,7 +631,15 @@ fn recovered_mismatch_message(
         Direction::Down => format!(
             "{key}: {MOVED_UP}: the pin claims {pinned} recovered, the tool recovers {measured}. \
              Paste this block into tests/ratios.toml:\n{}",
-            format_entry(key, measured, measured_declared)
+            format_entry(
+                key,
+                measured,
+                measured_declared,
+                measured_fc.form_declared,
+                measured_fc.form_recovered,
+                measured_fc.control_declared,
+                measured_fc.control_recovered,
+            )
         ),
     }
 }
@@ -627,6 +664,7 @@ fn declared_mismatch_message(
     pinned: u32,
     measured_recovered: u32,
     measured_declared: u32,
+    measured_fc: &differential::FormsControlsCounts,
 ) -> String {
     match direction {
         Direction::Up => format!(
@@ -636,7 +674,15 @@ fn declared_mismatch_message(
         Direction::Down => format!(
             "{key}: {MOVED_UP}: the pin claims {pinned} declared procedure slots, the binary \
              declares {measured_declared}. Paste this block into tests/ratios.toml:\n{}",
-            format_entry(key, measured_recovered, measured_declared)
+            format_entry(
+                key,
+                measured_recovered,
+                measured_declared,
+                measured_fc.form_declared,
+                measured_fc.form_recovered,
+                measured_fc.control_declared,
+                measured_fc.control_recovered,
+            )
         ),
     }
 }
@@ -668,6 +714,21 @@ fn the_pinned_file_holds_forty_four_entries_and_the_totals_one_hundred_eighty_fi
     let total_declared: u32 = pinned.values().map(|e| e.declared).sum();
     assert_eq!(total_recovered, EXPECTED_TOTAL_RECOVERED);
     assert_eq!(total_declared, EXPECTED_TOTAL_DECLARED);
+}
+
+#[test]
+fn the_pinned_file_holds_fifty_two_of_fifty_three_forms_and_six_hundred_eighty_six_of_six_hundred_eighty_six_controls()
+ {
+    let pinned = read_pinned();
+
+    let total_form_declared: u32 = pinned.values().map(|e| e.form_declared).sum();
+    let total_form_recovered: u32 = pinned.values().map(|e| e.form_recovered).sum();
+    let total_control_declared: u32 = pinned.values().map(|e| e.control_declared).sum();
+    let total_control_recovered: u32 = pinned.values().map(|e| e.control_recovered).sum();
+    assert_eq!(total_form_declared, EXPECTED_TOTAL_FORM_DECLARED);
+    assert_eq!(total_form_recovered, EXPECTED_TOTAL_FORM_RECOVERED);
+    assert_eq!(total_control_declared, EXPECTED_TOTAL_CONTROL_DECLARED);
+    assert_eq!(total_control_recovered, EXPECTED_TOTAL_CONTROL_RECOVERED);
 }
 
 /// Runs the whole gate: every corpus program checked against `pinned`, in
@@ -718,12 +779,16 @@ fn check_program_forms_controls(
             };
             failures.push(format!(
                 "{key}: {word}: the pin claims {pinned_value} {label}, the tool measures \
-                 {measured_value}. Paste the new counts into tests/ratios.toml: form_declared = \
-                 {}, form_recovered = {}, control_declared = {}, control_recovered = {}",
-                measured.form_declared,
-                measured.form_recovered,
-                measured.control_declared,
-                measured.control_recovered
+                 {measured_value}. Paste this block into tests/ratios.toml:\n{}",
+                format_entry(
+                    key,
+                    pinned.recovered,
+                    pinned.declared,
+                    measured.form_declared,
+                    measured.form_recovered,
+                    measured.control_declared,
+                    measured.control_recovered,
+                )
             ));
         }
     }
@@ -748,15 +813,16 @@ fn gate_failures(
         };
         let counts = counts_for(program, projects);
         let missing = declared_not_recovered_names(program, projects);
+        let forms_controls = forms_controls_counts_for(program, projects, &table);
         failures.extend(check_program(
             &program.key,
             entry,
             counts.recovered,
             declared_total(&counts),
             &missing,
+            &forms_controls,
         ));
 
-        let forms_controls = forms_controls_counts_for(program, projects, &table);
         failures.extend(check_program_forms_controls(
             &program.key,
             entry,
@@ -818,6 +884,7 @@ fn raising_a_pinned_recovered_count_fails_with_regression() {
     let pinned = read_pinned();
     let projects = vbp::project_files();
     let progs = programs();
+    let table = OpcodeTable::builtin();
     let program = progs
         .iter()
         .find(|p| p.key.contains("Grayscale-effect"))
@@ -827,6 +894,7 @@ fn raising_a_pinned_recovered_count_fails_with_regression() {
         .expect("Grayscale-effect is pinned");
     let counts = counts_for(program, &projects);
     let missing = declared_not_recovered_names(program, &projects);
+    let forms_controls = forms_controls_counts_for(program, &projects, &table);
 
     let doctored = PinnedEntry {
         recovered: entry.recovered + 1,
@@ -838,6 +906,7 @@ fn raising_a_pinned_recovered_count_fails_with_regression() {
         counts.recovered,
         declared_total(&counts),
         &missing,
+        &forms_controls,
     );
     assert!(
         !failures.is_empty(),
@@ -863,6 +932,7 @@ fn lowering_a_pinned_recovered_count_fails_with_moved_up_and_the_exact_paste_blo
     let pinned = read_pinned();
     let projects = vbp::project_files();
     let progs = programs();
+    let table = OpcodeTable::builtin();
     let program = progs
         .iter()
         .find(|p| p.key.contains("Grayscale-effect"))
@@ -876,6 +946,7 @@ fn lowering_a_pinned_recovered_count_fails_with_moved_up_and_the_exact_paste_blo
     );
     let counts = counts_for(program, &projects);
     let missing = declared_not_recovered_names(program, &projects);
+    let forms_controls = forms_controls_counts_for(program, &projects, &table);
 
     let doctored = PinnedEntry {
         recovered: entry.recovered - 1,
@@ -887,6 +958,7 @@ fn lowering_a_pinned_recovered_count_fails_with_moved_up_and_the_exact_paste_blo
         counts.recovered,
         declared_total(&counts),
         &missing,
+        &forms_controls,
     );
     assert!(!failures.is_empty());
     let message = failures.join("\n");
@@ -895,7 +967,15 @@ fn lowering_a_pinned_recovered_count_fails_with_moved_up_and_the_exact_paste_blo
         "lowering a pin must print {MOVED_UP:?}, got: {message}"
     );
 
-    let expected_block = format_entry(&program.key, counts.recovered, declared_total(&counts));
+    let expected_block = format_entry(
+        &program.key,
+        counts.recovered,
+        declared_total(&counts),
+        forms_controls.form_declared,
+        forms_controls.form_recovered,
+        forms_controls.control_declared,
+        forms_controls.control_recovered,
+    );
     assert!(
         message.contains(&expected_block),
         "the MOVED UP message must hold the exact block to paste:\nwanted:\n{expected_block}\ngot:\n{message}"
@@ -917,8 +997,23 @@ fn editing_only_the_ratio_fails_because_it_disagrees_with_its_own_counts() {
     // Compare the doctored entry against itself: no drift from the corpus
     // is involved, only the ratio-consistency check, so the counts (which
     // agree with themselves) never fail and the ratio mismatch is the only
-    // possible failure.
-    let failures = check_program(key, &doctored, entry.recovered, entry.declared, &[]);
+    // possible failure. The form/control counts are likewise the entry's
+    // own pinned values, standing in for a "measured" side that agrees with
+    // itself, for the same reason.
+    let forms_controls = differential::FormsControlsCounts {
+        form_declared: entry.form_declared,
+        form_recovered: entry.form_recovered,
+        control_declared: entry.control_declared,
+        control_recovered: entry.control_recovered,
+    };
+    let failures = check_program(
+        key,
+        &doctored,
+        entry.recovered,
+        entry.declared,
+        &[],
+        &forms_controls,
+    );
     assert!(
         !failures.is_empty(),
         "a ratio that disagrees with its own pinned counts must fail even when both counts are \

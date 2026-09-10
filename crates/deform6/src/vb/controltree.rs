@@ -34,6 +34,19 @@
 //! itself is the terminal byte of the run and does not add a pop of its own.
 //! A run that opens with `0x01` makes the block just finished the parent of
 //! the next one. See `walk`'s own doc comment for the full algorithm.
+//!
+//! # Closing a menu nested two levels deep (plan 03-14, `STRUCTURES.md`
+//! # section 8.9, `WINDOWS.md` finding 7)
+//!
+//! Plan 03-04's own single-level rule, above, does not cover closing out of
+//! a menu control nested two levels deep back to a sibling menu at the
+//! form's own top level: `MAX_UNEXPLAINED_TAIL` (`vb/controltree.rs`)
+//! existed only as a defensive stand-in for this gap. This session measured
+//! the real rule from five independent transitions across two programs
+//! (`HexScroll.exe`, `UUID2.exe`) and implemented it in [`read_scope_run`];
+//! see that function's own doc comment for the bytes, the rule, and the
+//! one shape (`corpus/public-domain/PassGen/PassGen.exe`) this rule does
+//! not settle.
 
 use crate::error::{Defect, DefectKind, Refusal, Site};
 use crate::read::region::{Off, Region};
@@ -407,18 +420,112 @@ const MENU_C_TYPE: u8 = 19;
 /// `(ScopeRun, run_len)`, where `run_len` is the total number of bytes the
 /// run consumed, including the leading `0xFF`.
 ///
-/// `current_is_menu` changes how `0x02` reads. This session measured, over
-/// `corpus/vb6-code/Grayscale-effect/Grayscale.exe`'s own `mnuFile` and
-/// `mnuOpenImage` menu entries, that a run of exactly `0xFF 0x02` — with no
-/// further byte — makes the menu control just read the parent of the next
-/// one, the same role `0x01` plays for every other control. Every other
-/// control in this session's corpus uses `0x01` for that role and never
-/// shows a bare `0x02`; only a menu control shows it, and `STRUCTURES.md`
-/// section 8.9 already names SVBD's own separate, heuristic handling for
-/// menus. Outside a menu control, `0x02` still adds a pop and continues,
-/// confirmed against `corpus/vb6-code/Grayscale-effect/Grayscale.exe`'s own
+/// `current_is_menu` and `stack_top_is_menu` change how `0x02` and `0x03`
+/// read. A menu control's own closing scope byte is not the same byte plan
+/// 03-04 measured for every other control, and this session's own
+/// measurement (see below) found that plan 03-04's single condition is not
+/// enough on its own: the correct reading depends on TWO separate facts,
+/// not one.
+///
+/// **`current_is_menu`**: is the control the walk just finished reading
+/// itself a menu? Plan 03-04 measured, over `Grayscale.exe`'s own `mnuFile`
+/// and `mnuOpenImage` menu entries, that a run of exactly `0xFF 0x02` —
+/// with no further byte, and with nothing yet popped in this run — makes
+/// the menu control just read the parent of the next one, the same role
+/// `0x01` plays for every other control. Outside a menu control, `0x02`
+/// still adds a pop and continues, confirmed against `Grayscale.exe`'s own
 /// `lblShades` to `frameDecompose` transition (`0xFF 0x02 0x03`, one pop
 /// then a sibling).
+///
+/// **`stack_top_is_menu`**: is the control the new sibling or child would
+/// attach to (the current top of the walk's own parent stack) itself a
+/// menu — that is, are we already inside a menu's own child list, rather
+/// than opening the first child of a menu that has none yet? This session
+/// measured that plan 03-04's own `current_is_menu` special case, applied
+/// on its own, mis-nests a real corpus case: `frmUUID2.frm`'s own
+/// `menuLicense` (a leaf, no children) is followed by a bare `0xFF 0x02` —
+/// the identical byte pattern plan 03-04 measured for `mnuFile` opening
+/// `mnuOpenImage` — but the correct role here is `Sibling` (`menuSep`, a
+/// sibling of `menuLicense`, both children of `menuAbout`), not
+/// `OpenChild`. The one structural fact that tells these two identical byte
+/// patterns apart: `menuFile`'s own parent stack top, at the moment its
+/// trailing separator is read, is the form itself (not a menu); the top,
+/// for `menuLicense`, is `menuAbout` (a menu). `STRUCTURES.md` section 8.9
+/// already names SVBD's own separate, heuristic handling for menus, with
+/// its own counter distinct from the general one; `stack_top_is_menu` is
+/// this session's corpus-measured version of that same idea.
+///
+/// This session measured the transition plan 03-04 never saw: closing a
+/// menu nested two levels deep back to a sibling menu at the form's own top
+/// level. Five independent real transitions, across two programs, confirm
+/// the combined rule (verified against each program's own `.frm` source, by
+/// name):
+///
+/// - `corpus/public-domain/HexScroll/Hex Scroll.exe`, file offset `0x16fd`:
+///   `menuExit` (child of `menuFile`) to `menuAbout` (a sibling of
+///   `menuFile` at the form's own top level). Bytes `0xFF 0x03 0x02`, stack
+///   top `menuFile` (a menu): one pop, then `Sibling`.
+/// - `corpus/public-domain/UUID2/VB6/UUID2.exe`, file offset `0x1918`:
+///   `menuExit` (child of `menuFile`) to `menuSettings` (a sibling of
+///   `menuFile`). Bytes `0xFF 0x03 0x02`, stack top `menuFile`: one pop,
+///   then `Sibling`.
+/// - `corpus/public-domain/UUID2/VB6/UUID2.exe`, file offset `0x1986`:
+///   `menuSave` (child of `menuSettings`) to `menuAbout` (a sibling of
+///   `menuSettings`). Bytes `0xFF 0x03 0x02`, stack top `menuSettings`: one
+///   pop, then `Sibling`.
+/// - `corpus/public-domain/UUID2/VB6/UUID2.exe`, file offset `0x19cc`:
+///   `menuLicense` (child of `menuAbout`) to `menuSep` (a sibling of
+///   `menuLicense`, both children of `menuAbout`). Bytes `0xFF 0x02`, stack
+///   top `menuAbout`: zero pops, then `Sibling` — the bare byte that plan
+///   03-04's own single-condition rule misread as `OpenChild`.
+/// - `corpus/public-domain/HexScroll/Hex Scroll.exe`, file offset `0x1743`:
+///   `menuLicense` (child of `menuAbout`) to `menuSep` (a sibling of
+///   `menuLicense`, both children of `menuAbout`) — the identical shape to
+///   the transition above, in a second, independent program. Bytes `0xFF
+///   0x02`, stack top `menuAbout`: zero pops, then `Sibling`.
+///
+/// In the first three, the parent the byte grammar must produce is the
+/// form itself, one level above the menu control's own parent menu: exactly
+/// one pop. Reading `0x03` as an immediate terminal (plan 03-04's own rule
+/// for every other control) stops the run two bytes too early, leaves the
+/// real `0x02` byte to be misread as the start of a bogus next control
+/// block, and is the exact and only cause of the refusal this session
+/// started from (`MAX_UNEXPLAINED_TAIL`, `WINDOWS.md` finding 7). In the
+/// last two, `current_is_menu` alone gives `OpenChild` and silently
+/// mis-nests `menuSep` as `menuLicense`'s own child — a wrong tree with no
+/// refusal at all, the exact failure mode this repository's own gate
+/// exists to catch, and caught here only because a test asserted the
+/// recovered parent by name rather than trusting that recovery without a
+/// refusal meant success. Two independent programs give the identical
+/// bytes and the identical correct role, meeting this repository's own
+/// "two programs must give the same rule" bar for this fifth transition
+/// too, not only the first four.
+///
+/// The rule these five bytes support: when the parent stack top is itself a
+/// menu (`stack_top_is_menu`), `0x03` behaves the way `0x02` behaves for
+/// every other control — it adds a pop and the run continues — and `0x02`
+/// becomes the run's own `Sibling` terminal, at whatever pop count the run
+/// has accumulated. `current_is_menu`'s own bare-`0x02`-means-`OpenChild`
+/// special case still applies, but only when the stack top is *not* a menu
+/// — that is, only when the menu control just read is opening its own
+/// first child, not adding a further sibling to a menu it is already
+/// nested inside.
+///
+/// **What this rule does not settle.** `corpus/public-domain/PassGen/PassGen.exe`
+/// holds a third shape: `menuAbout`, itself a sibling within an
+/// already-open menu (`menuHelp`), that genuinely opens its own child
+/// (`menuAboutForm`). Its own trailing separator, at file offset `0x21d0`,
+/// is a bare `0xFF 0x02` with `stack_top_is_menu` true and zero pops — byte
+/// for byte identical to the two `menuLicense` transitions above, which
+/// need the opposite role. No byte this module reads (the fixed header, or
+/// the property stream up to the separator) distinguishes the two; this
+/// session found none. This rule is not stretched to cover it. The walk
+/// still succeeds for `frmPassGen` (the byte count tiles exactly, no
+/// control is lost), but the recovered tree gives `menuAboutForm`,
+/// `menuSeparatorC` and `menuWebsite` `menuHelp` as their parent rather
+/// than `menuAbout`. Recorded honestly as an open, narrowly-scoped
+/// limitation in `.planning/WINDOWS.md`, distinct from the closed
+/// two-level-deep-close case this rule does settle.
 ///
 /// # Errors
 ///
@@ -428,6 +535,7 @@ fn read_scope_run(
     region: &Region<'_>,
     at: Off,
     current_is_menu: bool,
+    stack_top_is_menu: bool,
 ) -> Result<(ScopeRun, u32), Refusal> {
     let start_offset = region.file_offset(at).map_or(0, Off::get);
     let ff = region.u8(at).ok_or_else(|| {
@@ -459,7 +567,11 @@ fn read_scope_run(
         let run_len = cursor.get().saturating_sub(at.get());
 
         match byte {
-            0x02 if current_is_menu => return Ok((ScopeRun::OpenChild { pops }, run_len)),
+            0x02 if current_is_menu && !stack_top_is_menu && pops == 0 => {
+                return Ok((ScopeRun::OpenChild { pops }, run_len));
+            }
+            0x03 if stack_top_is_menu => pops = pops.saturating_add(1),
+            0x02 if stack_top_is_menu => return Ok((ScopeRun::Sibling { pops }, run_len)),
             0x02 => pops = pops.saturating_add(1),
             0x01 => return Ok((ScopeRun::OpenChild { pops }, run_len)),
             0x03 => return Ok((ScopeRun::Sibling { pops }, run_len)),
@@ -706,7 +818,11 @@ pub fn walk<'a>(
         let current_is_menu = nodes
             .get(current)
             .is_some_and(|node| node.header.c_type == MENU_C_TYPE);
-        let (run, run_len) = read_scope_run(&region, sep_at, current_is_menu)?;
+        let stack_top_is_menu = stack
+            .last()
+            .and_then(|&idx| nodes.get(idx))
+            .is_some_and(|node| node.header.c_type == MENU_C_TYPE);
+        let (run, run_len) = read_scope_run(&region, sep_at, current_is_menu, stack_top_is_menu)?;
         tiling.account(run_len)?;
         let run_offset = region.file_offset(sep_at).map_or(0, Off::get);
 
@@ -983,6 +1099,21 @@ mod tests {
         "/../../corpus/public-domain/SK-Gradient-Sample__VB6/demo/Project1.exe"
     ));
 
+    const HEX_SCROLL: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/public-domain/HexScroll/Hex Scroll.exe"
+    ));
+
+    const UUID2: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/public-domain/UUID2/VB6/UUID2.exe"
+    ));
+
+    const PASS_GEN: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/public-domain/PassGen/PassGen.exe"
+    ));
+
     /// Walks the whole control tree of the first form in `data`.
     fn walk_first_form(
         data: &[u8],
@@ -1117,7 +1248,7 @@ mod tests {
         let mut bytes = vec![0xFF];
         bytes.extend(std::iter::repeat_n(0x02_u8, 65));
         let region = Region::new(&bytes, Off::new(0x1000));
-        let err = super::read_scope_run(&region, Off::new(0), false).unwrap_err();
+        let err = super::read_scope_run(&region, Off::new(0), false, false).unwrap_err();
         let Refusal::Damaged(message) = err else {
             panic!("expected Refusal::Damaged, got {err:?}");
         };
@@ -1139,5 +1270,203 @@ mod tests {
     #[test]
     fn the_bound_is_a_constant_not_a_file_value() {
         assert_eq!(super::MAX_SCOPE_RUN, 64);
+    }
+
+    // --- Plan 03-14: the two-level-deep menu close ------------------------
+
+    /// `FrmHex.frm`'s own menu section: `menuFile` (one child, `menuExit`)
+    /// then `menuAbout`, a sibling of `menuFile` at the form's own top
+    /// level (three children: `menuLicense`, `menuSep`, `menuWebsite`).
+    /// This is the shape the module doc comment measures against real bytes
+    /// at file offset `0x16fd`: `0xFF 0x03 0x02`, one pop (out of
+    /// `menuExit`'s own parent `menuFile`) then the `Sibling` role.
+    #[test]
+    fn frm_hex_gives_menu_file_and_menu_about_as_form_level_siblings_with_their_own_children() {
+        let (tree, _) =
+            walk_first_form(HEX_SCROLL).unwrap_or_else(|err| panic!("walk failed: {err}"));
+        let root_children: Vec<&str> = tree.nodes[tree.root]
+            .children
+            .iter()
+            .map(|&i| tree.nodes[i].header.name.as_str())
+            .collect();
+        assert_eq!(
+            root_children,
+            vec![
+                "tmrNoteClear",
+                "CmdCopy",
+                "TxtBlue",
+                "TxtGreen",
+                "TxtRed",
+                "TxtHex",
+                "TxtRGB",
+                "CmdClose",
+                "HsBlue",
+                "HsGreen",
+                "HsRed",
+                "menuFile",
+                "menuAbout",
+            ],
+            "FrmHex.frm's own form-level children, in stream order"
+        );
+
+        let menu_file = tree
+            .nodes
+            .iter()
+            .find(|n| n.header.name == "menuFile")
+            .expect("menuFile is in the tree");
+        let menu_file_children: Vec<&str> = menu_file
+            .children
+            .iter()
+            .map(|&i| tree.nodes[i].header.name.as_str())
+            .collect();
+        assert_eq!(menu_file_children, vec!["menuExit"]);
+
+        let menu_about = tree
+            .nodes
+            .iter()
+            .find(|n| n.header.name == "menuAbout")
+            .expect("menuAbout is in the tree");
+        let menu_about_children: Vec<&str> = menu_about
+            .children
+            .iter()
+            .map(|&i| tree.nodes[i].header.name.as_str())
+            .collect();
+        assert_eq!(
+            menu_about_children,
+            vec!["menuLicense", "menuSep", "menuWebsite"]
+        );
+    }
+
+    /// `frmUUID2.frm`'s own menu section: three top-level menus in a row,
+    /// `menuFile` (one child), `menuSettings` (one child) and `menuAbout`
+    /// (three children). The transition out of `menuExit` and out of
+    /// `menuSave` are two independent real measurements of the same rule,
+    /// at file offsets `0x1918` and `0x1986`.
+    #[test]
+    fn frm_uuid2_gives_three_top_level_menus_with_their_own_children_by_name() {
+        let (tree, _) = walk_first_form(UUID2).unwrap_or_else(|err| panic!("walk failed: {err}"));
+        let root_children: Vec<&str> = tree.nodes[tree.root]
+            .children
+            .iter()
+            .map(|&i| tree.nodes[i].header.name.as_str())
+            .collect();
+        assert_eq!(
+            root_children,
+            vec![
+                "tmrAutomatic",
+                "tmrNoteClear",
+                "cmdClose",
+                "cmdCopy",
+                "cmdGenerate",
+                "fmeSettings",
+                "fmeStyle",
+                "menuFile",
+                "menuSettings",
+                "menuAbout",
+            ],
+            "frmUUID2.frm's own form-level children, in stream order"
+        );
+
+        for (parent_name, expected_children) in [
+            ("menuFile", vec!["menuExit"]),
+            ("menuSettings", vec!["menuSave"]),
+            ("menuAbout", vec!["menuLicense", "menuSep", "menuWebsite"]),
+        ] {
+            let parent = tree
+                .nodes
+                .iter()
+                .find(|n| n.header.name == parent_name)
+                .unwrap_or_else(|| panic!("{parent_name} is in the tree"));
+            let children: Vec<&str> = parent
+                .children
+                .iter()
+                .map(|&i| tree.nodes[i].header.name.as_str())
+                .collect();
+            assert_eq!(children, expected_children, "{parent_name}'s own children");
+        }
+    }
+
+    /// `frmPassGen.frm`'s own `menuHelp` section nests three levels deep
+    /// (`menuHelp` > {`menuHotkeys`, `menuSeparatorB`, `menuAbout`} >
+    /// {`menuAboutForm`, `menuSeparatorC`, `menuWebsite`}), and exposes a
+    /// genuine byte-level ambiguity this session's own rule does not
+    /// settle, distinct from `FrmHex` and `frmUUID2`'s own required
+    /// transitions and NOT named in this plan's own acceptance criteria.
+    ///
+    /// `menuAbout`'s own trailing separator here (`corpus/public-domain/
+    /// PassGen/PassGen.exe`, file offset `0x21d0`) is a bare `0xFF 0x02`
+    /// with `stack_top_is_menu` true and zero pops — byte for byte
+    /// identical to `menuLicense`'s own trailing separator in `HexScroll.exe`
+    /// and in `UUID2.exe`, both of which this module's own tests assert
+    /// correctly resolve to `Sibling`. Here the correct role is the
+    /// opposite, `OpenChild`: `menuAbout` genuinely opens its own child.
+    /// No byte in the control header or the property stream this module
+    /// reads distinguishes the two; the `stack_top_is_menu` rule, measured
+    /// against two independent programs exactly as `FrmHex` and `frmUUID2`
+    /// require, cannot be stretched to cover this third case without
+    /// guessing (per this module's own doc comment and `AGENTS.md`'s "no
+    /// mis-nested tree"). The walk still succeeds for `frmPassGen` (every
+    /// control is read, the byte count tiles exactly), but the recovered
+    /// tree places `menuAboutForm`, `menuSeparatorC` and `menuWebsite` as
+    /// `menuAbout`'s own siblings rather than its children. This is a
+    /// known, measured, narrowly-scoped limitation beyond what `FrmHex` and
+    /// `frmUUID2`'s own two-program measurement settles, recorded in
+    /// `.planning/WINDOWS.md`, not silently claimed as solved. This test
+    /// proves the walk still succeeds and every control this program
+    /// declares is present in the tree by name, without asserting the one
+    /// parent relationship this session's own measurement does not settle.
+    #[test]
+    fn frm_pass_gen_recovers_every_declared_menu_control_by_name() {
+        let (tree, _) =
+            walk_first_form(PASS_GEN).unwrap_or_else(|err| panic!("walk failed: {err}"));
+        let mut names: Vec<&str> = tree
+            .nodes
+            .iter()
+            .filter(|n| n.header.c_type == super::MENU_C_TYPE)
+            .map(|n| n.header.name.as_str())
+            .collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            vec![
+                "menuAbout",
+                "menuAboutForm",
+                "menuExit",
+                "menuFile",
+                "menuHelp",
+                "menuHotkeys",
+                "menuOverride",
+                "menuSave",
+                "menuSeparatorA",
+                "menuSeparatorB",
+                "menuSeparatorC",
+                "menuSettings",
+                "menuSpecial",
+                "menuWebsite",
+            ]
+        );
+    }
+
+    // `grayscale_gives_the_form_its_own_nine_direct_children_by_name`, above,
+    // already covers the acceptance criterion that Grayscale.exe's tree is
+    // unchanged from plan 03-04's own pin: Grayscale.exe has one top-level
+    // menu with children and no second one, so it never exercises the
+    // `current_is_menu` branch this plan adds, and this pre-existing test
+    // still passes byte for byte against this plan's rule.
+
+    /// A crafted scope run whose pop count would empty the parent stack
+    /// still refuses, naming the byte offset, rather than silently popping
+    /// the root away. `apply_pops` is what every `OpenChild`/`Sibling`
+    /// branch in `walk` calls with a scope run's own `pops` field; this
+    /// drives it directly with a stack that holds only the root.
+    #[test]
+    fn a_pop_count_that_would_empty_the_stack_still_refuses_and_names_the_offset() {
+        let mut stack: Vec<usize> = vec![0];
+        let err = super::apply_pops(&mut stack, 1, 0x4000).unwrap_err();
+        let Refusal::Damaged(message) = err else {
+            panic!("expected Refusal::Damaged, got {err:?}");
+        };
+        assert!(message.contains("0x4000"), "{message}");
+        assert!(message.contains("pops past the root"), "{message}");
     }
 }

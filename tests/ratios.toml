@@ -42,19 +42,20 @@
 # already the reason `form_recovered` is short one, and counting it twice
 # would double it.
 #
-# The totals over all 44 programs are 49 of 53 forms recovered and 607 of
-# 607 controls recovered, over the forms whose own tree the tool built.
-# `xtask update-ratios` does not yet write these four keys; a future rewrite
-# of this file with that command would drop them, tracked in `WINDOWS.md`.
+# The totals over all 44 programs are 52 of 53 forms recovered and 686 of
+# 686 controls recovered, over the forms whose own tree the tool built. The
+# one form still refusing is named in `WINDOWS.md`, with its own byte
+# offset. `xtask update-ratios` writes these four keys along with the two
+# procedure counts, from the same `Report` `deform6::inspect` builds.
 
 ["public-domain/HexScroll/Hex Scroll.exe"]
 recovered = 0
 declared = 23
 ratio = 0.00
 form_declared = 2
-form_recovered = 1
-control_declared = 5
-control_recovered = 5
+form_recovered = 2
+control_declared = 23
+control_recovered = 23
 
 ["public-domain/LockWorkStation/LockWorkStation.exe"]
 recovered = 0
@@ -70,9 +71,9 @@ recovered = 5
 declared = 83
 ratio = 0.06
 form_declared = 4
-form_recovered = 3
-control_declared = 51
-control_recovered = 51
+form_recovered = 4
+control_declared = 90
+control_recovered = 90
 
 ["public-domain/SK-Gradient-Sample__VB6/demo/Project1.exe"]
 recovered = 0
@@ -124,9 +125,9 @@ recovered = 4
 declared = 25
 ratio = 0.16
 form_declared = 2
-form_recovered = 1
-control_declared = 5
-control_recovered = 5
+form_recovered = 2
+control_declared = 27
+control_recovered = 27
 
 ["public-domain/dump/VB6/rot47/Rot47.exe"]
 recovered = 1

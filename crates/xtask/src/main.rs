@@ -53,8 +53,9 @@ mod opcode_table;
 use std::path::Path;
 
 use deform6::read::pe::PeImage;
-use ratios::differential::program_counts;
+use deform6::vb::opcodes::OpcodeTable;
 use ratios::differential::support::vbp;
+use ratios::differential::{forms_controls_counts, program_counts};
 
 fn main() {
     std::process::exit(run(std::env::args().skip(1).collect()));
@@ -93,11 +94,18 @@ const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | derive-opcode-
 /// same 44 every gate in this workspace already pins.
 const MINIMUM_PROGRAM_COUNT: usize = 44;
 
-/// One corpus program's key and its measured counts, ready to format.
+/// One corpus program's key and its measured counts, ready to format: the
+/// two procedure counts plan 02-08 pinned, plus the four form and control
+/// counts plan 03-10 added and this plan wires into this writer
+/// (`WINDOWS.md` finding 8, closed this plan).
 struct Measured {
     key: String,
     recovered: u32,
     declared: u32,
+    form_declared: u32,
+    form_recovered: u32,
+    control_declared: u32,
+    control_recovered: u32,
 }
 
 /// Gives one program's key: the executable's path relative to `corpus/`,
@@ -115,11 +123,16 @@ fn program_key(exe: &Path, root: &Path) -> Result<String, String> {
 }
 
 /// Walks every corpus program and computes its measured counts, through
-/// [`program_counts`] alone -- the same function `crates/deform6/tests/ratios.rs`
-/// calls, per T-02-45.
+/// [`program_counts`] for the two procedure counts and
+/// [`forms_controls_counts`] for the four form and control counts plan
+/// 03-10 added -- the same two functions `crates/deform6/tests/ratios.rs`
+/// calls, per T-02-45 and this plan's own closure of `WINDOWS.md` finding
+/// 8 ("a future run of `cargo run -p xtask -- update-ratios` would drop
+/// the four new keys until that wiring is done").
 fn measure_all() -> Result<Vec<Measured>, String> {
     let root = vbp::corpus_root();
     let projects = vbp::project_files();
+    let table = OpcodeTable::builtin();
     let mut out = Vec::new();
 
     for exe in vbp::executables() {
@@ -136,10 +149,19 @@ fn measure_all() -> Result<Vec<Measured>, String> {
         let declared = project.declared_objects();
 
         let counts = program_counts(&image, &declared, &recovered_objects);
+
+        let report = deform6::inspect(&bytes, &table)
+            .map_err(|err| format!("{}: inspect: {err}", exe.display()))?;
+        let forms_controls = forms_controls_counts(&declared, &report);
+
         out.push(Measured {
             key,
             recovered: counts.recovered,
             declared: ratios::declared_total(&counts),
+            form_declared: forms_controls.form_declared,
+            form_recovered: forms_controls.form_recovered,
+            control_declared: forms_controls.control_declared,
+            control_recovered: forms_controls.control_recovered,
         });
     }
 
@@ -157,7 +179,15 @@ fn render(measured: &[Measured]) -> String {
         if i > 0 {
             body.push('\n');
         }
-        body.push_str(&ratios::format_entry(&m.key, m.recovered, m.declared));
+        body.push_str(&ratios::format_entry(
+            &m.key,
+            m.recovered,
+            m.declared,
+            m.form_declared,
+            m.form_recovered,
+            m.control_declared,
+            m.control_recovered,
+        ));
     }
     format!("{}{body}", ratios::HEADER)
 }
@@ -298,11 +328,19 @@ mod tests {
                 key: "b/B.exe".to_owned(),
                 recovered: 1,
                 declared: 2,
+                form_declared: 0,
+                form_recovered: 0,
+                control_declared: 0,
+                control_recovered: 0,
             },
             Measured {
                 key: "a/A.exe".to_owned(),
                 recovered: 3,
                 declared: 4,
+                form_declared: 0,
+                form_recovered: 0,
+                control_declared: 0,
+                control_recovered: 0,
             },
         ];
         let rendered = render(&measured);
@@ -321,7 +359,7 @@ mod tests {
     /// Behaviour four ("the block the `MOVED UP` message prints is byte for
     /// byte the block the command writes for that entry"): the writer's
     /// per-entry block, sliced out of a full render, must equal
-    /// `ratios::format_entry` called directly with the same three values --
+    /// `ratios::format_entry` called directly with the same seven values --
     /// the same call `crates/deform6/tests/ratios.rs`'s own `MOVED UP`
     /// message builder makes. Both this test and that one exercise the one
     /// function `format_entry`, so a change to its shape cannot pass one
@@ -332,10 +370,21 @@ mod tests {
             key: "vb6-code/Grayscale-effect/Grayscale.exe".to_owned(),
             recovered: 12,
             declared: 34,
+            form_declared: 1,
+            form_recovered: 1,
+            control_declared: 9,
+            control_recovered: 9,
         }];
         let rendered = render(&measured);
-        let expected_block =
-            super::ratios::format_entry("vb6-code/Grayscale-effect/Grayscale.exe", 12, 34);
+        let expected_block = super::ratios::format_entry(
+            "vb6-code/Grayscale-effect/Grayscale.exe",
+            12,
+            34,
+            1,
+            1,
+            9,
+            9,
+        );
         assert!(
             rendered.ends_with(&expected_block),
             "the rendered file's one entry must be exactly format_entry's output:\nrendered:\n{rendered}\nexpected block:\n{expected_block}"
@@ -394,16 +443,28 @@ mod tests {
                 key: "changed/A.exe".to_owned(),
                 recovered: 2,
                 declared: 10,
+                form_declared: 0,
+                form_recovered: 0,
+                control_declared: 0,
+                control_recovered: 0,
             },
             Measured {
                 key: "unchanged/B.exe".to_owned(),
                 recovered: 2,
                 declared: 10,
+                form_declared: 0,
+                form_recovered: 0,
+                control_declared: 0,
+                control_recovered: 0,
             },
             Measured {
                 key: "new/D.exe".to_owned(),
                 recovered: 5,
                 declared: 10,
+                form_declared: 0,
+                form_recovered: 0,
+                control_declared: 0,
+                control_recovered: 0,
             },
         ];
         let lines = describe_changes(&old, &measured);
