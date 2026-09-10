@@ -20,9 +20,12 @@
 //! (`vb/project.rs::Component::library`), which [`join_component`] uses to
 //! recover the control's CLSID.
 
+use std::fmt;
+
 use crate::error::{Defect, DefectKind, Site};
 use crate::read::region::{Off, Region};
 use crate::vb::controltree::ControlHeader;
+use crate::vb::project::ComponentTable;
 use crate::vb::vbstr::{StrEncoding, VbStr};
 
 /// A third party control's programmatic class name, split into its library
@@ -41,7 +44,7 @@ pub struct ExternalControl {
     /// The absolute file offset of the class name's own length field.
     pub offset: u32,
     /// The control's CLSID, once [`join_component`] recovers one.
-    pub clsid: Option<()>,
+    pub clsid: Option<Clsid>,
 }
 
 /// Reads an external control's own class name.
@@ -139,6 +142,124 @@ fn split_class_name(class_name: &str, offset: u32, defects: &mut Vec<Defect>) ->
     }
 }
 
+/// A control's CLSID: sixteen raw bytes, parsed from a decoded textual GUID.
+///
+/// The textual GUID `vb/project.rs::Component::guid_text` carries is 32 hex
+/// digits in the eight-four-four-four-twelve grouping, with three internal
+/// hyphens and no braces (`STRUCTURES.md` section 7.3). [`Clsid::parse`]
+/// removes the hyphens and reads the 32 digits as bytes; [`Display`] renders
+/// them back in the same fixed grouping, with braces added. GUID formatting
+/// is written by hand: the output shape never varies, and this workspace
+/// carries no `uuid` crate for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Clsid([u8; 16]);
+
+impl Clsid {
+    /// Parses a decoded textual GUID into its sixteen raw bytes.
+    ///
+    /// Gives `None` when the text, once its hyphens are removed, is not
+    /// exactly 32 hexadecimal digits. Case-insensitive: a lower case or an
+    /// upper case textual GUID both parse the same sixteen bytes.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        let hex: String = text.chars().filter(|&c| c != '-').collect();
+        if hex.len() != 32 {
+            return None;
+        }
+        let mut bytes = [0_u8; 16];
+        for (i, slot) in bytes.iter_mut().enumerate() {
+            let start = i.checked_mul(2)?;
+            let end = start.checked_add(2)?;
+            let digits = hex.get(start..end)?;
+            *slot = u8::from_str_radix(digits, 16).ok()?;
+        }
+        Some(Self(bytes))
+    }
+}
+
+impl fmt::Display for Clsid {
+    /// Renders the eight-four-four-four-twelve hex groups with braces
+    /// around them, upper case, matching the shape a `.vbp`'s own `Object=`
+    /// line uses.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let [
+            b0,
+            b1,
+            b2,
+            b3,
+            b4,
+            b5,
+            b6,
+            b7,
+            b8,
+            b9,
+            b10,
+            b11,
+            b12,
+            b13,
+            b14,
+            b15,
+        ] = self.0;
+        write!(
+            f,
+            "{{{b0:02X}{b1:02X}{b2:02X}{b3:02X}-{b4:02X}{b5:02X}-{b6:02X}{b7:02X}-{b8:02X}{b9:02X}-{b10:02X}{b11:02X}{b12:02X}{b13:02X}{b14:02X}{b15:02X}}}"
+        )
+    }
+}
+
+/// Joins `control`'s own class name against `table`, by an exact,
+/// case-insensitive match against
+/// [`Component::library`](crate::vb::project::Component::library). Never a
+/// near match: a prefix match or a substring match could join a control to
+/// the wrong CLSID, and a wrong GUID is worse than no GUID, because a reader
+/// cannot tell it is wrong.
+///
+/// # The join key is the whole class name, not its own library part
+///
+/// `STRUCTURES.md` section 8.7 describes the join as matching "the library
+/// part of that class name" against `SourceOffset`. This session measured
+/// what `SourceOffset` actually holds, in both `Server.exe` and
+/// `SubReality_WinsockSample.exe`: the full dotted string
+/// `"MSWinsockLib.Winsock"`, identical to the external control's own whole
+/// class name, not the bare `"MSWinsockLib"` prefix
+/// [`read_external_control`]'s own split gives as `control.library`.
+/// `Component::library` carries that same full string verbatim (see its own
+/// doc comment and the corpus test proving it). Joining `control.library`
+/// (the split prefix) against `component.library` (the whole name) would
+/// therefore never match a real component; this function joins
+/// `control.class_name` against it instead.
+///
+/// On a match whose own textual GUID decodes, fills `control.clsid` and
+/// gives `None`. On no match, or on a match whose component declares no
+/// binary GUID (`guid_text` is `None`, or does not parse), `control.clsid`
+/// stays `None`, and this gives `Some` with a stated reason in plain words,
+/// naming the class name: the CLSID is not recoverable from this file.
+pub fn join_component(control: &mut ExternalControl, table: &ComponentTable) -> Option<String> {
+    let Some(component) = table
+        .components
+        .iter()
+        .find(|component| component.library.eq_ignore_ascii_case(&control.class_name))
+    else {
+        return Some(format!(
+            "the control declares the class name {}, and no component entry in this program \
+             declares that library, so the CLSID is not recoverable from this file",
+            control.class_name
+        ));
+    };
+
+    match component.guid_text.as_deref().and_then(Clsid::parse) {
+        Some(clsid) => {
+            control.clsid = Some(clsid);
+            None
+        }
+        None => Some(format!(
+            "the control declares the class name {}, and the component entry for {} declares \
+             no binary GUID, so the CLSID is not recoverable from this file",
+            control.class_name, component.library
+        )),
+    }
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -149,10 +270,11 @@ fn split_class_name(class_name: &str, offset: u32, defects: &mut Vec<Defect>) ->
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{ExternalControl, read_external_control};
+    use super::{Clsid, ExternalControl, join_component, read_external_control};
     use crate::error::DefectKind;
     use crate::read::region::{Off, Region};
     use crate::vb::controltree::{ControlKind, classify_control_type, read_control_header};
+    use crate::vb::project::{Component, ComponentTable};
 
     /// Builds a synthetic non-array control block: `Length`(2) `unknown`(1)
     /// `flags=0`(1) `cId`(1) `name_len`(2) `name`(n) `unknown`(1)
@@ -364,5 +486,251 @@ mod tests {
         assert_eq!(control.library, "MSWinsockLib");
         assert_eq!(control.component, "Winsock");
         assert!(defects.is_empty(), "{defects:?}");
+    }
+
+    // --- Task 2: the CLSID, decoded and joined ----------------------------
+
+    /// Walks the external component table out of a byte slice, the same
+    /// route `vb/project.rs`'s own test module uses: reached from the
+    /// header, never from `ProjectInfo`.
+    fn component_table(data: &[u8]) -> ComponentTable {
+        use crate::read::pe::PeImage;
+        use crate::vb::header::{VbHeader, header_region};
+
+        let image = PeImage::parse(data).unwrap();
+        let hdr = header_region(&image).unwrap();
+        let header = VbHeader::read(&hdr).unwrap();
+        ComponentTable::read(&image, header.lp_external_table, header.w_external_count)
+    }
+
+    /// The end to end join: `wsPop`'s own class name, read from the real
+    /// executable in [`the_winsock_sample_external_control_class_name_reads_back_whole`]'s
+    /// own way, joined against the SAME file's own external component
+    /// table. This session measured the textual GUID at `GUIDoffset` for
+    /// `MSWinsockLib.Winsock` as `2c49f800-c2dd-11cf-9ad6-0080c7e7b78d`, not
+    /// the `248DD890-BB45-11CF-9ABC-0080C7E7B78D` the `.vbp`'s own `Object=`
+    /// line names: see `vb/project.rs`'s own
+    /// `the_one_component_server_exe_declares_resolves_all_three_strings`
+    /// test for the full measurement and why the two differ. That measured
+    /// value, confirmed identically in this file and in `Server.exe`, is
+    /// what this test proves the join recovers.
+    #[test]
+    fn the_winsock_sample_class_name_joins_to_its_real_clsid() {
+        let block = wspop_block();
+        let (header, _) = read_control_header(&block);
+        let (mut control, _consumed, defects) = read_external_control(&block, &header);
+        assert!(defects.is_empty(), "{defects:?}");
+
+        let table = component_table(WINSOCK_SAMPLE);
+        let reason = join_component(&mut control, &table);
+        assert_eq!(reason, None, "{reason:?}");
+        let clsid = control.clsid.expect("the join must recover a CLSID");
+        assert_eq!(clsid.to_string(), "{2C49F800-C2DD-11CF-9AD6-0080C7E7B78D}");
+    }
+
+    /// A synthetic fixture: no corpus program's own class name differs from
+    /// its component's own library only by case, so this is proved here.
+    #[test]
+    fn a_class_name_differing_only_by_case_still_joins() {
+        let mut control = ExternalControl {
+            class_name: "mswinsocklib.winsock".to_owned(),
+            library: "mswinsocklib".to_owned(),
+            component: "winsock".to_owned(),
+            offset: 0,
+            clsid: None,
+        };
+        let table = ComponentTable::synthetic(vec![Component {
+            file_name: "MSWINSCK.OCX".to_owned(),
+            library: "MSWinsockLib.Winsock".to_owned(),
+            name: "Winsock".to_owned(),
+            guid_offset: Off::new(0),
+            guid_length: 72,
+            guid_text: Some("2c49f800-c2dd-11cf-9ad6-0080c7e7b78d".to_owned()),
+        }]);
+
+        let reason = join_component(&mut control, &table);
+        assert_eq!(
+            reason, None,
+            "synthetic fixture: a class name differing only by case must still join"
+        );
+        assert_eq!(
+            control.clsid,
+            Clsid::parse("2c49f800-c2dd-11cf-9ad6-0080c7e7b78d")
+        );
+    }
+
+    /// A synthetic fixture proving `join_component` takes no near match: a
+    /// class name differing from the component's own library by one
+    /// character gives no CLSID.
+    #[test]
+    fn a_class_name_differing_by_one_character_gives_no_clsid_and_a_reason() {
+        let mut control = ExternalControl {
+            class_name: "MSWinsockLiC.Winsock".to_owned(),
+            library: "MSWinsockLiC".to_owned(),
+            component: "Winsock".to_owned(),
+            offset: 0,
+            clsid: None,
+        };
+        let table = ComponentTable::synthetic(vec![Component {
+            file_name: "MSWINSCK.OCX".to_owned(),
+            library: "MSWinsockLib.Winsock".to_owned(),
+            name: "Winsock".to_owned(),
+            guid_offset: Off::new(0),
+            guid_length: 72,
+            guid_text: Some("2c49f800-c2dd-11cf-9ad6-0080c7e7b78d".to_owned()),
+        }]);
+
+        let reason = join_component(&mut control, &table);
+        assert!(control.clsid.is_none());
+        let reason = reason.expect("synthetic fixture: a one character difference must refuse");
+        assert!(reason.find(&control.class_name).is_some(), "{reason}");
+    }
+
+    /// A program with zero components gives no CLSID for an external
+    /// control, with the same shape of reason a real no-match gives.
+    #[test]
+    fn a_program_with_zero_components_gives_no_clsid_with_the_same_reason() {
+        let mut control = ExternalControl {
+            class_name: "Foo.Bar".to_owned(),
+            library: "Foo".to_owned(),
+            component: "Bar".to_owned(),
+            offset: 0,
+            clsid: None,
+        };
+        let table = ComponentTable::synthetic(Vec::new());
+
+        let reason = join_component(&mut control, &table);
+        assert!(control.clsid.is_none());
+        let reason = reason.expect("synthetic fixture: zero components must refuse");
+        assert!(reason.find(&control.class_name).is_some(), "{reason}");
+    }
+
+    #[test]
+    fn a_clsid_renders_the_fixed_hex_groups_with_braces() {
+        let clsid = Clsid::parse("2c49f800-c2dd-11cf-9ad6-0080c7e7b78d").unwrap();
+        assert_eq!(clsid.to_string(), "{2C49F800-C2DD-11CF-9AD6-0080C7E7B78D}");
+    }
+
+    #[test]
+    fn a_clsid_text_that_is_not_thirty_two_hex_digits_gives_none() {
+        assert_eq!(Clsid::parse("not a guid"), None);
+        assert_eq!(Clsid::parse("2c49f800-c2dd-11cf-9ad6-0080c7e7b78"), None);
+    }
+
+    #[test]
+    fn clsid_parse_is_case_insensitive() {
+        let lower = Clsid::parse("2c49f800-c2dd-11cf-9ad6-0080c7e7b78d");
+        let upper = Clsid::parse("2C49F800-C2DD-11CF-9AD6-0080C7E7B78D");
+        assert_eq!(lower, upper);
+    }
+
+    /// A synthetic fixture: a matched component whose own `guid_text` is
+    /// `None` (the `guid_length == -1` case) gives no CLSID and a reason,
+    /// distinct from the "no matching component" reason.
+    #[test]
+    fn a_matched_component_with_no_guid_text_gives_no_clsid_and_a_reason() {
+        let mut control = ExternalControl {
+            class_name: "MSWinsockLib.Winsock".to_owned(),
+            library: "MSWinsockLib".to_owned(),
+            component: "Winsock".to_owned(),
+            offset: 0,
+            clsid: None,
+        };
+        let table = ComponentTable::synthetic(vec![Component {
+            file_name: "MSWINSCK.OCX".to_owned(),
+            library: "MSWinsockLib.Winsock".to_owned(),
+            name: "Winsock".to_owned(),
+            guid_offset: Off::new(0),
+            guid_length: -1,
+            guid_text: None,
+        }]);
+
+        let reason = join_component(&mut control, &table);
+        assert!(control.clsid.is_none());
+        let reason = reason.expect("synthetic fixture: no binary GUID must refuse");
+        assert!(reason.find(&control.class_name).is_some(), "{reason}");
+    }
+
+    /// A synthetic fixture: a matched component whose `guid_text` does not
+    /// parse as 32 hex digits gives no CLSID and a reason, the same
+    /// treatment as a component with no `guid_text` at all.
+    #[test]
+    fn a_matched_component_whose_guid_text_does_not_parse_gives_no_clsid_and_a_reason() {
+        let mut control = ExternalControl {
+            class_name: "MSWinsockLib.Winsock".to_owned(),
+            library: "MSWinsockLib".to_owned(),
+            component: "Winsock".to_owned(),
+            offset: 0,
+            clsid: None,
+        };
+        let table = ComponentTable::synthetic(vec![Component {
+            file_name: "MSWINSCK.OCX".to_owned(),
+            library: "MSWinsockLib.Winsock".to_owned(),
+            name: "Winsock".to_owned(),
+            guid_offset: Off::new(0),
+            guid_length: 72,
+            guid_text: Some("not a real guid at all, thirty six characters".to_owned()),
+        }]);
+
+        let reason = join_component(&mut control, &table);
+        assert!(control.clsid.is_none());
+        assert!(reason.is_some());
+    }
+
+    /// A synthetic fixture proving `join_component` takes no near match at
+    /// the prefix level: a component whose library is a strict prefix of
+    /// the control's own class name (or the reverse) does not join.
+    #[test]
+    fn join_component_takes_no_prefix_near_match() {
+        let mut control = ExternalControl {
+            class_name: "MSWinsockLib.Winsock".to_owned(),
+            library: "MSWinsockLib".to_owned(),
+            component: "Winsock".to_owned(),
+            offset: 0,
+            clsid: None,
+        };
+        // The component's own library is a strict prefix of the control's
+        // class name: a `starts_with` join would wrongly match this.
+        let table = ComponentTable::synthetic(vec![Component {
+            file_name: "MSWINSCK.OCX".to_owned(),
+            library: "MSWinsockLib".to_owned(),
+            name: "Winsock".to_owned(),
+            guid_offset: Off::new(0),
+            guid_length: 72,
+            guid_text: Some("2c49f800-c2dd-11cf-9ad6-0080c7e7b78d".to_owned()),
+        }]);
+
+        let reason = join_component(&mut control, &table);
+        assert!(
+            control.clsid.is_none(),
+            "synthetic fixture: a prefix match must not join"
+        );
+        assert!(reason.is_some());
+    }
+
+    /// An `ExternalControl` with an empty class name (`read_external_control`
+    /// already flags this with `DefectKind::EmptyName`) never matches any
+    /// component, since no component's own library is the empty string.
+    #[test]
+    fn an_empty_class_name_never_joins() {
+        let mut control = ExternalControl {
+            class_name: String::new(),
+            library: String::new(),
+            component: String::new(),
+            offset: 0,
+            clsid: None,
+        };
+        let table = ComponentTable::synthetic(vec![Component {
+            file_name: "MSWINSCK.OCX".to_owned(),
+            library: "MSWinsockLib.Winsock".to_owned(),
+            name: "Winsock".to_owned(),
+            guid_offset: Off::new(0),
+            guid_length: 72,
+            guid_text: Some("2c49f800-c2dd-11cf-9ad6-0080c7e7b78d".to_owned()),
+        }]);
+
+        let reason = join_component(&mut control, &table);
+        assert!(control.clsid.is_none());
+        assert!(reason.is_some());
     }
 }

@@ -217,6 +217,23 @@ pub enum DefectKind {
         /// The absolute file offset of the class name's own length field.
         offset: u32,
     },
+
+    /// A component entry's `GUIDlength` field holds a value that is neither
+    /// `-1` (no binary GUID) nor `72` (a 36 character UTF-16 GUID).
+    ///
+    /// Plan 03-08: `STRUCTURES.md` section 7.3 names only these two values.
+    /// Any other value is not decoded, and the component keeps its other
+    /// fields.
+    #[error(
+        "the value {value} at offset {offset:#x} is neither -1 nor 72, so the textual GUID is not decoded"
+    )]
+    GuidLengthUnexpected {
+        /// The absolute file offset of the component entry that holds the
+        /// value.
+        offset: u32,
+        /// The value found.
+        value: i32,
+    },
 }
 
 /// How bad a defect is.
@@ -277,6 +294,9 @@ impl DefectKind {
             // A class name with no dot keeps its whole text as the library
             // part. The control is not lost; only the join key is degraded.
             Self::ClassNameNoDot { .. } => Severity::Recoverable,
+            // A GUIDlength outside the two documented values loses only the
+            // textual GUID. The component keeps every other field.
+            Self::GuidLengthUnexpected { .. } => Severity::Recoverable,
         }
     }
 }

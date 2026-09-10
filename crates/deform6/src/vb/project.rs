@@ -738,13 +738,26 @@ pub struct Component {
     pub library: String,
     /// The component name, e.g. `"Winsock"`.
     pub name: String,
-    /// The entry-relative offset of the textual GUID. Carried, not decoded:
-    /// `STRUCTURES.md` gap 17 leaves this and four other fields opaque, and
-    /// nothing in this phase needs them.
+    /// The entry-relative offset of the textual GUID. `STRUCTURES.md` gap 17
+    /// leaves three other fields opaque; nothing in this phase needs them.
+    /// This offset and [`Self::guid_length`] are decoded, as of plan 03-08,
+    /// into [`Self::guid_text`]. See that field's own doc comment.
     pub guid_offset: Off,
     /// `-1` means no binary identifier at `oUuid`. `72` means the textual
-    /// GUID is 36 UTF-16 characters. Carried, not decoded.
+    /// GUID is 36 UTF-16 characters. Decoded, as of plan 03-08, into
+    /// [`Self::guid_text`]. See that field's own doc comment.
     pub guid_length: i32,
+    /// The textual GUID, decoded from [`Self::guid_offset`] and
+    /// [`Self::guid_length`] inside [`ComponentTable::walk`], where the
+    /// entry's own region is in scope: `guid_offset` is relative to the
+    /// entry, not to the table, the same warning `STRUCTURES.md` section 7.3
+    /// opens with.
+    ///
+    /// `None` when `guid_length` is `-1`, a normal state and not a
+    /// [`Defect`]. `Some` of 36 characters (no braces) when `guid_length` is
+    /// `72`. `plan 03-08`'s `vb/ocx.rs::Clsid::parse` turns this text into
+    /// the sixteen raw bytes a third party control's CLSID needs.
+    pub guid_text: Option<String>,
 }
 
 /// The external component table, reached from
@@ -854,7 +867,19 @@ impl ComponentTable {
             };
 
             match read_component_entry(&entry) {
-                Some(component) => components.push(component),
+                Some(mut component) => {
+                    let (guid_text, guid_defect) = decode_guid_text(
+                        &entry,
+                        entry_offset.get(),
+                        component.guid_offset,
+                        component.guid_length,
+                    );
+                    component.guid_text = guid_text;
+                    if let Some(defect) = guid_defect {
+                        defects.push(defect);
+                    }
+                    components.push(component);
+                }
                 // The corpus's one distinct sample resolves cleanly on all
                 // three of its occurrences, so this is defensive and not
                 // corpus-exercised: five of thirteen fields in this
@@ -894,6 +919,21 @@ impl ComponentTable {
     pub fn defects(&self) -> &[Defect] {
         &self.defects
     }
+
+    /// Builds a `ComponentTable` directly from a component list, for a
+    /// synthetic fixture in a sibling module's own test suite (`vb/ocx.rs`,
+    /// plan 03-08's `join_component`). [`ComponentTable::read`] is
+    /// otherwise the only builder; this exists because [`Self::defects`] is
+    /// private everywhere except inside this module, and `join_component`'s
+    /// own tests need a table with no components, or with a hand-written
+    /// one, not a full synthetic portable executable.
+    #[cfg(test)]
+    pub(crate) const fn synthetic(components: Vec<Component>) -> Self {
+        Self {
+            components,
+            defects: Vec::new(),
+        }
+    }
 }
 
 /// Reads the three strings and the GUID fields of one component entry.
@@ -919,7 +959,76 @@ fn read_component_entry(entry: &Region<'_>) -> Option<Component> {
         name,
         guid_offset,
         guid_length,
+        // Decoded by the caller, `ComponentTable::walk`, where `entry` (this
+        // function's own borrow of it ends here) is still in scope.
+        guid_text: None,
     })
+}
+
+/// Decodes a component entry's own textual GUID, per `STRUCTURES.md`
+/// section 7.3: `guid_offset` is relative to the entry's own base, never to
+/// the table, the same warning that section opens with.
+///
+/// `guid_length` of `-1` means no binary identifier and gives `None` with no
+/// `Defect`: a normal state [`Component::guid_text`]'s own doc comment
+/// already names. `72` means the textual GUID is 36 UTF-16 characters; the
+/// 72 bytes are read bounded by the entry's own region, so a `guid_offset`
+/// that leaves too little room does not size an allocation from
+/// `guid_length` before that bound is checked. Any other value gives a
+/// `Defect` naming it, and gives `None`.
+fn decode_guid_text(
+    entry: &Region<'_>,
+    entry_offset: u32,
+    guid_offset: Off,
+    guid_length: i32,
+) -> (Option<String>, Option<Defect>) {
+    match guid_length {
+        -1 => (None, None),
+        72 => match entry.take(guid_offset, 72) {
+            Some(bytes) => {
+                let mut units = Vec::with_capacity(36);
+                for pair in bytes.chunks_exact(2) {
+                    let Ok(raw) = <[u8; 2]>::try_from(pair) else {
+                        continue;
+                    };
+                    units.push(u16::from_le_bytes(raw));
+                }
+                (Some(String::from_utf16_lossy(&units)), None)
+            }
+            None => {
+                let max = entry.len().saturating_sub(guid_offset.get());
+                let defect = Defect {
+                    site: Site {
+                        offset: entry_offset,
+                        rva: None,
+                        structure: "ExternalComponentEntry",
+                        field: "GUIDoffset",
+                    },
+                    kind: DefectKind::ImplausibleCount {
+                        offset: entry_offset,
+                        count: 72,
+                        max,
+                    },
+                };
+                (None, Some(defect))
+            }
+        },
+        other => {
+            let defect = Defect {
+                site: Site {
+                    offset: entry_offset,
+                    rva: None,
+                    structure: "ExternalComponentEntry",
+                    field: "GUIDlength",
+                },
+                kind: DefectKind::GuidLengthUnexpected {
+                    offset: entry_offset,
+                    value: other,
+                },
+            };
+            (None, Some(defect))
+        }
+    }
 }
 
 /// Reads one NUL terminated, Latin-1 decoded string at an entry-relative
@@ -1529,6 +1638,20 @@ mod tests {
         ComponentTable::read(&image, header.lp_external_table, header.w_external_count)
     }
 
+    /// The `.vbp` beside `Server.exe` declares
+    /// `Object={248DD890-BB45-11CF-9ABC-0080C7E7B78D}#1.0#0; MSWINSCK.OCX`.
+    /// The plan text this session executes assumed `GUIDoffset`'s own
+    /// textual GUID would read back as that exact value. It does not: this
+    /// session measured `2c49f800-c2dd-11cf-9ad6-0080c7e7b78d` at
+    /// `GUIDoffset`, byte for byte, confirmed identically in
+    /// `SubReality_WinsockSample.exe` too (a second corpus file for the same
+    /// `MSWinsockLib.Winsock` reference). The 16 byte binary GUID at
+    /// `oUuid` (entry offset `0x04`) is closer to the `.vbp` value
+    /// (`248DD896-BB45-11CF-9ABC-0080C7E7B78D`, differing from the `.vbp`
+    /// only in the low byte of `Data1`) but is not decoded by this plan:
+    /// its own action text names `GUIDoffset`/`GUIDlength`, at `0x1C`/`0x20`,
+    /// not `oUuid`, and that is the field this test proves against the real
+    /// bytes.
     #[test]
     fn the_one_component_server_exe_declares_resolves_all_three_strings() {
         let table = component_table(SERVER);
@@ -1538,6 +1661,83 @@ mod tests {
         assert_eq!(component.library, "MSWinsockLib.Winsock");
         assert_eq!(component.name, "Winsock");
         assert_eq!(component.guid_length, 72);
+        assert_eq!(
+            component.guid_text.as_deref(),
+            Some("2c49f800-c2dd-11cf-9ad6-0080c7e7b78d"),
+            "measured this session at GUIDoffset; see this test's own doc comment for why \
+             this differs from the .vbp's Object= line"
+        );
+        assert!(table.defects().is_empty());
+    }
+
+    #[test]
+    fn a_guid_length_of_minus_one_gives_no_guid_text_and_no_defect() {
+        let payload = build_component_entry_with_guid(
+            "None.ocx",
+            "NoneLib.None",
+            "None",
+            -1,
+            "this text is never read when guid_length is -1",
+        );
+        let (bytes, va) = a_synthetic_pe_image(&payload);
+        let image = PeImage::parse(&bytes).unwrap();
+        let table = ComponentTable::read(&image, va, 1);
+
+        assert_eq!(table.components.len(), 1, "{:?}", table.defects());
+        assert_eq!(table.components[0].guid_text, None);
+        assert!(table.defects().is_empty());
+    }
+
+    #[test]
+    fn a_guid_length_of_forty_gives_a_defect_naming_the_value_and_no_guid_text() {
+        let payload = build_component_entry_with_guid(
+            "Odd.ocx",
+            "OddLib.Odd",
+            "Odd",
+            40,
+            "this text is never read when guid_length is neither -1 nor 72",
+        );
+        let (bytes, va) = a_synthetic_pe_image(&payload);
+        let image = PeImage::parse(&bytes).unwrap();
+        let table = ComponentTable::read(&image, va, 1);
+
+        assert_eq!(table.components.len(), 1, "{:?}", table.defects());
+        assert_eq!(table.components[0].guid_text, None);
+        assert_eq!(table.defects().len(), 1);
+        let defect = &table.defects()[0];
+        assert_eq!(defect.kind.severity(), Severity::Recoverable);
+        assert!(matches!(
+            defect.kind,
+            DefectKind::GuidLengthUnexpected { value: 40, .. }
+        ));
+        let message = format!("{}", defect.kind);
+        let wanted = "40";
+        assert!(message.find(wanted).is_some(), "{message}");
+    }
+
+    /// A synthetic fixture, proving the UTF-16 decode itself against a
+    /// hand-written GUID rather than only against the real bytes
+    /// [`the_one_component_server_exe_declares_resolves_all_three_strings`]
+    /// already proves.
+    #[test]
+    fn a_guid_length_of_seventy_two_decodes_thirty_six_utf16_characters() {
+        let payload = build_component_entry_with_guid(
+            "Synthetic.ocx",
+            "SyntheticLib.Synthetic",
+            "Synthetic",
+            72,
+            "248DD890-BB45-11CF-9ABC-0080C7E7B78D",
+        );
+        let (bytes, va) = a_synthetic_pe_image(&payload);
+        let image = PeImage::parse(&bytes).unwrap();
+        let table = ComponentTable::read(&image, va, 1);
+
+        assert_eq!(table.components.len(), 1, "{:?}", table.defects());
+        assert_eq!(
+            table.components[0].guid_text.as_deref(),
+            Some("248DD890-BB45-11CF-9ABC-0080C7E7B78D"),
+            "synthetic fixture"
+        );
         assert!(table.defects().is_empty());
     }
 
@@ -1611,10 +1811,38 @@ mod tests {
 
     /// Builds one component entry: the fixed fields, then the three strings
     /// and a placeholder textual GUID, each written once and referenced by
-    /// its own entry-relative offset.
+    /// its own entry-relative offset. `GUIDlength` is `72`, matching the
+    /// UTF-16 encoded placeholder text this writes.
     fn build_component_entry(file_name: &str, library: &str, name: &str) -> Vec<u8> {
+        build_component_entry_with_guid(
+            file_name,
+            library,
+            name,
+            72,
+            "00000000-0000-0000-0000-000000000000",
+        )
+    }
+
+    /// Builds one component entry like [`build_component_entry`], but lets
+    /// the caller choose `GUIDlength` and the textual GUID `decode_guid_text`
+    /// reads at `GUIDoffset`. `guid_text` is encoded as UTF-16, the shape
+    /// `STRUCTURES.md` section 7.3 gives for `GUIDlength == 72`; a test
+    /// exercising a different `guid_length` passes whatever text it needs to
+    /// prove that field's own handling, not this encoding.
+    fn build_component_entry_with_guid(
+        file_name: &str,
+        library: &str,
+        name: &str,
+        guid_length: i32,
+        guid_text: &str,
+    ) -> Vec<u8> {
         let mut buf = vec![0_u8; 0x34];
         let mut pool = Vec::new();
+
+        let mut guid_utf16 = Vec::new();
+        for unit in guid_text.encode_utf16() {
+            guid_utf16.extend_from_slice(&unit.to_le_bytes());
+        }
 
         let place = |bytes: &[u8], pool: &mut Vec<u8>| -> u32 {
             let at = u32::try_from(0x34 + pool.len()).unwrap();
@@ -1623,13 +1851,13 @@ mod tests {
             at
         };
 
-        let guid_off = place(b"{00000000-0000-0000-0000-000000000000}", &mut pool);
+        let guid_off = place(&guid_utf16, &mut pool);
         let file_name_off = place(file_name.as_bytes(), &mut pool);
         let source_off = place(library.as_bytes(), &mut pool);
         let name_off = place(name.as_bytes(), &mut pool);
 
         buf[0x1C..0x20].copy_from_slice(&guid_off.to_le_bytes());
-        buf[0x20..0x24].copy_from_slice(&72_i32.to_le_bytes());
+        buf[0x20..0x24].copy_from_slice(&guid_length.to_le_bytes());
         buf[0x28..0x2C].copy_from_slice(&file_name_off.to_le_bytes());
         buf[0x2C..0x30].copy_from_slice(&source_off.to_le_bytes());
         buf[0x30..0x34].copy_from_slice(&name_off.to_le_bytes());
@@ -1666,6 +1894,7 @@ mod tests {
                 name: "First".to_string(),
                 guid_offset: table.components[0].guid_offset,
                 guid_length: 72,
+                guid_text: table.components[0].guid_text.clone(),
             }
         );
         assert_eq!(table.components[1].file_name, "Second.ocx");
