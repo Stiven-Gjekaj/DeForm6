@@ -9,15 +9,28 @@
 //! one commit, for the reason `lib.rs` gives for its own module list: plans
 //! 02-02 through 02-05 each edit only the one new file this phase gives them,
 //! so this file is written once and never becomes a merge point.
+//!
+//! The eight phase 3 modules (`gui`, `opcodes`, `controltree`, `vbstr`,
+//! `propstream`, `frx`, `ocx`, `controlinfo`) are declared here as a set, in
+//! one commit, for the same reason: each later plan in the phase then edits
+//! only the one file it owns, and this file never becomes a merge point for
+//! two plans in one wave.
 
 pub mod classify;
+pub mod controlinfo;
+pub mod controltree;
+pub mod frx;
 pub mod functyp;
 pub mod gui;
 pub mod header;
 pub mod object;
+pub mod ocx;
+pub mod opcodes;
 pub mod privateobj;
 pub mod project;
+pub mod propstream;
 pub mod runtime;
+pub mod vbstr;
 
 pub use crate::error::Refusal;
 
