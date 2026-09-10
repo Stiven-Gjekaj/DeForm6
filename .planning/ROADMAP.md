@@ -283,7 +283,7 @@ bound handler.
   - **STRUCTURES gap 16**: nine dwords in `GUIObjectInfo` at 0x35 to 0x58 have
     no known meaning. Leave them opaque; do not invent a reading.
 
-**Plans**: 14/17 plans executed. Plans 03-11 to 03-17 close the gaps the
+**Plans**: 15/17 plans executed. Plans 03-11 to 03-17 close the gaps the
 phase 3 verification found. They carry `gap_closure: true` and run with
 `/gsd-execute-phase 3 --gaps-only`.
 
@@ -322,7 +322,7 @@ Plans:
 
 **Gap closure wave 2** *(blocked on 03-13)*
 
-- [ ] 03-15-PLAN.md - `frx::extract_blob` wired into the property loop, the blob in the report and on the command line, and the `.frx` offset cursor corrected
+- [x] 03-15-PLAN.md - `frx::extract_blob` wired into the property loop, the blob in the report and on the command line, and the `.frx` offset cursor corrected
 
 **Gap closure wave 3** *(blocked on 03-15)*
 
@@ -624,7 +624,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 |-------|----------------|--------|-----------|
 | 1. It reads the file | 7/8 | In Progress|  |
 | 2. The object graph | 4/10 | In Progress|  |
-| 3. Forms | 14/17 | In Progress|  |
+| 3. Forms | 15/17 | In Progress|  |
 | 4. It writes a project | 0/9 | Not started | - |
 | 5. Hostility | 0/8 | Not started | - |
 | 6. Version 1.0 | 0/5 | Not started | - |

@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Forms
 status: verifying
-stopped_at: "Completed 03-14-PLAN.md (gap closure: two-level-deep menu close, close_walk WR-02 fix)"
-last_updated: "2026-09-10T22:31:29.880Z"
+stopped_at: "Completed 03-15-PLAN.md (gap closure: frx::extract_blob wired into the property loop, the .frx offset cursor corrected)"
+last_updated: "2026-09-10T22:56:11.000Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 03 execution started
-state_head: bd71f572f33a9589c0c1999cdab68b5161fb16dc
+state_head: 7901e15c7a195e75278a57cc4762b0fba213c2fc
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 35
-  completed_plans: 32
+  completed_plans: 33
   percent: 0
 ---
 
@@ -66,9 +66,12 @@ inferred.
 
 ## Current Position
 
-Phase: 03 (Forms) — EXECUTING
-Plan: 10 of 10
-Status: Phase complete — ready for verification
+Phase: 03 (Forms) — EXECUTING (gap closure)
+Plan: 03-15 of 17 (gap closure wave 2 of 4)
+Status: 15/17 plans executed. `frx::extract_blob` now has a production
+call site; `BlobCursor::take` is corrected against eleven measured
+`.frx` gaps. Plans 03-16 (OCX CLSID field) and 03-17 (remaining code
+review findings) still open.
 `deform6 inspect` reports the object graph. It reads a form's control tree
 now: every control's type, name and array index, gated on the tiling check.
 Open defects: `.planning/WINDOWS.md` holds three, all of them limits that are
@@ -127,6 +130,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 | Phase 03-forms P12 | 35min | 3 tasks | 1 files |
 | Phase 03-forms P13 | 20min | 3 tasks | 3 files |
 | Phase 03 P14 | single session | 3 tasks | 6 files |
+| Phase 03-forms P15 | 24min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -183,6 +187,9 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-14: read_scope_run's role decision needs stack_top_is_menu as a second fact, not only current_is_menu. A bare 0x02 after a menu means OpenChild only when the parent stack's own top is not itself a menu; when it is, 0x03 pops and continues and 0x02 becomes the sibling terminal. Measured across five transitions in HexScroll.exe and UUID2.exe. FrmHex and frmUUID2 recover in full, matching their .frm parent for parent by name.
 - [Phase 03]: 03-14: frmPassGen.frm's own menuHelp section exposes a third shape (a menu, itself a sibling within an already-open menu, that opens its own child) byte-identical to the confirmed sibling case and left unresolved on purpose, since frmUUID2's exact recovery is a hard plan requirement and the two contexts are provably indistinguishable from the bytes controltree.rs reads. Tracked as an open WINDOWS.md finding, not guessed at.
 - [Phase 03]: 03-14: close_walk (review finding WR-02) drops its own stack and pop-count parameters entirely rather than making the check real, because the terminal EndForm pop count routinely exceeds the real parent stack depth on real corpus data and an excess terminal pop closes nothing that still matters.
+- [Phase 03]: 03-15: BlobCursor::take advances by declared_len + 4, not declared_len + 12 as STRUCTURES.md section 8.8 states, measured against eleven real gaps across two committed .frx files (FormPhysics.frx, nine gaps; frmTransparency.frx, two gaps). A .frx item on disk is the same four byte length field the executable already carries inline, followed directly by declared_len bytes; there is no separate twelve byte FRXITEMHDR.
+- [Phase 03]: 03-15: walk_properties's resource blob arm now calls frx::extract_blob and advances the cursor only by the count it returns. PropertyValue::Blob carries a recovered blob's offset, declared length, image length, format and .frx offset, never its bytes; PropertyValue::BlobUnreadable is a new, distinct state for a blob the file marks present but this reader could not read. compose_form owns one BlobCursor per form, threaded through compose_control into walk_properties.
+- [Phase 03]: 03-15: FRM-05 is not marked complete. The requirement needs both blob recovery and the .frx writer; this plan does the recovery half only, and the writer stays with phase 4 plan 04-04. Marking it here would repeat the exact requirements-tracking overstatement 03-VERIFICATION.md found.
 
 ### Pending Todos
 
@@ -211,12 +218,13 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T22:31:20.769Z
-Stopped at: Completed 03-14-PLAN.md (gap closure: two-level-deep menu close, close_walk WR-02 fix)
+Last session: 2026-09-10T22:56:11.000Z
+Stopped at: Completed 03-15-PLAN.md (gap closure: frx::extract_blob wired into the property loop, the .frx offset cursor corrected against eleven measured gaps)
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and
 confirmed rather than assumed.
 
-Next: `/gsd-execute-phase 3` to continue Phase 3 execution with plan 03-05.
+Next: `/gsd-execute-phase 3` to continue Phase 3 gap closure with plan 03-16
+(which component table field holds a third party control's identifier).
 Resume file: None
