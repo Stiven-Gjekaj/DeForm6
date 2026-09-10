@@ -180,6 +180,28 @@ pub enum DefectKind {
         /// The high byte of the two-byte index value.
         high: u8,
     },
+
+    /// A `String`-typed property did not land on its declared end under
+    /// either encoding tried.
+    ///
+    /// Plan 03-05: `VbStr::read` tries the caller's own encoding, retries
+    /// once as the other, and refuses when neither decode consumes exactly
+    /// the declared length with a null byte at the declared end. The
+    /// property is unrecoverable; the block around it is not, because the
+    /// cursor still advances to the declared end.
+    #[error(
+        "the string at offset {offset:#x}, declared length {declared_len}, did not land under either encoding tried ({first_encoding} then {second_encoding})"
+    )]
+    UnrecoverableString {
+        /// The absolute file offset of the string's own length field.
+        offset: u32,
+        /// The declared length, in bytes, of the string's own text.
+        declared_len: u16,
+        /// The encoding tried first.
+        first_encoding: &'static str,
+        /// The encoding retried second.
+        second_encoding: &'static str,
+    },
 }
 
 /// How bad a defect is.
@@ -233,6 +255,10 @@ impl DefectKind {
             // The corpus has never proven a non-zero high byte meaningful,
             // but the value is still used. The control keeps every field.
             Self::IndexHighByteSet { .. } => Severity::Recoverable,
+            // One string property is unreadable under either encoding. The
+            // cursor still advances to the declared end, so the rest of the
+            // block is not lost to it.
+            Self::UnrecoverableString { .. } => Severity::Recoverable,
         }
     }
 }

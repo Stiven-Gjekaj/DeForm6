@@ -78,6 +78,27 @@ impl VbStr {
     /// arithmetic overflows a `u32`, gives a [`Defect`] naming the byte
     /// offset. No allocation is sized from the declared length before that
     /// bound check.
+    ///
+    /// # The landing check, the one retry, and the refusal
+    ///
+    /// `STRUCTURES.md` gap 13, the string encoding rule in the form
+    /// property stream, is not known: no public tool reads it from a flag.
+    /// The encoding comes from the opcode table when one is loaded, and
+    /// defaults to ASCII when it is not. That default can be wrong, so
+    /// after a decode this checks that it landed: the decode must have
+    /// consumed exactly the declared byte count, and the byte at the
+    /// declared end minus 1 must be a null byte, the trailing byte
+    /// `STRUCTURES.md` section 8.5's `2 + n + 1` width promises. A decode
+    /// that does not land is retried once, as the other encoding, with the
+    /// same landing check. A decode that lands under neither encoding
+    /// refuses: this gives a [`Defect`] naming both encodings tried, and an
+    /// empty text. The reader tries at most two encodings; there is no
+    /// third attempt and no fall back scan to the next null byte, which is
+    /// the heuristic `STRUCTURES.md` section 9.3 shows to be unsound by its
+    /// own byte accounting. Copying that heuristic copies its defect.
+    ///
+    /// The retry never changes the returned cursor: `declared_end` is the
+    /// same before the retry, after the retry, and in the refused case.
     #[must_use]
     pub fn read(region: &Region<'_>, at: Off, encoding: StrEncoding) -> (Self, Option<Defect>) {
         let offset = region.file_offset(at).map_or(0, Off::get);
@@ -103,8 +124,40 @@ impl VbStr {
             return Self::region_overflow(offset, declared_len, declared_end, max);
         }
 
-        let text = decode(region, text_start, declared_len, encoding).unwrap_or_default();
-        (Self { text, declared_end }, None)
+        if let Some((text, consumed)) = decode(region, text_start, declared_len, encoding)
+            && lands(region, declared_len, consumed, declared_end)
+        {
+            return (Self { text, declared_end }, None);
+        }
+
+        let retry_encoding = other_encoding(encoding);
+        if let Some((text, consumed)) = decode(region, text_start, declared_len, retry_encoding)
+            && lands(region, declared_len, consumed, declared_end)
+        {
+            return (Self { text, declared_end }, None);
+        }
+
+        let defect = Defect {
+            site: Site {
+                offset,
+                rva: None,
+                structure: "VbStr",
+                field: "text",
+            },
+            kind: DefectKind::UnrecoverableString {
+                offset,
+                declared_len,
+                first_encoding: encoding_name(encoding),
+                second_encoding: encoding_name(retry_encoding),
+            },
+        };
+        (
+            Self {
+                text: String::new(),
+                declared_end,
+            },
+            Some(defect),
+        )
     }
 
     /// The declared end's own arithmetic overflows a `u32`. There is no
@@ -164,10 +217,18 @@ impl VbStr {
 
 /// Decodes `declared_len` bytes at `text_start`, under `encoding`.
 ///
+/// Gives the decoded text and how many bytes the decode actually consumed.
+/// [`lands`] compares the consumed count against `declared_len`; it is
+/// never assumed equal, because an odd `declared_len` under UTF-16 cannot
+/// consume the full declared span.
+///
 /// ASCII maps each byte to its own Latin-1 code point, the rule
 /// `vb/object.rs::read_name` and `vb/controltree.rs::read_name` both use.
 /// `String::from_utf8_lossy` is never used here: a byte in 0x80 to 0xFF
-/// would become the replacement character and the text would be lost.
+/// would become the replacement character and the text would be lost. An
+/// ASCII decode of `n` declared bytes always consumes exactly `n` bytes, so
+/// only the trailing-null half of [`lands`] can ever refuse an ASCII
+/// attempt.
 ///
 /// UTF-16 pairs the bytes little endian. [`Region::take`] is the only route
 /// to the bytes, so a `declared_len` that does not fit is refused by
@@ -177,16 +238,19 @@ fn decode(
     text_start: Off,
     declared_len: u16,
     encoding: StrEncoding,
-) -> Option<String> {
+) -> Option<(String, u32)> {
     match encoding {
         StrEncoding::Ascii => {
             let bytes = region.take(text_start, u32::from(declared_len))?;
-            Some(bytes.iter().copied().map(char::from).collect())
+            let text = bytes.iter().copied().map(char::from).collect();
+            Some((text, u32::from(declared_len)))
         }
         StrEncoding::Utf16 => {
             // The largest even number of bytes at or below `declared_len`,
             // found by clearing the low bit. An odd `declared_len` leaves
-            // one byte unpaired; that byte is not consumed here.
+            // one byte unpaired; that byte is not consumed here, so the
+            // consumed count differs from the declared length and the
+            // landing check below catches it.
             let consumed = u32::from(declared_len) & !1_u32;
             let bytes = region.take(text_start, consumed)?;
             let mut units = Vec::new();
@@ -194,8 +258,42 @@ fn decode(
                 let raw: [u8; 2] = pair.try_into().ok()?;
                 units.push(u16::from_le_bytes(raw));
             }
-            Some(String::from_utf16_lossy(&units))
+            Some((String::from_utf16_lossy(&units), consumed))
         }
+    }
+}
+
+/// Tells whether a decode landed: it consumed exactly the declared byte
+/// count, and the byte at the declared end minus 1 is a null byte.
+///
+/// The trailing-null half is what a decode that trivially consumes the
+/// right byte count (every ASCII decode) cannot skip: a record whose
+/// trailing byte is not null did not land where `STRUCTURES.md` section
+/// 8.5's `2 + n + 1` width says it should, whichever encoding read it.
+fn lands(region: &Region<'_>, declared_len: u16, consumed: u32, declared_end: Off) -> bool {
+    if consumed != u32::from(declared_len) {
+        return false;
+    }
+    let Some(trailing_at) = declared_end.checked_sub(1) else {
+        return false;
+    };
+    region.u8(trailing_at) == Some(0)
+}
+
+/// Gives the other [`StrEncoding`] variant: the one retry [`VbStr::read`]
+/// takes when the first attempt does not land.
+const fn other_encoding(encoding: StrEncoding) -> StrEncoding {
+    match encoding {
+        StrEncoding::Ascii => StrEncoding::Utf16,
+        StrEncoding::Utf16 => StrEncoding::Ascii,
+    }
+}
+
+/// Names an encoding for a [`DefectKind::UnrecoverableString`] message.
+const fn encoding_name(encoding: StrEncoding) -> &'static str {
+    match encoding {
+        StrEncoding::Ascii => "ASCII",
+        StrEncoding::Utf16 => "UTF-16",
     }
 }
 
@@ -317,5 +415,109 @@ mod tests {
         let (s, defect) = VbStr::read(&region, Off::new(0), StrEncoding::Ascii);
         assert!(defect.is_some());
         assert_eq!(s.text(), "");
+    }
+
+    #[test]
+    fn a_string_that_lands_on_the_first_encoding_gives_no_defect() {
+        let mut buf = vec![0x03_u8, 0x00];
+        buf.extend_from_slice(b"Tag");
+        buf.push(0x00);
+        let region = Region::new(&buf, Off::new(0));
+        let (s, defect) = VbStr::read(&region, Off::new(0), StrEncoding::Ascii);
+        assert_eq!(s.text(), "Tag");
+        assert_eq!(s.declared_end(), Off::new(6));
+        assert!(defect.is_none());
+    }
+
+    #[test]
+    fn an_odd_declared_length_under_utf16_does_not_land_and_the_retry_as_ascii_does() {
+        // declared_len = 3, an odd count. UTF-16 can only pair 2 of the 3
+        // bytes, so it never lands; ASCII lands on the retry.
+        let mut buf = vec![0x03_u8, 0x00];
+        buf.extend_from_slice(b"Tag");
+        buf.push(0x00);
+        let region = Region::new(&buf, Off::new(0));
+        let (s, defect) = VbStr::read(&region, Off::new(0), StrEncoding::Utf16);
+        assert_eq!(s.text(), "Tag");
+        assert_eq!(s.declared_end(), Off::new(6));
+        assert!(defect.is_none());
+    }
+
+    #[test]
+    fn a_record_whose_trailing_byte_is_not_null_is_reported_unrecoverable_and_names_the_offset() {
+        let mut buf = vec![0x03_u8, 0x00];
+        buf.extend_from_slice(b"Tag");
+        buf.push(0xFF); // not a null terminator
+        let region = Region::new(&buf, Off::new(0));
+        let (s, defect) = VbStr::read(&region, Off::new(0), StrEncoding::Ascii);
+        assert_eq!(s.text(), "");
+        assert_eq!(s.declared_end(), Off::new(6));
+        let defect = defect.expect("a non-null trailing byte must refuse under both encodings");
+        assert!(matches!(
+            defect.kind,
+            DefectKind::UnrecoverableString { .. }
+        ));
+        let message = format!("{}", defect.kind);
+        assert!(message.contains("0x0"), "{message}");
+    }
+
+    #[test]
+    fn the_unrecoverable_defect_names_both_encodings_tried() {
+        let mut buf = vec![0x03_u8, 0x00];
+        buf.extend_from_slice(b"Tag");
+        buf.push(0xFF);
+        let region = Region::new(&buf, Off::new(0));
+        let (_s, defect) = VbStr::read(&region, Off::new(0), StrEncoding::Ascii);
+        let defect = defect.expect("must refuse");
+        let message = format!("{}", defect.kind);
+        assert!(message.contains("ASCII"), "{message}");
+        assert!(message.contains("UTF-16"), "{message}");
+        assert!(message.contains('3'), "{message}");
+    }
+
+    #[test]
+    fn the_declared_end_is_identical_whether_the_string_lands_or_is_refused() {
+        let mut landing = vec![0x03_u8, 0x00];
+        landing.extend_from_slice(b"Tag");
+        landing.push(0x00);
+        let landing_region = Region::new(&landing, Off::new(0));
+        let (landed, _) = VbStr::read(&landing_region, Off::new(0), StrEncoding::Ascii);
+
+        let mut refused = vec![0x03_u8, 0x00];
+        refused.extend_from_slice(b"Tag");
+        refused.push(0xFF);
+        let refused_region = Region::new(&refused, Off::new(0));
+        let (was_refused, defect) = VbStr::read(&refused_region, Off::new(0), StrEncoding::Ascii);
+
+        assert!(defect.is_some());
+        assert_eq!(landed.declared_end(), was_refused.declared_end());
+        assert_eq!(landed.declared_end(), Off::new(6));
+    }
+
+    #[test]
+    fn a_string_that_does_not_land_under_either_encoding_names_the_absolute_offset_when_the_region_has_a_nonzero_base()
+     {
+        let mut buf = vec![0x03_u8, 0x00];
+        buf.extend_from_slice(b"Tag");
+        buf.push(0xFF);
+        let region = Region::new(&buf, Off::new(0x2000));
+        let (_s, defect) = VbStr::read(&region, Off::new(0), StrEncoding::Ascii);
+        let defect = defect.expect("must refuse");
+        let message = format!("{}", defect.kind);
+        assert!(message.contains("0x2000"), "{message}");
+    }
+
+    #[test]
+    fn the_refused_case_gives_an_empty_text_never_a_partial_one() {
+        // A declared length that both encodings could otherwise decode
+        // cleanly, refused purely by the trailing-byte check: neither
+        // decode attempt's partial text leaks through.
+        let mut buf = vec![0x06_u8, 0x00];
+        buf.extend_from_slice(b"Abcdef");
+        buf.push(0xFF);
+        let region = Region::new(&buf, Off::new(0));
+        let (s, defect) = VbStr::read(&region, Off::new(0), StrEncoding::Ascii);
+        assert_eq!(s.text(), "");
+        assert!(defect.is_some());
     }
 }
