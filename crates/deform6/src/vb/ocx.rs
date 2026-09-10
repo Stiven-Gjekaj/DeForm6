@@ -229,11 +229,32 @@ impl fmt::Display for Clsid {
 /// therefore never match a real component; this function joins
 /// `control.class_name` against it instead.
 ///
-/// On a match whose own textual GUID decodes, fills `control.clsid` and
-/// gives `None`. On no match, or on a match whose component declares no
-/// binary GUID (`guid_text` is `None`, or does not parse), `control.clsid`
-/// stays `None`, and this gives `Some` with a stated reason in plain words,
+/// # Plan 03-16: the CLSID source is `oUuid`, not `GUIDoffset`/`GUIDlength`
+///
+/// Plan 03-08 read `component.guid_text` (`GUIDoffset`/`GUIDlength`) as the
+/// CLSID source. This session measured that field against all three corpus
+/// programs that declare a `MSWinsockLib.Winsock` component and found it
+/// shares no digit pattern with the identifier the matching `.vbp`
+/// declares. `Component::ouuid_text`'s own doc comment carries the full
+/// measurement: `oUuid` decodes to a value differing from the declared
+/// identifier by one byte, the closest of the two candidates, though still
+/// not a match. This function now reads `component.ouuid_text`, and a
+/// successful join always carries an honest caveat alongside the CLSID
+/// (below), because this repository's own research never confirmed either
+/// field against a project file's own declared identifier.
+///
+/// On a match whose own binary GUID at `oUuid` decodes, fills
+/// `control.clsid` and gives `Some` with a caveat: the value comes from a
+/// field this repository's own research does not confirm against the
+/// control's own project file, and the caveat names the byte offset the
+/// value was read from. On no match, or on a match whose component's own
+/// `oUuid` field could not be read as sixteen bytes, `control.clsid` stays
+/// `None`, and this gives `Some` with a stated reason in plain words,
 /// naming the class name: the CLSID is not recoverable from this file.
+///
+/// `None` is reserved for a field this repository's own research one day
+/// confirms against a declared identifier; no such field exists yet, so
+/// every successful join today carries a caveat.
 pub fn join_component(control: &mut ExternalControl, table: &ComponentTable) -> Option<String> {
     let Some(component) = table
         .components
@@ -247,14 +268,21 @@ pub fn join_component(control: &mut ExternalControl, table: &ComponentTable) -> 
         ));
     };
 
-    match component.guid_text.as_deref().and_then(Clsid::parse) {
+    match component.ouuid_text.as_deref().and_then(Clsid::parse) {
         Some(clsid) => {
             control.clsid = Some(clsid);
-            None
+            Some(format!(
+                "the value {clsid}, read from the entry's own oUuid field at offset \
+                 {:#x}, is not confirmed to match the identifier a project file's own \
+                 Object= line declares for this control; this repository's own research \
+                 found no field of the external component table entry that does",
+                component.ouuid_field_offset
+            ))
         }
         None => Some(format!(
-            "the control declares the class name {}, and the component entry for {} declares \
-             no binary GUID, so the CLSID is not recoverable from this file",
+            "the control declares the class name {}, and the component entry for {} names an \
+             oUuid field that this repository could not read as sixteen bytes, so the CLSID is \
+             not recoverable from this file",
             control.class_name, component.library
         )),
     }
@@ -680,19 +708,38 @@ mod tests {
         ComponentTable::read(&image, header.lp_external_table, header.w_external_count)
     }
 
+    /// `TFTPClient.exe` and `Server.exe` sit one directory deeper
+    /// (`Client/demo/`, `Server/demo/`) than earlier plans in this phase
+    /// state; plan 03-16 corrects that. All three files declare exactly one
+    /// component, `MSWinsockLib.Winsock`.
+    const TFTP_CLIENT: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/public-domain/SK-TFTP-Sample__VB6/Client/demo/TFTPClient.exe"
+    ));
+
+    /// See [`TFTP_CLIENT`]'s own doc comment for the corrected path.
+    const TFTP_SERVER: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/public-domain/SK-TFTP-Sample__VB6/Server/demo/Server.exe"
+    ));
+
     /// The end to end join: `wsPop`'s own class name, read from the real
     /// executable in [`the_winsock_sample_external_control_class_name_reads_back_whole`]'s
     /// own way, joined against the SAME file's own external component
-    /// table. This session measured the textual GUID at `GUIDoffset` for
-    /// `MSWinsockLib.Winsock` as `2c49f800-c2dd-11cf-9ad6-0080c7e7b78d`, not
-    /// the `248DD890-BB45-11CF-9ABC-0080C7E7B78D` the `.vbp`'s own `Object=`
-    /// line names: see `vb/project.rs`'s own
+    /// table.
+    ///
+    /// Plan 03-16 measured the sixteen byte binary GUID at the component
+    /// entry's own `oUuid` field, for `MSWinsockLib.Winsock`, as
+    /// `248DD896-BB45-11CF-9ABC-0080C7E7B78D`: one byte away from the
+    /// `.vbp`'s own declared `248DD890-BB45-11CF-9ABC-0080C7E7B78D`, and the
+    /// closer of the two candidate fields this repository decodes. See
+    /// `vb/project.rs`'s own
     /// `the_one_component_server_exe_declares_resolves_all_three_strings`
-    /// test for the full measurement and why the two differ. That measured
-    /// value, confirmed identically in this file and in `Server.exe`, is
-    /// what this test proves the join recovers.
+    /// test for the full eighteen-search measurement. `join_component` now
+    /// reports this field, always with a caveat: the value is not confirmed
+    /// against the control's own project file.
     #[test]
-    fn the_winsock_sample_class_name_joins_to_its_real_clsid() {
+    fn the_winsock_sample_class_name_joins_to_its_measured_ouuid_clsid() {
         let block = wspop_block();
         let (header, _) = read_control_header(&block);
         let (mut control, _consumed, defects) = read_external_control(&block, &header);
@@ -700,9 +747,66 @@ mod tests {
 
         let table = component_table(WINSOCK_SAMPLE);
         let reason = join_component(&mut control, &table);
-        assert_eq!(reason, None, "{reason:?}");
         let clsid = control.clsid.expect("the join must recover a CLSID");
-        assert_eq!(clsid.to_string(), "{2C49F800-C2DD-11CF-9AD6-0080C7E7B78D}");
+        assert_eq!(clsid.to_string(), "{248DD896-BB45-11CF-9ABC-0080C7E7B78D}");
+        let caveat = reason.expect("a joined CLSID must always carry the unconfirmed-value caveat");
+        assert!(caveat.contains("oUuid"), "{caveat}");
+        assert!(caveat.to_lowercase().contains("project file"), "{caveat}");
+    }
+
+    /// `Server.exe`'s own component entry, read live, joins to the same
+    /// measured `oUuid` value as `SubReality_WinsockSample.exe`: this
+    /// session confirmed the two decode identically.
+    #[test]
+    fn the_tftp_server_sample_joins_to_its_measured_ouuid_clsid() {
+        let mut control = ExternalControl {
+            class_name: "MSWinsockLib.Winsock".to_owned(),
+            library: "MSWinsockLib".to_owned(),
+            component: "Winsock".to_owned(),
+            offset: 0,
+            clsid: None,
+        };
+        let table = component_table(TFTP_SERVER);
+        let reason = join_component(&mut control, &table);
+        let clsid = control.clsid.expect("the join must recover a CLSID");
+        assert_eq!(clsid.to_string(), "{248DD896-BB45-11CF-9ABC-0080C7E7B78D}");
+        assert!(
+            reason.is_some(),
+            "a joined CLSID must always carry a caveat"
+        );
+    }
+
+    /// `TFTPClient.exe`'s own component entry, read live, joins to the same
+    /// measured `oUuid` value as the other two corpus programs.
+    #[test]
+    fn the_tftp_client_sample_joins_to_its_measured_ouuid_clsid() {
+        let mut control = ExternalControl {
+            class_name: "MSWinsockLib.Winsock".to_owned(),
+            library: "MSWinsockLib".to_owned(),
+            component: "Winsock".to_owned(),
+            offset: 0,
+            clsid: None,
+        };
+        let table = component_table(TFTP_CLIENT);
+        let reason = join_component(&mut control, &table);
+        let clsid = control.clsid.expect("the join must recover a CLSID");
+        assert_eq!(clsid.to_string(), "{248DD896-BB45-11CF-9ABC-0080C7E7B78D}");
+        assert!(
+            reason.is_some(),
+            "a joined CLSID must always carry a caveat"
+        );
+    }
+
+    /// The measured `oUuid` value (`248DD896-...`) and the identifier the
+    /// corpus project files declare (`248DD890-...`) differ in the low byte
+    /// of `Data1` only. `Clsid`'s derived `PartialEq` treats the two as
+    /// different values: a near match, even one byte away, is never taken
+    /// as equal.
+    #[test]
+    fn a_clsid_one_byte_from_another_is_not_equal_to_it() {
+        let measured = Clsid::parse("248DD896-BB45-11CF-9ABC-0080C7E7B78D").unwrap();
+        let declared = Clsid::parse("248DD890-BB45-11CF-9ABC-0080C7E7B78D").unwrap();
+        assert_ne!(measured, declared);
     }
 
     /// A synthetic fixture: no corpus program's own class name differs from
@@ -723,16 +827,19 @@ mod tests {
             guid_offset: Off::new(0),
             guid_length: 72,
             guid_text: Some("2c49f800-c2dd-11cf-9ad6-0080c7e7b78d".to_owned()),
+            o_uuid: Off::new(0),
+            ouuid_field_offset: 0x38,
+            ouuid_text: Some("248DD896-BB45-11CF-9ABC-0080C7E7B78D".to_owned()),
         }]);
 
         let reason = join_component(&mut control, &table);
-        assert_eq!(
-            reason, None,
-            "synthetic fixture: a class name differing only by case must still join"
+        assert!(
+            reason.is_some(),
+            "synthetic fixture: a joined CLSID must always carry a caveat"
         );
         assert_eq!(
             control.clsid,
-            Clsid::parse("2c49f800-c2dd-11cf-9ad6-0080c7e7b78d")
+            Clsid::parse("248DD896-BB45-11CF-9ABC-0080C7E7B78D")
         );
     }
 
@@ -755,6 +862,9 @@ mod tests {
             guid_offset: Off::new(0),
             guid_length: 72,
             guid_text: Some("2c49f800-c2dd-11cf-9ad6-0080c7e7b78d".to_owned()),
+            o_uuid: Off::new(0),
+            ouuid_field_offset: 0x38,
+            ouuid_text: Some("248DD896-BB45-11CF-9ABC-0080C7E7B78D".to_owned()),
         }]);
 
         let reason = join_component(&mut control, &table);
@@ -801,11 +911,12 @@ mod tests {
         assert_eq!(lower, upper);
     }
 
-    /// A synthetic fixture: a matched component whose own `guid_text` is
-    /// `None` (the `guid_length == -1` case) gives no CLSID and a reason,
-    /// distinct from the "no matching component" reason.
+    /// A synthetic fixture: a matched component whose own `oUuid` field
+    /// could not be read as sixteen bytes (`ouuid_text` is `None`) gives no
+    /// CLSID and a reason, distinct from the "no matching component"
+    /// reason.
     #[test]
-    fn a_matched_component_with_no_guid_text_gives_no_clsid_and_a_reason() {
+    fn a_matched_component_with_no_ouuid_text_gives_no_clsid_and_a_reason() {
         let mut control = ExternalControl {
             class_name: "MSWinsockLib.Winsock".to_owned(),
             library: "MSWinsockLib".to_owned(),
@@ -820,6 +931,9 @@ mod tests {
             guid_offset: Off::new(0),
             guid_length: -1,
             guid_text: None,
+            o_uuid: Off::new(0),
+            ouuid_field_offset: 0,
+            ouuid_text: None,
         }]);
 
         let reason = join_component(&mut control, &table);
@@ -828,11 +942,11 @@ mod tests {
         assert!(reason.find(&control.class_name).is_some(), "{reason}");
     }
 
-    /// A synthetic fixture: a matched component whose `guid_text` does not
+    /// A synthetic fixture: a matched component whose `ouuid_text` does not
     /// parse as 32 hex digits gives no CLSID and a reason, the same
-    /// treatment as a component with no `guid_text` at all.
+    /// treatment as a component with no `ouuid_text` at all.
     #[test]
-    fn a_matched_component_whose_guid_text_does_not_parse_gives_no_clsid_and_a_reason() {
+    fn a_matched_component_whose_ouuid_text_does_not_parse_gives_no_clsid_and_a_reason() {
         let mut control = ExternalControl {
             class_name: "MSWinsockLib.Winsock".to_owned(),
             library: "MSWinsockLib".to_owned(),
@@ -846,7 +960,10 @@ mod tests {
             name: "Winsock".to_owned(),
             guid_offset: Off::new(0),
             guid_length: 72,
-            guid_text: Some("not a real guid at all, thirty six characters".to_owned()),
+            guid_text: None,
+            o_uuid: Off::new(0),
+            ouuid_field_offset: 0x38,
+            ouuid_text: Some("not a real guid at all, thirty six characters".to_owned()),
         }]);
 
         let reason = join_component(&mut control, &table);
@@ -875,6 +992,9 @@ mod tests {
             guid_offset: Off::new(0),
             guid_length: 72,
             guid_text: Some("2c49f800-c2dd-11cf-9ad6-0080c7e7b78d".to_owned()),
+            o_uuid: Off::new(0),
+            ouuid_field_offset: 0x38,
+            ouuid_text: Some("248DD896-BB45-11CF-9ABC-0080C7E7B78D".to_owned()),
         }]);
 
         let reason = join_component(&mut control, &table);
@@ -904,6 +1024,9 @@ mod tests {
             guid_offset: Off::new(0),
             guid_length: 72,
             guid_text: Some("2c49f800-c2dd-11cf-9ad6-0080c7e7b78d".to_owned()),
+            o_uuid: Off::new(0),
+            ouuid_field_offset: 0x38,
+            ouuid_text: Some("248DD896-BB45-11CF-9ABC-0080C7E7B78D".to_owned()),
         }]);
 
         let reason = join_component(&mut control, &table);

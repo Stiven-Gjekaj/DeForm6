@@ -743,9 +743,14 @@ pub struct Component {
     /// This offset and [`Self::guid_length`] are decoded, as of plan 03-08,
     /// into [`Self::guid_text`]. See that field's own doc comment.
     pub guid_offset: Off,
-    /// `-1` means no binary identifier at `oUuid`. `72` means the textual
-    /// GUID is 36 UTF-16 characters. Decoded, as of plan 03-08, into
+    /// `-1` means the textual GUID at `GUIDoffset` is absent. `72` means it
+    /// is 36 UTF-16 characters. Decoded, as of plan 03-08, into
     /// [`Self::guid_text`]. See that field's own doc comment.
+    ///
+    /// Plan 03-08's own doc comment named this "no binary identifier at
+    /// `oUuid`", which conflates two different entry fields. `oUuid` is a
+    /// separate field, entry offset `0x04`, decoded independently into
+    /// [`Self::ouuid_text`]; `guid_length` governs `GUIDoffset` alone.
     pub guid_length: i32,
     /// The textual GUID, decoded from [`Self::guid_offset`] and
     /// [`Self::guid_length`] inside [`ComponentTable::walk`], where the
@@ -755,9 +760,68 @@ pub struct Component {
     ///
     /// `None` when `guid_length` is `-1`, a normal state and not a
     /// [`Defect`]. `Some` of 36 characters (no braces) when `guid_length` is
-    /// `72`. `plan 03-08`'s `vb/ocx.rs::Clsid::parse` turns this text into
-    /// the sixteen raw bytes a third party control's CLSID needs.
+    /// `72`.
+    ///
+    /// # Plan 03-16: measured, and not what `vb/ocx.rs::join_component`
+    /// reports as a control's CLSID
+    ///
+    /// Measured against all three corpus programs that declare a
+    /// `MSWinsockLib.Winsock` component: this field decodes to
+    /// `2c49f800-c2dd-11cf-9ad6-0080c7e7b78d` in every one, identically. The
+    /// matching `.vbp` file's own `Object=` line declares
+    /// `248DD890-BB45-11CF-9ABC-0080C7E7B78D`. The two share no digit
+    /// pattern. A whole-entry search of six encodings (the sixteen byte
+    /// binary layout in both field orders, and plain text and sixteen bit
+    /// text in both cases) never found the declared identifier anywhere in
+    /// the entry of any of the three programs. `STRUCTURES.md` section 7.3
+    /// carries the full eighteen-search record. See [`Self::ouuid_text`]'s
+    /// own doc comment for the field this repository reports instead.
     pub guid_text: Option<String>,
+    /// The entry-relative offset value the `oUuid` field (entry offset
+    /// `0x04`) holds: an offset to a sixteen byte binary GUID,
+    /// `STRUCTURES.md` section 7.3. Decoded, as of plan 03-16, into
+    /// [`Self::ouuid_text`].
+    pub o_uuid: Off,
+    /// The absolute file offset of the sixteen raw bytes [`Self::o_uuid`]
+    /// points to, computed once regardless of whether the sixteen bytes
+    /// could be read. `vb/ocx.rs::join_component` carries this offset into
+    /// the caveat it attaches to a reported CLSID, so a reader can open the
+    /// file at this offset and see the same bytes `STRUCTURES.md` section
+    /// 7.3 documents, the same convention `error.rs`'s own `Site::offset`
+    /// uses for every other byte offset this crate reports.
+    pub ouuid_field_offset: u32,
+    /// The textual form of the sixteen raw bytes at [`Self::o_uuid`],
+    /// decoded inside [`ComponentTable::walk`], where the entry's own
+    /// region is in scope, as a standard Microsoft binary GUID: the first
+    /// three fields (four, two and two bytes) are stored little-endian and
+    /// are reversed back to their textual byte order; the fourth field
+    /// (eight bytes) is stored raw and is never reversed.
+    ///
+    /// `None` when the entry's own region holds fewer than sixteen bytes at
+    /// `o_uuid`, a [`Defect`] naming the byte offset.
+    ///
+    /// # Plan 03-16: measured, and selected as the field this repository
+    /// reports as a control's CLSID
+    ///
+    /// Measured against all three corpus programs that declare a
+    /// `MSWinsockLib.Winsock` component: this field decodes to
+    /// `248DD896-BB45-11CF-9ABC-0080C7E7B78D` in every one, identically.
+    /// That differs from the matching `.vbp` file's own declared identifier,
+    /// `248DD890-BB45-11CF-9ABC-0080C7E7B78D`, by exactly one byte: the low
+    /// byte of `Data1`. The same eighteen-search sweep [`Self::guid_text`]'s
+    /// own doc comment describes never found the declared identifier here
+    /// either.
+    ///
+    /// Neither field is confirmed against the declared identifier. This one
+    /// is selected because its own shape, a fixed sixteen byte binary
+    /// identifier read at a fixed entry offset, is the shape a CLSID takes,
+    /// and because it is the closer of the two candidates to the declared
+    /// value. `vb/ocx.rs::join_component` reports it with an honest caveat
+    /// attached, naming the byte offset and stating plainly that this value
+    /// is not confirmed against the control's own project file. It is never
+    /// presented as a confirmed match: a value differing by even one byte is
+    /// a different identifier.
+    pub ouuid_text: Option<String>,
 }
 
 /// The external component table, reached from
@@ -878,6 +942,17 @@ impl ComponentTable {
                     if let Some(defect) = guid_defect {
                         defects.push(defect);
                     }
+
+                    component.ouuid_field_offset = entry
+                        .file_offset(component.o_uuid)
+                        .map_or(entry_offset.get(), Off::get);
+                    let (ouuid_text, ouuid_defect) =
+                        decode_ouuid_text(&entry, entry_offset.get(), component.o_uuid);
+                    component.ouuid_text = ouuid_text;
+                    if let Some(defect) = ouuid_defect {
+                        defects.push(defect);
+                    }
+
                     components.push(component);
                 }
                 // The corpus's one distinct sample resolves cleanly on all
@@ -943,6 +1018,7 @@ impl ComponentTable {
 /// offset that names a byte inside this entry resolves inside `entry`
 /// directly, with no second address to follow.
 fn read_component_entry(entry: &Region<'_>) -> Option<Component> {
+    let o_uuid = entry.off_le(Off::new(0x04))?;
     let guid_offset = entry.off_le(Off::new(0x1C))?;
     let guid_length = entry.i32_le(Off::new(0x20))?;
     let file_name_off = entry.off_le(Off::new(0x28))?;
@@ -962,6 +1038,10 @@ fn read_component_entry(entry: &Region<'_>) -> Option<Component> {
         // Decoded by the caller, `ComponentTable::walk`, where `entry` (this
         // function's own borrow of it ends here) is still in scope.
         guid_text: None,
+        o_uuid,
+        // Both filled by the caller, for the same reason `guid_text` is.
+        ouuid_field_offset: 0,
+        ouuid_text: None,
     })
 }
 
@@ -1024,6 +1104,71 @@ fn decode_guid_text(
                 kind: DefectKind::GuidLengthUnexpected {
                     offset: entry_offset,
                     value: other,
+                },
+            };
+            (None, Some(defect))
+        }
+    }
+}
+
+/// Decodes a component entry's own sixteen byte binary GUID at `oUuid`, per
+/// `STRUCTURES.md` section 7.3, entry offset `0x04`: `o_uuid` is itself an
+/// offset relative to the entry's own base, never to the table, read
+/// bounded by the entry's own region.
+///
+/// Gives `None` and a [`Defect`] naming the byte offset when the entry
+/// holds fewer than sixteen bytes at `o_uuid`. The sixteen bytes decode as
+/// a standard Microsoft binary GUID: the first three fields (four, two and
+/// two bytes) are stored little-endian and are reversed back to their
+/// textual byte order; the fourth field (eight bytes) is stored raw and is
+/// never reversed. [`Component::ouuid_text`]'s own doc comment carries the
+/// measurement that selected this field.
+fn decode_ouuid_text(
+    entry: &Region<'_>,
+    entry_offset: u32,
+    o_uuid: Off,
+) -> (Option<String>, Option<Defect>) {
+    match entry.take(o_uuid, 16) {
+        Some(bytes) => {
+            // `entry.take` gives exactly sixteen bytes or `None`, never a
+            // shorter slice, so this copy always succeeds.
+            let mut b = [0_u8; 16];
+            b.copy_from_slice(bytes);
+            let text = format!(
+                "{:02X}{:02X}{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-\
+                 {:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
+                b[3],
+                b[2],
+                b[1],
+                b[0],
+                b[5],
+                b[4],
+                b[7],
+                b[6],
+                b[8],
+                b[9],
+                b[10],
+                b[11],
+                b[12],
+                b[13],
+                b[14],
+                b[15],
+            );
+            (Some(text), None)
+        }
+        None => {
+            let max = entry.len().saturating_sub(o_uuid.get());
+            let defect = Defect {
+                site: Site {
+                    offset: entry_offset,
+                    rva: None,
+                    structure: "ExternalComponentEntry",
+                    field: "oUuid",
+                },
+                kind: DefectKind::ImplausibleCount {
+                    offset: entry_offset,
+                    count: 16,
+                    max,
                 },
             };
             (None, Some(defect))
@@ -1640,18 +1785,19 @@ mod tests {
 
     /// The `.vbp` beside `Server.exe` declares
     /// `Object={248DD890-BB45-11CF-9ABC-0080C7E7B78D}#1.0#0; MSWINSCK.OCX`.
-    /// The plan text this session executes assumed `GUIDoffset`'s own
-    /// textual GUID would read back as that exact value. It does not: this
-    /// session measured `2c49f800-c2dd-11cf-9ad6-0080c7e7b78d` at
-    /// `GUIDoffset`, byte for byte, confirmed identically in
-    /// `SubReality_WinsockSample.exe` too (a second corpus file for the same
-    /// `MSWinsockLib.Winsock` reference). The 16 byte binary GUID at
-    /// `oUuid` (entry offset `0x04`) is closer to the `.vbp` value
-    /// (`248DD896-BB45-11CF-9ABC-0080C7E7B78D`, differing from the `.vbp`
-    /// only in the low byte of `Data1`) but is not decoded by this plan:
-    /// its own action text names `GUIDoffset`/`GUIDlength`, at `0x1C`/`0x20`,
-    /// not `oUuid`, and that is the field this test proves against the real
-    /// bytes.
+    /// Plan 03-08 measured `GUIDoffset`'s own textual GUID as
+    /// `2c49f800-c2dd-11cf-9ad6-0080c7e7b78d`, byte for byte, confirmed
+    /// identically in `SubReality_WinsockSample.exe` too. Plan 03-16
+    /// measured the sixteen byte binary GUID at `oUuid` (entry offset
+    /// `0x04`) as well: `248DD896-BB45-11CF-9ABC-0080C7E7B78D`, differing
+    /// from the `.vbp`'s own declared value by one byte, the low byte of
+    /// `Data1`. A whole-entry search of six encodings (the sixteen byte
+    /// binary layout in both field orders, and plain text and sixteen bit
+    /// text in both cases) never found the declared value
+    /// `248DD890-BB45-11CF-9ABC-0080C7E7B78D` anywhere in this entry, in any
+    /// of the three corpus programs that hold one. `oUuid`, not
+    /// `GUIDoffset`, is the field `vb/ocx.rs::join_component` reports, with
+    /// an honest caveat: see [`Component::ouuid_text`]'s own doc comment.
     #[test]
     fn the_one_component_server_exe_declares_resolves_all_three_strings() {
         let table = component_table(SERVER);
@@ -1666,6 +1812,12 @@ mod tests {
             Some("2c49f800-c2dd-11cf-9ad6-0080c7e7b78d"),
             "measured this session at GUIDoffset; see this test's own doc comment for why \
              this differs from the .vbp's Object= line"
+        );
+        assert_eq!(
+            component.ouuid_text.as_deref(),
+            Some("248DD896-BB45-11CF-9ABC-0080C7E7B78D"),
+            "measured this session at oUuid; differs from the .vbp's declared identifier by \
+             one byte, the low byte of Data1"
         );
         assert!(table.defects().is_empty());
     }
@@ -1739,6 +1891,34 @@ mod tests {
             "synthetic fixture"
         );
         assert!(table.defects().is_empty());
+    }
+
+    /// A synthetic fixture: `oUuid`'s own offset points close enough to the
+    /// entry's own end that fewer than sixteen bytes remain there. The
+    /// sixteen byte binary GUID is not decoded, and the defect names the
+    /// entry's own byte offset, matching `decode_guid_text`'s own
+    /// bound-check precedent for the textual GUID field.
+    #[test]
+    fn an_o_uuid_offset_leaving_fewer_than_sixteen_bytes_gives_a_defect_and_no_ouuid_text() {
+        let mut payload = build_component_entry("Short.ocx", "ShortLib.Short", "Short");
+        let entry_len = u32::try_from(payload.len()).unwrap();
+        // Five bytes remain after this offset: not enough for the sixteen
+        // byte binary GUID.
+        let too_close = entry_len - 5;
+        payload[0x04..0x08].copy_from_slice(&too_close.to_le_bytes());
+        let (bytes, va) = a_synthetic_pe_image(&payload);
+        let image = PeImage::parse(&bytes).unwrap();
+        let table = ComponentTable::read(&image, va, 1);
+
+        assert_eq!(table.components.len(), 1, "{:?}", table.defects());
+        assert_eq!(table.components[0].ouuid_text, None);
+        assert_eq!(table.defects().len(), 1);
+        let defect = &table.defects()[0];
+        assert_eq!(defect.kind.severity(), Severity::Recoverable);
+        assert!(matches!(
+            defect.kind,
+            DefectKind::ImplausibleCount { count: 16, .. }
+        ));
     }
 
     #[test]
@@ -1895,6 +2075,9 @@ mod tests {
                 guid_offset: table.components[0].guid_offset,
                 guid_length: 72,
                 guid_text: table.components[0].guid_text.clone(),
+                o_uuid: table.components[0].o_uuid,
+                ouuid_field_offset: table.components[0].ouuid_field_offset,
+                ouuid_text: table.components[0].ouuid_text.clone(),
             }
         );
         assert_eq!(table.components[1].file_name, "Second.ocx");
