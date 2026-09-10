@@ -28,11 +28,15 @@ use clap::Parser as _;
 
 use deform6::Report;
 use deform6::vb::classify::ObjectKind;
+use deform6::vb::controlinfo::EventReport;
+use deform6::vb::controltree::ControlKind;
 use deform6::vb::functyp::{Argument, DefaultValue, Prototype, TypeEntry, VbType};
+use deform6::vb::ocx::{Clsid, ExternalControl, OcxHeader};
 use deform6::vb::opcodes::OpcodeTable;
 use deform6::vb::privateobj::Gap;
 use deform6::vb::project::{Declaration, ExportName};
-use deform6::vb::{ObjectProcedures, ProcedureEntry};
+use deform6::vb::propstream::PropertyValue;
+use deform6::vb::{ControlReport, FormReport, ObjectProcedures, ProcedureEntry};
 
 /// `deform6`: reads a compiled Visual Basic 6 executable and reports what it
 /// holds.
@@ -282,6 +286,8 @@ fn print_report(path: &Path, report: &Report, table_summary: &str) {
     print_objects(report);
     println!();
     print_declarations(report);
+    println!();
+    print_forms(report);
     println!();
     println!("{table_summary}");
 }
@@ -563,5 +569,176 @@ fn print_declarations(report: &Report) {
         println!("    {}", Declaration::NAME_MARKER);
         println!("    {}", Declaration::ARGUMENTS_MARKER);
         println!("    {}", Declaration::SCOPE_MARKER);
+    }
+}
+
+/// Prints one section per form: its own name, its control count, and every
+/// control's own tree beneath it. Per FRM-01, a control's indentation shows
+/// its parent, so the tree is visible without a second pass.
+///
+/// A form whose own control tree could not be built prints the refusal each
+/// of its own defects names, and no tree: `inspect` never builds a tree it
+/// cannot prove.
+fn print_forms(report: &Report) {
+    println!("Forms");
+    if report.forms.is_empty() {
+        println!("  this file declares no forms");
+        return;
+    }
+    for form in &report.forms {
+        print_form(form);
+    }
+}
+
+/// Prints one form's own section.
+fn print_form(form: &FormReport) {
+    println!("  {}  ({} control(s))", form.name, form.controls.len());
+    if form.controls.is_empty() {
+        for defect in &form.defects {
+            println!("    refused: {defect}");
+        }
+        return;
+    }
+    for (index, control) in form.controls.iter().enumerate() {
+        print_control(control, control_depth(&form.controls, index));
+    }
+}
+
+/// Gives the depth of `controls[index]`: the number of `parent` hops back to
+/// the root. The root itself (the form's own outermost block, `parent:
+/// None`) is depth `0`.
+///
+/// Bounded by `controls.len()`: a cycle in `parent` links would otherwise
+/// loop the printer forever, and `AGENTS.md` bars trusting the file that
+/// far. No corpus program produces one; the bound is defensive, not a value
+/// read from the file.
+fn control_depth(controls: &[ControlReport], index: usize) -> usize {
+    let mut depth = 0_usize;
+    let mut current = index;
+    for _ in 0..=controls.len() {
+        let Some(parent) = controls.get(current).and_then(|c| c.parent) else {
+            return depth;
+        };
+        depth = depth.saturating_add(1);
+        current = parent;
+    }
+    depth
+}
+
+/// Prints one control: its name, its type, its array index when it has one,
+/// indented to show its own parent, then its properties, its external
+/// control facts when its type is 255, and its event slots.
+fn print_control(control: &ControlReport, depth: usize) {
+    let indent = "  ".repeat(depth.saturating_add(2));
+    let kind = format_control_kind(&control.kind);
+    match control.array_index {
+        Some(array_index) => println!("{indent}{}  ({kind}, Index={array_index})", control.name),
+        None => println!("{indent}{}  ({kind})", control.name),
+    }
+
+    for property in &control.properties {
+        print_property(&indent, property);
+    }
+
+    if let Some(external) = &control.external {
+        print_external(
+            &indent,
+            external,
+            control.external_reason.as_deref(),
+            control.ocx_header.as_ref(),
+            control.opaque_message.as_deref(),
+        );
+    }
+
+    for event in &control.events {
+        print_event(&indent, event);
+    }
+}
+
+/// Prints the word a reader sees for one control's type: a name, or, for a
+/// value `03-RESEARCH.md` section 8.4.1's table does not cover, the raw
+/// value carried inside `ControlKind::Unknown`'s own `Debug` rendering.
+fn format_control_kind(kind: &ControlKind) -> String {
+    format!("{kind:?}")
+}
+
+/// Prints one property. A property this repository can name prints its
+/// name and its value. A property this repository cannot name prints
+/// present and undecoded, with its byte offset, its opcode number and the
+/// control type, and names the command line flag that would supply a
+/// table.
+fn print_property(indent: &str, property: &PropertyValue) {
+    match property {
+        PropertyValue::Byte { name, value } => println!("{indent}  {name} = {value}"),
+        PropertyValue::Boolean { name, value } => println!("{indent}  {name} = {value}"),
+        PropertyValue::Integer { name, value } => println!("{indent}  {name} = {value}"),
+        PropertyValue::Long { name, value } => println!("{indent}  {name} = {value}"),
+        PropertyValue::Single { name, value } => println!("{indent}  {name} = {value}"),
+        PropertyValue::Text { name, value } => println!("{indent}  {name} = {value:?}"),
+        PropertyValue::Position { name, value } => println!("{indent}  {name} = {value:?}"),
+        PropertyValue::Font { name, value } => println!("{indent}  {name} = {value:?}"),
+        PropertyValue::Undecoded {
+            opcode,
+            offset,
+            control_type,
+            ..
+        } => {
+            println!(
+                "{indent}  property opcode {opcode} at offset {offset:#x} on {control_type}: \
+                 not decoded. Run with --opcode-table to supply one."
+            );
+        }
+    }
+}
+
+/// Prints an external (`cType` 255) control's own facts: its class name,
+/// its CLSID or the stated reason for having none, its extents, and the
+/// opaque blob statement.
+fn print_external(
+    indent: &str,
+    external: &ExternalControl,
+    reason: Option<&str>,
+    header: Option<&OcxHeader>,
+    opaque_message: Option<&str>,
+) {
+    println!("{indent}  class name = {}", external.class_name);
+    print_clsid(indent, external.clsid.as_ref(), reason);
+    if let Some(header) = header {
+        println!(
+            "{indent}  extents = {} x {} (HiMetric), version {}",
+            header.extent_x, header.extent_y, header.version
+        );
+    }
+    if let Some(message) = opaque_message {
+        println!("{indent}  property blob: not decoded. {message}");
+    }
+}
+
+/// Prints a joined CLSID, or the stated reason none was joined.
+fn print_clsid(indent: &str, clsid: Option<&Clsid>, reason: Option<&str>) {
+    match clsid {
+        Some(clsid) => println!("{indent}  CLSID = {clsid}"),
+        None => println!(
+            "{indent}  CLSID: {}",
+            reason.unwrap_or("not recoverable from this file")
+        ),
+    }
+}
+
+/// Prints one event slot: its index, its bound state, and its name or the
+/// stated reason for having none.
+fn print_event(indent: &str, event: &EventReport) {
+    match event {
+        EventReport::Named {
+            index, event_name, ..
+        } => println!("{indent}  event slot {index}: bound, {event_name}"),
+        EventReport::BoundUnnamed { index, .. } => println!(
+            "{indent}  event slot {index}: bound, not decoded. Run with --event-name-table to \
+             supply one."
+        ),
+        EventReport::Unbound { index, .. } => println!(
+            "{indent}  event slot {index}: unbound, not decoded. Run with --event-name-table to \
+             supply one."
+        ),
     }
 }

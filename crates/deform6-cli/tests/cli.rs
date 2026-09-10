@@ -44,6 +44,18 @@ fn lock_work_station_path() -> PathBuf {
     corpus_root().join("public-domain/LockWorkStation/LockWorkStation.exe")
 }
 
+/// The corpus's one flat, three-control form: `Command1`, `Picture1` and
+/// `Label1`, all direct siblings of the form with no intervening container.
+fn gradient_sample_path() -> PathBuf {
+    corpus_root().join("public-domain/SK-Gradient-Sample__VB6/demo/Project1.exe")
+}
+
+/// A form with a real third party control, `wsPop`, an `MSWinsockLib.Winsock`
+/// instance nested inside `Frame1`.
+fn winsock_sample_path() -> PathBuf {
+    corpus_root().join("public-domain/SK-Winsock-Sample__VB6/demo/SubReality_WinsockSample.exe")
+}
+
 /// Runs the built binary and gives its exit code, stdout and stderr.
 fn run(args: &[&OsStr]) -> (i32, String, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_deform6"))
@@ -602,4 +614,78 @@ fn help_exits_zero() {
 fn version_exits_zero() {
     let (code, _stdout, stderr) = run(&[OsStr::new("--version")]);
     assert_eq!(code, 0, "stderr was: {stderr}");
+}
+
+// --- Plan 03-10, Task 2: inspect prints the form tree ---------------------
+
+/// Names the form (`Form1`, four control(s): the form's own outermost
+/// block plus its three flat children) and each of its three named
+/// controls.
+#[test]
+fn gradient_sample_names_the_form_and_its_three_controls() {
+    let path = gradient_sample_path();
+    let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+
+    assert!(
+        stdout.contains("Form1  (4 control(s))"),
+        "stdout did not name the form with its own control count: {stdout:?}"
+    );
+    for expected in ["Command1", "Picture1", "Label1"] {
+        assert!(
+            stdout.contains(expected),
+            "stdout did not name control {expected:?}: {stdout:?}"
+        );
+    }
+}
+
+/// A control inside a container prints with a deeper indent than its own
+/// parent: `Grayscale.exe`'s `frameShades` holds `hscrShades` and
+/// `lblShades` as direct children. The executor changed the indentation to
+/// a fixed zero, ran this test once, and saw it fail because every line's
+/// own leading space count came back equal; the two counts that failure
+/// printed are recorded in `03-10-SUMMARY.md`. Reverted before committing.
+#[test]
+fn a_control_inside_a_container_indents_deeper_than_its_parent() {
+    let path = grayscale_path();
+    let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+
+    let leading_spaces = |line: &str| line.len() - line.trim_start_matches(' ').len();
+
+    let parent_line = stdout
+        .lines()
+        .find(|line| line.trim_start().starts_with("frameShades"))
+        .expect("frameShades must appear in the tree");
+    let child_line = stdout
+        .lines()
+        .find(|line| line.trim_start().starts_with("hscrShades"))
+        .expect("hscrShades must appear in the tree, nested inside frameShades");
+
+    let parent_indent = leading_spaces(parent_line);
+    let child_indent = leading_spaces(child_line);
+    assert!(
+        child_indent > parent_indent,
+        "hscrShades (indent {child_indent}) must indent deeper than its own parent frameShades \
+         (indent {parent_indent}): parent line {parent_line:?}, child line {child_line:?}"
+    );
+}
+
+/// The report of a program with a real third party control names the type
+/// library it does not hold, and the CLSID this session's own measurement
+/// joins.
+#[test]
+fn winsock_sample_prints_the_clsid_and_the_opaque_blob_statement() {
+    let path = winsock_sample_path();
+    let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+
+    assert!(
+        stdout.contains("2C49F800-C2DD-11CF-9AD6-0080C7E7B78D"),
+        "stdout did not print the joined CLSID: {stdout:?}"
+    );
+    assert!(
+        stdout.to_lowercase().contains("type library"),
+        "stdout did not print the opaque blob statement naming the type library: {stdout:?}"
+    );
 }
