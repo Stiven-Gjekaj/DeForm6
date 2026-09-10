@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 4
+open_count: 5
 waived_count: 0
 fixed_count: 2
-total_count: 6
-last_updated: 2026-09-10T10:22:03.247Z
+total_count: 7
+last_updated: 2026-09-10T14:30:20.446Z
 ---
 
 # Broken Windows Ledger
@@ -21,6 +21,7 @@ last_updated: 2026-09-10T10:22:03.247Z
 | 4 | 01 | unrun-verify | crates/deform6/src/vb/runtime.rs |  | runtime_dll cannot be proved to come from the file: imported_dlls upper-cases every name and classify accepts only case variants of the constant, so the matched name always equals it. A discard written as _matched compiles clean under the whole gate. Fix in phase 2 by returning the name verbatim and comparing case-insensitively, then a lower-case import fixture separates them. | open |  | 2026-09-07T18:10:34.445Z |  |
 | 5 | 02 | unrun-verify | crates/deform6/src/vb/privateobj.rs |  | A non-null lpProcNamesArray entry that resolves but fails NUL-termination-within-64-bytes or the identifier-character test is handled but not exercised: the three vendored programs this module reads only exercise the address-does-not-resolve failure mode | fixed |  | 2026-09-07T22:59:56.143Z | 2026-09-08T11:19:57.959Z |
 | 6 | 03 | stub | crates/xtask/src/opcode_table.rs |  | windows_walk::run: the COM walk over a real VB6.OLB type library is a documented stub (cfg(windows), never compiled on this host); needs a human at a Windows host with a lawful VB6 install to implement | open |  | 2026-09-10T10:22:03.247Z |  |
+| 7 | 03 | deviation | crates/deform6/src/vb/controltree.rs |  | The scope-byte grammar for closing out of a menu control nested two levels deep, back to a sibling menu at the form's own top level, is unresolved. A defensive trailing-span bound (MAX_UNEXPLAINED_TAIL) converts the silent wrong tree into an honest refusal for the affected form, but the real grammar rule (HexScroll.exe, PassGen.exe, UUID2.exe, and Map Editor.exe's own separate gap) is not yet found. Needs the same byte-level corpus research 03-04 did for the single-level menu case. | open |  | 2026-09-10T14:30:20.446Z |  |
 
 ````json
 [
@@ -94,6 +95,18 @@ last_updated: 2026-09-10T10:22:03.247Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-10T10:22:03.247Z",
+    "resolved_at": null
+  },
+  {
+    "id": 7,
+    "kind": "deviation",
+    "phase": "03",
+    "file": "crates/deform6/src/vb/controltree.rs",
+    "line": null,
+    "description": "The scope-byte grammar for closing out of a menu control nested two levels deep, back to a sibling menu at the form's own top level, is unresolved. A defensive trailing-span bound (MAX_UNEXPLAINED_TAIL) converts the silent wrong tree into an honest refusal for the affected form, but the real grammar rule (HexScroll.exe, PassGen.exe, UUID2.exe, and Map Editor.exe's own separate gap) is not yet found. Needs the same byte-level corpus research 03-04 did for the single-level menu case.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-10T14:30:20.446Z",
     "resolved_at": null
   }
 ]

@@ -45,7 +45,7 @@ Version 1 recovers metadata. It does not recover statements.
 - [x] **FRM-02**: The tool recovers the type and the name of every control.
 - [x] **FRM-03**: The tool recovers the property values of every control, and
       of the form itself.
-- [ ] **FRM-04**: The tool recovers the CLSID of a third party OCX control, and
+- [x] **FRM-04**: The tool recovers the CLSID of a third party OCX control, and
       says plainly that it cannot interpret that control's property blob
       without the control's own type library.
 - [x] **FRM-05**: The tool recovers the resource blobs and writes an `.frx`
@@ -159,7 +159,7 @@ Deferred. Tracked, not in this roadmap.
 | DET-01 to DET-06 | Phase 1 | Complete |
 | OBJ-01 to OBJ-06 | Phase 2 | Complete |
 | VER-01 to VER-05 | Phase 2 | Complete |
-| FRM-01 to FRM-06 | Phase 3 | Pending |
+| FRM-01 to FRM-06 | Phase 3 | Complete |
 | VER-06 | Phase 3 | Complete |
 | WRT-01 to WRT-07 | Phase 4 | Pending |
 | RPT-01 to RPT-06 | Phase 4 | Pending |

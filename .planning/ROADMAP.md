@@ -275,7 +275,7 @@ control.
   - **STRUCTURES gap 16**: nine dwords in `GUIObjectInfo` at 0x35 to 0x58 have
     no known meaning. Leave them opaque; do not invent a reading.
 
-**Plans**: 9/10 plans executed
+**Plans**: 10/10 plans executed
 
 Plans:
 **Wave 1**
@@ -301,7 +301,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 03-10-PLAN.md - `inspect` reports the form tree, and the differential gate extends to forms and controls
+- [x] 03-10-PLAN.md - `inspect` reports the form tree, and the differential gate extends to forms and controls
 
 **Waves**: [03-01, 03-03] then [03-02, 03-04, 03-05] then [03-06, 03-08, 03-09] then [03-07] then [03-10]
 
@@ -581,7 +581,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 |-------|----------------|--------|-----------|
 | 1. It reads the file | 7/8 | In Progress|  |
 | 2. The object graph | 4/10 | In Progress|  |
-| 3. Forms | 9/10 | In Progress|  |
+| 3. Forms | 10/10 | In Progress|  |
 | 4. It writes a project | 0/9 | Not started | - |
 | 5. Hostility | 0/8 | Not started | - |
 | 6. Version 1.0 | 0/5 | Not started | - |

@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Forms
-status: executing
-stopped_at: Completed 03-07-PLAN.md
-last_updated: "2026-09-10T13:39:05.904Z"
+status: verifying
+stopped_at: Completed 03-10-PLAN.md, phase 3 (forms) complete
+last_updated: "2026-09-10T14:37:24.925Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 03 execution started
-state_head: f33f614b388b58f2608ddd79d02b829cc77602ef
+state_head: d75e5f8244e54ff75001bbde92ee0c998ae6595c
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 28
-  completed_plans: 27
+  completed_plans: 28
   percent: 0
 ---
 
@@ -68,7 +68,7 @@ inferred.
 
 Phase: 03 (Forms) — EXECUTING
 Plan: 10 of 10
-Status: Ready to execute
+Status: Phase complete — ready for verification
 `deform6 inspect` reports the object graph. It reads a form's control tree
 now: every control's type, name and array index, gated on the tiling check.
 Open defects: `.planning/WINDOWS.md` holds three, all of them limits that are
@@ -123,6 +123,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 | Phase 03 P08 | 34min | 3 tasks | 3 files |
 | Phase 03 P09 | 23min | 3 tasks | 1 files |
 | Phase 03 P07 | 14min | 2 tasks | 2 files |
+| Phase 03 P10 | single session | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -167,6 +168,10 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-09: A control array shares one ControlInfo entry across all of its own elements, not one per element, confirmed on Grayscale.exe two arrays.
 - [Phase 03]: 03-07: extract_blob checks the declared blob length against the remaining bytes of the block before any subregion is taken; a checked subtraction (not a plain one) refuses a declared length below 8, since this workspace's dev profile panics on overflow rather than wrapping.
 - [Phase 03]: 03-07: BlobCursor is the one place a .frx offset is computed: take() advances by declared_len + FRX_ITEM_HEADER_LEN (12), resets to 0 per form, and refuses on u32 overflow naming the running offset.
+- [Phase 03]: inspect gains an opcode-table parameter and composes every phase 3 reader into Report.forms; the compile-time ripple across refusal.rs and corpus_sweep.rs was fixed as a Rule 3 blocking issue
+- [Phase 03]: ControlNode carries its own byte block (Region<'a>) so composition can read a control's property stream after the walk finishes; FormStream::region() now returns Region<'a> by value
+- [Phase 03]: The differential gate found a real scope-byte grammar bug: closing a menu nested two levels deep back to a form-level sibling was silently swallowed as an unexplained tail. Fixed defensively with MAX_UNEXPLAINED_TAIL=8, true grammar rule tracked as WINDOWS.md finding 7, not guessed at
+- [Phase 03]: Pinned form/control recovery ratios land at 49 of 53 forms and 607 of 607 controls across the 44-program corpus, added as four new tests/ratios.toml keys per program
 
 ### Pending Todos
 
@@ -195,8 +200,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T13:39:05.887Z
-Stopped at: Completed 03-07-PLAN.md
+Last session: 2026-09-10T14:37:24.908Z
+Stopped at: Completed 03-10-PLAN.md, phase 3 (forms) complete
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and
