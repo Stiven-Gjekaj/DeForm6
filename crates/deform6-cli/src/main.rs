@@ -29,6 +29,7 @@ use clap::Parser as _;
 use deform6::Report;
 use deform6::vb::classify::ObjectKind;
 use deform6::vb::functyp::{Argument, DefaultValue, Prototype, TypeEntry, VbType};
+use deform6::vb::opcodes::OpcodeTable;
 use deform6::vb::privateobj::Gap;
 use deform6::vb::project::{Declaration, ExportName};
 use deform6::vb::{ObjectProcedures, ProcedureEntry};
@@ -51,6 +52,16 @@ enum Command {
         /// Taken as a path, not as a string, so a path that is not valid
         /// UTF-8 is not mangled and not rejected.
         input: PathBuf,
+
+        /// A property opcode table a user built with
+        /// `xtask derive-opcode-table`, on their own machine, from their
+        /// own lawful Visual Basic 6 install.
+        ///
+        /// Absent this flag, DeForm6 uses the small safe-provenance subset
+        /// built into the binary. Taken as a path, not a string, for the
+        /// same reason `input` is.
+        #[arg(long)]
+        opcode_table: Option<PathBuf>,
     },
 }
 
@@ -105,7 +116,58 @@ fn main() -> ExitCode {
 
 fn run(cli: &Cli) -> Exit {
     match &cli.command {
-        Command::Inspect { input } => run_inspect(input),
+        Command::Inspect {
+            input,
+            opcode_table,
+        } => run_inspect(input, opcode_table.as_deref()),
+    }
+}
+
+/// Loads the opcode table `inspect` uses for this run, and the one line the
+/// report names it by.
+///
+/// Absent `opcode_table_path`, this is [`OpcodeTable::builtin`] and the
+/// builtin line. Present, this reads the file (the byte-returning read, not
+/// the string-returning one, because a table file may hold a byte that is
+/// not valid UTF-8) and calls [`OpcodeTable::parse`] on the bytes: the
+/// library opens no file, this crate does, matching the split `lib.rs`
+/// documents for `inspect` itself.
+///
+/// A failure to read the file, or a [`deform6::vb::opcodes::TableError`]
+/// from `parse`, is [`Exit::Internal`], code 5: per plan 01-08, a usage
+/// error the tool cannot act on is 5, and this is an argument the tool
+/// cannot use, not a defect in the executable under test, so it is never
+/// [`Exit::Damaged`].
+fn load_opcode_table(opcode_table_path: Option<&Path>) -> Result<(OpcodeTable, String), Exit> {
+    let Some(path) = opcode_table_path else {
+        let table = OpcodeTable::builtin();
+        let count = table.len();
+        return Ok((
+            table,
+            format!("Opcode table  builtin subset, {count} entries"),
+        ));
+    };
+
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            eprintln!("could not read {}: {err}", path.display());
+            return Err(Exit::Internal);
+        }
+    };
+
+    match OpcodeTable::parse(&bytes) {
+        Ok(table) => {
+            let count = table.len();
+            Ok((
+                table,
+                format!("Opcode table  {}, {count} entries", path.display()),
+            ))
+        }
+        Err(err) => {
+            eprintln!("{err}");
+            Err(Exit::Internal)
+        }
     }
 }
 
@@ -114,8 +176,15 @@ fn run(cli: &Cli) -> Exit {
 ///
 /// An input-output error is [`Exit::Internal`], code 5, and not
 /// [`Exit::NotPe`]: the file was never read, so nothing about its format is
-/// known.
-fn run_inspect(path: &Path) -> Exit {
+/// known. The opcode table is loaded before the executable is read, so a
+/// bad `--opcode-table` argument is reported as the usage error it is,
+/// before this run does any work over the file under inspection.
+fn run_inspect(path: &Path, opcode_table_path: Option<&Path>) -> Exit {
+    let (_table, table_summary) = match load_opcode_table(opcode_table_path) {
+        Ok(loaded) => loaded,
+        Err(exit) => return exit,
+    };
+
     let data = match std::fs::read(path) {
         Ok(data) => data,
         Err(err) => {
@@ -126,7 +195,7 @@ fn run_inspect(path: &Path) -> Exit {
 
     match deform6::inspect(&data) {
         Ok(report) => {
-            print_report(path, &report);
+            print_report(path, &report, &table_summary);
             Exit::Ok
         }
         Err(refusal) => {
@@ -170,7 +239,14 @@ fn exit_for(refusal: deform6::Refusal) -> Exit {
 /// before they meet the per-object procedure counts the cap explains,
 /// rather than discovering the cap only after wondering why a module's
 /// procedures carry no names.
-fn print_report(path: &Path, report: &Report) {
+///
+/// # The opcode table line
+///
+/// `table_summary` names which opcode table produced this run's property
+/// names, and how many entries it holds. It prints last, so a reader who
+/// wonders where a property name came from finds the answer at the end of
+/// the report, without reading the command line back.
+fn print_report(path: &Path, report: &Report, table_summary: &str) {
     let name = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -206,6 +282,8 @@ fn print_report(path: &Path, report: &Report) {
     print_objects(report);
     println!();
     print_declarations(report);
+    println!();
+    println!("{table_summary}");
 }
 
 /// Prints one line of the report, with the label padded to ten columns.

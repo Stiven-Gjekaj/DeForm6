@@ -447,6 +447,67 @@ fn lock_work_station_prints_an_empty_declarations_section_and_not_nothing() {
     );
 }
 
+/// `inspect` with no `--opcode-table` flag exits 0 and its report names the
+/// builtin subset.
+#[test]
+fn inspect_with_no_opcode_table_flag_exits_zero_and_prints_the_builtin_line() {
+    let path = lock_work_station_path();
+    let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+    assert!(
+        stdout.to_ascii_lowercase().contains("builtin"),
+        "stdout did not name the builtin opcode table: {stdout:?}"
+    );
+}
+
+/// `--opcode-table` pointing at a file that does not exist is a usage
+/// error, exit 5, not a defect in the executable under inspection.
+#[test]
+fn inspect_with_an_opcode_table_flag_pointing_at_a_missing_file_exits_five() {
+    let path = lock_work_station_path();
+    let missing = std::env::temp_dir()
+        .join("deform6-cli-test-a-missing-opcode-table-that-does-not-exist.toml");
+    let (code, stdout, stderr) = run(&[
+        OsStr::new("inspect"),
+        OsStr::new("--opcode-table"),
+        missing.as_os_str(),
+        path.as_os_str(),
+    ]);
+    assert_eq!(code, 5, "stderr was: {stderr}");
+    assert_one_line_refusal(code, &stdout, &stderr);
+}
+
+/// `--opcode-table` pointing at a malformed table exits 5 and the refusal
+/// names the line number, matching `deform6::vb::opcodes::TableError`'s own
+/// `Display`. The malformed table is a temporary file this test writes and
+/// removes; `AGENTS.md` bars committing a table file, malformed or not.
+#[test]
+fn inspect_with_a_malformed_opcode_table_exits_five_and_prints_a_line_number() {
+    let path = lock_work_station_path();
+    let table_path = std::env::temp_dir().join(format!(
+        "deform6-cli-test-a-malformed-opcode-table-{}.toml",
+        std::process::id()
+    ));
+    // Missing the required "payload" field: a genuinely malformed row, not
+    // a hand-simulated one.
+    fs::write(&table_path, "[13]\n31 = { name = \"DrawMode\" }\n").unwrap();
+
+    let (code, stdout, stderr) = run(&[
+        OsStr::new("inspect"),
+        OsStr::new("--opcode-table"),
+        table_path.as_os_str(),
+        path.as_os_str(),
+    ]);
+    fs::remove_file(&table_path).ok();
+
+    assert_eq!(code, 5, "stderr was: {stderr}");
+    assert_one_line_refusal(code, &stdout, &stderr);
+    assert!(
+        stderr.contains("line 2"),
+        "stderr did not name the malformed row's line: {stderr:?}"
+    );
+}
+
 #[test]
 fn inspecting_the_corpus_file_changes_no_file_on_disk() {
     let path = mandelbrot_path();
