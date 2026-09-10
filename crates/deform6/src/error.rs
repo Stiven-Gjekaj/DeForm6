@@ -150,6 +150,36 @@ pub enum DefectKind {
         /// The address that maps nowhere.
         va: u32,
     },
+
+    /// A length-prefixed name field declares a length of zero.
+    ///
+    /// Plan 03-04: a control's declared name length can legitimately be
+    /// zero. The control keeps every other field; only the name is empty.
+    #[error("the name at offset {offset:#x} has a declared length of zero")]
+    EmptyName {
+        /// The absolute file offset of the control block that holds the
+        /// name.
+        offset: u32,
+    },
+
+    /// A two-byte field's high byte carries a value the corpus has never
+    /// proven meaningful.
+    ///
+    /// Plan 03-04: the control array `Index` field is read as two bytes,
+    /// defensively, per `03-RESEARCH.md` assumption A4. No corpus index
+    /// exceeds 24, so the high byte has never been observed non-zero. This
+    /// surfaces the case rather than deciding it; the low-byte-derived value
+    /// is still used.
+    #[error(
+        "the array index at offset {offset:#x} carries a non-zero high byte {high:#x}, which no corpus sample proves meaningful"
+    )]
+    IndexHighByteSet {
+        /// The absolute file offset of the control block that holds the
+        /// index.
+        offset: u32,
+        /// The high byte of the two-byte index value.
+        high: u8,
+    },
 }
 
 /// How bad a defect is.
@@ -197,6 +227,12 @@ impl DefectKind {
             // reaches the item. The item that holds it keeps its other
             // fields, so the walk that found it continues.
             Self::UnreadablePointer { .. } => Severity::Recoverable,
+            // A control with no name still carries its type. The tree keeps
+            // the control.
+            Self::EmptyName { .. } => Severity::Recoverable,
+            // The corpus has never proven a non-zero high byte meaningful,
+            // but the value is still used. The control keeps every field.
+            Self::IndexHighByteSet { .. } => Severity::Recoverable,
         }
     }
 }
