@@ -251,5 +251,6 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "deform6",
+ "serde",
  "toml",
 ]

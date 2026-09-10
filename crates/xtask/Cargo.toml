@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 toml.workspace = true
+serde.workspace = true
 deform6.workspace = true
 
 # The wall is opt-in per crate through this section. `xtask` carries it for

@@ -1,8 +1,12 @@
 //! The developer tools this workspace runs by hand, never shipped.
 //!
-//! `cargo run -p xtask -- update-ratios` rewrites `tests/ratios.toml`. Any
-//! other argument, or none, prints the usage line and exits non-zero: a
-//! mistyped subcommand is a loud failure, not a silent success.
+//! `cargo run -p xtask -- update-ratios` rewrites `tests/ratios.toml`.
+//! `cargo run -p xtask -- derive-opcode-table` writes the opcode table
+//! `deform6::vb::opcodes::OpcodeTable::parse` reads, from a type library on
+//! a Windows host; see `opcode_table.rs`'s own doc comment for why this
+//! command reads no file anywhere else. Any other argument, or none, prints
+//! the usage line and exits non-zero: a mistyped subcommand is a loud
+//! failure, not a silent success.
 //!
 //! This crate carries the full workspace lint wall at its own top level
 //! (see `Cargo.toml`'s `[lints] workspace = true`): a broken developer
@@ -44,6 +48,8 @@
 )]
 mod ratios;
 
+mod opcode_table;
+
 use std::path::Path;
 
 use deform6::read::pe::PeImage;
@@ -61,6 +67,9 @@ fn main() {
 fn run(args: Vec<String>) -> i32 {
     match args.first().map(String::as_str) {
         Some("update-ratios") => update_ratios(),
+        Some("derive-opcode-table") => {
+            opcode_table::derive_opcode_table(args.get(1..).unwrap_or(&[]))
+        }
         Some("--help" | "-h") => {
             println!("{USAGE}");
             0
@@ -76,7 +85,7 @@ fn run(args: Vec<String>) -> i32 {
     }
 }
 
-const USAGE: &str = "usage: cargo run -p xtask -- update-ratios";
+const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | derive-opcode-table";
 
 /// The number of corpus programs `update-ratios` refuses to write fewer
 /// than. Matches `EXPECTED_PROGRAM_COUNT` in `crates/deform6/tests/ratios.rs`

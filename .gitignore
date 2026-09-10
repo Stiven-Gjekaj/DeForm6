@@ -6,6 +6,12 @@
 # redistribution. The manifest is committed. The files are not.
 /corpus/fetched/
 
+# The opcode table `xtask derive-opcode-table` writes. It is calculated from
+# Microsoft's VB6.OLB, a third party file the author does not own, so
+# AGENTS.md bars it from this repository. The tool that produces it is
+# committed instead; the table it writes is not.
+derived/opcode-table.toml
+
 # macOS.
 .DS_Store
 
