@@ -53,6 +53,7 @@ dependencies = [
  "object",
  "serde",
  "thiserror",
+ "toml",
 ]
 
 [[package]]
