@@ -733,7 +733,8 @@ fn format_image_format(format: &deform6::vb::frx::ImageFormat) -> String {
 }
 
 /// Prints an external (`cType` 255) control's own facts: its class name,
-/// its CLSID or the stated reason for having none, its extents, and the
+/// its CLSID (with the caveat naming what that value is not, per plan
+/// 03-16) or the stated reason for having none, its extents, and the
 /// opaque blob statement.
 fn print_external(
     indent: &str,
@@ -756,9 +757,20 @@ fn print_external(
 }
 
 /// Prints a joined CLSID, or the stated reason none was joined.
+///
+/// Plan 03-16: `reason` also carries a caveat when `clsid` is `Some`, since
+/// this repository's own research never confirmed the field a reported
+/// CLSID comes from against a project file's own declared identifier. The
+/// caveat is printed on its own line beneath the value, so a reader sees
+/// what the value is and what it is not without opening the project file.
 fn print_clsid(indent: &str, clsid: Option<&Clsid>, reason: Option<&str>) {
     match clsid {
-        Some(clsid) => println!("{indent}  CLSID = {clsid}"),
+        Some(clsid) => {
+            println!("{indent}  CLSID = {clsid}");
+            if let Some(caveat) = reason {
+                println!("{indent}  {caveat}");
+            }
+        }
         None => println!(
             "{indent}  CLSID: {}",
             reason.unwrap_or("not recoverable from this file")

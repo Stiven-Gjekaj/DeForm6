@@ -672,8 +672,9 @@ fn a_control_inside_a_container_indents_deeper_than_its_parent() {
 }
 
 /// The report of a program with a real third party control names the type
-/// library it does not hold, and the CLSID this session's own measurement
-/// joins.
+/// library it does not hold, and the CLSID plan 03-16's own measurement
+/// selects: the entry's own `oUuid` field, at its own measured byte offset
+/// `0x1f18`.
 #[test]
 fn winsock_sample_prints_the_clsid_and_the_opaque_blob_statement() {
     let path = winsock_sample_path();
@@ -681,11 +682,80 @@ fn winsock_sample_prints_the_clsid_and_the_opaque_blob_statement() {
     assert_eq!(code, 0, "stderr was: {stderr}");
 
     assert!(
-        stdout.contains("2C49F800-C2DD-11CF-9AD6-0080C7E7B78D"),
+        stdout.contains("248DD896-BB45-11CF-9ABC-0080C7E7B78D"),
         "stdout did not print the joined CLSID: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("0x1f18"),
+        "stdout did not print the byte offset the CLSID was read from: {stdout:?}"
     );
     assert!(
         stdout.to_lowercase().contains("type library"),
         "stdout did not print the opaque blob statement naming the type library: {stdout:?}"
+    );
+}
+
+/// Plan 03-16: a joined CLSID always carries a caveat naming what the value
+/// is not, since this repository's own research never confirmed either
+/// candidate field against a project file's own declared identifier. The
+/// caveat and the CLSID's own printed value are both present, so a reader
+/// can compare the two without opening the project file.
+#[test]
+fn winsock_sample_prints_the_caveat_beside_the_joined_clsid() {
+    let path = winsock_sample_path();
+    let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+
+    let clsid_line = stdout
+        .lines()
+        .find(|line| line.trim_start().starts_with("CLSID ="))
+        .expect("the joined CLSID line must be present");
+    let clsid_index = stdout
+        .find(clsid_line)
+        .expect("the found line must be in stdout");
+    let caveat_line = stdout[clsid_index..]
+        .lines()
+        .nth(1)
+        .expect("a line must follow the CLSID line");
+
+    assert!(
+        caveat_line.contains("248DD896-BB45-11CF-9ABC-0080C7E7B78D"),
+        "the caveat line did not repeat the reported CLSID: {caveat_line:?}"
+    );
+    assert!(
+        caveat_line.to_lowercase().contains("project file"),
+        "the caveat line did not name the project file's own declared identifier: \
+         {caveat_line:?}"
+    );
+    assert!(
+        caveat_line.contains("oUuid"),
+        "the caveat line did not name the field the value was read from: {caveat_line:?}"
+    );
+}
+
+/// A control whose class name joins no component still prints the stated
+/// reason plan 03-08 already gives, unchanged by plan 03-16: `print_clsid`'s
+/// own `None` branch (`"CLSID: {reason}"`) is untouched by this plan's own
+/// diff, only its `Some` branch gained the caveat print.
+///
+/// No corpus program in this repository has an external control whose class
+/// name joins no component: the whole corpus's one third party control,
+/// `wsPop`, always matches. `vb/ocx.rs`'s own unit tests
+/// (`a_class_name_differing_by_one_character_gives_no_clsid_and_a_reason`,
+/// `a_program_with_zero_components_gives_no_clsid_with_the_same_reason`)
+/// prove the unjoined reason text itself is unchanged, against a synthetic
+/// fixture, since no real corpus file can exercise it. This test proves the
+/// complementary half at the CLI layer: the real, joined winsock sample
+/// output never carries that unjoined wording, so the two paths remain
+/// distinct.
+#[test]
+fn the_real_joined_winsock_sample_never_prints_the_unjoined_reason_wording() {
+    let path = winsock_sample_path();
+    let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+
+    assert!(
+        !stdout.contains("not recoverable from this file"),
+        "the real, joined winsock sample must not print the no-match reason: {stdout:?}"
     );
 }

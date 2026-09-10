@@ -183,8 +183,12 @@ pub struct ControlReport {
     /// for every other control type.
     pub external: Option<ocx::ExternalControl>,
     /// The stated reason no CLSID was joined, for an external control whose
-    /// join did not resolve one. `None` when the control is not external,
-    /// or when the join succeeded.
+    /// join did not resolve one, **or**, as of plan 03-16, the caveat
+    /// carried alongside a CLSID the join did resolve: this repository's
+    /// own research never confirmed the field a reported CLSID comes from
+    /// against a project file's own declared identifier, so a successful
+    /// join reports the caveat too, naming the byte offset the value was
+    /// read from. `None` only when the control is not external.
     pub external_reason: Option<String>,
     /// The fixed OCX header (`_ExtentX`, `_ExtentY`, `_Version`), for an
     /// external control whose property blob carries the signature this
