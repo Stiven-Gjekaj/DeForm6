@@ -202,6 +202,21 @@ pub enum DefectKind {
         /// The encoding retried second.
         second_encoding: &'static str,
     },
+
+    /// An external control's class name holds no dot separating the library
+    /// part from the component part.
+    ///
+    /// Plan 03-08: `STRUCTURES.md` section 8.7's own examples always hold
+    /// one, so a name with none cannot be joined against the external
+    /// component table by library. The whole string is still kept as the
+    /// library part.
+    #[error(
+        "the class name at offset {offset:#x} holds no dot separating the library from the component"
+    )]
+    ClassNameNoDot {
+        /// The absolute file offset of the class name's own length field.
+        offset: u32,
+    },
 }
 
 /// How bad a defect is.
@@ -259,6 +274,9 @@ impl DefectKind {
             // cursor still advances to the declared end, so the rest of the
             // block is not lost to it.
             Self::UnrecoverableString { .. } => Severity::Recoverable,
+            // A class name with no dot keeps its whole text as the library
+            // part. The control is not lost; only the join key is degraded.
+            Self::ClassNameNoDot { .. } => Severity::Recoverable,
         }
     }
 }
