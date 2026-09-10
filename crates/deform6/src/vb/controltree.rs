@@ -740,22 +740,38 @@ fn block_fits(region: &Region<'_>, at: Off) -> bool {
 /// it is never read from the file.
 const MAX_UNEXPLAINED_TAIL: u32 = 8;
 
-fn close_walk(
-    region: &Region<'_>,
-    stack: &mut Vec<usize>,
-    pops: u8,
-    end_at: Off,
-    tiling: &mut Tiling,
-) -> Result<(), Refusal> {
-    let bounded_pops = u8::try_from(stack.len().saturating_sub(1))
-        .unwrap_or(pops)
-        .min(pops);
-    for _ in 0..bounded_pops {
-        stack.pop();
-    }
+/// Closes the walk out: accounts whatever remains between `end_at` and the
+/// end of `region` as a trailing span (see [`MAX_UNEXPLAINED_TAIL`]'s own
+/// doc comment for that half).
+///
+/// Plan 03-14 (review finding WR-02). This function used to take the
+/// terminal run's own `pops` and a `stack: &mut Vec<usize>`, compute a
+/// `bounded_pops` value from `stack.len()`, apply only that many pops, and
+/// never read the result: a terminal pop count larger than the stack could
+/// give was silently truncated rather than reported, reading as a safety
+/// check it did not perform. The review finding names two acceptable
+/// fixes: make the check real (refuse, the way [`apply_pops`] already
+/// does mid-walk), or drop the dead code entirely.
+///
+/// This session measured that making the check real is the wrong fix here:
+/// the terminal run's own `pops` value, read at `EndForm` or at a next
+/// position [`block_fits`] finds implausible, routinely exceeds the real
+/// parent stack depth on real corpus data (`Grayscale.exe`, `UUID2.exe`,
+/// `HexScroll.exe` all hit this). Calling [`apply_pops`] here, as the
+/// mid-walk pop discipline does, refuses every one of those closing-out
+/// programs — including `FrmHex` and `frmUUID2`, whose own recovery this
+/// plan's own task 1 measured and requires. A terminal pop count closing
+/// the whole tree out is not the same fact a mid-walk pop is: mid-walk, an
+/// excess pop means the byte grammar has drifted from the real tree shape,
+/// and every later sibling would land at the wrong depth; at the very end
+/// of the walk, no more siblings follow, so an excess pop closes nothing
+/// that still matters. The dead code is dropped, per the review finding's
+/// second named fix, and this function no longer takes the stack or the
+/// pop count at all.
+fn close_walk(region: &Region<'_>, end_at: Off, tiling: &mut Tiling) -> Result<(), Refusal> {
+    let offset = region.file_offset(end_at).map_or(0, Off::get);
     let tail = region.len().saturating_sub(end_at.get());
     if tail > MAX_UNEXPLAINED_TAIL {
-        let offset = region.file_offset(end_at).map_or(0, Off::get);
         return Err(damaged(format!(
             "the control tree walk at file offset {offset:#x} would leave {tail} bytes \
              unaccounted for, more than the {MAX_UNEXPLAINED_TAIL} byte margin this repository \
@@ -832,11 +848,11 @@ pub fn walk<'a>(
                     "the scope run at file offset {run_offset:#x} holds an unrecognised byte {byte:#x}"
                 )));
             }
-            ScopeRun::EndForm { pops } => {
+            ScopeRun::EndForm { .. } => {
                 let end_at = sep_at.checked_add(run_len).ok_or(Refusal::Damaged(
                     "the control tree walk's own cursor overflows a u32",
                 ))?;
-                close_walk(&region, &mut stack, pops, end_at, tiling)?;
+                close_walk(&region, end_at, tiling)?;
                 break;
             }
             ScopeRun::OpenChild { pops } | ScopeRun::Sibling { pops } | ScopeRun::Menu { pops } => {
@@ -845,7 +861,7 @@ pub fn walk<'a>(
                 ))?;
 
                 if !block_fits(&region, next_at) {
-                    close_walk(&region, &mut stack, pops, next_at, tiling)?;
+                    close_walk(&region, next_at, tiling)?;
                     break;
                 }
 
@@ -902,7 +918,8 @@ pub fn walk<'a>(
 )]
 mod tests {
     use super::{
-        ARRAY_FLAG, ControlKind, classify_control_type, read_array_index, read_control_header, walk,
+        ARRAY_FLAG, ControlKind, ScopeRun, classify_control_type, read_array_index,
+        read_control_header, walk,
     };
     use crate::error::{DefectKind, Refusal};
     use crate::read::pe::PeImage;
@@ -1468,5 +1485,83 @@ mod tests {
         };
         assert!(message.contains("0x4000"), "{message}");
         assert!(message.contains("pops past the root"), "{message}");
+    }
+
+    /// Plan 03-14, task 2 (review finding WR-02). `close_walk` used to
+    /// compute a `bounded_pops` value against `stack.len()` and then never
+    /// read it: a terminal pop count larger than the stack could give was
+    /// silently truncated, not reported, reading as a safety check it did
+    /// not perform.
+    ///
+    /// This session tried the review finding's own first fix (call
+    /// [`super::apply_pops`], the same discipline `walk`'s own mid-walk
+    /// pops already use) and measured that it refuses real corpus data:
+    /// `Grayscale.exe`, `UUID2.exe` and `HexScroll.exe` all reach `EndForm`
+    /// with a `pops` count larger than the real parent stack depth at that
+    /// point, and none of that is a grammar error — no more siblings
+    /// follow, so an excess terminal pop closes nothing that still
+    /// matters, unlike a mid-walk excess pop, which would misplace every
+    /// later sibling. The chosen fix is the review finding's second one:
+    /// `close_walk` no longer takes a stack or a pop count at all.
+    ///
+    /// A synthetic byte sequence drives `read_scope_run` and `close_walk`
+    /// directly, the same two functions `walk`'s own main loop calls, on a
+    /// form built in memory (per `AGENTS.md`: a test builds the state it
+    /// needs and does not read it out of a file the author edits): one
+    /// root, one child, then an `EndForm` run whose own pop count (`5`) is
+    /// five times the real stack depth (`1`, root only, after the one real
+    /// pop the child's own `OpenChild` needs undoing). `close_walk` no
+    /// longer receives the stack or the pop count at all, so there is
+    /// nothing left for it to refuse on account of either; this proves
+    /// that directly rather than through `walk`'s own public entry point,
+    /// which needs a real `FormStream` this crate gives no test-only
+    /// constructor for.
+    #[test]
+    fn close_walk_no_longer_refuses_an_end_form_pop_count_larger_than_the_stack_depth() {
+        let mut bytes = Vec::new();
+        // Root form header: Length=11 (content=10, header_len=10, no
+        // property data beyond the header), cType 13 (Form).
+        bytes.extend_from_slice(&[0x0b, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00]);
+        bytes.push(b'F');
+        bytes.extend_from_slice(&[0x00, 13]);
+        // Separator: 0xFF 0x01, OpenChild, zero pops.
+        bytes.extend_from_slice(&[0xff, 0x01]);
+        // Child header: Length=11 (content=10), cType 1 (Label).
+        bytes.extend_from_slice(&[0x0b, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00]);
+        bytes.push(b'L');
+        bytes.extend_from_slice(&[0x00, 1]);
+        // Separator: 0xFF, five 0x02 pops, 0x04 EndForm. The stack holds
+        // only [root, root] at this point (root pushed once, for the
+        // child's own OpenChild); five pops is four more than the one
+        // real pop available.
+        bytes.extend_from_slice(&[0xff, 0x02, 0x02, 0x02, 0x02, 0x02, 0x04]);
+
+        let region = Region::new(&bytes, Off::new(0));
+        let root_at = Off::new(0);
+        let (_, _, root_length, _) = super::read_block(&region, root_at).unwrap();
+        let root_content = root_length - 1;
+        let mut tiling = Tiling::new(u32::try_from(bytes.len()).unwrap());
+        tiling.account(root_content).unwrap();
+
+        let sep1_at = root_at.checked_add(root_content).unwrap();
+        let (run1, run1_len) = super::read_scope_run(&region, sep1_at, false, false).unwrap();
+        assert!(matches!(run1, ScopeRun::OpenChild { pops: 0 }), "{run1:?}");
+        tiling.account(run1_len).unwrap();
+
+        let child_at = sep1_at.checked_add(run1_len).unwrap();
+        let (_, _, child_length, _) = super::read_block(&region, child_at).unwrap();
+        let child_content = child_length - 1;
+        tiling.account(child_content).unwrap();
+
+        let sep2_at = child_at.checked_add(child_content).unwrap();
+        let (run2, run2_len) = super::read_scope_run(&region, sep2_at, false, false).unwrap();
+        assert!(matches!(run2, ScopeRun::EndForm { pops: 5 }), "{run2:?}");
+        tiling.account(run2_len).unwrap();
+
+        let end_at = sep2_at.checked_add(run2_len).unwrap();
+        super::close_walk(&region, end_at, &mut tiling).unwrap_or_else(|err| {
+            panic!("close_walk must not refuse on account of the pop count: {err}")
+        });
+        tiling.finish().unwrap();
     }
 }
