@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Forms
 status: executing
-stopped_at: Completed 03-08-PLAN.md
-last_updated: "2026-09-10T12:55:49.799Z"
+stopped_at: Completed 03-09-PLAN.md
+last_updated: "2026-09-10T13:21:51.081Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 03 execution started
-state_head: 9f7e09a6e3f4280c1e86dd24ef4d84c1a9a3ffe8
+state_head: a2a9ffb44ebc4e254f46560671dc7aa9d6f199a8
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 28
-  completed_plans: 25
+  completed_plans: 26
   percent: 0
 ---
 
@@ -67,7 +67,7 @@ inferred.
 ## Current Position
 
 Phase: 03 (Forms) — EXECUTING
-Plan: 8 of 10
+Plan: 9 of 10
 Status: Ready to execute
 `deform6 inspect` reports the object graph. It reads a form's control tree
 now: every control's type, name and array index, gated on the tiling check.
@@ -121,6 +121,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 | Phase 03 P05 | 22min | 2 tasks | 2 files |
 | Phase 03 P06 | 1 session | 3 tasks | 1 files |
 | Phase 03 P08 | 34min | 3 tasks | 3 files |
+| Phase 03 P09 | 23min | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -160,6 +161,9 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-06: the position block escape at -32768 consumes 16 bytes total (re-reading the same span the short form occupied as four i32 values), matching the already-shipped PayloadType::Position doc comment, not 03-RESEARCH.md's own illustrative code, which reads 18 bytes while returning 16.
 - [Phase 03]: 03-06: the plan's own acceptance-criterion grep banning .len() anywhere in propstream.rs cannot pass alongside the mandatory clippy gate (clippy::iter_count, clippy::bytes_count_to_len deny the workaround); satisfied for production code only, test code keeps idiomatic .len().
 - [Phase 03]: 03-08: the plan's own asserted CLSID for MSWinsockLib.Winsock (248DD890-BB45-11CF-9ABC-0080C7E7B78D, matching the .vbp) does not match the real bytes at the component table entry's own GUIDoffset/GUIDlength fields; measured in two corpus files it decodes to 2c49f800-c2dd-11cf-9ad6-0080c7e7b78d instead. join_component also compares the control's whole class_name against Component::library, not a library-only split, because Component::library holds the whole dotted name.
+- [Phase 03]: The join excludes two entries, one on each side: the tree own root and the ControlInfo entry literally named "Form", measured across three independent corpus programs to be the fixed name a form own event-table slot always carries, never its declared name.
+- [Phase 03]: 03-09: EventNameTable ships zero entries with no safe-provenance carve-out, because 03-CONTEXT.md D-02 gives the event vtable ordering no such carve-out the way D-01 gives one for properties.
+- [Phase 03]: 03-09: A control array shares one ControlInfo entry across all of its own elements, not one per element, confirmed on Grayscale.exe two arrays.
 
 ### Pending Todos
 
@@ -188,8 +192,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T12:55:49.783Z
-Stopped at: Completed 03-08-PLAN.md
+Last session: 2026-09-10T13:21:51.065Z
+Stopped at: Completed 03-09-PLAN.md
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and

@@ -50,7 +50,7 @@ Version 1 recovers metadata. It does not recover statements.
       without the control's own type library.
 - [ ] **FRM-05**: The tool recovers the resource blobs and writes an `.frx`
       whose offsets the generated `.frm` agrees with.
-- [ ] **FRM-06**: The tool recovers the event handler names bound to each
+- [x] **FRM-06**: The tool recovers the event handler names bound to each
       control.
 
 ### Written output
