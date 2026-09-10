@@ -527,12 +527,28 @@ relative offset 0 to 75), confirming `STRUCTURES.md`'s own two SVBD-derived
 formulas ("the property loop runs while the cursor is below
 `blockStart + Length - 2`" and "the next sibling starts at
 `blockStart + Length + 2`") are both internally consistent for the
-zero-children case. Beyond `Length + 2` (relative offset 76) sit three more
+zero-children case `[DISPROVEN AS A GENERAL BOUND: see the correction
+below]`. Beyond `Length + 2` (relative offset 76) sit three more
 zero bytes, and only then does `lPropertiesLength` (79) end: `76 + 3 = 79`
 exactly. `[VERIFIED: local, this session]` This 3-byte tail is unexplained;
 it may be a fixed footer, or it may be specific to this sample. Plan 03-01
 should check it against at least one more zero-children form before treating
 it as general.
+
+**Correction (plan 03-12, gap closure).** The "internally consistent"
+finding above holds only for this one zero-children `LockWorkStation`
+sample shown in the hex dump. It does not generalise to a control with
+children, and the general property-loop bound is not `Length - 2`. The
+shipped code, `crates/deform6/src/vb/propstream.rs`, computes the bound as
+`block_end = u32::from(length).saturating_sub(1)`, that is, `Length - 1`,
+matching the scope-separator start `blockStart + Length - 1` that plan
+03-04 measured directly against `Grayscale.exe`'s real bytes (four
+independent transitions, not the `Length - 2`/`Length + 2` prose above).
+Plan 03-06 measured the property-loop bound the same way and kept the
+shipped `Length - 1` bound; see `03-06-SUMMARY.md`'s `key-decisions` block
+for the full account. A reader implementing a property loop uses the
+shipped `Length - 1` bound, not the `Length - 2` formula the sentence
+above states.
 
 **A form with children breaks the naive hypothesis, and that is useful.**
 `corpus/public-domain/SK-Gradient-Sample__VB6/demo/Project1.exe` has one form
