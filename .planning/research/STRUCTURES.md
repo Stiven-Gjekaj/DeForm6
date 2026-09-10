@@ -712,10 +712,10 @@ GD states this explicitly. **[L]** (source: GD `image_10.png`, an
 | 0x0D | `epvT_currency` | `Currency` |
 | 0x0F | `epvT_variant` | `Variant` |
 | 0x10 | `epvT_String` | `String` |
-| 0x13 | `epvT_internal` | a class defined in this project — **adds a 32-bit pointer** |
+| 0x13 | `epvT_internal` | a class defined in this project, **adds a 32-bit pointer** |
 | 0x1B | `epvT_object` | `Object` |
-| 0x1C | `epvT_comIFace` | external COM interface — **adds a 32-bit pointer** |
-| 0x1D | `epvT_comobj` | external COM object — **adds a 32-bit pointer** |
+| 0x1C | `epvT_comIFace` | external COM interface, **adds a 32-bit pointer** |
+| 0x1D | `epvT_comobj` | external COM object, **adds a 32-bit pointer** |
 | 0x1E | `epvT_hresult` | `HRESULT` |
 
 **Values 0x00, 0x01, 0x02, 0x04, 0x07, 0x09, 0x0E, 0x11, 0x12, 0x14..0x1A are
@@ -903,7 +903,7 @@ sub-offsets are relative to the **start of the entry**. **[L]** (SVBD
 | 0x14 | 4 | | unknown |
 | 0x18 | 4 | | unknown |
 | 0x1C | 4 | `GUIDoffset` | Offset to a **textual** GUID |
-| 0x20 | 4 | `GUIDlength` | `-1` ⇒ no GUID at `oUuid`. `72` ⇒ the textual GUID is 36 UTF-16 characters. |
+| 0x20 | 4 | `GUIDlength` | `-1` ⇒ no textual GUID at `GUIDoffset`. `72` ⇒ the textual GUID is 36 UTF-16 characters. Plan 03-16 corrects an earlier draft of this row, which named `oUuid` here by mistake: `GUIDlength` governs `GUIDoffset` alone, and `oUuid` (0x04) is a separate field. |
 | 0x24 | 4 | | unknown |
 | 0x28 | 4 | `FileNameOffset` | Offset to the OCX file name NTS |
 | 0x2C | 4 | `SourceOffset` | Offset to the library name NTS, e.g. `"TabDlg"` |
@@ -913,14 +913,79 @@ sub-offsets are relative to the **start of the entry**. **[L]** (SVBD
 to its CLSID. This table is what produces the `Object=` lines of the `.vbp`.
 
 **Five of thirteen fields are unknown.** **[G]** They are not needed for
-`.vbp` reconstruction.
+`.vbp` reconstruction. Gap 17 (§11) tracks them; plan 03-16 did not measure
+any of them, and none is closed.
+
+### 7.3.1 Neither `oUuid` nor `GUIDoffset` holds the CLSID a project file declares, 2026-09-11
+
+Plan 03-08 read `GUIDoffset`/`GUIDlength` as a third-party control's CLSID.
+Phase 3's own verification found the value it decodes for
+`MSWinsockLib.Winsock` does not match the identifier the corpus `.vbp` files
+declare, and flagged the discrepancy as unresolved. Plan 03-16 measured both
+candidate fields directly, against all three corpus executables that declare
+a `MSWinsockLib.Winsock` component, to settle which field, if either, holds
+the declared identifier.
+
+**Ground truth.** All three `.vbp` files that reference this control declare
+the same line:
+
+    Object={248DD890-BB45-11CF-9ABC-0080C7E7B78D}#1.0#0; MSWINSCK.OCX
+
+**The eighteen searches.** For each of the three executables, the whole
+declared length of the component entry (`StructLength`, 368 bytes in every
+one) was searched for the declared identifier
+`248DD890-BB45-11CF-9ABC-0080C7E7B78D`, in six forms: the sixteen byte binary
+layout with the first field in file order (the standard Microsoft binary GUID
+encoding: the first three fields little-endian, the fourth raw), the same
+layout with the first field reversed (the sixteen bytes in the order the hex
+string itself reads, with no byte-swap), plain text upper case, plain text
+lower case, sixteen bit (UTF-16LE) upper case, and sixteen bit lower case.
+**None of the eighteen searches found the declared identifier anywhere in the
+entry, in any of the three files.** A whole-file search (not bounded to the
+entry) gave the same result: not found, in any form, in any file.
+
+**What each identifier-shaped field decodes to.** Both fields decode
+identically across all three corpus executables:
+
+| Field | Entry offset | Decoded value | Matches the declared identifier? |
+|---|---|---|---|
+| `oUuid` | `0x04` (an offset field; the sixteen raw bytes it points to sit at entry offset `0x38` in all three files) | `248DD896-BB45-11CF-9ABC-0080C7E7B78D` | No. Differs by one byte: the low byte of `Data1` (`0x96` vs the declared `0x90`). |
+| `GUIDoffset`/`GUIDlength` | `0x1C`/`0x20` (the text sits at entry offset `0xF8` in all three files) | `2c49f800-c2dd-11cf-9ad6-0080c7e7b78d` | No. Shares no digit pattern with the declared identifier. |
+
+The absolute file offsets the sixteen raw `oUuid` bytes sit at are
+`0x2180` (`TFTPClient.exe`), `0x1738` (`Server.exe`) and `0x1f18`
+(`SubReality_WinsockSample.exe`); the component entries themselves start at
+`0x2148`, `0x1700` and `0x1ee0` respectively.
+
+**The selection.** Since neither field holds the declared identifier, this
+repository selects `oUuid`: its own shape, a fixed sixteen byte binary
+identifier, is the shape a CLSID takes, and its decoded value is the closer
+of the two candidates to the declared one. `vb/ocx.rs::join_component` (plan
+03-16) reports it, and a successful join always carries a caveat naming the
+byte offset the value was read from and stating plainly that the value is
+not confirmed against the control's own project file. A one byte difference
+is never treated as a match: `Clsid`'s own equality is exact.
+
+**What this measurement does not prove.** The corpus holds exactly one
+third-party control, `MSWinsockLib.Winsock`, across three files that all
+reference the same OCX. This is one control's own evidence, not a general
+proof about the external component table entry for any other control. §11
+gap 17's own five (six, counting `0x24`) truly unknown dwords remain
+untouched by this measurement and stay open.
+
+**The open question this raises.** FRM-04's own requirement text promises
+the CLSID of each third-party OCX control; if no field of this entry, in the
+one control this corpus can test, holds a value a registry lookup would
+recognise, that wording may promise more than the format can deliver for
+every control. This is a question for the human, not a decision this
+document makes: see `03-16-SUMMARY.md`.
 
 ---
 
 ## 8. The GUI table and the form data stream
 
 This is the most important section for DeForm6 and the least well documented in
-the canonical sources. **AI does not document it at all** — his structure
+the canonical sources. **AI does not document it at all**: his structure
 diagram shows a "GUI Table" box and the document ends with "TBD LATER". AG
 reaches it, names it `DialogsStruct`, and correctly identifies its 0x50-byte
 stride and the pointer at 0x48, but does not decode the stream. **Everything
@@ -961,7 +1026,7 @@ itself (§8.4).
 ### 8.2 `GUIObjectInfo`
 
 At `tGuiTable.aFormPointer`. Size `0x5D` = 93 bytes. **[L]** (SVBD
-`GUIObjectInfo`; corroborated by SVBD's own `Seek F, aFormPointer + 94` — VB's
+`GUIObjectInfo`; corroborated by SVBD's own `Seek F, aFormPointer + 94`. VB's
 `Seek` is 1-based, so `+94` is byte offset `0x5D`.)
 
 | Offset | Size | Name | Meaning |
@@ -1026,11 +1091,11 @@ Two layouts, selected by the flag byte at +0x03. **[L]**
 | 0x00 | 2 | `Length` |
 | 0x02 | 1 | unknown |
 | 0x03 | 1 | flags |
-| 0x04 | 1 | `cId` — the control's ID, used to link it to its event handlers |
+| 0x04 | 1 | `cId`, the control's ID, used to link it to its event handlers |
 | 0x05 | 2 | name length, `n` |
 | 0x07 | n | control name, ASCII |
 | 0x07+n | 1 | unknown |
-| 0x08+n | 1 | `cType` — the control type code, §8.4.1 |
+| 0x08+n | 1 | `cType`, the control type code, §8.4.1 |
 | 0x09+n | | property stream begins |
 
 **Control array** (`flags == 0x80`):
@@ -1058,7 +1123,7 @@ array `Index`, not `cId`. See section 14, "Gap 11 closed," for the offset,
 the evidence, and what the measurement did not settle.
 
 AG's dump independently corroborates the name encoding: he shows
-`db 5,0,'Form1',0` and `db 0Bh,0,'Leimcrackme',0` — a 16-bit little-endian
+`db 5,0,'Form1',0` and `db 0Bh,0,'Leimcrackme',0`, a 16-bit little-endian
 length followed by ASCII bytes. **[C]**
 
 #### 8.4.1 `cType` values **[L]** (SVBD `ControlType` enum)
@@ -1375,14 +1440,14 @@ greater than 3 or equal to 0. A trailing `04` means the form is finished.
 The honest description is therefore: **the separator is `0xFF` followed by a run
 of one or more scope bytes**, where `01` opens a sibling, `02` and `03` each
 close one container level, `04` ends the form and `05` introduces a menu. SVBD's
-handling of this is visibly heuristic — it contains a separate special case for
-menus with its own counter and a `IdentNextMenu` flag — and it is the most
+handling of this is visibly heuristic, it contains a separate special case for
+menus with its own counter and a `IdentNextMenu` flag, and it is the most
 likely place for a decompiler to produce a mis-nested `.frm`.
 
 **Recommendation for DeForm6.** Do not model this as a stack machine driven by
 guesses. Model it as: read `0xFF`, then read scope bytes until one is `> 3` or
 `0`, counting `02`/`03` as pops. Cross-validate the resulting nesting against an
-independent signal — the sum of the control blocks' `Length` fields must exactly
+independent signal: the sum of the control blocks' `Length` fields must exactly
 tile `GUIObjectInfo.lPropertiesLength`. If it does not, refuse rather than emit
 a wrong tree. Menus in particular should be validated against the
 `fMdlIntCtls` Menu bit and against a `cType == 19` count.
@@ -1493,7 +1558,7 @@ mis-decoded caption and a whole form that decodes into garbage.
 | Item | VB5 | VB6 | Conf |
 |---|---|---|---|
 | Imported runtime | `MSVBVM50.DLL` | `MSVBVM60.DLL` | **[C]** |
-| `VBHeader.szVbMagic` | `"VB5!"` | `"VB5!"` — **unchanged** | **[C]** |
+| `VBHeader.szVbMagic` | `"VB5!"` | `"VB5!"`, **unchanged** | **[C]** |
 | `ProjectInfo.dwVersion` | `0x1F4` | `0x1F4` | **[C]** |
 | VBHeader layout | identical | identical | **[L]** |
 | `Object.fObjectType` | SVBD's bit ladder labels one bit "vb5", so there may be a VB5 marker inside the object type word. Which bit is not resolvable from the value table. | | **[G]** |
@@ -1540,7 +1605,7 @@ SEK is the only source that documents it, at
 
 | Offset | Size | Name |
 |---|---|---|
-| 0x00 | 4 | `ProcTable` — VA of a 56-byte table whose last dword is a data constant |
+| 0x00 | 4 | `ProcTable`, VA of a 56-byte table whose last dword is a data constant |
 | 0x04 | 2 | unknown |
 | 0x06 | 2 | `FrameSize` |
 | 0x08 | 2 | `ProcSize` |
@@ -1574,7 +1639,7 @@ answer stated confidently would be worse than no answer.
 | 14 | Scope separator grammar (§8.9) | correct control nesting | PARTIALLY CLOSED 2026-09-11, 5 transitions across 2 programs. The two-level-deep menu close (a top-level menu with a child, then a second top-level menu with children) is measured; method and worked example in §15. What remains open, narrowed from this row's own prior text: (1) a menu that is itself a sibling within an already-open menu group, opening its own child, is byte-identical to a confirmed sibling case and unresolved (`corpus/public-domain/PassGen/PassGen.exe`, `menuAbout`, offset `0x21d0`); (2) a separate, unexplained failure where an expected scope separator (`0xFF`) is not there at all (`corpus/vb6-code/Map-editor-2D/Map Editor.exe`, `Main`, offset `0x170e`, byte `0x37`). Both tracked in `WINDOWS.md`. |
 | 15 | Full opcode-to-property tables per control type (§8.5) | every property | Build from a type-library dump; ship as derived data |
 | 16 | Nine unknown dwords in `GUIObjectInfo` 0x35-0x58 (§8.2) | nothing known | Leave opaque |
-| 17 | Five unknown dwords in the external component entry (§7.3) | nothing known | Leave opaque |
+| 17 | Five unknown dwords in the external component entry (§7.3) | nothing known | Leave opaque. Not touched by plan 03-16 (§7.3.1): that plan measured the two already-named fields, `oUuid` and `GUIDoffset`/`GUIDlength`, not these unknown ones. Still open. |
 | 18 | Entry-point stub variants `0x5A` / `0x11` (§1.3) | exotic inputs | Do not implement without a sample |
 | 19 | Which object table count is the number of objects (§4) | the object count DeForm6 reports, and the Phase 2 object walk | CLOSED 2026-09-07, 44 of 44 corpus binaries against their `.vbp`. `wTotalObjects` is the count and `wCompiledObjects` is the array capacity. Method and numbers in §4.1. |
 
