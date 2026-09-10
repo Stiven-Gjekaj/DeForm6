@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Forms
 status: executing
-stopped_at: Completed 03-04-PLAN.md
-last_updated: "2026-09-10T11:19:17.000Z"
+stopped_at: Completed 03-05-PLAN.md
+last_updated: "2026-09-10T11:44:31.724Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 03 execution started
-state_head: ef7e55f463ee8ae923cae777164944796ed75679
+state_head: 29c893e5fc609e8085971fda134e4a39376a8c26
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 28
-  completed_plans: 22
+  completed_plans: 23
   percent: 0
 ---
 
@@ -67,7 +67,7 @@ inferred.
 ## Current Position
 
 Phase: 03 (Forms) — EXECUTING
-Plan: 5 of 10
+Plan: 6 of 10
 Status: Ready to execute
 `deform6 inspect` reports the object graph. It reads a form's control tree
 now: every control's type, name and array index, gated on the tiling check.
@@ -118,6 +118,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 | Phase 03 P03 | 18min | 3 tasks | 3 files |
 | Phase 03 P02 | 46min | 3 tasks | 9 files |
 | Phase 03 P04 | 53min | 3 tasks | 5 files |
+| Phase 03 P05 | 22min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -151,6 +152,8 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-04: the scope-separator grammar is implemented from this session's own byte-level measurement against Grayscale.exe, not from 03-RESEARCH.md's approximate Length+2/Length-2 prose, which does not reconcile against four independent real transitions. A control block's own separator starts at blockStart + Length - 1; 0x02 pops and continues; 0x03 is the sibling terminal with no pop of its own; a menu control (cType 19) reads a bare 0x02 as an OpenChild-equivalent terminal instead.
 - [Phase 03]: 03-04: STRUCTURES.md gap 11 closed. The control array Index is the two byte value at control block offset 0x05, not cId as the published array header table states.
 - [Phase 03]: 03-04: corpus/vb6-code/Custom-image-filters/CustomFilters.exe, named in the plan text, does not exist in this corpus; the real ExeName32 is Custom_Filters.exe.
+- [Phase 03]: 03-05: A length field that does not fit at the given offset is read as declared length 0, matching vb/controltree.rs::read_control_header's own precedent for a count field it cannot read; the downstream declared-end bound check still catches an offset that leaves no room for anything.
+- [Phase 03]: 03-05: The landing check has two independent halves, byte-count match and a trailing-null check at a fixed position; ASCII always trivially matches the byte-count half, so only the trailing-null half can ever refuse an ASCII attempt, and that same check applies identically on retry.
 
 ### Pending Todos
 
@@ -179,8 +182,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T11:19:17.000Z
-Stopped at: Completed 03-04-PLAN.md
+Last session: 2026-09-10T11:44:31.708Z
+Stopped at: Completed 03-05-PLAN.md
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and

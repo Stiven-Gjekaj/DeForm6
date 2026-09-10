@@ -275,7 +275,7 @@ control.
   - **STRUCTURES gap 16**: nine dwords in `GUIObjectInfo` at 0x35 to 0x58 have
     no known meaning. Leave them opaque; do not invent a reading.
 
-**Plans**: 4/10 plans executed
+**Plans**: 5/10 plans executed
 
 Plans:
 **Wave 1**
@@ -287,7 +287,7 @@ Plans:
 
 - [x] 03-02-PLAN.md - `OpcodeTable`, the never-committed derived table, the `--opcode-table` flag, and the safe-provenance subset
 - [x] 03-04-PLAN.md - Scope separators, the control tree, control types, control names, and the control array index at offset `0x05`
-- [ ] 03-05-PLAN.md - `VbStr` - the encoding parameter, the landing point validation, and the refusal
+- [x] 03-05-PLAN.md - `VbStr` - the encoding parameter, the landing point validation, and the refusal
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -581,7 +581,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 |-------|----------------|--------|-----------|
 | 1. It reads the file | 7/8 | In Progress|  |
 | 2. The object graph | 4/10 | In Progress|  |
-| 3. Forms | 4/10 | In Progress|  |
+| 3. Forms | 5/10 | In Progress|  |
 | 4. It writes a project | 0/9 | Not started | - |
 | 5. Hostility | 0/8 | Not started | - |
 | 6. Version 1.0 | 0/5 | Not started | - |
