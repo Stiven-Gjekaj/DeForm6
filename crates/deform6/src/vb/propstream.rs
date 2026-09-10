@@ -91,6 +91,14 @@ pub enum PropertyValue {
         /// list [`walk_properties`] returns.
         value: String,
     },
+    /// A `Position` payload: four coordinates, read through
+    /// [`read_position_block`].
+    Position {
+        /// The property this opcode names.
+        name: String,
+        /// The four coordinates, in the short or the long form.
+        value: PositionBlock,
+    },
     /// An opcode this repository does not decode.
     ///
     /// Two distinct causes share this one variant: no table entry names the
@@ -135,7 +143,8 @@ impl PropertyValue {
             | Self::Integer { .. }
             | Self::Long { .. }
             | Self::Single { .. }
-            | Self::Text { .. } => None,
+            | Self::Text { .. }
+            | Self::Position { .. } => None,
         }
     }
 }
@@ -221,6 +230,140 @@ fn read_fixed(
                 value: f32::from_bits(raw),
             }
         }
+    }
+}
+
+/// The `Position` payload: four coordinates, `Left`, `Top`, `Width` and
+/// `Height`, in an 8 byte short form or a 16 byte long form.
+///
+/// `STRUCTURES.md` section 8.5.1: the short form is four signed 16 bit
+/// values, in that order. When the first of them is `-32768`, the format
+/// escapes to four signed 32 bit values instead, for coordinates outside the
+/// signed 16 bit range. `PayloadType::Position`'s own doc comment (plan
+/// 03-02, already committed) already states the total payload width as "8
+/// bytes, or 16 bytes when the first `i16` is `-32768`": 16 bytes total, not
+/// 18. `03-RESEARCH.md`'s own illustrative code reads the four `i32` values
+/// starting two bytes after the escape marker (18 bytes total: 2 for the
+/// marker, plus 16 for four `i32` values) while also returning `16` as its
+/// own consumed count, which does not reconcile against its own read. No
+/// corpus file exercises this escape (`03-RESEARCH.md`'s own "Flagged
+/// assumption", carried into this plan), so there is no corpus evidence to
+/// arbitrate between the two readings. This reader keeps the total the
+/// already-shipped `PayloadType::fixed_width` doc comment commits to: on the
+/// escape, it re-reads the same 16 byte span the short form's own four `i16`
+/// values would have occupied, as four `i32` values instead, 16 bytes total,
+/// self-consistent and untested by construction against the corpus, the
+/// same treatment phase 1 gave the P-code branch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PositionBlock {
+    /// Four signed 16 bit values, 8 bytes total.
+    Short {
+        /// The left coordinate.
+        left: i16,
+        /// The top coordinate.
+        top: i16,
+        /// The width.
+        width: i16,
+        /// The height.
+        height: i16,
+    },
+    /// Four signed 32 bit values, 16 bytes total, used when a coordinate
+    /// does not fit in a signed 16 bit value.
+    Long {
+        /// The left coordinate.
+        left: i32,
+        /// The top coordinate.
+        top: i32,
+        /// The width.
+        width: i32,
+        /// The height.
+        height: i32,
+    },
+}
+
+/// Reads a [`PositionBlock`] at `at`, bounded by `block_end`.
+///
+/// Gives `(PositionBlock, consumed)`, where `consumed` is `8` or `16`, the
+/// caller's own cursor advance: never a constant, always the width this
+/// reader itself decided on from the payload's own first two bytes.
+///
+/// # Errors
+///
+/// Returns a [`Defect`] naming both positions when the chosen form (8 or 16
+/// bytes) would run past `block_end`.
+fn read_position_block(
+    block: &Region<'_>,
+    at: u32,
+    block_end: u32,
+) -> Result<(PositionBlock, u32), Defect> {
+    let offset = block.file_offset(Off::new(at)).map_or(0, Off::get);
+    let block_end_offset = block.file_offset(Off::new(block_end)).map_or(0, Off::get);
+
+    // Peek the first signed 16 bit value to decide the form. Bound the peek
+    // itself first: a crafted file can put the opcode one or two bytes
+    // before the block's own end.
+    if ends_within(at, 2, block_end).is_none() {
+        let peek_end_offset = block
+            .file_offset(Off::new(at.saturating_add(2)))
+            .map_or(0, Off::get);
+        return Err(overrun_defect(offset, peek_end_offset, block_end_offset));
+    }
+    let first = block.i16_le(Off::new(at)).unwrap_or(0);
+    let escaped = first == i16::MIN;
+    let width: u32 = if escaped { 16 } else { 8 };
+
+    if ends_within(at, width, block_end).is_none() {
+        let payload_end_offset = block
+            .file_offset(Off::new(at.saturating_add(width)))
+            .map_or(0, Off::get);
+        return Err(overrun_defect(offset, payload_end_offset, block_end_offset));
+    }
+
+    if escaped {
+        let left = block.i32_le(Off::new(at)).unwrap_or(0);
+        let top = at
+            .checked_add(4)
+            .and_then(|o| block.i32_le(Off::new(o)))
+            .unwrap_or(0);
+        let width_value = at
+            .checked_add(8)
+            .and_then(|o| block.i32_le(Off::new(o)))
+            .unwrap_or(0);
+        let height = at
+            .checked_add(12)
+            .and_then(|o| block.i32_le(Off::new(o)))
+            .unwrap_or(0);
+        Ok((
+            PositionBlock::Long {
+                left,
+                top,
+                width: width_value,
+                height,
+            },
+            16,
+        ))
+    } else {
+        let top = at
+            .checked_add(2)
+            .and_then(|o| block.i16_le(Off::new(o)))
+            .unwrap_or(0);
+        let width_value = at
+            .checked_add(4)
+            .and_then(|o| block.i16_le(Off::new(o)))
+            .unwrap_or(0);
+        let height = at
+            .checked_add(6)
+            .and_then(|o| block.i16_le(Off::new(o)))
+            .unwrap_or(0);
+        Ok((
+            PositionBlock::Short {
+                left: first,
+                top,
+                width: width_value,
+                height,
+            },
+            8,
+        ))
     }
 }
 
@@ -327,9 +470,26 @@ pub fn walk_properties(
                     });
                     cursor = declared_end;
                 }
-                PayloadType::Position | PayloadType::Font | PayloadType::Picture => {
-                    // Not yet decoded by this reader. Plan 03-06 Task 2
-                    // fills in `PayloadType::Position`; Task 3 fills in
+                PayloadType::Position => match read_position_block(block, payload_start, block_end)
+                {
+                    Ok((value, consumed)) => {
+                        let Some(new_cursor) = payload_start.checked_add(consumed) else {
+                            break;
+                        };
+                        properties.push(PropertyValue::Position {
+                            name: entry.name.clone(),
+                            value,
+                        });
+                        cursor = new_cursor;
+                    }
+                    Err(defect) => {
+                        defects.push(defect);
+                        cursor = block_end;
+                        break;
+                    }
+                },
+                PayloadType::Font | PayloadType::Picture => {
+                    // Not yet decoded by this reader. Task 3 fills in
                     // `PayloadType::Font`. `Picture` (a resource blob)
                     // stays undecoded through this whole plan; `frx.rs`,
                     // plan 03-07, owns blob extraction.
@@ -384,7 +544,7 @@ pub fn walk_properties(
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{PropertyValue, walk_properties};
+    use super::{PositionBlock, PropertyValue, read_position_block, walk_properties};
     use crate::error::DefectKind;
     use crate::read::region::{Off, Region};
     use crate::vb::controltree::read_control_header;
@@ -543,11 +703,13 @@ mod tests {
     }
 
     #[test]
-    fn a_position_typed_entry_is_not_yet_decoded_and_stops_the_loop_honestly() {
-        // CommandButton opcode 4 is `Position` in the builtin subset. This
-        // plan's Task 1 has no reader for it yet (Task 2 adds one): the
-        // loop must stop honestly rather than guess the payload's width.
-        let bytes = control_block("Cmd", 4, &[4, 0, 0, 0, 0, 0, 0, 0]);
+    fn a_position_typed_entry_now_decodes_through_read_position_block() {
+        // CommandButton opcode 4 is `Position` in the builtin subset.
+        // Task 1 had no reader for it (see this test's own former name and
+        // body, updated once Task 2 added `read_position_block`); this is
+        // the same evolution 03-04's own SUMMARY documents for a test that
+        // depended on later-task functionality.
+        let bytes = control_block("Cmd", 4, &[4, 0, 0, 0, 0, 0, 0, 0, 0]);
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
         let table = OpcodeTable::builtin();
@@ -555,7 +717,15 @@ mod tests {
         assert_eq!(stream.properties.len(), 1);
         assert!(matches!(
             &stream.properties[0],
-            PropertyValue::Undecoded { opcode: 4, .. }
+            PropertyValue::Position {
+                value: PositionBlock::Short {
+                    left: 0,
+                    top: 0,
+                    width: 0,
+                    height: 0
+                },
+                ..
+            }
         ));
         assert!(defects.is_empty(), "{defects:?}");
     }
@@ -645,6 +815,141 @@ mod tests {
         assert!(matches!(
             &stream.properties[1],
             PropertyValue::Byte { name, value: 2 } if name == "Second"
+        ));
+        assert!(defects.is_empty(), "{defects:?}");
+    }
+
+    // --- Task 2: the position block and its escape at -32768 -------------
+
+    #[test]
+    fn read_position_block_with_a_first_value_of_100_consumes_8_bytes() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&100_i16.to_le_bytes());
+        bytes.extend_from_slice(&200_i16.to_le_bytes());
+        bytes.extend_from_slice(&300_i16.to_le_bytes());
+        bytes.extend_from_slice(&400_i16.to_le_bytes());
+        let region = Region::new(&bytes, Off::new(0));
+        let (value, consumed) = read_position_block(&region, 0, 8).unwrap();
+        assert_eq!(consumed, 8);
+        assert!(matches!(
+            value,
+            PositionBlock::Short {
+                left: 100,
+                top: 200,
+                width: 300,
+                height: 400
+            }
+        ));
+    }
+
+    #[test]
+    fn read_position_block_at_the_threshold_minus_32767_consumes_8_bytes_one_step_above_the_escape()
+    {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&(-32_767_i16).to_le_bytes());
+        bytes.extend_from_slice(&0_i16.to_le_bytes());
+        bytes.extend_from_slice(&0_i16.to_le_bytes());
+        bytes.extend_from_slice(&0_i16.to_le_bytes());
+        let region = Region::new(&bytes, Off::new(0));
+        let (value, consumed) = read_position_block(&region, 0, 8).unwrap();
+        assert_eq!(consumed, 8);
+        assert!(matches!(value, PositionBlock::Short { left: -32_767, .. }));
+    }
+
+    #[test]
+    fn read_position_block_at_minus_32768_consumes_16_bytes_and_reads_four_i32_values() {
+        // Synthetic fixture: no corpus file in this repository exercises
+        // this escape (03-RESEARCH.md's own "Flagged assumption"). `left`'s
+        // own first two bytes are the -32768 escape marker; the full i32
+        // value they are part of is 0x0000_8000 = 32768.
+        let mut body = Vec::new();
+        body.extend_from_slice(&[0x00, 0x80, 0x00, 0x00]); // left
+        body.extend_from_slice(&(-70_000_i32).to_le_bytes()); // top
+        body.extend_from_slice(&123_456_i32.to_le_bytes()); // width
+        body.extend_from_slice(&(-1_i32).to_le_bytes()); // height
+        let region = Region::new(&body, Off::new(0));
+        let (value, consumed) = read_position_block(&region, 0, 16).unwrap();
+        assert_eq!(
+            consumed, 16,
+            "synthetic fixture: the -32768 escape must consume 16 bytes total"
+        );
+        assert!(matches!(
+            value,
+            PositionBlock::Long {
+                left: 32_768,
+                top: -70_000,
+                width: 123_456,
+                height: -1
+            }
+        ));
+    }
+
+    #[test]
+    fn a_left_of_minus_one_reads_back_as_minus_one_not_65535() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&(-1_i16).to_le_bytes());
+        bytes.extend_from_slice(&0_i16.to_le_bytes());
+        bytes.extend_from_slice(&0_i16.to_le_bytes());
+        bytes.extend_from_slice(&0_i16.to_le_bytes());
+        let region = Region::new(&bytes, Off::new(0));
+        let (value, _) = read_position_block(&region, 0, 8).unwrap();
+        assert!(matches!(value, PositionBlock::Short { left: -1, .. }));
+    }
+
+    #[test]
+    fn a_16_byte_form_that_runs_past_the_block_end_gives_a_defect_naming_the_byte_offset() {
+        // Synthetic fixture: the escape marker sits one byte before the
+        // declared block end, which is not enough room for the 16 byte
+        // long form.
+        let mut body = Vec::new();
+        body.extend_from_slice(&[0x00, 0x80, 0x00, 0x00]);
+        body.extend_from_slice(&0_i32.to_le_bytes());
+        body.extend_from_slice(&0_i32.to_le_bytes());
+        body.extend_from_slice(&0_i32.to_le_bytes());
+        let region = Region::new(&body, Off::new(0x3000));
+        let err = read_position_block(&region, 0, 15).unwrap_err();
+        let message = format!("{}", err.kind);
+        assert!(message.contains("0x3000"), "{message}");
+    }
+
+    #[test]
+    fn read_position_block_refuses_rather_than_overflowing_near_u32_max() {
+        let bytes = [0u8; 4];
+        let region = Region::new(&bytes, Off::new(0));
+        let err = read_position_block(&region, u32::MAX - 1, u32::MAX).unwrap_err();
+        assert!(!format!("{}", err.kind).is_empty());
+    }
+
+    #[test]
+    fn a_position_property_wired_through_walk_properties_advances_by_its_own_reported_count() {
+        let table = OpcodeTable::builtin();
+        let mut body = vec![4u8]; // opcode 4 = Position on CommandButton
+        body.extend_from_slice(&10_i16.to_le_bytes());
+        body.extend_from_slice(&20_i16.to_le_bytes());
+        body.extend_from_slice(&30_i16.to_le_bytes());
+        body.extend_from_slice(&40_i16.to_le_bytes());
+        body.push(10); // opcode 10 = MousePointer (Byte), right after
+        body.push(5);
+        let bytes = control_block("Cmd", 4, &body);
+        let region = Region::new(&bytes, Off::new(0));
+        let (header, _) = read_control_header(&region);
+        let (stream, defects) = walk_properties(&region, &header, &table);
+        assert_eq!(stream.properties.len(), 2, "{:?}", stream.properties);
+        assert!(matches!(
+            &stream.properties[0],
+            PropertyValue::Position {
+                value: PositionBlock::Short {
+                    left: 10,
+                    top: 20,
+                    width: 30,
+                    height: 40
+                },
+                ..
+            }
+        ));
+        assert!(matches!(
+            &stream.properties[1],
+            PropertyValue::Byte { value: 5, .. }
         ));
         assert!(defects.is_empty(), "{defects:?}");
     }
