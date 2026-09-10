@@ -50,8 +50,13 @@ Version 1 recovers metadata. It does not recover statements.
       without the control's own type library.
 - [ ] **FRM-05**: The tool recovers the resource blobs and writes an `.frx`
       whose offsets the generated `.frm` agrees with.
-- [ ] **FRM-06**: The tool recovers the event handler names bound to each
-      control.
+- [ ] **FRM-06**: The tool recovers the event structure of each control:
+      which event slots the compiled form binds, the index of each slot, and
+      the native address of each bound handler. The tool does not recover
+      the name of an event. The compiled file holds no such name. A name
+      needs a table built from a Microsoft type library, and decision D-02
+      in `.planning/phases/03-forms/03-CONTEXT.md` bars that table from this
+      repository.
 
 ### Written output
 
