@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Forms
 status: verifying
-stopped_at: "Completed 03-13-PLAN.md (gap closure: Form Caption/BackColor/Icon opcode rows so the property loop reaches the resource blob opcode)"
-last_updated: "2026-09-10T21:30:36.384Z"
+stopped_at: "Completed 03-14-PLAN.md (gap closure: two-level-deep menu close, close_walk WR-02 fix)"
+last_updated: "2026-09-10T22:31:29.880Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 03 execution started
-state_head: 220787022f0643c3407c9c64695a4073abb8aee6
+state_head: bd71f572f33a9589c0c1999cdab68b5161fb16dc
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 35
-  completed_plans: 31
+  completed_plans: 32
   percent: 0
 ---
 
@@ -126,6 +126,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 | Phase 03 P10 | single session | 3 tasks | 14 files |
 | Phase 03-forms P12 | 35min | 3 tasks | 1 files |
 | Phase 03-forms P13 | 20min | 3 tasks | 3 files |
+| Phase 03 P14 | single session | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -179,6 +180,9 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-13: insert_builtin_rows takes its default provenance string from the caller (default_source param) rather than choosing it from the payload shape, so a mixed-provenance rows array (STRUCTURES.md-transcribed and corpus-measured) is representable; a PayloadType::Position row still always cites SVBD_POSITION_BLOCK regardless.
 - [Phase 03]: 03-13: opcode 35's property name is Icon (the .frm's own name), not Picture (the payload shape's own name), matching every other row's convention of using the .frm's own property name.
 - [Phase 03]: 03-13: fixed a real bug in support/frm.rs's own value parser (doubled quote inside a quoted .frm value did not unescape to one literal quote, VB6's own escaping convention), found via the corpus-wide gate the first time a Text payload reached it.
+- [Phase 03]: 03-14: read_scope_run's role decision needs stack_top_is_menu as a second fact, not only current_is_menu. A bare 0x02 after a menu means OpenChild only when the parent stack's own top is not itself a menu; when it is, 0x03 pops and continues and 0x02 becomes the sibling terminal. Measured across five transitions in HexScroll.exe and UUID2.exe. FrmHex and frmUUID2 recover in full, matching their .frm parent for parent by name.
+- [Phase 03]: 03-14: frmPassGen.frm's own menuHelp section exposes a third shape (a menu, itself a sibling within an already-open menu, that opens its own child) byte-identical to the confirmed sibling case and left unresolved on purpose, since frmUUID2's exact recovery is a hard plan requirement and the two contexts are provably indistinguishable from the bytes controltree.rs reads. Tracked as an open WINDOWS.md finding, not guessed at.
+- [Phase 03]: 03-14: close_walk (review finding WR-02) drops its own stack and pop-count parameters entirely rather than making the check real, because the terminal EndForm pop count routinely exceeds the real parent stack depth on real corpus data and an excess terminal pop closes nothing that still matters.
 
 ### Pending Todos
 
@@ -207,8 +211,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T21:30:36.366Z
-Stopped at: Completed 03-13-PLAN.md (gap closure: Form Caption/BackColor/Icon opcode rows so the property loop reaches the resource blob opcode)
+Last session: 2026-09-10T22:31:20.769Z
+Stopped at: Completed 03-14-PLAN.md (gap closure: two-level-deep menu close, close_walk WR-02 fix)
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and
