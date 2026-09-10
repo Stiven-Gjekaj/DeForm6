@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Forms
 status: verifying
-stopped_at: "Completed 03-16-PLAN.md (gap closure: the OCX CLSID field measured and reported honestly via oUuid, with an unconditional caveat)"
-last_updated: "2026-09-11T00:00:00.000Z"
+stopped_at: "Completed 03-17-PLAN.md (gap closure: the shared damaged() helper, the format_ratio zero-denominator guard, and the controltree.rs em-dash sweep; the last plan of phase 3's gap closure run)"
+last_updated: "2026-09-10T23:48:41.157Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 03 execution started
-state_head: 29973edcc01aa6a9b86811c76b1cd5458e416922
+state_head: 81583d02cedb847d22c12c188410ad486e82db94
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 35
-  completed_plans: 34
+  completed_plans: 35
   percent: 0
 ---
 
@@ -67,7 +67,7 @@ inferred.
 ## Current Position
 
 Phase: 03 (Forms) — EXECUTING (gap closure)
-Plan: 03-16 of 17 (gap closure wave 3 of 4)
+Plan: 17 of 17 (gap closure wave 4 of 4)
 Status: 16/17 plans executed. The OCX CLSID field is measured: eighteen
 searches, six encodings across three corpus programs, never find the
 identifier a project file declares anywhere in the component table
@@ -136,6 +136,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 | Phase 03 P14 | single session | 3 tasks | 6 files |
 | Phase 03-forms P15 | 24min | 3 tasks | 7 files |
 | Phase 03-forms P16 | 55min | 3 tasks | 6 files |
+| Phase 03-forms P17 | single session | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -197,6 +198,9 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-15: FRM-05 is not marked complete. The requirement needs both blob recovery and the .frx writer; this plan does the recovery half only, and the writer stays with phase 4 plan 04-04. Marking it here would repeat the exact requirements-tracking overstatement 03-VERIFICATION.md found.
 - [Phase 03]: 03-16: eighteen searches (six encodings, three corpus programs) never find the identifier a project file's Object= line declares anywhere in the external component table entry. oUuid decodes to a value one byte from the declared identifier; GUIDoffset/GUIDlength (the field 03-08 read) shares no digit pattern with it. join_component now reports oUuid and always attaches a caveat, since neither field is confirmed.
 - [Phase 03]: 03-16: FRM-04 is not marked complete. This plan raises, and does not answer, the question of whether FRM-04's own wording promises a CLSID the on-disk format cannot always deliver; REQUIREMENTS.md is left unchanged.
+- [Phase 03]: 03-17: crate::error::damaged replaces three byte for byte identical private leaking helpers (gui.rs, controltree.rs, frx.rs) with one shared pub(crate) copy next to Refusal itself, chosen over widening Refusal::Damaged to an owned String because the extraction touches 4 files against 108 construction/pattern sites the widening would touch; the leak is centralised, not removed, and its memory cost is stated in the helper's own doc comment.
+- [Phase 03]: 03-17: format_ratio refuses to divide by a declared count of zero and gives the named text n/a instead of a bare division's NaN; no corpus program reaches this today, so a dedicated test drives the branch directly and a second test pins two real corpus values to prove every non-zero denominator is unchanged.
+- [Phase 03]: 03-17: controltree.rs's own em-dash count was 22 at this session's own measurement, not the review's own ten counted before four later plans wrote more prose; all 22 removed, and a whole crates/tests sweep confirms zero remain anywhere. FRM-01 and FRM-05 stay unchecked: this plan changes how the code is written, not what it reports.
 
 ### Pending Todos
 
@@ -225,8 +229,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-11T00:00:00.000Z
-Stopped at: Completed 03-16-PLAN.md (gap closure: the OCX CLSID field measured and reported honestly via oUuid, with an unconditional caveat)
+Last session: 2026-09-10T23:48:41.137Z
+Stopped at: Completed 03-17-PLAN.md (gap closure: the shared damaged() helper, the format_ratio zero-denominator guard, and the controltree.rs em-dash sweep; the last plan of phase 3's gap closure run)
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and
