@@ -260,6 +260,181 @@ pub fn join_component(control: &mut ExternalControl, table: &ComponentTable) -> 
     }
 }
 
+/// The four byte little endian signature VB writes at the start of the
+/// fixed header every external control's own property blob carries,
+/// `STRUCTURES.md` section 8.7. In the file the bytes appear in the order
+/// `0x21 0x43 0x34 0x12`.
+pub const OCX_SIGNATURE: u32 = 0x1234_4321;
+
+/// The reserved field the fixed header carries at offset `0x04` from the
+/// signature. Every sample `STRUCTURES.md` section 8.7 names holds `8`.
+const OCX_RESERVED: u32 = 8;
+
+/// The fixed header's own total length, signature through `_Version`
+/// inclusive: `STRUCTURES.md` section 8.7 gives six fields at offsets
+/// `0x00` through `0x14`, the last one four bytes wide.
+const OCX_HEADER_LEN: u32 = 0x18;
+
+/// The one control-agnostic fragment of an external control's own property
+/// blob this repository can read without its type library:
+/// `_ExtentX`/`_ExtentY`, in HiMetric units and carried raw (never converted
+/// here; that belongs with the writer), and `_Version`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OcxHeader {
+    /// The control's width, in HiMetric units, as the file stores it.
+    pub extent_x: i32,
+    /// The control's height, in HiMetric units, as the file stores it.
+    pub extent_y: i32,
+    /// The control's version.
+    pub version: i32,
+}
+
+/// Everything in an external control's own property blob this repository
+/// does not decode: reading it needs the control's own type library, which
+/// this repository does not hold and may not redistribute.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OpaqueBlob {
+    /// The absolute file offset the opaque span starts at.
+    pub offset: u32,
+    /// The opaque span's own length in bytes. `0` when the blob holds no
+    /// bytes at all past the class name.
+    pub length: u32,
+}
+
+impl OpaqueBlob {
+    /// The message `03-RESEARCH.md` Pattern 4 states, in the same words
+    /// `vb/propstream.rs::PropertyValue::undecoded_message` uses for an
+    /// unnamed property opcode: the two gaps are the same kind of fact.
+    #[must_use]
+    pub fn message(&self) -> String {
+        format!(
+            "External control property blob at offset {:#x}, length {} bytes: value not \
+             decoded. Reading it needs the control's own type library, which this repository \
+             does not hold and may not redistribute.",
+            self.offset, self.length
+        )
+    }
+}
+
+/// Scans an external control's own property blob for the fixed OCX header,
+/// bounded by `block_end`, and reports the rest of the blob as opaque.
+///
+/// `block` is the control's own block region, the same shape
+/// [`read_external_control`]'s own `block` parameter is. `blob_start` is
+/// where the property blob begins, in `block`-relative offset terms: after
+/// the class name [`read_external_control`] read. `block_end` is the
+/// block's own end (`Length - 1`, matching `vb/propstream.rs`'s own bound,
+/// itself corrected from `03-RESEARCH.md`'s stale `Length - 2` per plan
+/// 03-04's own measurement).
+///
+/// The scan reads no byte past `block_end`: every candidate position is
+/// checked against it, both for the four byte signature word and for the
+/// full 24 byte header, before either is read. A signature sitting too
+/// close to the block's own end for the full header to fit is therefore
+/// never treated as a complete header, and no byte belonging to whatever
+/// follows the block (the next control, or the scope separator run) is
+/// ever read.
+///
+/// Gives `(Option<OcxHeader>, OpaqueBlob, Vec<Defect>)`. The [`OpaqueBlob`]
+/// is always given, at `blob_start`, with a length covering the whole
+/// scanned span (`block_end` minus `blob_start`) minus the fixed header's
+/// own 24 bytes when one is found: everything in the blob other than the
+/// fixed header is opaque, wherever inside the span the header sits. A blob
+/// with no signature gives no header and no [`Defect`]: that absence is a normal
+/// state, not a fault.
+#[must_use]
+pub fn read_ocx_blob(
+    block: &Region<'_>,
+    blob_start: u32,
+    block_end: u32,
+) -> (Option<OcxHeader>, OpaqueBlob, Vec<Defect>) {
+    let mut defects = Vec::new();
+    let mut header = None;
+
+    let mut sig_at = blob_start;
+    while sig_at < block_end {
+        if let Some(sig_end) = sig_at.checked_add(4)
+            && sig_end <= block_end
+            && let Some(sig) = block.u32_le(Off::new(sig_at))
+            && sig == OCX_SIGNATURE
+            && let Some(header_end) = sig_at.checked_add(OCX_HEADER_LEN)
+            && header_end <= block_end
+        {
+            let (found, mut header_defects) = read_ocx_header_at(block, sig_at);
+            defects.append(&mut header_defects);
+            header = Some(found);
+            break;
+        }
+        sig_at = sig_at.saturating_add(1);
+    }
+
+    let span = block_end.saturating_sub(blob_start);
+    let opaque = OpaqueBlob {
+        offset: block.file_offset(Off::new(blob_start)).map_or(0, Off::get),
+        // Everything in the blob other than the fixed header is opaque: the
+        // header's own OCX_HEADER_LEN bytes are subtracted from the whole
+        // scanned span when it is found, wherever inside the span it sits.
+        length: if header.is_some() {
+            span.saturating_sub(OCX_HEADER_LEN)
+        } else {
+            span
+        },
+    };
+
+    (header, opaque, defects)
+}
+
+/// Reads the fixed header's own three recoverable fields at `sig_at`, the
+/// absolute position of the signature the caller already confirmed the
+/// full header fits at.
+fn read_ocx_header_at(block: &Region<'_>, sig_at: u32) -> (OcxHeader, Vec<Defect>) {
+    let mut defects = Vec::new();
+
+    let reserved_at = sig_at.checked_add(4);
+    let reserved = reserved_at
+        .and_then(|at| block.u32_le(Off::new(at)))
+        .unwrap_or(0);
+    if reserved != OCX_RESERVED {
+        let offset = reserved_at
+            .and_then(|at| block.file_offset(Off::new(at)))
+            .map_or(0, Off::get);
+        defects.push(Defect {
+            site: Site {
+                offset,
+                rva: None,
+                structure: "OcxHeader",
+                field: "reserved",
+            },
+            kind: DefectKind::OcxReservedFieldUnexpected {
+                offset,
+                value: reserved,
+            },
+        });
+    }
+
+    let extent_x = sig_at
+        .checked_add(8)
+        .and_then(|at| block.i32_le(Off::new(at)))
+        .unwrap_or(0);
+    let extent_y = sig_at
+        .checked_add(12)
+        .and_then(|at| block.i32_le(Off::new(at)))
+        .unwrap_or(0);
+    let version = sig_at
+        .checked_add(20)
+        .and_then(|at| block.i32_le(Off::new(at)))
+        .unwrap_or(0);
+
+    (
+        OcxHeader {
+            extent_x,
+            extent_y,
+            version,
+        },
+        defects,
+    )
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -270,7 +445,9 @@ pub fn join_component(control: &mut ExternalControl, table: &ComponentTable) -> 
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{Clsid, ExternalControl, join_component, read_external_control};
+    use super::{
+        Clsid, ExternalControl, OCX_SIGNATURE, join_component, read_external_control, read_ocx_blob,
+    };
     use crate::error::DefectKind;
     use crate::read::region::{Off, Region};
     use crate::vb::controltree::{ControlKind, classify_control_type, read_control_header};
@@ -732,5 +909,173 @@ mod tests {
         let reason = join_component(&mut control, &table);
         assert!(control.clsid.is_none());
         assert!(reason.is_some());
+    }
+
+    // --- Task 3: the fixed OCX header and the opaque blob statement -------
+
+    /// The four bytes VB writes in the file, little endian, for
+    /// [`OCX_SIGNATURE`]. `STRUCTURES.md` section 8.7's own doc comment
+    /// names the byte order; this test proves the constant matches it.
+    #[test]
+    fn ocx_signature_is_0x12344321_stored_little_endian_as_21_43_34_12() {
+        assert_eq!(OCX_SIGNATURE, 0x1234_4321);
+        assert_eq!(OCX_SIGNATURE.to_le_bytes(), [0x21, 0x43, 0x34, 0x12]);
+    }
+
+    /// Builds a synthetic fixed header: the four byte signature, the
+    /// reserved field, `_ExtentX`, `_ExtentY`, a second reserved field, and
+    /// `_Version`, the exact 24 byte layout `STRUCTURES.md` section 8.7
+    /// gives.
+    fn ocx_header_bytes(reserved: u32, extent_x: i32, extent_y: i32, version: i32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&OCX_SIGNATURE.to_le_bytes());
+        bytes.extend_from_slice(&reserved.to_le_bytes());
+        bytes.extend_from_slice(&extent_x.to_le_bytes());
+        bytes.extend_from_slice(&extent_y.to_le_bytes());
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // the second reserved field
+        bytes.extend_from_slice(&version.to_le_bytes());
+        bytes
+    }
+
+    #[test]
+    fn a_blob_holding_the_signature_gives_a_header_with_the_three_recoverable_fields() {
+        let bytes = ocx_header_bytes(8, 741, 741, 393_216);
+        let region = Region::new(&bytes, Off::new(0));
+        let block_end = u32::try_from(bytes.len()).unwrap();
+        let (header, opaque, defects) = read_ocx_blob(&region, 0, block_end);
+        let header = header.expect("synthetic fixture: the signature must be found");
+        assert_eq!(header.extent_x, 741);
+        assert_eq!(header.extent_y, 741);
+        assert_eq!(header.version, 393_216);
+        assert!(defects.is_empty(), "{defects:?}");
+        assert_eq!(
+            opaque.length, 0,
+            "the fixture holds nothing past the header"
+        );
+    }
+
+    #[test]
+    fn a_blob_with_no_signature_gives_no_header_and_no_defect() {
+        let bytes = vec![0xAA_u8; 40];
+        let region = Region::new(&bytes, Off::new(0));
+        let (header, opaque, defects) = read_ocx_blob(&region, 0, 40);
+        assert!(header.is_none());
+        assert!(defects.is_empty(), "{defects:?}");
+        assert_eq!(opaque.length, 40);
+    }
+
+    #[test]
+    fn a_reserved_field_other_than_eight_gives_a_defect_and_the_other_three_fields_still_read() {
+        let bytes = ocx_header_bytes(99, 100, 200, 300);
+        let region = Region::new(&bytes, Off::new(0));
+        let block_end = u32::try_from(bytes.len()).unwrap();
+        let (header, _opaque, defects) = read_ocx_blob(&region, 0, block_end);
+        let header = header.expect("the header still reads past an unexpected reserved value");
+        assert_eq!(header.extent_x, 100);
+        assert_eq!(header.extent_y, 200);
+        assert_eq!(header.version, 300);
+        assert_eq!(defects.len(), 1);
+        assert!(matches!(
+            defects[0].kind,
+            DefectKind::OcxReservedFieldUnexpected { value: 99, .. }
+        ));
+    }
+
+    /// Synthetic fixture: the signature sits three bytes before the block's
+    /// own end, too close for the full 24 byte header to fit. The scan must
+    /// not read past `block_end`, so this gives no header, not a header read
+    /// from bytes belonging to whatever follows the block.
+    #[test]
+    fn a_signature_three_bytes_before_the_block_end_reads_no_byte_past_the_bound() {
+        // The region's own physical buffer is 50 bytes, long enough to hold
+        // a complete, real signature and header at `sig_at`. `block_end` is
+        // 20, three bytes past `sig_at`: a caller that trusted the region's
+        // own physical length instead of `block_end` would read a
+        // plausible-looking header from bytes that, logically, belong to
+        // whatever follows this block.
+        let mut bytes = vec![0xAA_u8; 50];
+        let sig_at = 17;
+        let header_bytes = ocx_header_bytes(8, 1, 2, 3);
+        bytes[sig_at..sig_at + header_bytes.len()].copy_from_slice(&header_bytes);
+        let region = Region::new(&bytes, Off::new(0));
+        let (header, _opaque, defects) = read_ocx_blob(&region, 0, 20);
+        assert!(
+            header.is_none(),
+            "synthetic fixture: too little room for the full header must not read past the bound"
+        );
+        assert!(defects.is_empty(), "{defects:?}");
+    }
+
+    #[test]
+    fn a_blob_of_zero_bytes_gives_no_header_and_one_opaque_report_of_length_zero() {
+        let bytes: Vec<u8> = Vec::new();
+        let region = Region::new(&bytes, Off::new(0x5000));
+        let (header, opaque, defects) = read_ocx_blob(&region, 0, 0);
+        assert!(header.is_none());
+        assert!(defects.is_empty(), "{defects:?}");
+        assert_eq!(opaque.length, 0);
+        assert_eq!(opaque.offset, 0x5000);
+    }
+
+    #[test]
+    fn the_opaque_message_names_the_type_library_and_the_repositorys_inability_to_hold_it() {
+        let opaque = super::OpaqueBlob {
+            offset: 0x10,
+            length: 4,
+        };
+        let message = opaque.message();
+        assert!(message.to_ascii_lowercase().find("type library").is_some());
+        assert!(message.find("0x10").is_some(), "{message}");
+    }
+
+    /// A gap of unreadable bytes before the signature (this session
+    /// measured exactly this shape in the real corpus: nine bytes between
+    /// `wsPop`'s own class name and its fixed header) is scanned over, not
+    /// skipped by assuming the header sits at `blob_start`.
+    #[test]
+    fn the_scan_finds_a_signature_that_does_not_sit_at_blob_start() {
+        let mut bytes = vec![0xBB_u8; 9]; // an unrelated gap, matching the corpus shape
+        bytes.extend_from_slice(&ocx_header_bytes(8, 1, 2, 3));
+        let region = Region::new(&bytes, Off::new(0));
+        let block_end = u32::try_from(bytes.len()).unwrap();
+        let (header, opaque, defects) = read_ocx_blob(&region, 0, block_end);
+        let header = header.expect("the scan must find a signature past the gap");
+        assert_eq!(header.extent_x, 1);
+        assert_eq!(header.extent_y, 2);
+        assert_eq!(header.version, 3);
+        assert!(defects.is_empty(), "{defects:?}");
+        assert_eq!(
+            opaque.length, 9,
+            "the 9 byte gap before the header is still reported opaque; the header's own 24 \
+             bytes are not"
+        );
+    }
+
+    /// `SK-Winsock-Sample__VB6`'s own `.frm` declares `_ExtentX = 741`,
+    /// `_ExtentY = 741` and `_Version = 393216` on `wsPop`. This session
+    /// measured the fixed header's own real position: 9 bytes after the
+    /// class name's own declared end, at file offset `0x1d96`.
+    /// `[VERIFIED: local]`
+    #[test]
+    fn the_winsock_sample_gives_its_real_ocx_header_with_non_zero_extents() {
+        let block = wspop_block();
+        let (header, _) = read_control_header(&block);
+        let (control, consumed, defects) = read_external_control(&block, &header);
+        assert!(defects.is_empty(), "{defects:?}");
+
+        let blob_start = header.header_len().checked_add(consumed).unwrap();
+        let length = block.u16_le(Off::new(0)).unwrap();
+        let block_end = u32::from(length) - 1;
+
+        let (ocx_header, _opaque, defects) = read_ocx_blob(&block, blob_start, block_end);
+        assert!(defects.is_empty(), "{defects:?}");
+        let ocx_header = ocx_header.expect("the real Winsock control carries the fixed header");
+        assert_eq!(ocx_header.extent_x, 741);
+        assert_eq!(ocx_header.extent_y, 741);
+        assert_eq!(ocx_header.version, 393_216);
+        assert_ne!(ocx_header.extent_x, 0);
+        assert_ne!(ocx_header.extent_y, 0);
+        // control.class_name still available for readers of this test.
+        assert_eq!(control.class_name, "MSWinsockLib.Winsock");
     }
 }

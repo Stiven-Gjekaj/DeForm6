@@ -234,6 +234,20 @@ pub enum DefectKind {
         /// The value found.
         value: i32,
     },
+
+    /// The fixed OCX header's own reserved field, at offset `0x04` from its
+    /// signature, does not hold the value every known sample gives.
+    ///
+    /// Plan 03-08: `STRUCTURES.md` section 8.7 names the field reserved,
+    /// always `8`. A different value does not lose the three properties
+    /// after it: `_ExtentX`, `_ExtentY` and `_Version` still read.
+    #[error("the reserved field at offset {offset:#x} holds {value:#x}, not the expected value 8")]
+    OcxReservedFieldUnexpected {
+        /// The absolute file offset of the reserved field.
+        offset: u32,
+        /// The value found.
+        value: u32,
+    },
 }
 
 /// How bad a defect is.
@@ -297,6 +311,9 @@ impl DefectKind {
             // A GUIDlength outside the two documented values loses only the
             // textual GUID. The component keeps every other field.
             Self::GuidLengthUnexpected { .. } => Severity::Recoverable,
+            // An unexpected reserved value does not stop the header's other
+            // three fields from reading.
+            Self::OcxReservedFieldUnexpected { .. } => Severity::Recoverable,
         }
     }
 }
