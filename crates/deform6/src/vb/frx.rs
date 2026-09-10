@@ -31,7 +31,7 @@
 //! subregion, and it checks the declared length is at least 8 (a checked
 //! subtraction, never a plain one) before it computes the image byte count.
 
-use crate::error::{Defect, DefectKind, Site};
+use crate::error::{Defect, DefectKind, Refusal, Site};
 use crate::read::region::{Off, Region};
 
 /// The four byte little endian length value that means "the property is
@@ -207,6 +207,154 @@ pub fn extract_blob(block: &Region<'_>, at: Off) -> (Option<Blob>, u32, Option<D
     (Some(blob), consumed, None)
 }
 
+/// The size of the `.frx` item header a `.frx` writer adds around every
+/// blob. The executable does not contain it: `STRUCTURES.md` section 8.8
+/// gives its three fields (`dwSizeImageEx`, `dwKey`, `dwSizeImage`) and
+/// credits Brad Martinez, through SVBD's own `modFrx`, for documenting it.
+pub const FRX_ITEM_HEADER_LEN: u32 = 12;
+
+/// The running `.frx` offset cursor.
+///
+/// `STRUCTURES.md` section 8.8: the `.frx` offset is a cursor a decompiler
+/// synthesises, never a value the file stores. There is exactly one cursor
+/// and exactly one place the offset is computed, in [`BlobCursor::take`]:
+/// the `.frm` writer and the `.frx` writer are one component (phase 4's
+/// plan 04-04), and any independent computation of an offset drifts.
+/// `AGENTS.md`'s measurement rule states the same thing in general terms:
+/// give the number that can be proved, not one calculated from a part.
+///
+/// A form's own cursor starts at 0 and never carries over from a form read
+/// before it: two forms in one program each get their own `.frx` file in
+/// phase 4, so a shared cursor would put the second form's first blob at a
+/// non-zero offset in a file that holds nothing before it. Build a fresh
+/// [`BlobCursor::new`] per form.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BlobCursor {
+    offset: u32,
+}
+
+impl BlobCursor {
+    /// Starts a fresh cursor at offset 0.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { offset: 0 }
+    }
+
+    /// Gives the offset this blob's own `.frx` item would start at, then
+    /// advances the cursor by `blob`'s own declared length plus
+    /// [`FRX_ITEM_HEADER_LEN`], the one place this module computes an
+    /// offset.
+    ///
+    /// # Errors
+    ///
+    /// Refuses, naming the running offset, when the advance would overflow
+    /// a `u32`: a form whose blobs sum past a `u32` cannot produce a valid
+    /// `.frx` offset at all.
+    pub fn take(&mut self, blob: &Blob) -> Result<u32, Refusal> {
+        let current = self.offset;
+        let Some(next) = current
+            .checked_add(blob.declared_len)
+            .and_then(|v| v.checked_add(FRX_ITEM_HEADER_LEN))
+        else {
+            return Err(damaged(format!(
+                "the .frx offset cursor at {current} overflows a u32 advancing past this blob"
+            )));
+        };
+        self.offset = next;
+        Ok(current)
+    }
+}
+
+/// Builds a [`Refusal::Damaged`] whose message is computed at runtime.
+///
+/// The same escape hatch `vb/gui.rs::damaged` and `vb/controltree.rs::damaged`
+/// document: `Refusal::Damaged` takes `&'static str`, and this module's own
+/// required refusal (a running offset that overflows a `u32`) must name a
+/// value computed at run time. Every path that reaches this function is
+/// already fatal to the whole form's own blob recovery.
+fn damaged(message: String) -> Refusal {
+    let leaked: &'static str = Box::leak(message.into_boxed_str());
+    Refusal::Damaged(leaked)
+}
+
+/// A resource blob's container format, detected from its own first bytes.
+///
+/// `STRUCTURES.md` section 8.8: the executable records no format tag for a
+/// blob, so the format is detected the same way any other tool detects an
+/// unlabelled image: from a short signature at the start of the bytes, or
+/// at a fixed offset for EMF. DeForm6 never decodes the image; it
+/// classifies the container and copies the blob verbatim, so an unknown
+/// format costs nothing and a wrong guess would cost the blob. This follows
+/// `vb/classify.rs`'s own discipline: a name for a signature this module
+/// recognises, the raw bytes for one it does not, and no refusal either
+/// way.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ImageFormat {
+    /// `42 4D`.
+    Bmp,
+    /// `47 49 46`.
+    Gif,
+    /// `FF D8`.
+    Jpeg,
+    /// `D7 CD`, the Aldus placeable WMF key.
+    Wmf,
+    /// `20 45 4D 46` at byte offset 40.
+    Emf,
+    /// `00 00 01 00`.
+    Ico,
+    /// `00 00 02 00`.
+    Cur,
+    /// No known signature matched. Carries the first bytes the blob held,
+    /// up to 4, so the report can show what was actually there without
+    /// naming a format nobody proved.
+    Unknown(Vec<u8>),
+}
+
+/// Tells whether `image` holds `signature` at byte offset `at`.
+///
+/// Reads through [`Region::take`], so a blob shorter than `at + signature.len()`
+/// gives `false` rather than a panic: this is "reads no byte past the end"
+/// for every signature check below.
+fn signature_at(image: &[u8], at: u32, signature: &[u8]) -> bool {
+    let region = Region::new(image, Off::new(0));
+    let len = u32::try_from(signature.len()).unwrap_or(0);
+    region.take(Off::new(at), len) == Some(signature)
+}
+
+/// Detects `image`'s own container format from its first bytes, per
+/// [`ImageFormat`]'s own doc comment. Never reads past the end of `image`.
+#[must_use]
+pub fn sniff_format(image: &[u8]) -> ImageFormat {
+    if signature_at(image, 0, &[0x42, 0x4D]) {
+        return ImageFormat::Bmp;
+    }
+    if signature_at(image, 0, &[0x47, 0x49, 0x46]) {
+        return ImageFormat::Gif;
+    }
+    if signature_at(image, 0, &[0xFF, 0xD8]) {
+        return ImageFormat::Jpeg;
+    }
+    if signature_at(image, 0, &[0xD7, 0xCD]) {
+        return ImageFormat::Wmf;
+    }
+    if signature_at(image, 0, &[0x00, 0x00, 0x01, 0x00]) {
+        return ImageFormat::Ico;
+    }
+    if signature_at(image, 0, &[0x00, 0x00, 0x02, 0x00]) {
+        return ImageFormat::Cur;
+    }
+    if signature_at(image, 40, &[0x20, 0x45, 0x4D, 0x46]) {
+        return ImageFormat::Emf;
+    }
+    let region = Region::new(image, Off::new(0));
+    let prefix_len = region.len().min(4);
+    let prefix = region
+        .take(Off::new(0), prefix_len)
+        .map(<[u8]>::to_vec)
+        .unwrap_or_default();
+    ImageFormat::Unknown(prefix)
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -217,7 +365,7 @@ pub fn extract_blob(block: &Region<'_>, at: Off) -> (Option<Blob>, u32, Option<D
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{Blob, extract_blob};
+    use super::{Blob, BlobCursor, FRX_ITEM_HEADER_LEN, ImageFormat, extract_blob, sniff_format};
     use crate::read::region::{Off, Region};
 
     // --- Task 1: the inline blob and its bounds --------------------------
@@ -349,5 +497,121 @@ mod tests {
         let blob = blob.unwrap();
         assert_eq!(blob.image.len(), 12);
         assert_eq!(consumed, 24);
+    }
+
+    // --- Task 2: the running offset cursor and the image format sniff ----
+
+    /// Builds a [`Blob`] with the given declared length; every other field
+    /// is a synthetic placeholder, since `BlobCursor::take` reads only
+    /// `declared_len`.
+    fn a_blob(declared_len: u32) -> Blob {
+        Blob {
+            header: [0u8; 8],
+            image: Vec::new(),
+            declared_len,
+            offset: 0,
+        }
+    }
+
+    #[test]
+    fn frx_item_header_len_is_twelve() {
+        assert_eq!(FRX_ITEM_HEADER_LEN, 12);
+    }
+
+    #[test]
+    fn a_fresh_cursor_starts_at_zero() {
+        let mut cursor = BlobCursor::new();
+        let offset = cursor.take(&a_blob(8)).unwrap();
+        assert_eq!(offset, 0);
+    }
+
+    #[test]
+    fn three_blobs_of_length_8_108_and_8_give_offsets_0_20_and_140() {
+        let mut cursor = BlobCursor::new();
+        let first = cursor.take(&a_blob(8)).unwrap();
+        let second = cursor.take(&a_blob(108)).unwrap();
+        let third = cursor.take(&a_blob(8)).unwrap();
+        assert_eq!(
+            [first, second, third],
+            [0, 20, 140],
+            "the plus 12 must apply once per blob, not once per form"
+        );
+    }
+
+    #[test]
+    fn a_new_form_starts_its_cursor_at_zero_after_a_previous_form_advanced_it() {
+        let mut first_form = BlobCursor::new();
+        first_form.take(&a_blob(108)).unwrap();
+        assert_ne!(first_form.take(&a_blob(8)).unwrap(), 0);
+
+        let mut second_form = BlobCursor::new();
+        let offset = second_form.take(&a_blob(8)).unwrap();
+        assert_eq!(
+            offset, 0,
+            "a second form's own cursor must not carry over the first form's"
+        );
+    }
+
+    #[test]
+    fn take_gives_a_refusal_naming_the_offset_when_the_advance_overflows_a_u32() {
+        let mut cursor = BlobCursor::new();
+        // The first take leaves the cursor at u32::MAX - 8: close to the
+        // edge, but a valid offset. The second take's own advance (8 plus
+        // the item header) then overflows.
+        cursor.take(&a_blob(u32::MAX - 20)).unwrap();
+        let err = cursor.take(&a_blob(8)).unwrap_err();
+        let message = format!("{err}");
+        assert!(!message.is_empty());
+    }
+
+    #[test]
+    fn sniff_format_recognises_each_of_the_six_first_byte_signatures() {
+        assert_eq!(sniff_format(&[0x42, 0x4D, 0, 0]), ImageFormat::Bmp);
+        assert_eq!(sniff_format(&[0x47, 0x49, 0x46, 0]), ImageFormat::Gif);
+        assert_eq!(sniff_format(&[0xFF, 0xD8, 0, 0]), ImageFormat::Jpeg);
+        assert_eq!(sniff_format(&[0xD7, 0xCD, 0, 0]), ImageFormat::Wmf);
+        assert_eq!(sniff_format(&[0x00, 0x00, 0x01, 0x00]), ImageFormat::Ico);
+        assert_eq!(sniff_format(&[0x00, 0x00, 0x02, 0x00]), ImageFormat::Cur);
+    }
+
+    #[test]
+    fn sniff_format_finds_the_emf_signature_at_offset_forty() {
+        let mut image = vec![0u8; 40];
+        image.extend_from_slice(&[0x20, 0x45, 0x4D, 0x46]);
+        assert_eq!(sniff_format(&image), ImageFormat::Emf);
+    }
+
+    #[test]
+    fn sniff_format_on_an_unrecognised_prefix_gives_unknown_and_carries_the_bytes() {
+        let image = [0x99, 0x88, 0x77, 0x66];
+        assert_eq!(
+            sniff_format(&image),
+            ImageFormat::Unknown(vec![0x99, 0x88, 0x77, 0x66])
+        );
+    }
+
+    #[test]
+    fn sniff_format_on_a_blob_of_zero_image_bytes_gives_unknown_with_no_panic() {
+        assert_eq!(sniff_format(&[]), ImageFormat::Unknown(Vec::new()));
+    }
+
+    #[test]
+    fn sniff_format_on_a_blob_shorter_than_the_signature_it_needs_reads_no_byte_past_the_end() {
+        // 20 bytes: far short of the 44 the EMF signature needs (offset 40
+        // plus its own 4 bytes). Must not panic and must not falsely match.
+        let image = vec![0u8; 20];
+        assert_ne!(sniff_format(&image), ImageFormat::Emf);
+    }
+
+    #[test]
+    fn a_zero_length_blob_still_advances_the_cursor_by_the_item_header_alone() {
+        // A short blob still round-trips through the cursor: this proves
+        // BlobCursor::take reads declared_len off the Blob it is given,
+        // not a constant.
+        let mut cursor = BlobCursor::new();
+        let offset = cursor.take(&a_blob(0)).unwrap();
+        assert_eq!(offset, 0);
+        let expected_second_offset = FRX_ITEM_HEADER_LEN;
+        assert_eq!(cursor.take(&a_blob(0)).unwrap(), expected_second_offset);
     }
 }
