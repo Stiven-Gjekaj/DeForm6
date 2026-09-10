@@ -233,6 +233,99 @@ impl FormStream<'_> {
     }
 }
 
+/// The phase's byte accounting rule: a running count of the bytes a control
+/// tree walk has consumed, checked against `GUIObjectInfo.lPropertiesLength`
+/// at the end of the walk.
+///
+/// `Tiling` is a small accounting type, not a parser. It holds the declared
+/// length, the running count of bytes the caller has accounted for, and the
+/// file offset the stream starts at (used only to build the refusal
+/// message; a `Tiling` a test builds with only [`Tiling::new`] reports
+/// offset `0x0`). It allocates nothing.
+///
+/// This is a `Refusal`, not a per-item `Defect`: a tiling mismatch
+/// invalidates the whole tree, not one control, the same distinction
+/// `vb/object.rs`'s own `Refusal` vs. `Defect` split makes.
+#[derive(Debug)]
+pub struct Tiling {
+    declared: u32,
+    consumed: u32,
+    at: u32,
+}
+
+impl Tiling {
+    /// Starts an accounting run at zero consumed bytes.
+    #[must_use]
+    pub const fn new(l_properties_length: u32) -> Self {
+        Self {
+            declared: l_properties_length,
+            consumed: 0,
+            at: 0,
+        }
+    }
+
+    /// Sets the absolute file offset the stream starts at, for the refusal
+    /// message `finish` builds.
+    #[must_use]
+    pub const fn at(mut self, offset: u32) -> Self {
+        self.at = offset;
+        self
+    }
+
+    /// Adds `n` bytes to the running total.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Refusal::Damaged`] naming the running total when `n` would
+    /// overflow a `u32`.
+    pub fn account(&mut self, n: u32) -> Result<(), Refusal> {
+        match self.consumed.checked_add(n) {
+            Some(total) => {
+                self.consumed = total;
+                Ok(())
+            }
+            None => Err(damaged(format!(
+                "the property stream tiling total overflows a u32 while adding {n} bytes \
+                 to a running total of {}",
+                self.consumed
+            ))),
+        }
+    }
+
+    /// Compares the running total against the declared length.
+    ///
+    /// Under-consumption and over-consumption are two different faults:
+    /// under-consumption means the walk stopped early and the tree is
+    /// short; over-consumption means the walk read past the end of the
+    /// declared stream and every byte after the divergence point is
+    /// unsound. Each gets its own message.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Refusal::Damaged`] naming the byte offset and the count of
+    /// bytes short, when the total is below the declared length, and a
+    /// distinct message naming the byte offset and the count of bytes past
+    /// the declared end, when it is above.
+    pub fn finish(&self) -> Result<(), Refusal> {
+        match self.declared.checked_sub(self.consumed) {
+            Some(0) => Ok(()),
+            Some(missing) => Err(damaged(format!(
+                "the property stream at file offset {:#x} declares {} bytes; the control \
+                 tree walk consumed {} and left {missing} byte(s) unaccounted for",
+                self.at, self.declared, self.consumed
+            ))),
+            None => {
+                let excess = self.consumed.saturating_sub(self.declared);
+                Err(damaged(format!(
+                    "the property stream at file offset {:#x} declares {} bytes; the \
+                     control tree walk consumed {}, {excess} byte(s) past the declared end",
+                    self.at, self.declared, self.consumed
+                )))
+            }
+        }
+    }
+}
+
 /// Builds a [`Refusal::Damaged`] whose message is computed at runtime.
 ///
 /// `Refusal::Damaged` takes `&'static str`. Every other call site in this
@@ -263,7 +356,7 @@ fn damaged(message: String) -> Refusal {
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{GUI_ENTRY_SIZE, GuiObjectInfo, GuiTable};
+    use super::{GUI_ENTRY_SIZE, GuiObjectInfo, GuiTable, Tiling};
     use crate::error::Refusal;
     use crate::read::pe::PeImage;
     use crate::read::region::Va;
@@ -456,5 +549,103 @@ mod tests {
             panic!("expected Refusal::Damaged, got {err:?}");
         };
         assert!(message.contains("4294967040"), "{message}");
+    }
+
+    #[test]
+    fn a_fresh_tiling_run_starts_at_zero_consumed_bytes() {
+        // A declared length of zero and nothing accounted for finishes Ok:
+        // the only way that can hold is if `new` starts `consumed` at zero.
+        assert_eq!(Tiling::new(0).finish(), Ok(()));
+        // A non-zero declared length with nothing accounted for is refused,
+        // which only distinguishes from the zero case if `consumed` truly
+        // started at zero rather than already matching `declared`.
+        assert!(Tiling::new(5).finish().is_err());
+    }
+
+    #[test]
+    fn two_adjacent_spans_that_sum_to_the_declared_length_finish_ok() {
+        let mut tiling = Tiling::new(30);
+        tiling.account(10).unwrap();
+        tiling.account(20).unwrap();
+        assert_eq!(tiling.finish(), Ok(()));
+    }
+
+    #[test]
+    fn the_same_spans_against_a_declared_length_of_31_report_one_unaccounted_byte() {
+        let mut tiling = Tiling::new(31);
+        tiling.account(10).unwrap();
+        tiling.account(20).unwrap();
+        let err = tiling.finish().unwrap_err();
+        let Refusal::Damaged(message) = err else {
+            panic!("expected Refusal::Damaged, got {err:?}");
+        };
+        assert!(
+            message.contains('1'),
+            "the message does not name the one unaccounted byte: {message}"
+        );
+    }
+
+    #[test]
+    fn an_under_consuming_walk_is_refused_and_the_message_differs_from_over_consumption() {
+        let mut tiling = Tiling::new(100);
+        tiling.account(40).unwrap();
+        let err = tiling.finish().unwrap_err();
+        let Refusal::Damaged(under_message) = err else {
+            panic!("expected Refusal::Damaged, got {err:?}");
+        };
+
+        let mut over = Tiling::new(100);
+        over.account(140).unwrap();
+        let err = over.finish().unwrap_err();
+        let Refusal::Damaged(over_message) = err else {
+            panic!("expected Refusal::Damaged, got {err:?}");
+        };
+
+        assert_ne!(
+            under_message, over_message,
+            "under-consumption and over-consumption must read differently"
+        );
+        assert!(under_message.contains("60"), "{under_message}");
+        assert!(over_message.contains("40"), "{over_message}");
+    }
+
+    #[test]
+    fn a_zero_length_span_is_accepted_and_adds_nothing() {
+        let mut tiling = Tiling::new(30);
+        tiling.account(30).unwrap();
+        tiling.account(0).unwrap();
+        assert_eq!(tiling.finish(), Ok(()));
+    }
+
+    #[test]
+    fn account_refuses_on_overflow_and_names_the_running_total() {
+        let mut tiling = Tiling::new(u32::MAX);
+        tiling.account(u32::MAX - 1).unwrap();
+        let err = tiling.account(2).unwrap_err();
+        let Refusal::Damaged(message) = err else {
+            panic!("expected Refusal::Damaged, got {err:?}");
+        };
+        assert!(message.contains(&(u32::MAX - 1).to_string()), "{message}");
+    }
+
+    #[test]
+    fn the_lock_work_station_stream_tiles_exactly_with_a_three_byte_tail() {
+        // 03-RESEARCH.md Pattern 1: lPropertiesLength is 79, the single
+        // control block's Length is 74 (span 76 with its own +2), and a
+        // 3 byte tail completes the total: 76 + 3 = 79.
+        let image = PeImage::parse(LOCK_WORK_STATION).unwrap();
+        let table = lock_work_station_gui_table();
+        let info = GuiObjectInfo::read(&image, table.entries[0].a_form_pointer).unwrap();
+        let stream = info.form_stream().unwrap();
+
+        let block_length = u32::from(stream.length().unwrap());
+        let block_span = block_length.checked_add(2).unwrap();
+        let tail = info.l_properties_length.checked_sub(block_span).unwrap();
+        assert_eq!(tail, 3, "the measured tail must still be 3 bytes");
+
+        let mut tiling = Tiling::new(info.l_properties_length);
+        tiling.account(block_span).unwrap();
+        tiling.account(tail).unwrap();
+        assert_eq!(tiling.finish(), Ok(()));
     }
 }
