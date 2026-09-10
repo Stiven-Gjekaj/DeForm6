@@ -2,7 +2,8 @@
 //! the `Font` block, and the other special opcodes `03-RESEARCH.md` section
 //! 8.5 names.
 //!
-//! Plan 03-06 fills this module. It serves FRM-03.
+//! Plan 03-06 fills this module. It serves FRM-03. Plan 03-15 wires the
+//! resource blob arm to [`crate::vb::frx::extract_blob`]; it serves FRM-05.
 //!
 //! # The loop bound
 //!
@@ -28,9 +29,10 @@
 //! carries the opcode, the byte offset, and the control type, and names
 //! `--opcode-table` as the way to supply a table that decodes it.
 
-use crate::error::{Defect, DefectKind, Site};
+use crate::error::{Defect, DefectKind, Refusal, Site};
 use crate::read::region::{Off, Region};
 use crate::vb::controltree::{ControlHeader, classify_control_type};
+use crate::vb::frx::{self, BlobCursor};
 use crate::vb::opcodes::{OpcodeTable, PayloadType};
 use crate::vb::vbstr::{StrEncoding, VbStr};
 
@@ -106,6 +108,61 @@ pub enum PropertyValue {
         /// The font's own charset, style, weight, size and name.
         value: FontBlock,
     },
+    /// A recovered resource blob, `Picture`'s own payload shape, read
+    /// through [`frx::extract_blob`].
+    ///
+    /// Carries the facts a reader and a phase 4 `.frx` writer need, never
+    /// the blob's own bytes: `extract_blob` already holds them in memory
+    /// for exactly as long as this call needs them, and a second copy
+    /// inside the report would sit in every [`crate::vb::ControlReport`] a
+    /// form's blobs pass through for no consumer this plan has. A future
+    /// `.frx` writer re-reads `offset..offset + 4 + declared_len` out of
+    /// the executable's own bytes, the same range `extract_blob` read them
+    /// from, whenever it needs the bytes themselves; this plan's own end to
+    /// end test (`tests/blobs.rs`) does the same over the corpus executable
+    /// it already holds in memory, and compares the result against the
+    /// committed `.frx` beside it.
+    Blob {
+        /// The property this opcode names (`Icon`, not `Picture`: plan
+        /// 03-13's own corpus-measured row already gives the `.frm`'s own
+        /// name).
+        name: String,
+        /// The absolute file offset of the blob's own four byte length
+        /// field.
+        offset: u32,
+        /// The blob's own declared length (`blobLen`): the eight byte
+        /// inline picture header plus the image bytes.
+        declared_len: u32,
+        /// The image byte count: `declared_len - 8`.
+        image_len: u32,
+        /// The container format [`frx::sniff_format`] detected from the
+        /// image's own first bytes.
+        format: frx::ImageFormat,
+        /// The `.frx` offset [`BlobCursor::take`] gave this blob: where a
+        /// phase 4 writer would place it in the generated `.frx` file.
+        frx_offset: u32,
+    },
+    /// A resource blob this repository could not read: present in the
+    /// file, but its own bound check refused.
+    ///
+    /// Distinct from [`PropertyValue::Undecoded`] (an opcode this
+    /// repository names no decoder for) and from a plain absence (the file
+    /// itself marks the property `0xFFFFFFFF`, which produces no property
+    /// value at all): this state means the opcode names a resource blob,
+    /// the file marks one present, and its own length field or its own
+    /// bytes refused a bound check. The defect [`frx::extract_blob`]
+    /// returned is carried into [`walk_properties`]'s own defect list, and
+    /// this value stays in the property list rather than being dropped, so
+    /// a reader never mistakes an unreadable blob for one the file simply
+    /// does not set.
+    BlobUnreadable {
+        /// The property this opcode names.
+        name: String,
+        /// The absolute file offset of the blob's own four byte length
+        /// field, or of whichever earlier field this blob's own read
+        /// refused at.
+        offset: u32,
+    },
     /// An opcode this repository does not decode.
     ///
     /// Two distinct causes share this one variant: no table entry names the
@@ -152,7 +209,9 @@ impl PropertyValue {
             | Self::Single { .. }
             | Self::Text { .. }
             | Self::Position { .. }
-            | Self::Font { .. } => None,
+            | Self::Font { .. }
+            | Self::Blob { .. }
+            | Self::BlobUnreadable { .. } => None,
         }
     }
 }
@@ -196,6 +255,32 @@ fn overrun_defect(offset: u32, payload_end: u32, block_end: u32) -> Defect {
             offset,
             count: payload_end,
             max: block_end,
+        },
+    }
+}
+
+/// Builds the [`Defect`] for a `.frx` offset cursor that refused to
+/// advance: [`BlobCursor::take`]'s own `u32` overflow refusal, converted
+/// from a [`Refusal`] into a per-property defect. This is the one place
+/// `walk_properties` reaches a `Refusal` rather than an `Option`, because
+/// `BlobCursor::take` is the one function in this crate that must name a
+/// value (the running `.frx` offset) no `&'static str` can carry.
+///
+/// No corpus program reaches this: it needs a form whose blobs sum past a
+/// `u32`, which requires billions of bytes of resource data in one file.
+/// It exists for the hostile file the corpus does not contain, per
+/// `AGENTS.md`'s "no panic on any input, ever".
+fn blob_cursor_defect(offset: u32, refusal: &Refusal) -> Defect {
+    Defect {
+        site: Site {
+            offset,
+            rva: None,
+            structure: "BlobCursor",
+            field: "take",
+        },
+        kind: DefectKind::StructureUnreadable {
+            offset,
+            reason: refusal.to_string(),
         },
     }
 }
@@ -593,18 +678,30 @@ fn read_scale_mode(block: &Region<'_>, payload_start: u32, block_end: u32) -> Re
 /// stream begins at. `table` resolves each opcode to a name and a payload
 /// shape. On a Form or MDIForm control, [`read_special_opcode`] is tried
 /// first, per `STRUCTURES.md` section 8.5.1; a resolved
-/// [`PayloadType::Picture`] entry is not yet decoded by this reader (see the
-/// module doc comment): it becomes a [`PropertyValue::Undecoded`] and stops
-/// the loop, the same honest treatment a genuinely unnamed opcode gets.
+/// [`PayloadType::Picture`] entry calls [`frx::extract_blob`] and advances
+/// the cursor by the count that call returns, never by a count this
+/// function computes.
+///
+/// `blob_cursor` is one form's own [`BlobCursor`]: the caller
+/// (`vb/mod.rs::compose_form`) owns one per form and threads it by mutable
+/// reference through every control that form's own tree holds, in control
+/// tree order, so a blob's `.frx` offset is assigned in the order the
+/// property stream holds and a second form starts its own cursor at 0.
 ///
 /// Gives `(PropertyStream, Vec<Defect>)`. A payload that would end past the
 /// block's own end is never truncated to fit: it gives a [`Defect`] and
-/// stops the loop, and no value is reported for it.
+/// stops the loop, and no value is reported for it. A resource blob the
+/// file marks absent gives neither a value nor a defect, and does not stop
+/// the loop; a resource blob the file marks present but that this reader
+/// could not read gives a [`PropertyValue::BlobUnreadable`], carries its
+/// own defect into the returned list, and does stop the loop, the same
+/// honest treatment every other unreadable payload in this function gets.
 #[must_use]
 pub fn walk_properties(
     block: &Region<'_>,
     header: &ControlHeader,
     table: &OpcodeTable,
+    blob_cursor: &mut BlobCursor,
 ) -> (PropertyStream, Vec<Defect>) {
     let mut properties = Vec::new();
     let mut defects = Vec::new();
@@ -740,18 +837,61 @@ pub fn walk_properties(
                     }
                 },
                 PayloadType::Picture => {
-                    // `Picture` (a resource blob) is not decoded by this
-                    // reader through the whole of this plan; `frx.rs`,
-                    // plan 03-07, owns blob extraction.
-                    let bytes_not_read = block_end.saturating_sub(cursor);
-                    properties.push(PropertyValue::Undecoded {
-                        opcode,
-                        offset: opcode_offset,
-                        control_type: control_type_name.clone(),
-                        bytes_not_read,
-                    });
-                    cursor = block_end;
-                    break;
+                    // `frx::extract_blob` owns every bound check on the
+                    // declared length and the block's own remaining bytes;
+                    // this arm computes no width of its own and never
+                    // repeats a check `extract_blob` already made.
+                    let (blob, consumed, defect) =
+                        frx::extract_blob(block, Off::new(payload_start));
+                    match blob {
+                        Some(blob) => match blob_cursor.take(&blob) {
+                            Ok(frx_offset) => {
+                                let image_len = u32::try_from(blob.image.len()).unwrap_or(u32::MAX);
+                                let format = frx::sniff_format(&blob.image);
+                                properties.push(PropertyValue::Blob {
+                                    name: entry.name.clone(),
+                                    offset: blob.offset,
+                                    declared_len: blob.declared_len,
+                                    image_len,
+                                    format,
+                                    frx_offset,
+                                });
+                                let Some(new_cursor) = payload_start.checked_add(consumed) else {
+                                    break;
+                                };
+                                cursor = new_cursor;
+                            }
+                            Err(refusal) => {
+                                defects.push(blob_cursor_defect(blob.offset, &refusal));
+                                properties.push(PropertyValue::BlobUnreadable {
+                                    name: entry.name.clone(),
+                                    offset: blob.offset,
+                                });
+                                cursor = block_end;
+                                break;
+                            }
+                        },
+                        None => match defect {
+                            Some(d) => {
+                                let unreadable_offset = d.site.offset;
+                                defects.push(d);
+                                properties.push(PropertyValue::BlobUnreadable {
+                                    name: entry.name.clone(),
+                                    offset: unreadable_offset,
+                                });
+                                cursor = block_end;
+                                break;
+                            }
+                            None => {
+                                // Absent (`0xFFFFFFFF`): no property, no
+                                // defect, and the loop continues.
+                                let Some(new_cursor) = payload_start.checked_add(consumed) else {
+                                    break;
+                                };
+                                cursor = new_cursor;
+                            }
+                        },
+                    }
                 }
                 PayloadType::Byte
                 | PayloadType::Boolean
@@ -795,7 +935,8 @@ pub fn walk_properties(
 )]
 mod tests {
     use super::{
-        PositionBlock, PropertyValue, read_font_block, read_position_block, walk_properties,
+        BlobCursor, PositionBlock, PropertyValue, read_font_block, read_position_block,
+        walk_properties,
     };
     use crate::error::DefectKind;
     use crate::read::region::{Off, Region};
@@ -842,7 +983,7 @@ mod tests {
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
         let table = OpcodeTable::builtin();
-        let (stream, defects) = walk_properties(&region, &header, &table);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
         assert!(stream.properties.is_empty());
         assert!(defects.is_empty(), "{defects:?}");
     }
@@ -855,7 +996,7 @@ mod tests {
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
         let table = form_byte_table();
-        let (stream, defects) = walk_properties(&region, &header, &table);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
         assert_eq!(stream.properties.len(), 1);
         assert!(matches!(
             &stream.properties[0],
@@ -875,7 +1016,7 @@ mod tests {
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
         let table = form_byte_table();
-        let (stream, defects) = walk_properties(&region, &header, &table);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
         assert!(stream.properties.is_empty(), "{:?}", stream.properties);
         assert_eq!(defects.len(), 1);
         let message = format!("{}", defects[0].kind);
@@ -898,7 +1039,7 @@ mod tests {
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
         let table = OpcodeTable::builtin(); // holds no entry for Form opcode 200 here
-        let (stream, defects) = walk_properties(&region, &header, &table);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
         assert_eq!(stream.properties.len(), 1);
         match &stream.properties[0] {
             PropertyValue::Undecoded {
@@ -940,7 +1081,7 @@ mod tests {
         let bytes = control_block("Cmd", 4, &body);
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
-        let (stream, defects) = walk_properties(&region, &header, &table);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
         assert_eq!(stream.properties.len(), 3, "{:?}", stream.properties);
         assert!(matches!(
             &stream.properties[0],
@@ -968,7 +1109,7 @@ mod tests {
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
         let table = OpcodeTable::builtin();
-        let (stream, defects) = walk_properties(&region, &header, &table);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
         assert_eq!(stream.properties.len(), 1);
         assert!(matches!(
             &stream.properties[0],
@@ -1017,7 +1158,7 @@ mod tests {
         let bytes = control_block("Cmd", 4, &[1, 0xFF, 0xFF]);
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
-        let (stream, _) = walk_properties(&region, &header, &table);
+        let (stream, _) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
         assert!(matches!(
             &stream.properties[0],
             PropertyValue::Boolean { value: -1, .. }
@@ -1026,7 +1167,7 @@ mod tests {
         let bytes = control_block("Cmd", 4, &[1, 0x00, 0x00]);
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
-        let (stream, _) = walk_properties(&region, &header, &table);
+        let (stream, _) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
         assert!(matches!(
             &stream.properties[0],
             PropertyValue::Boolean { value: 0, .. }
@@ -1044,7 +1185,7 @@ mod tests {
         let bytes = control_block("Cmd", 4, &body);
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
-        let (stream, defects) = walk_properties(&region, &header, &table);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
         assert_eq!(stream.properties.len(), 1);
         assert!(matches!(
             &stream.properties[0],
@@ -1061,7 +1202,7 @@ mod tests {
         let bytes = control_block("Cmd", 4, &[10, 1, 11, 2]);
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
-        let (stream, defects) = walk_properties(&region, &header, &table);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
         assert_eq!(stream.properties.len(), 2);
         assert!(matches!(
             &stream.properties[0],
@@ -1188,7 +1329,7 @@ mod tests {
         let bytes = control_block("Cmd", 4, &body);
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
-        let (stream, defects) = walk_properties(&region, &header, &table);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
         assert_eq!(stream.properties.len(), 2, "{:?}", stream.properties);
         assert!(matches!(
             &stream.properties[0],
@@ -1292,7 +1433,7 @@ mod tests {
         let bytes = control_block("Frm1", 13, &body);
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
-        let (stream, defects) = walk_properties(&region, &header, &table);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
         assert_eq!(stream.properties.len(), 2, "{:?}", stream.properties);
         assert!(matches!(&stream.properties[0], PropertyValue::Font { .. }));
         assert!(matches!(
@@ -1314,7 +1455,7 @@ mod tests {
         let bytes = control_block("Frm1", 13, &body);
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
-        let (stream, defects) = walk_properties(&region, &header, &table);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
         assert_eq!(stream.properties.len(), 1, "{:?}", stream.properties);
         assert!(
             matches!(&stream.properties[0], PropertyValue::Byte { value: 3, .. }),
@@ -1335,7 +1476,7 @@ mod tests {
         let bytes = control_block("Frm1", 13, &body);
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
-        let (stream, defects) = walk_properties(&region, &header, &table);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
         assert_eq!(stream.properties.len(), 1, "{:?}", stream.properties);
         assert!(matches!(
             &stream.properties[0],
@@ -1352,7 +1493,8 @@ mod tests {
             let bytes = control_block("Frm1", 13, &body);
             let region = Region::new(&bytes, Off::new(0));
             let (header, _) = read_control_header(&region);
-            let (stream, defects) = walk_properties(&region, &header, &table);
+            let (stream, defects) =
+                walk_properties(&region, &header, &table, &mut BlobCursor::new());
             assert_eq!(
                 stream.properties.len(),
                 1,
@@ -1378,7 +1520,7 @@ mod tests {
         let bytes = control_block("Cmd", 4, &body);
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
-        let (stream, defects) = walk_properties(&region, &header, &table);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
         assert_eq!(stream.properties.len(), 1);
         assert!(matches!(
             &stream.properties[0],
@@ -1394,7 +1536,7 @@ mod tests {
         let bytes = control_block("Mdi1", 20, &body);
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
-        let (stream, defects) = walk_properties(&region, &header, &table);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
         assert_eq!(stream.properties.len(), 1);
         assert!(matches!(
             &stream.properties[0],
@@ -1429,7 +1571,8 @@ mod tests {
         assert_eq!(control_header.c_type, 13, "the form's own cType");
 
         let table = OpcodeTable::builtin();
-        let (props, _defects) = walk_properties(&region, &control_header, &table);
+        let (props, _defects) =
+            walk_properties(&region, &control_header, &table, &mut BlobCursor::new());
 
         // The form's own first property, WindowState (opcode 10, Byte), is
         // resolved from the safe-provenance subset.
@@ -1453,6 +1596,164 @@ mod tests {
             "stopped_at {:#x} must not run past the block's own end {:#x}",
             props.stopped_at,
             block_end_offset.get()
+        );
+    }
+
+    // --- Plan 03-15, Task 2: the resource blob arm calls extract_blob -----
+
+    /// A hand-written table naming opcode 1 `Icon` (`Picture`) and opcode 2
+    /// `After` (`Byte`), on control type 4, so a test can prove the blob
+    /// arm advances the cursor by the count `extract_blob` returned and the
+    /// loop reaches the property right after it.
+    fn picture_table() -> OpcodeTable {
+        let text = concat!(
+            "[4]\n",
+            "1 = { name = \"Icon\", payload = \"Picture\" }\n",
+            "2 = { name = \"After\", payload = \"Byte\" }\n",
+        );
+        OpcodeTable::parse(text.as_bytes()).unwrap()
+    }
+
+    /// Gives the `.frx` offset of the property list's own first
+    /// [`PropertyValue::Blob`], or `None` when it holds none.
+    fn first_blob_frx_offset(properties: &[PropertyValue]) -> Option<u32> {
+        properties.iter().find_map(|p| match p {
+            PropertyValue::Blob { frx_offset, .. } => Some(*frx_offset),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn the_resource_blob_arm_advances_by_the_count_extract_blob_returned() {
+        let table = picture_table();
+        let mut body = vec![1u8]; // opcode 1 = Icon (Picture)
+        body.extend_from_slice(&12_u32.to_le_bytes()); // declared_len = 12
+        body.extend_from_slice(&[0xAA; 8]); // the 8 byte inline header
+        body.extend_from_slice(&[0xBB; 4]); // 12 - 8 = 4 image bytes
+        body.push(2); // opcode 2 = After (Byte), right after the blob
+        body.push(7);
+        let bytes = control_block("Cmd", 4, &body);
+        let region = Region::new(&bytes, Off::new(0));
+        let (header, _) = read_control_header(&region);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
+
+        assert_eq!(stream.properties.len(), 2, "{:?}", stream.properties);
+        match &stream.properties[0] {
+            PropertyValue::Blob {
+                name,
+                declared_len,
+                image_len,
+                frx_offset,
+                ..
+            } => {
+                assert_eq!(name, "Icon");
+                assert_eq!(*declared_len, 12);
+                assert_eq!(*image_len, 4);
+                assert_eq!(
+                    *frx_offset, 0,
+                    "the first blob a fresh cursor gives must start at 0"
+                );
+            }
+            other => panic!("expected Blob, got {other:?}"),
+        }
+        assert!(
+            matches!(&stream.properties[1], PropertyValue::Byte { name, value: 7 } if name == "After"),
+            "the arm must never compute a width of its own: the property right after the blob \
+             must be read at the position extract_blob's own consumed count landed on, {:?}",
+            stream.properties[1]
+        );
+        assert!(defects.is_empty(), "{defects:?}");
+    }
+
+    #[test]
+    fn an_absent_resource_property_gives_no_blob_no_defect_and_does_not_stop_the_loop() {
+        let table = picture_table();
+        let mut body = vec![1u8]; // opcode 1 = Icon (Picture)
+        body.extend_from_slice(&0xFFFF_FFFF_u32.to_le_bytes()); // absent
+        body.push(2); // opcode 2 = After (Byte), right after
+        body.push(9);
+        let bytes = control_block("Cmd", 4, &body);
+        let region = Region::new(&bytes, Off::new(0));
+        let (header, _) = read_control_header(&region);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
+
+        assert_eq!(
+            stream.properties.len(),
+            1,
+            "an absent blob reports no property at all for its own opcode: {:?}",
+            stream.properties
+        );
+        assert!(
+            matches!(&stream.properties[0], PropertyValue::Byte { name, value: 9 } if name == "After"),
+            "the loop must continue past the absent marker: {:?}",
+            stream.properties[0]
+        );
+        assert!(defects.is_empty(), "{defects:?}");
+    }
+
+    #[test]
+    fn an_unreadable_blob_is_reported_present_and_unreadable_with_its_byte_offset() {
+        // A declared length of 3 cannot hold its own 8 byte header (the
+        // same shape frx.rs's own
+        // `a_length_of_three_gives_a_defect_naming_the_value_and_the_offset`
+        // test proves at the `extract_blob` layer); three padding bytes
+        // keep the length field itself inside the block, so this exercises
+        // the "too small for its own header" refusal, not "runs past the
+        // block's own end".
+        let table = picture_table();
+        let mut body = vec![1u8]; // opcode 1 = Icon (Picture)
+        body.extend_from_slice(&3_u32.to_le_bytes());
+        body.extend_from_slice(&[0, 0, 0]);
+        let bytes = control_block("Cmd", 4, &body);
+        let region = Region::new(&bytes, Off::new(0));
+        let (header, _) = read_control_header(&region);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
+
+        assert_eq!(stream.properties.len(), 1, "{:?}", stream.properties);
+        match &stream.properties[0] {
+            PropertyValue::BlobUnreadable { name, offset } => {
+                assert_eq!(name, "Icon");
+                assert!(*offset > 0, "the byte offset must be carried, not zero");
+            }
+            other => panic!(
+                "expected BlobUnreadable, distinguishable from the absent case's empty \
+                 property list, got {other:?}"
+            ),
+        }
+        assert_eq!(defects.len(), 1, "{defects:?}");
+        assert!(matches!(
+            defects[0].kind,
+            DefectKind::BlobLenTooSmall { .. }
+        ));
+    }
+
+    #[test]
+    fn two_forms_in_one_program_each_start_their_own_blob_cursor_at_zero() {
+        let table = picture_table();
+        let mut body = vec![1u8]; // opcode 1 = Icon (Picture)
+        body.extend_from_slice(&12_u32.to_le_bytes());
+        body.extend_from_slice(&[0xAA; 8]);
+        body.extend_from_slice(&[0xBB; 4]);
+
+        // Two entirely separate control blocks, each read through its own
+        // fresh `BlobCursor`, the same shape `compose_form` gives every
+        // form: a local `BlobCursor::new()`, never carried over from a
+        // form composed before it.
+        let bytes_a = control_block("FrmA", 4, &body);
+        let region_a = Region::new(&bytes_a, Off::new(0));
+        let (header_a, _) = read_control_header(&region_a);
+        let (stream_a, _) = walk_properties(&region_a, &header_a, &table, &mut BlobCursor::new());
+
+        let bytes_b = control_block("FrmB", 4, &body);
+        let region_b = Region::new(&bytes_b, Off::new(0));
+        let (header_b, _) = read_control_header(&region_b);
+        let (stream_b, _) = walk_properties(&region_b, &header_b, &table, &mut BlobCursor::new());
+
+        assert_eq!(first_blob_frx_offset(&stream_a.properties), Some(0));
+        assert_eq!(
+            first_blob_frx_offset(&stream_b.properties),
+            Some(0),
+            "a second form's own cursor must not carry over the first form's"
         );
     }
 }

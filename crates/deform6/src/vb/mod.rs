@@ -391,20 +391,15 @@ pub fn inspect(data: &[u8], opcode_table: &OpcodeTable) -> Result<Report, Refusa
     // property stream, its control tree, its `ControlInfoTable`) is
     // per-form recoverable instead; see `compose_form`.
     let gui_table = GuiTable::walk(&pe, &header)?;
+    let tables = ComposeTables {
+        opcode_table,
+        components: &component_table,
+        event_names: &event_names,
+    };
     let forms: Vec<FormReport> = gui_table
         .entries
         .iter()
-        .map(|entry| {
-            compose_form(
-                &pe,
-                entry,
-                &object_table.objects,
-                opcode_table,
-                &component_table,
-                &event_names,
-                &mut defects,
-            )
-        })
+        .map(|entry| compose_form(&pe, entry, &object_table.objects, &tables, &mut defects))
         .collect();
 
     Ok(Report {
@@ -547,6 +542,27 @@ fn structure_defect(offset: u32, structure: &'static str, refusal: &Refusal) -> 
     }
 }
 
+/// The three read-only lookup tables every control needs while composing
+/// its report: the opcode table, the external component table, and the
+/// event name table.
+///
+/// `compose_form` and `compose_control` both thread all three, unchanged,
+/// through every form and every control in one run; grouping them into one
+/// struct keeps each function's own argument count under
+/// `clippy::too_many_arguments`'s limit instead of adding a fourth
+/// unrelated reference (`blob_cursor`, one per form and mutable, never
+/// belongs in this read-only group) to an already-long parameter list.
+struct ComposeTables<'a> {
+    /// Resolves each opcode to a name and a payload shape.
+    opcode_table: &'a OpcodeTable,
+    /// The external OCX and type library components a form's own controls
+    /// may reference.
+    components: &'a ComponentTable,
+    /// The event ordinal to name table, per `03-CONTEXT.md` D-02: empty by
+    /// design in this phase.
+    event_names: &'a EventNameTable,
+}
+
 /// Composes one form's report: its name, its control tree, and the defects
 /// collected while reading it.
 ///
@@ -566,9 +582,7 @@ fn compose_form(
     pe: &PeImage<'_>,
     entry: &GuiTableEntry,
     objects: &[Object],
-    opcode_table: &OpcodeTable,
-    components: &ComponentTable,
-    event_names: &EventNameTable,
+    tables: &ComposeTables<'_>,
     defects: &mut Vec<Defect>,
 ) -> FormReport {
     let mut form_defects: Vec<Defect> = Vec::new();
@@ -660,6 +674,14 @@ fn compose_form(
         })
         .unwrap_or_default();
 
+    // One `.frx` offset cursor per form, per `frx::BlobCursor`'s own doc
+    // comment: a fresh cursor here, threaded by mutable reference through
+    // every control this form's own tree holds, in the same control tree
+    // order `tree.nodes` already walks (the property stream order plan
+    // 03-04 established), so a blob's `.frx` offset is assigned in stream
+    // order and a second form never carries over the first form's cursor.
+    let mut blob_cursor = frx::BlobCursor::new();
+
     let controls: Vec<ControlReport> = match &tree {
         Some(tree) => tree
             .nodes
@@ -674,10 +696,9 @@ fn compose_form(
                 compose_control(
                     pe,
                     node,
-                    opcode_table,
-                    components,
+                    tables,
                     control_info,
-                    event_names,
+                    &mut blob_cursor,
                     &mut form_defects,
                 )
             })
@@ -695,13 +716,16 @@ fn compose_form(
 
 /// Composes one control's report: its type, its properties, its external
 /// control facts when its type is 255, and its event slots.
+///
+/// `blob_cursor` is the one form's own [`frx::BlobCursor`] `compose_form`
+/// owns; every control in the same form shares it, so a resource blob's
+/// `.frx` offset advances across the whole form, not per control.
 fn compose_control(
     pe: &PeImage<'_>,
     node: &controltree::ControlNode<'_>,
-    opcode_table: &OpcodeTable,
-    components: &ComponentTable,
+    tables: &ComposeTables<'_>,
     control_info: Option<&ControlInfo>,
-    event_names: &EventNameTable,
+    blob_cursor: &mut frx::BlobCursor,
     defects: &mut Vec<Defect>,
 ) -> ControlReport {
     let header = &node.header;
@@ -716,7 +740,7 @@ fn compose_control(
     if matches!(kind, controltree::ControlKind::External) {
         let (mut ext, consumed, ext_defects) = ocx::read_external_control(&node.block, header);
         defects.extend(ext_defects);
-        external_reason = ocx::join_component(&mut ext, components);
+        external_reason = ocx::join_component(&mut ext, tables.components);
 
         let length = node.block.u16_le(Off::new(0)).unwrap_or(0);
         let block_end = u32::from(length).saturating_sub(1);
@@ -728,7 +752,8 @@ fn compose_control(
         opaque_message = Some(opaque.message());
         external = Some(ext);
     } else {
-        let (stream, prop_defects) = propstream::walk_properties(&node.block, header, opcode_table);
+        let (stream, prop_defects) =
+            propstream::walk_properties(&node.block, header, tables.opcode_table, blob_cursor);
         defects.extend(prop_defects);
         properties = stream.properties;
     }
@@ -738,7 +763,7 @@ fn compose_control(
         Some(info) => match read_event_table(pe, info) {
             Ok(table) => {
                 defects.extend(table.defects().iter().cloned());
-                report_events(&header.name, &control_type_name, &table, event_names)
+                report_events(&header.name, &control_type_name, &table, tables.event_names)
             }
             Err(refusal) => {
                 defects.push(structure_defect(0, "EventTable", &refusal));

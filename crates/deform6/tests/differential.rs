@@ -889,7 +889,9 @@ fn recovered_property_name(value: &PropertyValue) -> Option<&str> {
         | PropertyValue::Single { name, .. }
         | PropertyValue::Text { name, .. }
         | PropertyValue::Position { name, .. }
-        | PropertyValue::Font { name, .. } => Some(name.as_str()),
+        | PropertyValue::Font { name, .. }
+        | PropertyValue::Blob { name, .. }
+        | PropertyValue::BlobUnreadable { name, .. } => Some(name.as_str()),
         PropertyValue::Undecoded { .. } => None,
     }
 }
@@ -906,7 +908,13 @@ fn recovered_property_name(value: &PropertyValue) -> Option<&str> {
 /// skip them by construction rather than by a special case. `Undecoded`
 /// gives `None` for the same reason `PropertyValue::undecoded_message`
 /// documents: this repository does not decode it, so there is nothing to
-/// compare, and it is never asked to guess.
+/// compare, and it is never asked to guess. `Blob` and `BlobUnreadable` are
+/// excluded the same way `Position` and `Font` are: a `.frm` file's own
+/// declared value for a resource property names a file and an offset
+/// (`"name.frx":OFFSET`), never a literal, so `recovered_property_name`
+/// still counts a resource property as recovered by name, and this
+/// function's `None` is what skips its own text comparison, with no
+/// literal on either side to compare.
 ///
 /// `Long` renders as a `.frm` colour literal, `&H{bits:08X}&`, never as a
 /// plain signed decimal. `BackColor` (opcode 3, plan 03-13) is the only
@@ -928,6 +936,8 @@ fn recovered_property_text(value: &PropertyValue) -> Option<String> {
         PropertyValue::Text { value, .. } => Some(value.clone()),
         PropertyValue::Position { .. }
         | PropertyValue::Font { .. }
+        | PropertyValue::Blob { .. }
+        | PropertyValue::BlobUnreadable { .. }
         | PropertyValue::Undecoded { .. } => None,
     }
 }

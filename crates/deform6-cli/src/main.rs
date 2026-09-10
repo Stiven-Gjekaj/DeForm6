@@ -666,7 +666,8 @@ fn format_control_kind(kind: &ControlKind) -> String {
 /// name and its value. A property this repository cannot name prints
 /// present and undecoded, with its byte offset, its opcode number and the
 /// control type, and names the command line flag that would supply a
-/// table.
+/// table. A resource blob prints its own recovered facts, or, when it
+/// could not be read, that it is present and unreadable.
 fn print_property(indent: &str, property: &PropertyValue) {
     match property {
         PropertyValue::Byte { name, value } => println!("{indent}  {name} = {value}"),
@@ -677,6 +678,26 @@ fn print_property(indent: &str, property: &PropertyValue) {
         PropertyValue::Text { name, value } => println!("{indent}  {name} = {value:?}"),
         PropertyValue::Position { name, value } => println!("{indent}  {name} = {value:?}"),
         PropertyValue::Font { name, value } => println!("{indent}  {name} = {value:?}"),
+        PropertyValue::Blob {
+            name,
+            offset,
+            declared_len,
+            image_len,
+            format,
+            frx_offset,
+        } => {
+            println!(
+                "{indent}  {name}: resource blob at offset {offset:#x}, declared length \
+                 {declared_len}, {image_len} image byte(s), format {}, .frx offset \
+                 {frx_offset:#x} (an offset into a file this run did not write)",
+                format_image_format(format)
+            );
+        }
+        PropertyValue::BlobUnreadable { name, offset } => {
+            println!(
+                "{indent}  {name}: resource blob at offset {offset:#x}: present and unreadable."
+            );
+        }
         PropertyValue::Undecoded {
             opcode,
             offset,
@@ -687,6 +708,26 @@ fn print_property(indent: &str, property: &PropertyValue) {
                 "{indent}  property opcode {opcode} at offset {offset:#x} on {control_type}: \
                  not decoded. Run with --opcode-table to supply one."
             );
+        }
+    }
+}
+
+/// Prints the word a reader sees for one resource blob's own detected
+/// container format. `Unknown` names no format that was never proved and
+/// prints only how many prefix bytes were checked, never the raw bytes: per
+/// this plan's own threat model, the print arm names counts and offsets
+/// only.
+fn format_image_format(format: &deform6::vb::frx::ImageFormat) -> String {
+    match format {
+        deform6::vb::frx::ImageFormat::Bmp => "BMP".to_owned(),
+        deform6::vb::frx::ImageFormat::Gif => "GIF".to_owned(),
+        deform6::vb::frx::ImageFormat::Jpeg => "JPEG".to_owned(),
+        deform6::vb::frx::ImageFormat::Wmf => "WMF".to_owned(),
+        deform6::vb::frx::ImageFormat::Emf => "EMF".to_owned(),
+        deform6::vb::frx::ImageFormat::Ico => "ICO".to_owned(),
+        deform6::vb::frx::ImageFormat::Cur => "CUR".to_owned(),
+        deform6::vb::frx::ImageFormat::Unknown(bytes) => {
+            format!("unrecognised ({} prefix byte(s) checked)", bytes.len())
         }
     }
 }

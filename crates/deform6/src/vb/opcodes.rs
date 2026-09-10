@@ -775,33 +775,31 @@ mod tests {
         assert_eq!(entry.source, super::CORPUS_MEASURED);
     }
 
-    /// Gives the byte offset of the form's own root control block's first
-    /// [`crate::vb::propstream::PropertyValue::Undecoded`] entry with the
-    /// given `opcode`, or `None` when none of its properties is that
-    /// opcode. `Picture` is not yet a reader `walk_properties` has (plan
-    /// 03-15 owns wiring `frx::extract_blob`), so opcode 35 still surfaces
-    /// as `Undecoded`, carrying its own real byte offset: reachability, not
-    /// decoding, is what this task proves.
-    fn undecoded_offset(
-        properties: &[crate::vb::propstream::PropertyValue],
-        opcode: u8,
-    ) -> Option<u32> {
+    /// Gives the byte offset of the form's own root control block's
+    /// recovered [`crate::vb::propstream::PropertyValue::Blob`], or `None`
+    /// when its properties hold none.
+    ///
+    /// Plan 03-15 wires `frx::extract_blob` into `walk_properties`'s own
+    /// resource blob arm, so opcode 35 (this row's own `Picture` payload)
+    /// now decodes into a `Blob` rather than surfacing as `Undecoded`. The
+    /// offset this test asserts is therefore the blob's own four byte
+    /// length field, one byte past the opcode byte this session originally
+    /// measured by hand: reachability and decoding are both proved here.
+    fn blob_offset(properties: &[crate::vb::propstream::PropertyValue]) -> Option<u32> {
         properties.iter().find_map(|p| match p {
-            crate::vb::propstream::PropertyValue::Undecoded {
-                opcode: found,
-                offset,
-                ..
-            } if *found == opcode => Some(*offset),
+            crate::vb::propstream::PropertyValue::Blob { offset, .. } => Some(*offset),
             _ => None,
         })
     }
 
-    /// `Fast_Flames.exe`'s own form, `frmFire`, reaches opcode 35 at the
-    /// offset this session measured by hand (`0x13d4`): the property loop
-    /// now advances past opcode 1 (Caption), opcode 25 (ScaleMode, already
-    /// special-cased), opcode 3 (BackColor) and opcode 0 (a no-output
-    /// opcode, already special-cased) to arrive there, instead of stopping
-    /// at the very first opcode as it did before this plan.
+    /// `Fast_Flames.exe`'s own form, `frmFire`, reaches opcode 35 (at file
+    /// offset `0x13d4`, this session's own measurement) and decodes its
+    /// resource blob, whose own four byte length field sits at `0x13d5`:
+    /// the property loop advances past opcode 1 (Caption), opcode 25
+    /// (ScaleMode, already special-cased), opcode 3 (BackColor) and opcode
+    /// 0 (a no-output opcode, already special-cased) to arrive there,
+    /// instead of stopping at the very first opcode as it did before this
+    /// plan.
     #[test]
     fn fast_flames_form_reaches_opcode_35_at_the_measured_offset() {
         let data: &[u8] = include_bytes!(concat!(
@@ -818,16 +816,17 @@ mod tests {
             .controls
             .first()
             .expect("frmFire's own tree must resolve for this corpus measurement to stand");
-        let offset = undecoded_offset(&root.properties, 35)
-            .expect("frmFire's own property loop must reach opcode 35, not stop earlier");
-        assert_eq!(offset, 0x13d4);
+        let offset = blob_offset(&root.properties)
+            .expect("frmFire's own property loop must reach opcode 35 and decode a blob");
+        assert_eq!(offset, 0x13d5);
     }
 
     /// A second, independent corpus program:
     /// `SubReality_WinsockSample.exe`'s own form, `frmMain`, reaches opcode
-    /// 35 at the offset this session measured by hand (`0x1301`). Both
-    /// programs give the same opcode number for the resource blob, which is
-    /// what this row's own proof requires.
+    /// 35 (at file offset `0x1301`) and decodes its resource blob, whose
+    /// own four byte length field sits at `0x1302`. Both programs give the
+    /// same opcode number for the resource blob, which is what this row's
+    /// own proof requires.
     #[test]
     fn winsock_sample_form_reaches_opcode_35_at_the_measured_offset() {
         let data: &[u8] = include_bytes!(concat!(
@@ -844,9 +843,9 @@ mod tests {
             .controls
             .first()
             .expect("frmMain's own tree must resolve for this corpus measurement to stand");
-        let offset = undecoded_offset(&root.properties, 35)
-            .expect("frmMain's own property loop must reach opcode 35, not stop earlier");
-        assert_eq!(offset, 0x1301);
+        let offset = blob_offset(&root.properties)
+            .expect("frmMain's own property loop must reach opcode 35 and decode a blob");
+        assert_eq!(offset, 0x1302);
     }
 
     /// Adding `FORM_CORPUS_ROWS` changes no other control type: CommandButton
