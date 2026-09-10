@@ -362,6 +362,7 @@ const FORM_ROWS: &[(u8, &str, PayloadType)] = &[
 const FORM_CORPUS_ROWS: &[(u8, &str, PayloadType)] = &[
     (1, "Caption", PayloadType::Text),
     (3, "BackColor", PayloadType::Long),
+    (35, "Icon", PayloadType::Picture),
 ];
 
 /// The CommandButton rows, `cType` 4.
@@ -761,5 +762,104 @@ mod tests {
             })
             .expect("frmBrightness's own BackColor must now resolve");
         assert_eq!(back_color.cast_unsigned(), 0x00C0_C0C0);
+    }
+
+    // --- Plan 03-13, Task 3: the Form resource blob row -------------------
+
+    #[test]
+    fn form_opcode_35_gives_icon_with_a_picture_payload_and_the_corpus_measured_source() {
+        let table = OpcodeTable::builtin();
+        let entry = table.lookup(super::CT_FORM, 35).unwrap();
+        assert_eq!(entry.name, "Icon");
+        assert_eq!(entry.payload, PayloadType::Picture);
+        assert_eq!(entry.source, super::CORPUS_MEASURED);
+    }
+
+    /// Gives the byte offset of the form's own root control block's first
+    /// [`crate::vb::propstream::PropertyValue::Undecoded`] entry with the
+    /// given `opcode`, or `None` when none of its properties is that
+    /// opcode. `Picture` is not yet a reader `walk_properties` has (plan
+    /// 03-15 owns wiring `frx::extract_blob`), so opcode 35 still surfaces
+    /// as `Undecoded`, carrying its own real byte offset: reachability, not
+    /// decoding, is what this task proves.
+    fn undecoded_offset(
+        properties: &[crate::vb::propstream::PropertyValue],
+        opcode: u8,
+    ) -> Option<u32> {
+        properties.iter().find_map(|p| match p {
+            crate::vb::propstream::PropertyValue::Undecoded {
+                opcode: found,
+                offset,
+                ..
+            } if *found == opcode => Some(*offset),
+            _ => None,
+        })
+    }
+
+    /// `Fast_Flames.exe`'s own form, `frmFire`, reaches opcode 35 at the
+    /// offset this session measured by hand (`0x13d4`): the property loop
+    /// now advances past opcode 1 (Caption), opcode 25 (ScaleMode, already
+    /// special-cased), opcode 3 (BackColor) and opcode 0 (a no-output
+    /// opcode, already special-cased) to arrive there, instead of stopping
+    /// at the very first opcode as it did before this plan.
+    #[test]
+    fn fast_flames_form_reaches_opcode_35_at_the_measured_offset() {
+        let data: &[u8] = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/vb6-code/Fire-effect/Fast_Flames.exe"
+        ));
+        let report = crate::vb::inspect(data, &OpcodeTable::builtin()).unwrap();
+        let form = report
+            .forms
+            .iter()
+            .find(|f| f.name == "frmFire")
+            .expect("Fast_Flames.exe declares a form named frmFire");
+        let root = form
+            .controls
+            .first()
+            .expect("frmFire's own tree must resolve for this corpus measurement to stand");
+        let offset = undecoded_offset(&root.properties, 35)
+            .expect("frmFire's own property loop must reach opcode 35, not stop earlier");
+        assert_eq!(offset, 0x13d4);
+    }
+
+    /// A second, independent corpus program:
+    /// `SubReality_WinsockSample.exe`'s own form, `frmMain`, reaches opcode
+    /// 35 at the offset this session measured by hand (`0x1301`). Both
+    /// programs give the same opcode number for the resource blob, which is
+    /// what this row's own proof requires.
+    #[test]
+    fn winsock_sample_form_reaches_opcode_35_at_the_measured_offset() {
+        let data: &[u8] = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/public-domain/SK-Winsock-Sample__VB6/demo/SubReality_WinsockSample.exe"
+        ));
+        let report = crate::vb::inspect(data, &OpcodeTable::builtin()).unwrap();
+        let form = report
+            .forms
+            .iter()
+            .find(|f| f.name == "frmMain")
+            .expect("SubReality_WinsockSample.exe declares a form named frmMain");
+        let root = form
+            .controls
+            .first()
+            .expect("frmMain's own tree must resolve for this corpus measurement to stand");
+        let offset = undecoded_offset(&root.properties, 35)
+            .expect("frmMain's own property loop must reach opcode 35, not stop earlier");
+        assert_eq!(offset, 0x1301);
+    }
+
+    /// Adding `FORM_CORPUS_ROWS` changes no other control type: CommandButton
+    /// opcode 31 still resolves `Appearance`, the same row it resolved
+    /// before this plan, since `FORM_CORPUS_ROWS` is only ever inserted
+    /// under `CT_FORM` and `CT_MDIFORM`.
+    #[test]
+    fn a_control_type_outside_the_form_group_resolves_the_same_rows_it_resolved_before() {
+        let table = OpcodeTable::builtin();
+        let entry = table.lookup(super::CT_COMMAND_BUTTON, 31).unwrap();
+        assert_eq!(entry.name, "Appearance");
+        assert_eq!(entry.source, super::SVBD_OPCODE_AND_TYPE);
+        // CommandButton has no opcode 35 row: FORM_CORPUS_ROWS never reaches it.
+        assert_eq!(table.lookup(super::CT_COMMAND_BUTTON, 35), None);
     }
 }
