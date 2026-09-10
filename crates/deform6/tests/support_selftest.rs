@@ -24,7 +24,7 @@ mod support;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use support::{source, vbp};
+use support::{frm, source, vbp};
 
 /// Reads a file as Latin-1 bytes, the same rule every reader in this
 /// harness uses. `std::fs::read_to_string` would refuse a source file
@@ -945,5 +945,96 @@ fn the_corpus_declares_one_hundred_and_eighty_five_public_procedures_over_the_ob
         total, 185,
         "the corpus source declares {total} public procedures over the objects the standard- \
          module and absent-source rules keep, wanted 185"
+    );
+}
+
+// `support::frm::EXCLUSIONS`: VER-06's named exclusion for one upstream
+// defect, with the reason recorded beside it.
+
+#[test]
+fn exclusions_holds_exactly_one_entry() {
+    assert_eq!(
+        frm::EXCLUSIONS.len(),
+        1,
+        "EXCLUSIONS holds {} entries, wanted exactly 1",
+        frm::EXCLUSIONS.len()
+    );
+}
+
+#[test]
+fn every_exclusion_reason_is_non_empty() {
+    for exclusion in frm::EXCLUSIONS {
+        assert!(
+            !exclusion.reason.is_empty(),
+            "{} carries an empty exclusion reason",
+            exclusion.path
+        );
+    }
+}
+
+#[test]
+fn the_one_exclusion_names_frm_hmm_frx_and_its_reason_names_the_line_ending_cause() {
+    assert_eq!(frm::EXCLUSIONS.len(), 1);
+    let exclusion = &frm::EXCLUSIONS[0];
+    assert!(
+        exclusion.path.ends_with("Hidden-Markov-model/frmHMM.frx"),
+        "expected the one exclusion to name frmHMM.frx, found {}",
+        exclusion.path
+    );
+    assert!(
+        exclusion.reason.contains("line ending") || exclusion.reason.contains("normalis"),
+        "the reason must name the upstream line ending normalisation as the cause, found {:?}",
+        exclusion.reason
+    );
+}
+
+#[test]
+fn excluded_reason_gives_some_for_the_named_frx_and_none_for_the_form_beside_it() {
+    let frx = frm::corpus_root().join("vb6-code/Hidden-Markov-model/frmHMM.frx");
+    assert_eq!(
+        frm::excluded_reason(&frx),
+        Some(frm::EXCLUSIONS[0].reason),
+        "the excluded .frx must give Some(reason)"
+    );
+
+    let form = frm::corpus_root().join("vb6-code/Hidden-Markov-model/frmHMM.frm");
+    assert!(
+        form.exists(),
+        "the corpus vendors Hidden-Markov-model/frmHMM.frm"
+    );
+    assert_eq!(
+        frm::excluded_reason(&form),
+        None,
+        "the .frm beside the excluded .frx must never be excluded, per D-04's narrow scope"
+    );
+}
+
+#[test]
+fn excluded_reason_gives_none_for_every_other_corpus_form() {
+    for path in frm::forms() {
+        assert_eq!(
+            frm::excluded_reason(&path),
+            None,
+            "{} must not be excluded; only frmHMM.frx is on the list",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn gitattributes_still_marks_the_resource_extensions_as_binary() {
+    let root = frm::corpus_root()
+        .parent()
+        .expect("corpus_root has a parent")
+        .to_owned();
+    let gitattributes = std::fs::read_to_string(root.join(".gitattributes"))
+        .expect("reading the repository .gitattributes");
+    assert!(
+        gitattributes.lines().any(|l| l.trim() == "*.frx binary"),
+        "expected .gitattributes to mark *.frx as binary"
+    );
+    assert!(
+        gitattributes.lines().any(|l| l.trim() == "*.ctx binary"),
+        "expected .gitattributes to mark *.ctx as binary"
     );
 }

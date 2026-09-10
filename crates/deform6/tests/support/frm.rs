@@ -261,6 +261,53 @@ pub fn parse_blocks(text: &str) -> Vec<Block> {
     roots
 }
 
+/// One named, upstream defect this harness excludes from the
+/// differential gate, with the reason recorded beside it.
+///
+/// This is the opposite shape to `support::rules::Rule`. Those five
+/// rules are deliberately generic and predicate-shaped, forbidden from
+/// naming a program, precisely so a rule cannot quietly become a
+/// per-program allowance. VER-06 asks for the opposite on purpose: a
+/// *named* exclusion, so a later reader can see, without re-deriving the
+/// evidence, exactly which file is excluded and why. Do not merge the
+/// two mechanisms.
+pub struct Exclusion {
+    pub path: &'static str,
+    pub reason: &'static str,
+}
+
+/// The one upstream defect VER-06 excludes.
+///
+/// `corpus/vb6-code/Hidden-Markov-model/frmHMM.frx` is 56 bytes. Its own
+/// record header declares 56 bytes of payload, and only 55 are present:
+/// the upstream repository sets `text=auto`, and git silently removed
+/// one carriage return from what should have been a `0D 0A` pair at the
+/// end of the record. `corpus/vb6-code/Hidden-Markov-model/HMM.exe`
+/// holds the same string as a whole, correct record and is the second,
+/// independent source of truth for the fault. The fault is upstream and
+/// it is not a parsing question.
+///
+/// `frmHMM.frm`, beside it, is not excluded: it holds 14 of the corpus's
+/// 48 `Index` lines and stays in the differential gate, per D-04.
+pub const EXCLUSIONS: &[Exclusion] = &[Exclusion {
+    path: "corpus/vb6-code/Hidden-Markov-model/frmHMM.frx",
+    reason: "the file is 56 bytes and its own record header declares 56 bytes of payload, but \
+             only 55 are present, because the upstream repository sets text=auto and git's line \
+             ending normalisation silently removed one carriage return; HMM.exe holds the same \
+             string as a whole, correct record and is the second, independent source of truth \
+             for this fault",
+}];
+
+/// Gives the reason `path` is excluded, or `None` when it is not on
+/// [`EXCLUSIONS`].
+#[must_use]
+pub fn excluded_reason(path: &Path) -> Option<&'static str> {
+    EXCLUSIONS
+        .iter()
+        .find(|e| path.ends_with(Path::new(e.path)))
+        .map(|e| e.reason)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
