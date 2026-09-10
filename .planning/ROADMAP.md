@@ -275,7 +275,7 @@ control.
   - **STRUCTURES gap 16**: nine dwords in `GUIObjectInfo` at 0x35 to 0x58 have
     no known meaning. Leave them opaque; do not invent a reading.
 
-**Plans**: 5/10 plans executed
+**Plans**: 6/10 plans executed
 
 Plans:
 **Wave 1**
@@ -291,7 +291,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 03-06-PLAN.md - The property stream reader - typed payloads, the position block escape, the `Font` block, the special opcodes
+- [x] 03-06-PLAN.md - The property stream reader - typed payloads, the position block escape, the `Font` block, the special opcodes
 - [ ] 03-08-PLAN.md - External OCX controls - `cType 255`, the class name, the CLSID join, `_ExtentX` and `_ExtentY`, the opaque blob
 - [ ] 03-09-PLAN.md - `ControlInfo` and the event handler table - event handler names and the honest report for a slot with no name
 
@@ -581,7 +581,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 |-------|----------------|--------|-----------|
 | 1. It reads the file | 7/8 | In Progress|  |
 | 2. The object graph | 4/10 | In Progress|  |
-| 3. Forms | 5/10 | In Progress|  |
+| 3. Forms | 6/10 | In Progress|  |
 | 4. It writes a project | 0/9 | Not started | - |
 | 5. Hostility | 0/8 | Not started | - |
 | 6. Version 1.0 | 0/5 | Not started | - |

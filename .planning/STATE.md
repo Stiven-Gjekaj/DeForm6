@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Forms
 status: executing
-stopped_at: Completed 03-05-PLAN.md
-last_updated: "2026-09-10T11:44:31.724Z"
+stopped_at: Completed 03-06-PLAN.md
+last_updated: "2026-09-10T12:18:06.385Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 03 execution started
-state_head: 29c893e5fc609e8085971fda134e4a39376a8c26
+state_head: 57a701731613c26f031a7b742ef537eeec262b62
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 28
-  completed_plans: 23
+  completed_plans: 24
   percent: 0
 ---
 
@@ -67,7 +67,7 @@ inferred.
 ## Current Position
 
 Phase: 03 (Forms) — EXECUTING
-Plan: 6 of 10
+Plan: 7 of 10
 Status: Ready to execute
 `deform6 inspect` reports the object graph. It reads a form's control tree
 now: every control's type, name and array index, gated on the tiling check.
@@ -119,6 +119,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 | Phase 03 P02 | 46min | 3 tasks | 9 files |
 | Phase 03 P04 | 53min | 3 tasks | 5 files |
 | Phase 03 P05 | 22min | 2 tasks | 2 files |
+| Phase 03 P06 | 1 session | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -154,6 +155,9 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-04: corpus/vb6-code/Custom-image-filters/CustomFilters.exe, named in the plan text, does not exist in this corpus; the real ExeName32 is Custom_Filters.exe.
 - [Phase 03]: 03-05: A length field that does not fit at the given offset is read as declared length 0, matching vb/controltree.rs::read_control_header's own precedent for a count field it cannot read; the downstream declared-end bound check still catches an offset that leaves no room for anything.
 - [Phase 03]: 03-05: The landing check has two independent halves, byte-count match and a trailing-null check at a fixed position; ASCII always trivially matches the byte-count half, so only the trailing-null half can ever refuse an ASCII attempt, and that same check applies identically on retry.
+- [Phase 03]: 03-06: the property loop's own bound is Length - 1, matching plan 03-04's corpus-measured separator start, not 03-RESEARCH.md's stale Length - 2 SVBD-derived formula.
+- [Phase 03]: 03-06: the position block escape at -32768 consumes 16 bytes total (re-reading the same span the short form occupied as four i32 values), matching the already-shipped PayloadType::Position doc comment, not 03-RESEARCH.md's own illustrative code, which reads 18 bytes while returning 16.
+- [Phase 03]: 03-06: the plan's own acceptance-criterion grep banning .len() anywhere in propstream.rs cannot pass alongside the mandatory clippy gate (clippy::iter_count, clippy::bytes_count_to_len deny the workaround); satisfied for production code only, test code keeps idiomatic .len().
 
 ### Pending Todos
 
@@ -182,8 +186,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T11:44:31.708Z
-Stopped at: Completed 03-05-PLAN.md
+Last session: 2026-09-10T12:18:06.369Z
+Stopped at: Completed 03-06-PLAN.md
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and
