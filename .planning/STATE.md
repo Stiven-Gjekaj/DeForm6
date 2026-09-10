@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Forms
 status: verifying
-stopped_at: Completed 03-10-PLAN.md, phase 3 (forms) complete
-last_updated: "2026-09-10T14:37:24.925Z"
+stopped_at: Completed 03-11-PLAN.md (FRM-06 gap closure, documentation only)
+last_updated: "2026-09-10T20:59:28.597Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 03 execution started
-state_head: d75e5f8244e54ff75001bbde92ee0c998ae6595c
+state_head: 7f71d8a793dd14243093256b60c022a7f12ccfdc
 progress:
   total_phases: 6
   completed_phases: 0
-  total_plans: 28
-  completed_plans: 28
+  total_plans: 35
+  completed_plans: 29
   percent: 0
 ---
 
@@ -172,6 +172,7 @@ Recent decisions affecting current work:
 - [Phase 03]: ControlNode carries its own byte block (Region<'a>) so composition can read a control's property stream after the walk finishes; FormStream::region() now returns Region<'a> by value
 - [Phase 03]: The differential gate found a real scope-byte grammar bug: closing a menu nested two levels deep back to a form-level sibling was silently swallowed as an unexplained tail. Fixed defensively with MAX_UNEXPLAINED_TAIL=8, true grammar rule tracked as WINDOWS.md finding 7, not guessed at
 - [Phase 03]: Pinned form/control recovery ratios land at 49 of 53 forms and 607 of 607 controls across the 44-program corpus, added as four new tests/ratios.toml keys per program
+- [Phase 03]: 03-11: FRM-06 and the Phase 3 goal narrowed to event structure (bound slots, index, handler address) in REQUIREMENTS.md and ROADMAP.md, citing D-02. Event names are never recovered; this is a documentation-only correction of an unpassable requirement, not a code change.
 
 ### Pending Todos
 
@@ -200,8 +201,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T14:37:24.908Z
-Stopped at: Completed 03-10-PLAN.md, phase 3 (forms) complete
+Last session: 2026-09-10T20:59:23.154Z
+Stopped at: Completed 03-11-PLAN.md (FRM-06 gap closure, documentation only)
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and
