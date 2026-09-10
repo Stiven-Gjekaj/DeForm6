@@ -1053,6 +1053,10 @@ discards it. A control array needs an `Index = N` property per element in the
 emitted `.frm`, so this must be resolved before control arrays can be written
 correctly.
 
+**Gap 11 is closed.** The field this table names `cId` at 0x05 holds the
+array `Index`, not `cId`. See section 14, "Gap 11 closed," for the offset,
+the evidence, and what the measurement did not settle.
+
 AG's dump independently corroborates the name encoding: he shows
 `db 5,0,'Form1',0` and `db 0Bh,0,'Leimcrackme',0` — a 16-bit little-endian
 length followed by ASCII bytes. **[C]**
@@ -1564,7 +1568,7 @@ answer stated confidently would be worse than no answer.
 | 8 | `PubVarDesc` record stride (§6.4) | walking public variables | Diff two adjacent records in a real file |
 | 9 | Event name strings (§6.4) | naming recovered events | Positional heuristic after `ProcNamesArray`; mark inferred |
 | 10 | Ordinal `Declare` encoding (§7.2) | `Alias "#123"` | Compile a sample |
-| 11 | Control array index location (§8.4) | `Index = N` in `.frm` | Compile a control array, diff |
+| 11 | Control array index location (§8.4) | `Index = N` in `.frm` | CLOSED 2026-09-10, 30 array elements across 2 files. The array `Index` is the two byte value at control block offset 0x05. Method and worked example in §14. |
 | 12 | Byte at control-block +0x02 ("uni") (§8.3) | possibly the string encoding flag | Compile ASCII vs non-Latin-1 caption, diff |
 | 13 | String encoding rule (§9.3) | every string property | Three named experiments in §9.3 |
 | 14 | Scope separator grammar (§8.9) | correct control nesting | Implement with the `lPropertiesLength` tiling check as a gate |
@@ -1774,3 +1778,39 @@ that the expected names were a **subset** of the recovered names, so the extra
 slots that the capacity introduced added unexpected names without failing
 anything. A subset assertion cannot see an over-count. The differential gate in
 Phase 2 must compare both directions.
+
+---
+
+## 14. Gap 11 closed: the control array `Index` field, 2026-09-10
+
+Section 8.4's array header table names the byte at control block offset 0x05
+`cId`. It is not `cId`. It is the control array `Index`.
+
+**The offset.** The control array `Index` is the two byte, little endian
+value at control block offset 0x05, in the array header layout (`flags`
+byte at offset 0x03 equal to `0x80`). Offset 0x03 and 0x04 together are a
+flags-and-selector pair that stays constant per array group and does not
+vary with `Index`; reading it as the index gives the same wrong number for
+every element of one array.
+
+**The evidence.** 30 array elements, across 2 files and 2 control types,
+with array sizes of 2, 3 and 25:
+
+- `corpus/vb6-code/Custom-image-filters/Custom_Filters.exe` (the program's
+  own `ExeName32`, per its `.vbp`; earlier phase 3 documents cite
+  `CustomFilters.exe`, which this corpus does not hold). The `TxtF` array,
+  `VB.TextBox`, 25 elements, `Index` 0 through 24.
+- `corpus/vb6-code/Grayscale-effect/Grayscale.exe`. The `optDecompose`
+  array, `VB.OptionButton`, 2 elements, `Index` 1 and 0. The `optChannel`
+  array, `VB.OptionButton`, 3 elements, `Index` 2, 1 and 0.
+
+Every one of the 30 values read at offset 0x05 matches the element's own
+`Index =` line in the committed `.frm` source. Zero disagreements.
+
+**What the measurement did not settle.** The corpus cannot tell a one byte
+field at 0x05 from the low byte of a two byte field spanning 0x05 and 0x06,
+because no corpus array index exceeds 24. DeForm6 reads two bytes
+defensively and gives a `Defect` when the high byte is non-zero, which
+surfaces the case rather than deciding it. A program with a control array
+index above 255 would close the question.
+

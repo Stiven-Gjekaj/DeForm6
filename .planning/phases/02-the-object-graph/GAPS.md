@@ -133,31 +133,42 @@ Measured directly against the corpus on disk, not assumed:
 | `.frm` files at all | 54 | `find corpus -iname "*.frm" \| wc -l` |
 | MDI forms (`VB.MDIForm`) | **0** | `grep -l "VB.MDIForm" corpus/**/*.frm` — no match |
 | UserControls (`.ctl` files) | **0** | `find corpus -iname "*.ctl" \| wc -l` |
-| Menus (`Begin VB.Menu`) | 17 files | `grep -l "Begin VB.Menu" corpus/**/*.frm` |
-| Control arrays (`Index =` lines) | 35 files | `grep -l "Index *=" corpus/**/*.frm` |
-| Third-party OCX controls (non-`VB.*` `Begin` lines in `.frm`) | **0** | `grep -ohE "^ *Begin [A-Za-z0-9_.]+\." corpus/**/*.frm \| grep -v "Begin VB\."` — empty result |
+| Menus (`Begin VB.Menu`) | 22 files, 76 entries | `find corpus -iname "*.frm" -print0 \| xargs -0 grep -h "Begin VB.Menu" \| wc -l` |
+| Control arrays (`Index =` lines) | 48 elements across 6 files | `find corpus -iname "*.frm" -print0 \| xargs -0 grep -haE '^[[:space:]]*Index[[:space:]]*=' \| wc -l` |
+| Third-party OCX controls (non-`VB.*` `Begin` lines in `.frm`) | **3**, all `MSWinsockLib.Winsock`, in `SK-Winsock-Sample__VB6/frmMain.frm`, `SK-TFTP-Sample__VB6/Server/frmMain.frm` and `SK-TFTP-Sample__VB6/Client/frmMain.frm` | `find corpus -iname "*.frm" -print0 \| xargs -0 grep -l 'MSWinsockLib.Winsock'` |
 | Any OCX reference at the project level (`.vbp` `Object=` line) | **1**, and it is `COMDLG32.OCX` (the standard Windows common-dialog control, shipped with every VB6 install, not a third-party control) | `grep -h "^Object=" corpus/**/*.vbp` |
+
+**The cause of the two wrong counts above (menus and control arrays), and of
+the third-party OCX count of zero.** The `Source of count` column used a
+shell glob with two asterisks, `corpus/**/*.frm`, which a plain `bash`
+invocation expands the same as one asterisk unless the recursive `globstar`
+option is on. Every nested project directory — `SK-Winsock-Sample__VB6/`,
+`SK-TFTP-Sample__VB6/Server/`, `SK-TFTP-Sample__VB6/Client/`, and every
+control-array or menu form more than one directory level deep — was skipped
+with no warning. `find corpus -iname "*.frm" -print0 | xargs -0 ...`, a null
+separated pipeline that does not depend on `globstar`, is the re-count method
+above. `AGENTS.md`'s own rule applies directly: a search for some names is
+not a search for all of them, and a zero finding about this corpus is
+re-checked with a second method before it is reported.
 
 **What this means concretely for Phase 3:**
 
-- **Menus and control arrays are covered.** 17 and 35 files respectively give
-  real material to test FRM-01/FRM-02 tree recovery against.
-- **FRM-04 (third-party OCX CLSID recovery) has essentially no corpus
-  coverage.** The one `Object=` line in the whole 44-program corpus is
-  `COMDLG32.OCX`, a system-shipped control most VB6 installs already have,
-  not a genuine third-party control with its own unrecoverable property blob.
-  Phase 3's plan 03-08 ("External OCX controls — `cType 255`, the class name,
-  the CLSID join") will need a **synthetic or externally-sourced fixture**,
-  because the corpus cannot exercise this path meaningfully even though it
-  technically contains one OCX reference. This is worth raising before 03-08
-  is planned, not discovered mid-plan.
+- **Menus and control arrays are covered.** 22 files (76 entries) and 6 files
+  (48 elements) respectively give real material to test FRM-01/FRM-02 tree
+  recovery against.
+- **FRM-04 (third-party OCX CLSID recovery) has real, if thin, corpus
+  coverage.** Three `MSWinsockLib.Winsock` instances exist, across three
+  files, one of them inside a control array. Phase 3's plan 03-08 ("External
+  OCX controls — `cType 255`, the class name, the CLSID join") is not
+  starting from zero, though the coverage is still thin enough that a
+  synthetic or externally-sourced fixture is worth planning for alongside it.
 - **MDIForm and UserControl are absent, matching the roadmap's own
   acknowledgment** (FILE-FORMATS gap 9 for MDIForm; PRJ-01 for UserControl,
   deferred to v2). Phase 3 does not list either as a success criterion, so
   this is consistent, not a surprise gap.
 - **Menus need the `fMdlIntCtls` Menu bit cross-check** that STRUCTURES gap 14
   names (`Validate menus against the fMdlIntCtls Menu bit and a cType == 19
-  count`). 17 files exist to validate against; this is a real, exercisable
+  count`). 22 files exist to validate against; this is a real, exercisable
   check, not an untestable one.
 
 ---
@@ -198,9 +209,11 @@ Phase 3 at all — Phase 3 does not print procedure signatures.
 ## Summary ranking
 
 1. **Not a blocker, but plan around it:** FRM-04's OCX CLSID work (03-08) has
-   no real third-party-OCX corpus material. Confirmed by direct grep, not
-   assumed. Recommend a synthetic `.frm`/`.vbp` fixture with a fabricated
-   third-party CLSID before or during 03-08's planning.
+   thin third-party-OCX corpus material: three `MSWinsockLib.Winsock`
+   instances, across three files, confirmed by a `find`-based re-count of
+   this section's own earlier zero finding (see section 5 above). Recommend
+   a synthetic `.frm`/`.vbp` fixture with a fabricated third-party CLSID
+   alongside the real material, before or during 03-08's planning.
 2. **Not a blocker, worth a one-line clarification in Phase 3 planning:**
    STRUCTURES gap 9 (object-level `EventDesc`) and Phase 3's event-handler-name
    work (FRM-06, plan 03-09) are two different unknowns — the control-level
