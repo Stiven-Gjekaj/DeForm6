@@ -99,6 +99,13 @@ pub enum PropertyValue {
         /// The four coordinates, in the short or the long form.
         value: PositionBlock,
     },
+    /// A `Font` payload, read through [`read_font_block`].
+    Font {
+        /// The property this opcode names.
+        name: String,
+        /// The font's own charset, style, weight, size and name.
+        value: FontBlock,
+    },
     /// An opcode this repository does not decode.
     ///
     /// Two distinct causes share this one variant: no table entry names the
@@ -144,7 +151,8 @@ impl PropertyValue {
             | Self::Long { .. }
             | Self::Single { .. }
             | Self::Text { .. }
-            | Self::Position { .. } => None,
+            | Self::Position { .. }
+            | Self::Font { .. } => None,
         }
     }
 }
@@ -367,6 +375,215 @@ fn read_position_block(
     }
 }
 
+/// The `Font` payload: `BeginProperty Font ... EndProperty`, `STRUCTURES.md`
+/// section 8.5.2.
+///
+/// The size is stored in tenths of a thousandth of a point. `AGENTS.md`
+/// says to give the number that can be proved and not a number calculated
+/// from a part, so this carries both: the raw stored value, and the value
+/// in points with its own remainder, rather than only the divided number.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FontBlock {
+    /// The charset byte at the block's own offset `0x01`.
+    pub charset: u8,
+    /// Style bit `0x02`.
+    pub italic: bool,
+    /// Style bit `0x04`.
+    pub underline: bool,
+    /// Style bit `0x08`.
+    pub strikethrough: bool,
+    /// The weight, at offset `0x04`, two bytes.
+    pub weight: u16,
+    /// The size exactly as the file stores it: tenths of a thousandth of a
+    /// point.
+    pub size_raw: u32,
+    /// [`Self::size_raw`] divided by 10000, in points.
+    pub size_points: u32,
+    /// The remainder [`Self::size_points`] drops, so a size that does not
+    /// divide evenly is never silently lost.
+    pub size_remainder: u32,
+    /// The font name, read as length-prefixed ASCII bytes, each its own
+    /// Latin-1 code point.
+    pub name: String,
+}
+
+/// Reads a [`FontBlock`] at `at`, bounded by `block_end`.
+///
+/// The block consumes `11 + n` bytes, `n` being the declared name length at
+/// offset `0x0A`; the name length is checked against the remaining block
+/// space before any allocation is sized from it.
+///
+/// # Errors
+///
+/// Returns a [`Defect`] naming the byte offset when the fixed 11 byte header
+/// or the name would run past `block_end`.
+fn read_font_block(
+    block: &Region<'_>,
+    at: u32,
+    block_end: u32,
+) -> Result<(FontBlock, u32), Defect> {
+    let offset = block.file_offset(Off::new(at)).map_or(0, Off::get);
+    let block_end_offset = block.file_offset(Off::new(block_end)).map_or(0, Off::get);
+
+    if ends_within(at, 11, block_end).is_none() {
+        let fixed_end_offset = block
+            .file_offset(Off::new(at.saturating_add(11)))
+            .map_or(0, Off::get);
+        return Err(overrun_defect(offset, fixed_end_offset, block_end_offset));
+    }
+
+    let charset = at
+        .checked_add(1)
+        .and_then(|o| block.u8(Off::new(o)))
+        .unwrap_or(0);
+    let style = at
+        .checked_add(3)
+        .and_then(|o| block.u8(Off::new(o)))
+        .unwrap_or(0);
+    let weight = at
+        .checked_add(4)
+        .and_then(|o| block.u16_le(Off::new(o)))
+        .unwrap_or(0);
+    let size_raw = at
+        .checked_add(6)
+        .and_then(|o| block.u32_le(Off::new(o)))
+        .unwrap_or(0);
+    let name_len = at
+        .checked_add(0x0A)
+        .and_then(|o| block.u8(Off::new(o)))
+        .unwrap_or(0);
+
+    let total_width = 11_u32.saturating_add(u32::from(name_len));
+    let Some(font_end) = ends_within(at, total_width, block_end) else {
+        let name_end_offset = block
+            .file_offset(Off::new(at.saturating_add(total_width)))
+            .map_or(0, Off::get);
+        return Err(overrun_defect(offset, name_end_offset, block_end_offset));
+    };
+
+    let name = at
+        .checked_add(0x0B)
+        .and_then(|name_start| block.take(Off::new(name_start), u32::from(name_len)))
+        .map_or_else(String::new, |bytes| {
+            bytes.iter().copied().map(char::from).collect()
+        });
+
+    let size_points = size_raw.div_euclid(10_000);
+    let size_remainder = size_raw.rem_euclid(10_000);
+    let consumed = font_end.checked_sub(at).unwrap_or(total_width);
+
+    Ok((
+        FontBlock {
+            charset,
+            italic: style & 0x02 != 0,
+            underline: style & 0x04 != 0,
+            strikethrough: style & 0x08 != 0,
+            weight,
+            size_raw,
+            size_points,
+            size_remainder,
+            name,
+        },
+        consumed,
+    ))
+}
+
+/// The `cType` `STRUCTURES.md` section 8.4.1 gives for `Form`.
+const CT_FORM: u8 = 13;
+
+/// The `cType` `STRUCTURES.md` section 8.4.1 gives for `MDIForm`.
+const CT_MDIFORM: u8 = 20;
+
+/// The opcode `STRUCTURES.md` section 8.5.1 names `ScaleMode` on Form and
+/// MDIForm, with its own conditional skip.
+const SCALE_MODE_OPCODE: u8 = 25;
+
+/// The three opcodes `STRUCTURES.md` section 8.5.1 marks "consume 1 byte,
+/// no output" on Form and MDIForm.
+const NO_OUTPUT_OPCODES: [u8; 3] = [0, 98, 99];
+
+/// Handles a Form/MDIForm special opcode before the generic typed path is
+/// tried. Covers only the four safe-provenance control types this plan's
+/// own opcode table subset names (Form, MDIForm, CommandButton, Label,
+/// ListBox); of those, only Form and MDIForm carry a special case at all.
+///
+/// `None` means `opcode` is not a special case for `control_type`, and the
+/// caller falls through to the generic [`OpcodeTable::lookup`] path.
+/// `Some(Ok(new_cursor))` means the special case consumed bytes up to
+/// `new_cursor` and produced no property, per `STRUCTURES.md` section
+/// 8.5.1's own words for these opcodes. `Some(Err(_))` means the special
+/// case would run past the block's own end.
+fn read_special_opcode(
+    control_type: u8,
+    opcode: u8,
+    block: &Region<'_>,
+    payload_start: u32,
+    block_end: u32,
+) -> Option<Result<u32, Defect>> {
+    if control_type != CT_FORM && control_type != CT_MDIFORM {
+        return None;
+    }
+    if NO_OUTPUT_OPCODES.contains(&opcode) {
+        // The opcode byte itself is already consumed by the caller before
+        // `payload_start`; this opcode carries no payload the format
+        // exposes, so producing nothing here is correct, not a gap.
+        return Some(Ok(payload_start));
+    }
+    if opcode == SCALE_MODE_OPCODE {
+        return Some(read_scale_mode(block, payload_start, block_end));
+    }
+    None
+}
+
+/// Reads the Form `ScaleMode` special opcode: one byte for the scale mode,
+/// then, only when that byte is `0`, 16 more skipped bytes, then one flags
+/// byte (`0x20` = `AutoRedraw`, `0x02` = `FontTransparent`), then one more
+/// byte. Gives the cursor position after all of that; produces no property,
+/// per `STRUCTURES.md` section 8.5.1.
+fn read_scale_mode(block: &Region<'_>, payload_start: u32, block_end: u32) -> Result<u32, Defect> {
+    let offset = block
+        .file_offset(Off::new(payload_start))
+        .map_or(0, Off::get);
+    let block_end_offset = block.file_offset(Off::new(block_end)).map_or(0, Off::get);
+
+    let Some(after_mode) = ends_within(payload_start, 1, block_end) else {
+        let end_offset = block
+            .file_offset(Off::new(payload_start.saturating_add(1)))
+            .map_or(0, Off::get);
+        return Err(overrun_defect(offset, end_offset, block_end_offset));
+    };
+    let scale_mode = block.u8(Off::new(payload_start)).unwrap_or(0);
+
+    let after_skip = if scale_mode == 0 {
+        let Some(skipped) = ends_within(after_mode, 16, block_end) else {
+            let end_offset = block
+                .file_offset(Off::new(after_mode.saturating_add(16)))
+                .map_or(0, Off::get);
+            return Err(overrun_defect(offset, end_offset, block_end_offset));
+        };
+        skipped
+    } else {
+        after_mode
+    };
+
+    let Some(after_flags) = ends_within(after_skip, 1, block_end) else {
+        let end_offset = block
+            .file_offset(Off::new(after_skip.saturating_add(1)))
+            .map_or(0, Off::get);
+        return Err(overrun_defect(offset, end_offset, block_end_offset));
+    };
+
+    // One more byte after the flags byte, per STRUCTURES.md section 8.5.1.
+    let Some(final_end) = ends_within(after_flags, 1, block_end) else {
+        let end_offset = block
+            .file_offset(Off::new(after_flags.saturating_add(1)))
+            .map_or(0, Off::get);
+        return Err(overrun_defect(offset, end_offset, block_end_offset));
+    };
+
+    Ok(final_end)
+}
+
 /// Walks one control block's own property stream.
 ///
 /// `block` is the control block's own bounded window, the same
@@ -374,7 +591,8 @@ fn read_position_block(
 /// reads its header from. `header` is that block's own [`ControlHeader`],
 /// which gives [`ControlHeader::header_len`], the byte offset the property
 /// stream begins at. `table` resolves each opcode to a name and a payload
-/// shape; a resolved [`PayloadType::Position`] or [`PayloadType::Font`] or
+/// shape. On a Form or MDIForm control, [`read_special_opcode`] is tried
+/// first, per `STRUCTURES.md` section 8.5.1; a resolved
 /// [`PayloadType::Picture`] entry is not yet decoded by this reader (see the
 /// module doc comment): it becomes a [`PropertyValue::Undecoded`] and stops
 /// the loop, the same honest treatment a genuinely unnamed opcode gets.
@@ -405,6 +623,22 @@ pub fn walk_properties(
         let Some(payload_start) = cursor.checked_add(1) else {
             break;
         };
+
+        if let Some(special) =
+            read_special_opcode(header.c_type, opcode, block, payload_start, block_end)
+        {
+            match special {
+                Ok(new_cursor) => {
+                    cursor = new_cursor;
+                    continue;
+                }
+                Err(defect) => {
+                    defects.push(defect);
+                    cursor = block_end;
+                    break;
+                }
+            }
+        }
 
         let Some(entry) = table.lookup(header.c_type, opcode) else {
             let bytes_not_read = block_end.saturating_sub(cursor);
@@ -488,10 +722,26 @@ pub fn walk_properties(
                         break;
                     }
                 },
-                PayloadType::Font | PayloadType::Picture => {
-                    // Not yet decoded by this reader. Task 3 fills in
-                    // `PayloadType::Font`. `Picture` (a resource blob)
-                    // stays undecoded through this whole plan; `frx.rs`,
+                PayloadType::Font => match read_font_block(block, payload_start, block_end) {
+                    Ok((value, consumed)) => {
+                        let Some(new_cursor) = payload_start.checked_add(consumed) else {
+                            break;
+                        };
+                        properties.push(PropertyValue::Font {
+                            name: entry.name.clone(),
+                            value,
+                        });
+                        cursor = new_cursor;
+                    }
+                    Err(defect) => {
+                        defects.push(defect);
+                        cursor = block_end;
+                        break;
+                    }
+                },
+                PayloadType::Picture => {
+                    // `Picture` (a resource blob) is not decoded by this
+                    // reader through the whole of this plan; `frx.rs`,
                     // plan 03-07, owns blob extraction.
                     let bytes_not_read = block_end.saturating_sub(cursor);
                     properties.push(PropertyValue::Undecoded {
@@ -544,7 +794,9 @@ pub fn walk_properties(
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{PositionBlock, PropertyValue, read_position_block, walk_properties};
+    use super::{
+        PositionBlock, PropertyValue, read_font_block, read_position_block, walk_properties,
+    };
     use crate::error::DefectKind;
     use crate::read::region::{Off, Region};
     use crate::vb::controltree::read_control_header;
@@ -639,10 +891,13 @@ mod tests {
     #[test]
     fn an_opcode_with_no_table_entry_gives_undecoded_and_stops_the_loop_naming_offset_and_bytes_not_read()
      {
-        let bytes = control_block("Frm1", 13, &[99, 1, 2, 3, 4, 5]);
+        // 200 is deliberately outside both FORM_ROWS and the special
+        // no-output/ScaleMode opcodes (0, 25, 98, 99), so this exercises a
+        // genuine lookup miss, not a special case.
+        let bytes = control_block("Frm1", 13, &[200, 1, 2, 3, 4, 5]);
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
-        let table = OpcodeTable::builtin(); // holds no entry for Form opcode 99 here
+        let table = OpcodeTable::builtin(); // holds no entry for Form opcode 200 here
         let (stream, defects) = walk_properties(&region, &header, &table);
         assert_eq!(stream.properties.len(), 1);
         match &stream.properties[0] {
@@ -652,7 +907,7 @@ mod tests {
                 control_type,
                 bytes_not_read,
             } => {
-                assert_eq!(*opcode, 99);
+                assert_eq!(*opcode, 200);
                 // "Frm1" is 4 bytes, so the header is 13 bytes (9 + 4), and
                 // the opcode sits at that same byte offset in this region,
                 // whose base is 0.
@@ -950,6 +1205,200 @@ mod tests {
         assert!(matches!(
             &stream.properties[1],
             PropertyValue::Byte { value: 5, .. }
+        ));
+        assert!(defects.is_empty(), "{defects:?}");
+    }
+
+    // --- Task 3: the Font block and the special opcodes -------------------
+
+    #[test]
+    fn a_font_block_with_a_name_of_13_characters_consumes_24_bytes() {
+        let name = "ComicSansMS12"; // 13 ASCII characters
+        assert_eq!(name.len(), 13);
+        let mut bytes = vec![0u8]; // +0x00 unknown
+        bytes.push(7); // +0x01 charset
+        bytes.push(0); // +0x02 unknown
+        bytes.push(0x0E); // +0x03 style: italic | underline | strikethrough
+        bytes.extend_from_slice(&400_u16.to_le_bytes()); // +0x04 weight
+        bytes.extend_from_slice(&82_500_u32.to_le_bytes()); // +0x06 size
+        bytes.push(13); // +0x0A name length
+        bytes.extend_from_slice(name.as_bytes()); // +0x0B name
+        let block_end = u32::try_from(bytes.len()).unwrap();
+        let region = Region::new(&bytes, Off::new(0));
+        let (value, consumed) = read_font_block(&region, 0, block_end).unwrap();
+        assert_eq!(consumed, 24, "11 fixed bytes plus 13 name bytes");
+        assert_eq!(value.charset, 7);
+        assert!(value.italic && value.underline && value.strikethrough);
+        assert_eq!(value.weight, 400);
+        assert_eq!(value.size_raw, 82_500);
+        assert_eq!(value.size_points, 8);
+        assert_eq!(value.size_remainder, 2_500);
+        assert_eq!(value.name, name);
+    }
+
+    #[test]
+    fn a_style_byte_of_0x00_gives_all_three_style_flags_clear() {
+        let mut bytes = vec![0u8, 0, 0, 0x00];
+        bytes.extend_from_slice(&0_u16.to_le_bytes());
+        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes.push(0); // name length = 0
+        let block_end = u32::try_from(bytes.len()).unwrap();
+        let region = Region::new(&bytes, Off::new(0));
+        let (value, consumed) = read_font_block(&region, 0, block_end).unwrap();
+        assert_eq!(consumed, 11);
+        assert!(!value.italic && !value.underline && !value.strikethrough);
+        assert_eq!(value.name, "");
+    }
+
+    #[test]
+    fn a_stored_size_that_divides_evenly_gives_a_zero_remainder() {
+        let mut bytes = vec![0u8, 0, 0, 0];
+        bytes.extend_from_slice(&0_u16.to_le_bytes());
+        bytes.extend_from_slice(&120_000_u32.to_le_bytes()); // 12 points exactly
+        bytes.push(0);
+        let block_end = u32::try_from(bytes.len()).unwrap();
+        let region = Region::new(&bytes, Off::new(0));
+        let (value, _) = read_font_block(&region, 0, block_end).unwrap();
+        assert_eq!(value.size_points, 12);
+        assert_eq!(value.size_remainder, 0);
+    }
+
+    #[test]
+    fn a_font_name_length_larger_than_the_block_gives_a_defect_and_sizes_no_allocation() {
+        let mut bytes = vec![0u8, 0, 0, 0];
+        bytes.extend_from_slice(&0_u16.to_le_bytes());
+        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes.push(200); // declares 200 name bytes; none of them are present
+        let block_end = u32::try_from(bytes.len()).unwrap();
+        let region = Region::new(&bytes, Off::new(0x4000));
+        let err = read_font_block(&region, 0, block_end).unwrap_err();
+        let message = format!("{}", err.kind);
+        assert!(message.contains("0x4000"), "{message}");
+    }
+
+    #[test]
+    fn a_font_property_wired_through_walk_properties_advances_by_its_own_reported_count() {
+        let table = OpcodeTable::builtin();
+        let mut body = vec![64u8]; // opcode 64 = Font on Form
+        body.push(0); // unknown
+        body.push(0); // charset
+        body.push(0); // unknown
+        body.push(0); // style
+        body.extend_from_slice(&0_u16.to_le_bytes()); // weight
+        body.extend_from_slice(&0_u32.to_le_bytes()); // size
+        body.push(0); // name length = 0
+        body.push(10); // opcode 10 = WindowState (Byte), right after
+        body.push(2);
+        let bytes = control_block("Frm1", 13, &body);
+        let region = Region::new(&bytes, Off::new(0));
+        let (header, _) = read_control_header(&region);
+        let (stream, defects) = walk_properties(&region, &header, &table);
+        assert_eq!(stream.properties.len(), 2, "{:?}", stream.properties);
+        assert!(matches!(&stream.properties[0], PropertyValue::Font { .. }));
+        assert!(matches!(
+            &stream.properties[1],
+            PropertyValue::Byte { value: 2, .. }
+        ));
+        assert!(defects.is_empty(), "{defects:?}");
+    }
+
+    #[test]
+    fn a_form_scale_mode_byte_of_0_consumes_sixteen_more_bytes_before_the_flags_byte() {
+        let table = OpcodeTable::builtin();
+        let mut body = vec![25u8, 0]; // opcode 25 = ScaleMode, mode = 0
+        body.extend(std::iter::repeat_n(0xAA_u8, 16)); // the 16 skipped bytes
+        body.push(0x20); // flags byte
+        body.push(0x00); // one more byte
+        body.push(10); // opcode 10 = WindowState, right after
+        body.push(3);
+        let bytes = control_block("Frm1", 13, &body);
+        let region = Region::new(&bytes, Off::new(0));
+        let (header, _) = read_control_header(&region);
+        let (stream, defects) = walk_properties(&region, &header, &table);
+        assert_eq!(stream.properties.len(), 1, "{:?}", stream.properties);
+        assert!(
+            matches!(&stream.properties[0], PropertyValue::Byte { value: 3, .. }),
+            "{:?}",
+            stream.properties[0]
+        );
+        assert!(defects.is_empty(), "{defects:?}");
+    }
+
+    #[test]
+    fn a_non_zero_form_scale_mode_does_not_skip_sixteen_bytes() {
+        let table = OpcodeTable::builtin();
+        let mut body = vec![25u8, 3]; // opcode 25 = ScaleMode, mode = 3
+        body.push(0x20); // flags byte, right after the mode (no skip)
+        body.push(0x00); // one more byte
+        body.push(10); // opcode 10 = WindowState, right after
+        body.push(7);
+        let bytes = control_block("Frm1", 13, &body);
+        let region = Region::new(&bytes, Off::new(0));
+        let (header, _) = read_control_header(&region);
+        let (stream, defects) = walk_properties(&region, &header, &table);
+        assert_eq!(stream.properties.len(), 1, "{:?}", stream.properties);
+        assert!(matches!(
+            &stream.properties[0],
+            PropertyValue::Byte { value: 7, .. }
+        ));
+        assert!(defects.is_empty(), "{defects:?}");
+    }
+
+    #[test]
+    fn the_no_output_opcodes_zero_ninety_eight_and_ninety_nine_consume_only_their_own_byte() {
+        let table = OpcodeTable::builtin();
+        for opcode in [0u8, 98, 99] {
+            let body = vec![opcode, 10, 4]; // the special opcode, then WindowState = 4
+            let bytes = control_block("Frm1", 13, &body);
+            let region = Region::new(&bytes, Off::new(0));
+            let (header, _) = read_control_header(&region);
+            let (stream, defects) = walk_properties(&region, &header, &table);
+            assert_eq!(
+                stream.properties.len(),
+                1,
+                "opcode {opcode}: {:?}",
+                stream.properties
+            );
+            assert!(
+                matches!(&stream.properties[0], PropertyValue::Byte { value: 4, .. }),
+                "opcode {opcode}: {:?}",
+                stream.properties[0]
+            );
+            assert!(defects.is_empty(), "opcode {opcode}: {defects:?}");
+        }
+    }
+
+    #[test]
+    fn special_opcode_handling_does_not_apply_to_commandbutton() {
+        // Opcode 25 on CommandButton (cType 4) is neither in the builtin
+        // subset nor one of Form's own special cases: it is a genuine
+        // lookup miss, not the ScaleMode special case.
+        let table = OpcodeTable::builtin();
+        let body = vec![25u8, 0, 1, 2, 3];
+        let bytes = control_block("Cmd", 4, &body);
+        let region = Region::new(&bytes, Off::new(0));
+        let (header, _) = read_control_header(&region);
+        let (stream, defects) = walk_properties(&region, &header, &table);
+        assert_eq!(stream.properties.len(), 1);
+        assert!(matches!(
+            &stream.properties[0],
+            PropertyValue::Undecoded { opcode: 25, .. }
+        ));
+        assert!(defects.is_empty(), "{defects:?}");
+    }
+
+    #[test]
+    fn mdiform_shares_the_forms_special_opcode_handling() {
+        let table = OpcodeTable::builtin();
+        let body = vec![98u8, 10, 9]; // a no-output opcode, then WindowState = 9
+        let bytes = control_block("Mdi1", 20, &body);
+        let region = Region::new(&bytes, Off::new(0));
+        let (header, _) = read_control_header(&region);
+        let (stream, defects) = walk_properties(&region, &header, &table);
+        assert_eq!(stream.properties.len(), 1);
+        assert!(matches!(
+            &stream.properties[0],
+            PropertyValue::Byte { value: 9, .. }
         ));
         assert!(defects.is_empty(), "{defects:?}");
     }
