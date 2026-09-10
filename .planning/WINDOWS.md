@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 3
+open_count: 4
 waived_count: 0
 fixed_count: 2
-total_count: 5
-last_updated: 2026-09-08T11:19:57.959Z
+total_count: 6
+last_updated: 2026-09-10T10:22:03.247Z
 ---
 
 # Broken Windows Ledger
@@ -20,6 +20,7 @@ last_updated: 2026-09-08T11:19:57.959Z
 | 3 | 01 | unmet-truth | crates/deform6/src/vb/mod.rs |  | inspect drops the defects it collects: Report derives PartialEq and Defect does not, so the count mismatch and the section overlap reach no caller until the Phase 4 report | fixed |  | 2026-09-07T15:53:11.332Z | 2026-09-08T10:55:45.000Z |
 | 4 | 01 | unrun-verify | crates/deform6/src/vb/runtime.rs |  | runtime_dll cannot be proved to come from the file: imported_dlls upper-cases every name and classify accepts only case variants of the constant, so the matched name always equals it. A discard written as _matched compiles clean under the whole gate. Fix in phase 2 by returning the name verbatim and comparing case-insensitively, then a lower-case import fixture separates them. | open |  | 2026-09-07T18:10:34.445Z |  |
 | 5 | 02 | unrun-verify | crates/deform6/src/vb/privateobj.rs |  | A non-null lpProcNamesArray entry that resolves but fails NUL-termination-within-64-bytes or the identifier-character test is handled but not exercised: the three vendored programs this module reads only exercise the address-does-not-resolve failure mode | fixed |  | 2026-09-07T22:59:56.143Z | 2026-09-08T11:19:57.959Z |
+| 6 | 03 | stub | crates/xtask/src/opcode_table.rs |  | windows_walk::run: the COM walk over a real VB6.OLB type library is a documented stub (cfg(windows), never compiled on this host); needs a human at a Windows host with a lawful VB6 install to implement | open |  | 2026-09-10T10:22:03.247Z |  |
 
 ````json
 [
@@ -82,6 +83,18 @@ last_updated: 2026-09-08T11:19:57.959Z
     "reason": "",
     "recorded_at": "2026-09-07T22:59:56.143Z",
     "resolved_at": "2026-09-08T11:19:57.959Z"
+  },
+  {
+    "id": 6,
+    "kind": "stub",
+    "phase": "03",
+    "file": "crates/xtask/src/opcode_table.rs",
+    "line": null,
+    "description": "windows_walk::run: the COM walk over a real VB6.OLB type library is a documented stub (cfg(windows), never compiled on this host); needs a human at a Windows host with a lawful VB6 install to implement",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-10T10:22:03.247Z",
+    "resolved_at": null
   }
 ]
 ````

@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Forms
 status: executing
-stopped_at: Completed 03-03-PLAN.md
-last_updated: "2026-09-10T09:33:02.492Z"
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-09-10T10:22:44.941Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 03 execution started
-state_head: 9653188a5033be27844b32381aad5587e5a82951
+state_head: b29ece6f80286235634d023a0d65146ba34bd761
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 28
-  completed_plans: 20
+  completed_plans: 21
   percent: 0
 ---
 
@@ -67,7 +67,7 @@ inferred.
 ## Current Position
 
 Phase: 03 (Forms) — EXECUTING
-Plan: 3 of 10
+Plan: 4 of 10
 Status: Ready to execute
 `deform6 inspect` reports the object graph. It does not read a form yet.
 Open defects: `.planning/WINDOWS.md` holds three, all of them limits that are
@@ -112,6 +112,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 | Phase 02 P01 | 1 session | 3 tasks | 6 files |
 | Phase 03 P01 | 56min | 3 tasks | 10 files |
 | Phase 03 P03 | 18min | 3 tasks | 3 files |
+| Phase 03 P02 | 46min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -140,6 +141,8 @@ Recent decisions affecting current work:
 - [Phase 1]: DefectKind::UnreadablePointer added to error.rs as the Recoverable leaf-pointer twin of the Fatal UnmappedAddress, for a name pointer that resolves nowhere
 - [Phase 03]: Refusal::Damaged stays &'static str crate-wide; a local damaged(String)->Refusal helper in gui.rs uses Box::leak for the two refusals that must name a runtime byte offset.
 - [Phase 03]: A full sweep of all 54 corpus .frm forms found LockWorkStation is the only zero-children form; no constant is written for the measured 3-byte tail, per 03-RESEARCH.md's own fallback.
+- [Phase 03]: 03-02: safe-provenance subset leaves out conditional/unwidth-stated STRUCTURES.md rows (ScaleMode, ClientLeft/Top/Width/Height, List, DataSource, DataFormat) rather than guess a payload width.
+- [Phase 03]: 03-02: derive-opcode-table's default output path is derived/opcode-table.toml (not top-level) so git check-ignore, called with the extracted .gitignore path, does not see a leading slash as an OS-absolute path.
 
 ### Pending Todos
 
@@ -168,8 +171,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T09:33:02.477Z
-Stopped at: Completed 03-03-PLAN.md
+Last session: 2026-09-10T10:22:44.926Z
+Stopped at: Completed 03-02-PLAN.md
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and

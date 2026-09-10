@@ -43,7 +43,7 @@ Version 1 recovers metadata. It does not recover statements.
 - [ ] **FRM-01**: The tool recovers the control tree of every form, with the
       parent of each control.
 - [ ] **FRM-02**: The tool recovers the type and the name of every control.
-- [ ] **FRM-03**: The tool recovers the property values of every control, and
+- [x] **FRM-03**: The tool recovers the property values of every control, and
       of the form itself.
 - [ ] **FRM-04**: The tool recovers the CLSID of a third party OCX control, and
       says plainly that it cannot interpret that control's property blob
