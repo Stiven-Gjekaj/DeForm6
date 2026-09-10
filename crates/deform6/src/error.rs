@@ -248,6 +248,25 @@ pub enum DefectKind {
         /// The value found.
         value: u32,
     },
+
+    /// A resource blob's declared length is not the absent sentinel
+    /// (`0xFFFFFFFF`) yet is too small to hold its own eight byte inline
+    /// picture header.
+    ///
+    /// Plan 03-07: `blobLen` counts the eight byte inline picture header
+    /// plus the image bytes, so a real blob's declared length is never
+    /// below 8. A smaller value cannot be split into a header and an image
+    /// byte count with a checked subtraction; this is the refusal that
+    /// subtraction gives instead of wrapping to a very large number.
+    #[error(
+        "the blob length {blob_len} at offset {offset:#x} is too small to hold its own 8 byte picture header"
+    )]
+    BlobLenTooSmall {
+        /// The absolute file offset of the blob's own length field.
+        offset: u32,
+        /// The declared length that was too small.
+        blob_len: u32,
+    },
 }
 
 /// How bad a defect is.
@@ -314,6 +333,10 @@ impl DefectKind {
             // An unexpected reserved value does not stop the header's other
             // three fields from reading.
             Self::OcxReservedFieldUnexpected { .. } => Severity::Recoverable,
+            // A blob too small to hold its own header is one unreadable
+            // property. The control block around it keeps every other
+            // field.
+            Self::BlobLenTooSmall { .. } => Severity::Recoverable,
         }
     }
 }
