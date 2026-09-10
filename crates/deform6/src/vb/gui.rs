@@ -199,6 +199,18 @@ pub struct FormStream<'a> {
 }
 
 impl FormStream<'_> {
+    /// Gives the stream's own bounded region.
+    ///
+    /// Plan 03-04's `controltree::walk` is the first caller that needs to
+    /// read past the form's own outermost block: the child controls and the
+    /// scope-byte runs between them. `pub(crate)` because `Region` carries no
+    /// byte-hostility contract of its own outside this crate; every read
+    /// through it still goes through the bounded, `Option`-returning API.
+    #[must_use]
+    pub(crate) const fn region(&self) -> &Region<'_> {
+        &self.region
+    }
+
     /// Reads the form's own block `Length` field, at offset `0x00`.
     #[must_use]
     pub fn length(&self) -> Option<u16> {
