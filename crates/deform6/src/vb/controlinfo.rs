@@ -686,6 +686,155 @@ fn decode_stub(
     )
 }
 
+// --- The event name, reported honestly per 03-CONTEXT.md D-02 ------------
+//
+// The file holds no event name. The slot index is the event's ordinal in
+// the control's default source interface, and turning an ordinal into a
+// name needs a table this repository does not commit: the vtable ordering
+// is not commonly published, and D-02 treats it with the same "commit the
+// tool, not the table" discipline `vb/opcodes.rs::OpcodeTable` already
+// established for property names. This module builds no such table. It
+// builds the honest report for a slot whose name is not available, and the
+// seam a caller-supplied table plugs into later.
+
+/// A source of event names, keyed by control type and event ordinal.
+///
+/// Per `03-CONTEXT.md` D-02, this repository ships zero entries.
+/// [`EventNameTable::default`] is the "no table" case every
+/// [`report_events`] call uses until a caller supplies one; a supplied
+/// table plugs into this same [`EventNameTable::lookup`] path, so it can
+/// never behave differently from the empty one, the same seam plan 03-02
+/// gave [`crate::vb::opcodes::OpcodeTable`].
+#[derive(Clone, Debug, Default)]
+pub struct EventNameTable {
+    entries: std::collections::HashMap<(String, u16), String>,
+}
+
+impl EventNameTable {
+    /// Looks up the event name for one control type's own ordinal.
+    ///
+    /// Gives `None` for every ordinal on an empty table, and for any
+    /// control type or ordinal a supplied table names no entry for: a slot
+    /// on a control type with no table entry reports no name, never one
+    /// guessed from a neighbouring entry.
+    #[must_use]
+    pub fn lookup(&self, control_type: &str, index: u16) -> Option<&str> {
+        self.entries
+            .get(&(control_type.to_owned(), index))
+            .map(String::as_str)
+    }
+}
+
+/// The event name state for one control's own event slot, reported
+/// honestly per `03-CONTEXT.md` D-02.
+///
+/// Three states: a bound slot whose name a supplied [`EventNameTable`]
+/// names, a bound slot with no name available, and an unbound slot. This
+/// module never derives a name from the slot index by counting, and never
+/// names an event from a control type this repository has not verified
+/// against a cited public source.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EventReport {
+    /// A bound slot whose name [`EventNameTable::lookup`] gave.
+    Named {
+        /// The control's own name.
+        control_name: String,
+        /// This slot's own ordinal.
+        index: u16,
+        /// The event name a supplied table gave.
+        event_name: String,
+    },
+    /// A bound slot with no name available.
+    BoundUnnamed {
+        /// The control's own name.
+        control_name: String,
+        /// This slot's own ordinal.
+        index: u16,
+    },
+    /// An unbound slot: no handler in the source. VB6 declares a
+    /// source-level event procedure only for a bound slot, so this module
+    /// never attempts a name lookup for one: naming an event nothing calls
+    /// serves no recovery this repository writes.
+    Unbound {
+        /// The control's own name.
+        control_name: String,
+        /// This slot's own ordinal.
+        index: u16,
+    },
+}
+
+impl EventReport {
+    /// Renders the honest-gap message for a slot with no name available,
+    /// matching the shape `PropertyValue::undecoded_message` gives for an
+    /// unnamed property opcode: present, at its own index, no table
+    /// supplied, and the way to supply one. `None` for
+    /// [`EventReport::Named`], which already carries its own name.
+    #[must_use]
+    pub fn no_name_message(&self) -> Option<String> {
+        match self {
+            Self::BoundUnnamed {
+                control_name,
+                index,
+            } => Some(format!(
+                "Event slot {index} on {control_name}: bound, name not available, no event \
+                 name table loaded. Run with --event-name-table to supply one naming this \
+                 control's own vtable ordering."
+            )),
+            Self::Unbound {
+                control_name,
+                index,
+            } => Some(format!(
+                "Event slot {index} on {control_name}: unbound, name not available, no event \
+                 name table loaded. Run with --event-name-table to supply one naming this \
+                 control's own vtable ordering."
+            )),
+            Self::Named { .. } => None,
+        }
+    }
+}
+
+/// Builds the event report for one control's own event table.
+///
+/// `control_type_name` is the control's own type, from
+/// `classify_control_type`'s own `Debug` rendering (matching
+/// `vb/propstream.rs`'s own `Undecoded` message, which reads the same way):
+/// event names are per control type, not per control instance, so the
+/// lookup key is the type, while the report itself still carries the
+/// control's own `control_name` for identification.
+///
+/// Two runs over the same bytes give the same report in the same order:
+/// this function reads only `table.slots`, in its own stored order, and
+/// invents nothing.
+#[must_use]
+pub fn report_events(
+    control_name: &str,
+    control_type_name: &str,
+    table: &EventTable,
+    names: &EventNameTable,
+) -> Vec<EventReport> {
+    table
+        .slots
+        .iter()
+        .map(|slot| match slot {
+            EventSlot::Unbound { index } => EventReport::Unbound {
+                control_name: control_name.to_owned(),
+                index: *index,
+            },
+            EventSlot::Bound { index, .. } => match names.lookup(control_type_name, *index) {
+                Some(event_name) => EventReport::Named {
+                    control_name: control_name.to_owned(),
+                    index: *index,
+                    event_name: event_name.to_owned(),
+                },
+                None => EventReport::BoundUnnamed {
+                    control_name: control_name.to_owned(),
+                    index: *index,
+                },
+            },
+        })
+        .collect()
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -697,7 +846,8 @@ fn decode_stub(
 )]
 mod tests {
     use super::{
-        ControlInfoTable, EventSlot, join_by_name, read_event_table, read_raw_control_info,
+        ControlInfoTable, EventNameTable, EventReport, EventSlot, join_by_name, read_event_table,
+        read_raw_control_info, report_events,
     };
     use crate::error::DefectKind;
     use crate::read::pe::PeImage;
@@ -1319,5 +1469,160 @@ mod tests {
             &event_table.slots[1..]
         );
         assert!(event_table.defects().is_empty());
+    }
+
+    // --- Task 3: the event name, reported honestly per D-02 ----------------
+
+    #[test]
+    fn a_bound_slot_with_a_named_table_entry_gives_the_named_state() {
+        let mut names = EventNameTable::default();
+        names
+            .entries
+            .insert(("CommandButton".to_owned(), 0), "Click".to_owned());
+        let table = super::EventTable {
+            slots: vec![EventSlot::Bound {
+                index: 0,
+                stub: Va::new(0x0040_1000),
+                handler: None,
+            }],
+            unsupported_control_type: None,
+            defects: Vec::new(),
+        };
+
+        let reports = report_events("Command1", "CommandButton", &table, &names);
+        assert_eq!(reports.len(), 1);
+        assert_eq!(
+            reports[0],
+            EventReport::Named {
+                control_name: "Command1".to_owned(),
+                index: 0,
+                event_name: "Click".to_owned(),
+            }
+        );
+        assert!(reports[0].no_name_message().is_none());
+    }
+
+    #[test]
+    fn a_bound_slot_with_no_table_gives_the_bound_unnamed_state_and_a_reason() {
+        let names = EventNameTable::default();
+        let table = super::EventTable {
+            slots: vec![EventSlot::Bound {
+                index: 3,
+                stub: Va::new(0x0040_1000),
+                handler: None,
+            }],
+            unsupported_control_type: None,
+            defects: Vec::new(),
+        };
+
+        let reports = report_events("Command1", "CommandButton", &table, &names);
+        assert_eq!(
+            reports[0],
+            EventReport::BoundUnnamed {
+                control_name: "Command1".to_owned(),
+                index: 3,
+            }
+        );
+        let message = reports[0].no_name_message().unwrap();
+        assert!(message.contains('3'), "{message}");
+        assert!(message.contains("Command1"), "{message}");
+        assert!(message.contains("--event-name-table"), "{message}");
+    }
+
+    #[test]
+    fn an_unbound_slot_gives_the_unbound_state_and_a_reason() {
+        let names = EventNameTable::default();
+        let table = super::EventTable {
+            slots: vec![EventSlot::Unbound { index: 7 }],
+            unsupported_control_type: None,
+            defects: Vec::new(),
+        };
+
+        let reports = report_events("Picture1", "PictureBox", &table, &names);
+        assert_eq!(
+            reports[0],
+            EventReport::Unbound {
+                control_name: "Picture1".to_owned(),
+                index: 7,
+            }
+        );
+        let message = reports[0].no_name_message().unwrap();
+        assert!(message.contains('7'), "{message}");
+        assert!(message.contains("Picture1"), "{message}");
+        assert!(message.contains("--event-name-table"), "{message}");
+    }
+
+    #[test]
+    fn a_slot_on_a_control_type_with_no_table_entry_reports_no_name() {
+        let mut names = EventNameTable::default();
+        names
+            .entries
+            .insert(("CommandButton".to_owned(), 0), "Click".to_owned());
+        let table = super::EventTable {
+            slots: vec![EventSlot::Bound {
+                index: 0,
+                stub: Va::new(0x0040_1000),
+                handler: None,
+            }],
+            unsupported_control_type: None,
+            defects: Vec::new(),
+        };
+
+        // The table names an entry for CommandButton's own ordinal 0, but
+        // this slot belongs to a Label: no name is invented from the
+        // CommandButton entry, and no name is derived from the ordinal.
+        let reports = report_events("Label1", "Label", &table, &names);
+        assert!(matches!(reports[0], EventReport::BoundUnnamed { .. }));
+    }
+
+    #[test]
+    fn two_runs_over_the_same_bytes_give_the_same_report_in_the_same_order() {
+        let names = EventNameTable::default();
+        let table = super::EventTable {
+            slots: vec![
+                EventSlot::Unbound { index: 0 },
+                EventSlot::Bound {
+                    index: 1,
+                    stub: Va::new(0x0040_1000),
+                    handler: None,
+                },
+                EventSlot::Unbound { index: 2 },
+            ],
+            unsupported_control_type: None,
+            defects: Vec::new(),
+        };
+
+        let first = report_events("Command1", "CommandButton", &table, &names);
+        let second = report_events("Command1", "CommandButton", &table, &names);
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 3);
+    }
+
+    #[test]
+    fn the_name_source_is_a_parameter_not_a_compiled_in_table() {
+        assert_eq!(
+            0,
+            production_code_only().matches("const EVENT_NAMES").count()
+        );
+    }
+
+    #[test]
+    fn the_bound_and_unbound_reasons_read_differently_for_the_same_index_and_control() {
+        let bound = EventReport::BoundUnnamed {
+            control_name: "Command1".to_owned(),
+            index: 0,
+        };
+        let unbound = EventReport::Unbound {
+            control_name: "Command1".to_owned(),
+            index: 0,
+        };
+        let bound_message = bound.no_name_message().unwrap();
+        let unbound_message = unbound.no_name_message().unwrap();
+        assert_ne!(
+            bound_message, unbound_message,
+            "a bound slot and an unbound slot must not read the same"
+        );
+        assert!(bound_message.contains("bound"), "{bound_message}");
+        assert!(unbound_message.contains("unbound"), "{unbound_message}");
     }
 }
