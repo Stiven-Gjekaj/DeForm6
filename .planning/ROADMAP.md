@@ -275,12 +275,12 @@ control.
   - **STRUCTURES gap 16**: nine dwords in `GUIObjectInfo` at 0x35 to 0x58 have
     no known meaning. Leave them opaque; do not invent a reading.
 
-**Plans**: 10 plans
+**Plans**: 1/10 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 03-01-PLAN.md - The GUI table, `GUIObjectInfo`, the `lPropertiesLength` tiling invariant, the end to end tracer, and the module set
+- [x] 03-01-PLAN.md - The GUI table, `GUIObjectInfo`, the `lPropertiesLength` tiling invariant, the end to end tracer, and the module set
 - [ ] 03-03-PLAN.md - `support/frm.rs`, the independent `.frm` reader, and the `frmHMM.frx` exclusion by name
 
 **Wave 2** *(blocked on Wave 1 completion)*
@@ -581,7 +581,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 |-------|----------------|--------|-----------|
 | 1. It reads the file | 7/8 | In Progress|  |
 | 2. The object graph | 4/10 | In Progress|  |
-| 3. Forms | 0/10 | Not started | - |
+| 3. Forms | 1/10 | In Progress|  |
 | 4. It writes a project | 0/9 | Not started | - |
 | 5. Hostility | 0/8 | Not started | - |
 | 6. Version 1.0 | 0/5 | Not started | - |

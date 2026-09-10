@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 3
+current_phase: 03
 current_phase_name: Forms
-status: planned
-stopped_at: "Phase 3 planned. Ten plans in five waves, verified by the plan checker."
-last_updated: "2026-09-09T12:18:00.365Z"
-last_activity: 2026-09-09
-last_activity_desc: "Phase 3 planned. Research closed STRUCTURES gap 11 and found the ROADMAP conflict with the AGENTS.md redistribution rule. Four decisions recorded. Ten plans in five waves. The plan checker passed with no blocker and no warning. 7 of 7 requirements and 4 of 4 decisions covered."
-state_head: 77f3eb91392f2dd6db53df3f532b68788823f17b
+status: executing
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-09-10T09:18:59.471Z"
+last_activity: 2026-09-10
+last_activity_desc: Phase 03 execution started
+state_head: 3e244c41f1025b8248e2c20995d3fcc7ddf616dd
 progress:
   total_phases: 6
-  completed_phases: 2
-  total_plans: 50
-  completed_plans: 18
-  percent: 36
+  completed_phases: 0
+  total_plans: 28
+  completed_plans: 19
+  percent: 0
 ---
 
 ## Continue
@@ -62,25 +62,25 @@ See: .planning/PROJECT.md (updated 2026-09-07)
 Visual Basic project that opens in the VB6 IDE, with the forms and the names
 intact, and a report that says how much of it is proved and how much is
 inferred.
-**Current focus:** Phase 1 complete - Phase 2, The object graph, is next
+**Current focus:** Phase 03 — Forms
 
 ## Current Position
 
-Phase: 3 (Forms) - READY TO EXECUTE
-Plan: 0 of 10 in phase 3 - none executed
-Status: Phase 2 done and audited. Phase 3 is planned and not started.
+Phase: 03 (Forms) — EXECUTING
+Plan: 2 of 10
+Status: Ready to execute
 `deform6 inspect` reports the object graph. It does not read a form yet.
 Open defects: `.planning/WINDOWS.md` holds three, all of them limits that are
 stated rather than hidden. The section overlap rule has no test because no
 corpus file overlaps. The P-code branch has no real sample because every
 vendored project is native. `inspect` drops the defects it collects, because
 `Report` derives `PartialEq` and `Defect` does not.
-Last activity: 2026-09-09 - Phase 3 planned in ten plans and five waves.
+Last activity: 2026-09-10 — Phase 03 execution started
 Plan 03-01 leads with an end to end tracer. Plan 03-02 withdraws the ROADMAP
 instruction to commit an opcode table built from a type library dump, because
 `AGENTS.md` bars a fixture calculated from a third party file.
 
-Progress: [███░░░░░░░] 36% of the 50 plans in the roadmap, which is 18 of 50
+Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, which is 18 of 50
 
 ## Performance Metrics
 
@@ -110,6 +110,7 @@ Progress: [███░░░░░░░] 36% of the 50 plans in the roadmap, w
 | Phase 01 P07 | 1 session | 3 tasks | 4 files |
 | Phase 01 P08 | 1 session | 3 tasks | 4 files |
 | Phase 02 P01 | 1 session | 3 tasks | 6 files |
+| Phase 03 P01 | 56min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -136,6 +137,8 @@ Recent decisions affecting current work:
 - [Phase 1]: 01-08: The corpus sweep's header-string check cross-checks Report's fields against a second, independent header read by field identity, not only an ascending-offset check, because the offsets alone cannot see a field-swap bug in Report construction.
 - [Phase 1]: vb/object.rs resolves lpObjectArray independently rather than extending ObjectTableHead, so plan 02-06 keeps sole ownership of vb/project.rs
 - [Phase 1]: DefectKind::UnreadablePointer added to error.rs as the Recoverable leaf-pointer twin of the Fatal UnmappedAddress, for a name pointer that resolves nowhere
+- [Phase 03]: Refusal::Damaged stays &'static str crate-wide; a local damaged(String)->Refusal helper in gui.rs uses Box::leak for the two refusals that must name a runtime byte offset.
+- [Phase 03]: A full sweep of all 54 corpus .frm forms found LockWorkStation is the only zero-children form; no constant is written for the measured 3-byte tail, per 03-RESEARCH.md's own fallback.
 
 ### Pending Todos
 
@@ -164,8 +167,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-07T22:12:36.234Z
-Stopped at: Completed 02-01-PLAN.md
+Last session: 2026-09-10T09:18:59.456Z
+Stopped at: Completed 03-01-PLAN.md
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and
