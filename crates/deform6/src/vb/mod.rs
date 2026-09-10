@@ -12,6 +12,7 @@
 
 pub mod classify;
 pub mod functyp;
+pub mod gui;
 pub mod header;
 pub mod object;
 pub mod privateobj;
