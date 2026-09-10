@@ -198,17 +198,23 @@ pub struct FormStream<'a> {
     region: Region<'a>,
 }
 
-impl FormStream<'_> {
-    /// Gives the stream's own bounded region.
+impl<'a> FormStream<'a> {
+    /// Gives the stream's own bounded region, by value.
     ///
-    /// Plan 03-04's `controltree::walk` is the first caller that needs to
-    /// read past the form's own outermost block: the child controls and the
-    /// scope-byte runs between them. `pub(crate)` because `Region` carries no
-    /// byte-hostility contract of its own outside this crate; every read
-    /// through it still goes through the bounded, `Option`-returning API.
+    /// [`Region`] is `Copy`, and an explicit `'a` here (rather than the
+    /// elided `&Region<'_>` plan 03-04 gave this method) is what lets a
+    /// caller keep the returned region past this call's own borrow of
+    /// `self`. Plan 03-10's composed walk (`vb/mod.rs`) is the first caller
+    /// that needs exactly that: it stores each control's own block region
+    /// inside [`crate::vb::controltree::ControlNode`], which outlives the
+    /// `walk` call that builds it.
+    ///
+    /// `pub(crate)` because `Region` carries no byte-hostility contract of
+    /// its own outside this crate; every read through it still goes through
+    /// the bounded, `Option`-returning API.
     #[must_use]
-    pub(crate) const fn region(&self) -> &Region<'_> {
-        &self.region
+    pub(crate) const fn region(&self) -> Region<'a> {
+        self.region
     }
 
     /// Reads the form's own block `Length` field, at offset `0x00`.

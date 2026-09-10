@@ -180,7 +180,7 @@ fn load_opcode_table(opcode_table_path: Option<&Path>) -> Result<(OpcodeTable, S
 /// bad `--opcode-table` argument is reported as the usage error it is,
 /// before this run does any work over the file under inspection.
 fn run_inspect(path: &Path, opcode_table_path: Option<&Path>) -> Exit {
-    let (_table, table_summary) = match load_opcode_table(opcode_table_path) {
+    let (table, table_summary) = match load_opcode_table(opcode_table_path) {
         Ok(loaded) => loaded,
         Err(exit) => return exit,
     };
@@ -193,7 +193,7 @@ fn run_inspect(path: &Path, opcode_table_path: Option<&Path>) -> Exit {
         }
     };
 
-    match deform6::inspect(&data) {
+    match deform6::inspect(&data, &table) {
         Ok(report) => {
             print_report(path, &report, &table_summary);
             Exit::Ok

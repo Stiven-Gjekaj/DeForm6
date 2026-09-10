@@ -351,7 +351,7 @@ fn read_name(pe: &PeImage<'_>, element: &Region<'_>, lpsz_name: Va) -> (String, 
 /// structural position (there is exactly one root and, per this
 /// measurement, exactly one entry of this name), not by a literal string
 /// match against the root's own declared name.
-const FORM_SELF_ENTRY_NAME: &str = "Form";
+pub(crate) const FORM_SELF_ENTRY_NAME: &str = "Form";
 
 /// The result of joining a control tree's own names against a
 /// [`ControlInfoTable`]'s own names, in both directions.
@@ -1128,7 +1128,7 @@ mod tests {
 
     /// Walks the whole control tree of the first form in `data`, through the
     /// same pointer chain `vb/controltree.rs`'s own corpus tests use.
-    fn walk_first_form_tree(data: &[u8]) -> ControlTree {
+    fn walk_first_form_tree(data: &[u8]) -> ControlTree<'_> {
         let image = PeImage::parse(data).unwrap();
         let hdr = header_region(&image).unwrap();
         let header = VbHeader::read(&hdr).unwrap();

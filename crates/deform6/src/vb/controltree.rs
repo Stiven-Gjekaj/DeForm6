@@ -474,14 +474,27 @@ fn read_scope_run(
     )))
 }
 
-/// One control in the tree: its header, its parent, and its children.
+/// One control in the tree: its header, its own bounded byte block, its
+/// parent, and its children.
 ///
-/// Holds indices into [`ControlTree::nodes`] rather than references, so the
-/// tree needs no lifetime and no allocation per edge.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ControlNode {
+/// Holds indices into [`ControlTree::nodes`] for the parent/child edges
+/// rather than references, so an edge costs no allocation. `block` does
+/// carry a lifetime, tied to the underlying file bytes: plan 03-10's
+/// `vb/mod.rs` is the first caller that needs a control's own bytes after
+/// the walk finishes, to read its property stream, and, for an external
+/// control, its class name and OCX header, without re-walking the tree to
+/// find that span again. `PartialEq`/`Eq` are not derived: [`Region`]
+/// itself does not implement them, and no caller needs to compare a whole
+/// tree, only its own fields.
+#[derive(Clone, Debug)]
+pub struct ControlNode<'a> {
     /// The control's own header: its type, name, and array index.
     pub header: ControlHeader,
+    /// The control's own bounded window: `Length + 2` bytes starting at the
+    /// block's own `Length` field, the same region [`read_control_header`]
+    /// reads `header` from. `pub(crate)`: a caller outside this crate has
+    /// no bound-checked API of its own to read through it safely.
+    pub(crate) block: Region<'a>,
     /// The index of this control's parent in [`ControlTree::nodes`]. `None`
     /// for the root, which is the form itself.
     pub parent: Option<usize>,
@@ -491,20 +504,23 @@ pub struct ControlNode {
 
 /// The control tree: every node the walk recovered, in depth-first stream
 /// order, plus the root index.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ControlTree {
+#[derive(Clone, Debug)]
+pub struct ControlTree<'a> {
     /// Every node, in depth-first stream order. Index `0` is always the
     /// root.
-    pub nodes: Vec<ControlNode>,
+    pub nodes: Vec<ControlNode<'a>>,
     /// The index of the root node (the form itself) in [`Self::nodes`].
     pub root: usize,
 }
 
 /// Reads one control block at `at` in `region`: its `Length`, its header,
-/// and its own byte span.
+/// and its own bounded byte block.
 ///
-/// Gives `(ControlHeader, Vec<Defect>, length)`, where `length` is the raw
-/// declared `Length` value (not `Length + 2`).
+/// Gives `(ControlHeader, Vec<Defect>, length, block)`, where `length` is
+/// the raw declared `Length` value (not `Length + 2`), and `block` is the
+/// control's own `Length + 2`-byte window: `header` was read from it, and
+/// plan 03-10's `vb/mod.rs` composes a `ControlNode` around it so a later
+/// pass can read this control's own property stream from the same bytes.
 ///
 /// # Errors
 ///
@@ -513,7 +529,10 @@ pub struct ControlTree {
 /// research measured this exact value appearing when a flat jump ignores
 /// the scope run), or when the block's own declared span runs past the end
 /// of the file.
-fn read_block(region: &Region<'_>, at: Off) -> Result<(ControlHeader, Vec<Defect>, u32), Refusal> {
+fn read_block<'a>(
+    region: &Region<'a>,
+    at: Off,
+) -> Result<(ControlHeader, Vec<Defect>, u32, Region<'a>), Refusal> {
     let offset = region.file_offset(at).map_or(0, Off::get);
     let length = region.u16_le(at).ok_or_else(|| {
         damaged(format!(
@@ -536,7 +555,7 @@ fn read_block(region: &Region<'_>, at: Off) -> Result<(ControlHeader, Vec<Defect
     })?;
 
     let (header, defects) = read_control_header(&block);
-    Ok((header, defects, u32::from(length)))
+    Ok((header, defects, u32::from(length), block))
 }
 
 /// Applies `pops` to the parent stack, refusing rather than popping the
@@ -627,15 +646,15 @@ fn close_walk(
 /// scope run is unreadable or exceeds [`MAX_SCOPE_RUN`] bytes with no
 /// terminator, when a scope run holds an unrecognised byte, when pops would
 /// empty the parent stack, or when the tiling check fails.
-pub fn walk(
-    stream: &FormStream<'_>,
+pub fn walk<'a>(
+    stream: &FormStream<'a>,
     tiling: &mut Tiling,
-) -> Result<(ControlTree, Vec<Defect>), Refusal> {
-    let region = stream.region();
+) -> Result<(ControlTree<'a>, Vec<Defect>), Refusal> {
+    let region: Region<'a> = stream.region();
     let mut defects = Vec::new();
 
     let root_at = Off::new(0);
-    let (root_header, root_defects, root_length) = read_block(region, root_at)?;
+    let (root_header, root_defects, root_length, root_block) = read_block(&region, root_at)?;
     defects.extend(root_defects);
     let root_content = root_length.checked_sub(1).ok_or(Refusal::Damaged(
         "a control block's Length is too small to hold its own header",
@@ -644,6 +663,7 @@ pub fn walk(
 
     let mut nodes = vec![ControlNode {
         header: root_header,
+        block: root_block,
         parent: None,
         children: Vec::new(),
     }];
@@ -657,7 +677,7 @@ pub fn walk(
         let current_is_menu = nodes
             .get(current)
             .is_some_and(|node| node.header.c_type == MENU_C_TYPE);
-        let (run, run_len) = read_scope_run(region, sep_at, current_is_menu)?;
+        let (run, run_len) = read_scope_run(&region, sep_at, current_is_menu)?;
         tiling.account(run_len)?;
         let run_offset = region.file_offset(sep_at).map_or(0, Off::get);
 
@@ -671,7 +691,7 @@ pub fn walk(
                 let end_at = sep_at.checked_add(run_len).ok_or(Refusal::Damaged(
                     "the control tree walk's own cursor overflows a u32",
                 ))?;
-                close_walk(region, &mut stack, pops, end_at, tiling)?;
+                close_walk(&region, &mut stack, pops, end_at, tiling)?;
                 break;
             }
             ScopeRun::OpenChild { pops } | ScopeRun::Sibling { pops } | ScopeRun::Menu { pops } => {
@@ -679,8 +699,8 @@ pub fn walk(
                     "the control tree walk's own cursor overflows a u32",
                 ))?;
 
-                if !block_fits(region, next_at) {
-                    close_walk(region, &mut stack, pops, next_at, tiling)?;
+                if !block_fits(&region, next_at) {
+                    close_walk(&region, &mut stack, pops, next_at, tiling)?;
                     break;
                 }
 
@@ -695,7 +715,7 @@ pub fn walk(
                     ))?
                 };
 
-                let (header, node_defects, length) = read_block(region, next_at)?;
+                let (header, node_defects, length, block) = read_block(&region, next_at)?;
                 defects.extend(node_defects);
                 let content = length.checked_sub(1).ok_or(Refusal::Damaged(
                     "a control block's Length is too small to hold its own header",
@@ -705,6 +725,7 @@ pub fn walk(
                 let idx = nodes.len();
                 nodes.push(ControlNode {
                     header,
+                    block,
                     parent: Some(parent),
                     children: Vec::new(),
                 });
@@ -936,7 +957,7 @@ mod tests {
     /// Walks the whole control tree of the first form in `data`.
     fn walk_first_form(
         data: &[u8],
-    ) -> Result<(super::ControlTree, Vec<crate::error::Defect>), Refusal> {
+    ) -> Result<(super::ControlTree<'_>, Vec<crate::error::Defect>), Refusal> {
         let image = PeImage::parse(data).unwrap();
         let hdr = header_region(&image).unwrap();
         let header = VbHeader::read(&hdr).unwrap();

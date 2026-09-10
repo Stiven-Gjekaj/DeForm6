@@ -1425,11 +1425,11 @@ mod tests {
         let stream = info.form_stream().unwrap();
         let region = stream.region();
 
-        let (control_header, _) = read_control_header(region);
+        let (control_header, _) = read_control_header(&region);
         assert_eq!(control_header.c_type, 13, "the form's own cType");
 
         let table = OpcodeTable::builtin();
-        let (props, _defects) = walk_properties(region, &control_header, &table);
+        let (props, _defects) = walk_properties(&region, &control_header, &table);
 
         // The form's own first property, WindowState (opcode 10, Byte), is
         // resolved from the safe-provenance subset.

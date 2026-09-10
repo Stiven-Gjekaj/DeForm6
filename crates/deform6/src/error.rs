@@ -267,6 +267,22 @@ pub enum DefectKind {
         /// The declared length that was too small.
         blob_len: u32,
     },
+    /// Plan 03-10: one structure the composed `inspect` walk needed could
+    /// not be read, converted from a [`Refusal`] into a per-item defect so
+    /// the walk that reached it can continue over the rest of the report.
+    /// Used for a form's own `GuiObjectInfo`, its property stream, its
+    /// control tree, its `ControlInfoTable`, or one control's own event
+    /// table: any of these refusing costs the one form or the one control,
+    /// never the whole file.
+    #[error("the structure at offset {offset:#x} could not be read: {reason}")]
+    StructureUnreadable {
+        /// The absolute file offset the structure was read from, when one
+        /// was known; `0` when it was not (the same fallback
+        /// `vb/object.rs::unreadable_pointer` uses).
+        offset: u32,
+        /// The refusal's own message, carried verbatim.
+        reason: String,
+    },
 }
 
 /// How bad a defect is.
@@ -337,6 +353,10 @@ impl DefectKind {
             // property. The control block around it keeps every other
             // field.
             Self::BlobLenTooSmall { .. } => Severity::Recoverable,
+            // A form, a control's property stream, or a control's own event
+            // table that refuses costs that one item. Every other form and
+            // every other control in the same report still stands.
+            Self::StructureUnreadable { .. } => Severity::Recoverable,
         }
     }
 }

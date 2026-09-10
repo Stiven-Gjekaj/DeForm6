@@ -34,16 +34,35 @@ pub mod vbstr;
 
 pub use crate::error::Refusal;
 
+use std::collections::HashMap;
+
 use crate::error::{Defect, DefectKind, Site};
 use crate::read::pe::PeImage;
 use crate::read::region::{Off, Rva, Va};
 use classify::ObjectKind;
+use controlinfo::{ControlInfo, ControlInfoTable, EventNameTable, read_event_table, report_events};
 use functyp::{FuncTypeWalk, ProcedureSignature, Prototype, PrototypeList};
+use gui::{GuiObjectInfo, GuiTable, GuiTableEntry, Tiling};
 use header::{VbHeader, header_region};
 use object::{Object, ObjectTable};
+use opcodes::OpcodeTable;
 use privateobj::{Gap, ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureList};
 use project::{Component, ComponentTable, Declaration, DeclareTable, ObjectTableHead, ProjectInfo};
 use runtime::{Runtime, runtime_of};
+
+/// One property this repository recovered for a control, or the honest
+/// report that its opcode is present and undecoded, per FRM-03.
+/// [`propstream::walk_properties`] builds these; this re-export is what
+/// lets a caller of [`Report`] reach the type by the name this phase's own
+/// artifact table gives it.
+pub use propstream::PropertyValue as PropertyReport;
+
+/// One control's own event slot report, per FRM-06 and `03-CONTEXT.md`
+/// D-02's honest event-name states (named, bound-unnamed, unbound).
+/// [`controlinfo::report_events`] builds these; this re-export is what lets
+/// a caller of [`Report`] reach the type by the name this phase's own
+/// artifact table gives it.
+pub use controlinfo::EventReport;
 
 /// One procedure slot, composed from two arrays that share one length
 /// (`Object.proc_count`) and resolve independently.
@@ -108,6 +127,80 @@ pub struct ObjectReport {
     /// Empty for a standard module, which carries no `PrivateObj` to raise
     /// one.
     pub gaps: Vec<Gap>,
+}
+
+/// One form this phase recovered: FRM-01 through FRM-06 composed for one
+/// GUI table entry.
+///
+/// A form whose own control tree could not be built (its `GuiObjectInfo`
+/// did not resolve, its property stream did not bound, or the scope-byte
+/// walk's own tiling check refused) still gets an entry here: `name` may be
+/// empty and `controls` is empty, and `defects` names the reason. One
+/// damaged form costs one entry, never the whole report.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FormReport {
+    /// The form's own name, from its own outermost control block. Empty
+    /// when the form's own header did not resolve at all.
+    pub name: String,
+    /// Every control this form's own control tree holds, in the same
+    /// depth-first order [`controltree::ControlTree::nodes`] gives, index
+    /// for index: `controls[0]` is always the form's own outermost block
+    /// (the form itself, carrying its own properties and its own event
+    /// slots), and [`ControlReport::parent`] indexes back into this same
+    /// list. Empty when the tree could not be built at all.
+    pub controls: Vec<ControlReport>,
+    /// Every defect this form's own composition found: a `GuiObjectInfo`
+    /// that did not resolve, a tiling check that refused, or a
+    /// `ControlInfoTable` that could not be read. The same defects are also
+    /// folded into [`Report::defects`], which carries every defect across
+    /// the whole file; this list is scoped to one form.
+    pub defects: Vec<Defect>,
+}
+
+/// One control this phase recovered: its name, its type, its array index
+/// when it has one, its parent, its properties, its external-control facts
+/// when its type is 255, and its event slots.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ControlReport {
+    /// The control's own name.
+    pub name: String,
+    /// The control's own type: a name from [`controltree::ControlKind`], or
+    /// the raw `cType` byte when this repository does not name it.
+    pub kind: controltree::ControlKind,
+    /// The control array `Index`, when this control is one element of an
+    /// array. `None` for a non-array control.
+    pub array_index: Option<u16>,
+    /// The index of this control's parent in the same
+    /// [`FormReport::controls`] list. `None` for the form itself.
+    pub parent: Option<usize>,
+    /// Every property this control's own property stream holds, in stream
+    /// order. Empty for an external control (`cType` 255): its own facts
+    /// come through [`Self::external`], [`Self::ocx_header`] and
+    /// [`Self::opaque_message`] instead, per FRM-04.
+    pub properties: Vec<PropertyReport>,
+    /// The class name, the library and component split, and the CLSID this
+    /// repository could join, for a `cType` 255 external control. `None`
+    /// for every other control type.
+    pub external: Option<ocx::ExternalControl>,
+    /// The stated reason no CLSID was joined, for an external control whose
+    /// join did not resolve one. `None` when the control is not external,
+    /// or when the join succeeded.
+    pub external_reason: Option<String>,
+    /// The fixed OCX header (`_ExtentX`, `_ExtentY`, `_Version`), for an
+    /// external control whose property blob carries the signature this
+    /// repository can read without its own type library. `None` for every
+    /// other control type, and for an external control whose blob carries
+    /// no signature.
+    pub ocx_header: Option<ocx::OcxHeader>,
+    /// The honest opaque-blob statement, for an external control: the rest
+    /// of its property blob needs the control's own type library, which
+    /// this repository does not hold and may not redistribute. `None` for
+    /// every other control type.
+    pub opaque_message: Option<String>,
+    /// This control's own event slots, joined by name from the control
+    /// tree to the `ControlInfo` array, per FRM-06. Empty when no
+    /// `ControlInfo` entry joins this control's own name.
+    pub events: Vec<EventReport>,
 }
 
 /// What DeForm6 read out of one executable.
@@ -201,6 +294,11 @@ pub struct Report {
     /// Every OCX or type library component a form in this project
     /// references, read from the external component table.
     pub components: Vec<Component>,
+    /// Every form the GUI table declares, with its control tree, its
+    /// property values, its resource blobs, its external control facts and
+    /// its event slots. Serves FRM-01 through FRM-06. A program with zero
+    /// forms (only modules and classes) gives an empty list and no fault.
+    pub forms: Vec<FormReport>,
     /// Every recoverable defect this run collected, across every structure
     /// this phase reads.
     ///
@@ -227,6 +325,11 @@ pub struct Report {
 /// The remaining steps follow the pointer chain, and each one is reached only
 /// through the address the step before it read.
 ///
+/// `opcode_table` names every property this run can decode by name; a
+/// caller with no opinion of its own passes [`OpcodeTable::builtin`]. This
+/// is the one file-free entry point the command line crate calls: it reads
+/// no file and reaches no state outside `data` and `opcode_table`.
+///
 /// # Errors
 ///
 /// Returns [`Refusal::NotPe`], [`Refusal::NotI386`] or [`Refusal::NotPe32`]
@@ -234,7 +337,7 @@ pub struct Report {
 /// [`Refusal::NoVbRuntime`], [`Refusal::IsVb5`] or [`Refusal::IsVb4`] when the
 /// image names no Visual Basic 6 runtime, and [`Refusal::Damaged`] when a
 /// Visual Basic 6 structure does not resolve.
-pub fn inspect(data: &[u8]) -> Result<Report, Refusal> {
+pub fn inspect(data: &[u8], opcode_table: &OpcodeTable) -> Result<Report, Refusal> {
     let pe = PeImage::parse(data)?;
     let (runtime, runtime_dll) = runtime_of(&pe)?;
 
@@ -273,6 +376,37 @@ pub fn inspect(data: &[u8]) -> Result<Report, Refusal> {
         ComponentTable::read(&pe, header.lp_external_table, header.w_external_count);
     defects.extend(component_table.defects().iter().cloned());
 
+    // The event name table ships zero entries by design, per
+    // `03-CONTEXT.md` D-02: the vtable ordering an ordinal maps into is not
+    // commonly published, and this repository does not commit a table built
+    // from a type library dump. Every event slot this walk reports names no
+    // event, honestly, until a future plan supplies a caller-built table
+    // through this same seam.
+    let event_names = EventNameTable::default();
+
+    // The GUI table walk sits on the spine, like `ObjectTable::walk` above:
+    // a bad `lStructSize` on any one entry refuses the whole table, because
+    // the array's own stride is not proven for any entry after it. Every
+    // fallible step past this point (one form's own `GuiObjectInfo`, its
+    // property stream, its control tree, its `ControlInfoTable`) is
+    // per-form recoverable instead; see `compose_form`.
+    let gui_table = GuiTable::walk(&pe, &header)?;
+    let forms: Vec<FormReport> = gui_table
+        .entries
+        .iter()
+        .map(|entry| {
+            compose_form(
+                &pe,
+                entry,
+                &object_table.objects,
+                opcode_table,
+                &component_table,
+                &event_names,
+                &mut defects,
+            )
+        })
+        .collect();
+
     Ok(Report {
         // The saturating conversions over-report a slice larger than 4 GiB
         // and a section table longer than 65535 entries. Neither is reachable
@@ -294,6 +428,7 @@ pub fn inspect(data: &[u8]) -> Result<Report, Refusal> {
         objects,
         declarations: declare_table.declarations,
         components: component_table.components,
+        forms,
         defects,
     })
 }
@@ -392,6 +527,241 @@ fn unreadable_pointer(
     }
 }
 
+/// Builds the [`Defect`] for a structure this composed walk needed that a
+/// [`Refusal`] refused: a form's own `GuiObjectInfo`, its property stream,
+/// its control tree, its `ControlInfoTable`, or one control's own event
+/// table. `offset` is `0` when no byte offset was known at the point of
+/// failure, the same fallback [`unreadable_pointer`] uses.
+fn structure_defect(offset: u32, structure: &'static str, refusal: &Refusal) -> Defect {
+    Defect {
+        site: Site {
+            offset,
+            rva: None,
+            structure,
+            field: "read",
+        },
+        kind: DefectKind::StructureUnreadable {
+            offset,
+            reason: refusal.to_string(),
+        },
+    }
+}
+
+/// Composes one form's report: its name, its control tree, and the defects
+/// collected while reading it.
+///
+/// Every fallible step past the GUI table entry itself (reading
+/// `GuiObjectInfo`, bounding the property stream, walking the scope-byte
+/// tree, reading this form's own `ControlInfoTable`) is caught here and
+/// turned into a per-form [`Defect`], never a whole-file [`Refusal`]: the
+/// refusal discipline the earlier plans set is per form, and a program with
+/// one damaged form still has readable objects, procedures, declarations
+/// and every other form.
+///
+/// `objects` is the whole object table this run already walked:
+/// `ControlInfoTable::read` needs the [`Object`] that carries the same name
+/// as this form, because `OptionalObjectInfo` (and the event table it
+/// names) sits off `Object.lpObjectInfo`, not off the GUI table entry.
+fn compose_form(
+    pe: &PeImage<'_>,
+    entry: &GuiTableEntry,
+    objects: &[Object],
+    opcode_table: &OpcodeTable,
+    components: &ComponentTable,
+    event_names: &EventNameTable,
+    defects: &mut Vec<Defect>,
+) -> FormReport {
+    let mut form_defects: Vec<Defect> = Vec::new();
+
+    let info = match GuiObjectInfo::read(pe, entry.a_form_pointer) {
+        Ok(info) => info,
+        Err(refusal) => {
+            form_defects.push(structure_defect(0, "GuiObjectInfo", &refusal));
+            defects.extend(form_defects.iter().cloned());
+            return FormReport {
+                name: String::new(),
+                controls: Vec::new(),
+                defects: form_defects,
+            };
+        }
+    };
+
+    let stream = match info.form_stream() {
+        Ok(stream) => stream,
+        Err(refusal) => {
+            form_defects.push(structure_defect(0, "FormStream", &refusal));
+            defects.extend(form_defects.iter().cloned());
+            return FormReport {
+                name: String::new(),
+                controls: Vec::new(),
+                defects: form_defects,
+            };
+        }
+    };
+
+    let stream_region = stream.region();
+    let stream_offset = stream_region.file_offset(Off::new(0)).map_or(0, Off::get);
+    let name = stream.name().unwrap_or_default();
+
+    let mut tiling = Tiling::new(info.l_properties_length).at(stream_offset);
+    let tree = match controltree::walk(&stream, &mut tiling) {
+        Ok((tree, tree_defects)) => {
+            form_defects.extend(tree_defects);
+            Some(tree)
+        }
+        Err(refusal) => {
+            form_defects.push(structure_defect(stream_offset, "ControlTree", &refusal));
+            None
+        }
+    };
+
+    // `ControlInfoTable::read` resolves off the same-named `Object`, not
+    // off `entry` itself: `OptionalObjectInfo` sits at `Object.lpObjectInfo`
+    // plus `0x38`, and the GUI table carries no such pointer of its own.
+    let control_info_table = objects
+        .iter()
+        .find(|object| object.name == name)
+        .and_then(|object| match ControlInfoTable::read(pe, object) {
+            Ok(table) => Some(table),
+            Err(refusal) => {
+                form_defects.push(structure_defect(
+                    stream_offset,
+                    "ControlInfoTable",
+                    &refusal,
+                ));
+                None
+            }
+        });
+    if let Some(table) = &control_info_table {
+        form_defects.extend(table.defects().iter().cloned());
+    }
+
+    // Per plan 03-09's own measurement: the `ControlInfo` array carries one
+    // entry for the form itself, and that entry is never the form's own
+    // declared name -- it is always the literal string
+    // `controlinfo::FORM_SELF_ENTRY_NAME`. The root node (the form's own
+    // outermost control block) joins against that entry; every other node
+    // joins by its own declared name.
+    let root_event_info = control_info_table.as_ref().and_then(|table| {
+        table
+            .entries
+            .iter()
+            .find(|entry| entry.name == controlinfo::FORM_SELF_ENTRY_NAME)
+    });
+    let control_info_by_name: HashMap<&str, &ControlInfo> = control_info_table
+        .as_ref()
+        .map(|table| {
+            table
+                .entries
+                .iter()
+                .filter(|entry| entry.name != controlinfo::FORM_SELF_ENTRY_NAME)
+                .map(|entry| (entry.name.as_str(), entry))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let controls: Vec<ControlReport> = match &tree {
+        Some(tree) => tree
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(index, node)| {
+                let control_info = if index == tree.root {
+                    root_event_info
+                } else {
+                    control_info_by_name.get(node.header.name.as_str()).copied()
+                };
+                compose_control(
+                    pe,
+                    node,
+                    opcode_table,
+                    components,
+                    control_info,
+                    event_names,
+                    &mut form_defects,
+                )
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+
+    defects.extend(form_defects.iter().cloned());
+    FormReport {
+        name,
+        controls,
+        defects: form_defects,
+    }
+}
+
+/// Composes one control's report: its type, its properties, its external
+/// control facts when its type is 255, and its event slots.
+fn compose_control(
+    pe: &PeImage<'_>,
+    node: &controltree::ControlNode<'_>,
+    opcode_table: &OpcodeTable,
+    components: &ComponentTable,
+    control_info: Option<&ControlInfo>,
+    event_names: &EventNameTable,
+    defects: &mut Vec<Defect>,
+) -> ControlReport {
+    let header = &node.header;
+    let kind = controltree::classify_control_type(header.c_type);
+
+    let mut properties = Vec::new();
+    let mut external = None;
+    let mut external_reason = None;
+    let mut ocx_header = None;
+    let mut opaque_message = None;
+
+    if matches!(kind, controltree::ControlKind::External) {
+        let (mut ext, consumed, ext_defects) = ocx::read_external_control(&node.block, header);
+        defects.extend(ext_defects);
+        external_reason = ocx::join_component(&mut ext, components);
+
+        let length = node.block.u16_le(Off::new(0)).unwrap_or(0);
+        let block_end = u32::from(length).saturating_sub(1);
+        let blob_start = header.header_len().saturating_add(consumed);
+        let (found_header, opaque, ocx_defects) =
+            ocx::read_ocx_blob(&node.block, blob_start, block_end);
+        defects.extend(ocx_defects);
+        ocx_header = found_header;
+        opaque_message = Some(opaque.message());
+        external = Some(ext);
+    } else {
+        let (stream, prop_defects) = propstream::walk_properties(&node.block, header, opcode_table);
+        defects.extend(prop_defects);
+        properties = stream.properties;
+    }
+
+    let control_type_name = format!("{kind:?}");
+    let events = match control_info {
+        Some(info) => match read_event_table(pe, info) {
+            Ok(table) => {
+                defects.extend(table.defects().iter().cloned());
+                report_events(&header.name, &control_type_name, &table, event_names)
+            }
+            Err(refusal) => {
+                defects.push(structure_defect(0, "EventTable", &refusal));
+                Vec::new()
+            }
+        },
+        None => Vec::new(),
+    };
+
+    ControlReport {
+        name: header.name.clone(),
+        kind,
+        array_index: header.array_index,
+        parent: node.parent,
+        properties,
+        external,
+        external_reason,
+        ocx_header,
+        opaque_message,
+        events,
+    }
+}
+
 /// Joins the recovered names with the recovered prototypes, by index, over
 /// the same `Object.proc_count` length both arrays share.
 ///
@@ -444,6 +814,15 @@ fn compose_procedures(names: ProcNames, prototypes: PrototypeList) -> ObjectProc
 )]
 mod tests {
     use super::{ObjectProcedures, ProcedureEntry, Refusal, Report, inspect};
+    use crate::vb::opcodes::OpcodeTable;
+
+    /// The opcode table every test in this module reads properties through,
+    /// absent a reason to build a different one. `OpcodeTable::builtin`
+    /// (the safe-provenance subset) matches what the command line gives
+    /// `inspect` when the user supplies no `--opcode-table` of their own.
+    fn builtin_table() -> OpcodeTable {
+        OpcodeTable::builtin()
+    }
     use crate::error::DefectKind;
     use crate::read::pe::PeImage;
     use crate::read::region::Off;
@@ -478,6 +857,19 @@ mod tests {
     const MAP_EDITOR: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../corpus/vb6-code/Map-editor-2D/Map Editor.exe"
+    ));
+
+    /// The program with two forms that both give a real control tree on
+    /// unmodified bytes: `FrmHex` (14 controls) and `frmAbout` (5
+    /// controls). `[VERIFIED: local]` this session, via a survey over
+    /// every multi-form corpus program: `Map Editor.exe`'s own first form
+    /// already refuses on unmodified bytes (a genuine scope-grammar gap
+    /// this corpus form exercises, not something this plan's own
+    /// deliberate-breakage test should doctor further), so this file is
+    /// the corpus's own clean pair instead.
+    const HEX_SCROLL: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/public-domain/HexScroll/Hex Scroll.exe"
     ));
 
     /// Gives a copy of `data` whose first imported DLL name is `replacement`.
@@ -530,7 +922,7 @@ mod tests {
     }
 
     fn mandelbrot_report() -> Report {
-        inspect(MANDELBROT).unwrap()
+        inspect(MANDELBROT, &builtin_table()).unwrap()
     }
 
     /// The `.vbp` beside the executable declares these four values.
@@ -580,7 +972,7 @@ mod tests {
 
     #[test]
     fn an_empty_slice_is_not_a_portable_executable() {
-        assert_eq!(inspect(&[]), Err(Refusal::NotPe));
+        assert_eq!(inspect(&[], &builtin_table()), Err(Refusal::NotPe));
     }
 
     /// The runtime is decided before any Visual Basic structure is read.
@@ -597,7 +989,7 @@ mod tests {
         // The signature really is gone, so the ordering is what decides.
         let head = header_offset_the_hard_way(&bytes);
         assert_ne!(&bytes[head..head + 4], b"VB5!");
-        assert_eq!(inspect(&bytes), Err(Refusal::IsVb5));
+        assert_eq!(inspect(&bytes, &builtin_table()), Err(Refusal::IsVb5));
     }
 
     /// The report describes the slice the caller handed in.
@@ -669,7 +1061,7 @@ mod tests {
         let at = object_table_field_offset(GRAYSCALE, 0x2C);
         let bytes = with_u16_at(GRAYSCALE, at, 1);
 
-        let report = inspect(&bytes).unwrap();
+        let report = inspect(&bytes, &builtin_table()).unwrap();
         let defect = report
             .defects
             .iter()
@@ -769,7 +1161,7 @@ mod tests {
         let mut bytes = GRAYSCALE.to_vec();
         bytes[at..at + 4].copy_from_slice(&nowhere.to_le_bytes());
 
-        let report = inspect(&bytes).unwrap();
+        let report = inspect(&bytes, &builtin_table()).unwrap();
         let object = report
             .objects
             .iter()
@@ -822,7 +1214,7 @@ mod tests {
     /// imports, per this task's fourth behaviour.
     #[test]
     fn grayscale_gives_three_objects_twelve_public_names_and_eight_imports() {
-        let report = inspect(GRAYSCALE).unwrap();
+        let report = inspect(GRAYSCALE, &builtin_table()).unwrap();
 
         assert_eq!(report.objects.len(), 3);
         let kinds: Vec<ObjectKind> = report.objects.iter().map(|o| o.kind).collect();
@@ -853,7 +1245,7 @@ mod tests {
     /// `Sub_Module` (`proc_count` 7), both standard modules, per D-13.
     #[test]
     fn map_editor_reports_its_two_modules_as_unreachable_and_not_as_empty() {
-        let report = inspect(MAP_EDITOR).unwrap();
+        let report = inspect(MAP_EDITOR, &builtin_table()).unwrap();
 
         let modules: Vec<(&str, &ObjectProcedures)> = report
             .objects
@@ -874,13 +1266,131 @@ mod tests {
         }
     }
 
-    /// `inspect` still takes only a byte slice and returns a value, per this
-    /// task's sixth behaviour. The grep the plan's own `<verify>` runs is
-    /// the acceptance instrument for "no file system type anywhere under
-    /// `src/`"; this test is the type-level half of the same claim.
+    /// `inspect` still takes only a byte slice and an opcode table and
+    /// returns a value, per this task's sixth behaviour. The grep the
+    /// plan's own `<verify>` runs is the acceptance instrument for "no file
+    /// system type anywhere under `src/`"; this test is the type-level half
+    /// of the same claim.
     #[test]
-    fn inspect_still_takes_a_byte_slice_and_returns_a_value() {
-        fn assert_signature(_f: fn(&[u8]) -> Result<Report, Refusal>) {}
+    fn inspect_still_takes_a_byte_slice_and_an_opcode_table_and_returns_a_value() {
+        fn assert_signature(_f: fn(&[u8], &OpcodeTable) -> Result<Report, Refusal>) {}
         assert_signature(inspect);
+    }
+
+    // --- Plan 03-10, Task 1: Report gains forms, inspect walks them -------
+
+    /// Every corpus `.vbp` in this repository declares at least one form
+    /// (`03-10-SUMMARY.md` records the measurement: a script over all 44
+    /// found zero programs with no `Form=`/`MDIForm=` line), so a
+    /// zero-form program is doctored here rather than taken from the
+    /// corpus, matching this repository's own precedent for a branch the
+    /// corpus cannot exercise: doctor a real, working fixture at the one
+    /// field that matters, rather than build a whole synthetic PE image by
+    /// hand.
+    #[test]
+    fn a_program_with_zero_forms_gives_an_empty_forms_list_and_no_fault() {
+        let head = header_offset_the_hard_way(MANDELBROT);
+        let at = head + 0x44; // VbHeader.w_form_count, STRUCTURES.md's own offset
+        assert_ne!(
+            &MANDELBROT[at..at + 2],
+            [0, 0],
+            "the fixture must patch a real, non-zero form count"
+        );
+        let mut bytes = MANDELBROT.to_vec();
+        bytes[at..at + 2].copy_from_slice(&0_u16.to_le_bytes());
+
+        let report = inspect(&bytes, &builtin_table()).unwrap();
+        assert!(
+            report.forms.is_empty(),
+            "a zero form count must give an empty forms list: {:?}",
+            report.forms
+        );
+    }
+
+    /// Two runs over the same bytes give the same report, field for field:
+    /// `Report` still derives an equality, and this composed walk invents
+    /// nothing that would make one run differ from the next.
+    #[test]
+    fn two_runs_over_the_same_bytes_give_equal_reports() {
+        let table = builtin_table();
+        let first = inspect(MANDELBROT, &table).unwrap();
+        let second = inspect(MANDELBROT, &table).unwrap();
+        assert_eq!(first, second);
+    }
+
+    /// `Hex Scroll.exe` declares two forms, both of which give a real
+    /// control tree on unmodified bytes. This test corrupts the second
+    /// form's own `GuiObjectInfo.lPropertiesLength` to a value far too
+    /// small for its real control tree (`8`, smaller than any real
+    /// control block's own header), so `controltree::walk` refuses for
+    /// that one form. The instrument for this task's own deliberate
+    /// breakage: the executor changed the per-form `match` in
+    /// `compose_form` to propagate `controltree::walk`'s `Err` with `?`
+    /// instead of converting it to a defect, ran this test once, and saw
+    /// `inspect` return `Err` for the *whole* file rather than an `Ok`
+    /// report with exactly one form missing its tree; both forms this
+    /// program declares are named in that failed run's own output, and
+    /// recorded in `03-10-SUMMARY.md`. Reverted before committing.
+    #[test]
+    fn a_tiling_failure_in_one_form_costs_only_that_form() {
+        let image = PeImage::parse(HEX_SCROLL).unwrap();
+        let hdr = header_region(&image).unwrap();
+        let header = VbHeader::read(&hdr).unwrap();
+        let gui_table = crate::vb::gui::GuiTable::walk(&image, &header).unwrap();
+        assert_eq!(
+            gui_table.entries.len(),
+            2,
+            "Hex Scroll.exe must declare two forms for this test to corrupt one of them"
+        );
+
+        let region = image
+            .region_at_va(gui_table.entries[1].a_form_pointer)
+            .unwrap();
+        let at = region.file_offset(Off::new(0x59)).unwrap();
+        let at = usize::try_from(at.get()).unwrap();
+
+        let mut bytes = HEX_SCROLL.to_vec();
+        let corrupted: u32 = 8;
+        bytes[at..at + 4].copy_from_slice(&corrupted.to_le_bytes());
+
+        let report = inspect(&bytes, &builtin_table()).unwrap();
+        assert_eq!(
+            report.forms.len(),
+            2,
+            "one corrupted form still costs only itself"
+        );
+
+        let broken: Vec<&str> = report
+            .forms
+            .iter()
+            .filter(|f| f.controls.is_empty())
+            .map(|f| f.name.as_str())
+            .collect();
+        let intact: Vec<&str> = report
+            .forms
+            .iter()
+            .filter(|f| !f.controls.is_empty())
+            .map(|f| f.name.as_str())
+            .collect();
+        assert_eq!(
+            broken.len(),
+            1,
+            "exactly one form must lose its tree, found {broken:?}"
+        );
+        assert_eq!(
+            intact.len(),
+            1,
+            "the other form must keep its tree, found {intact:?}"
+        );
+
+        let broken_form = report
+            .forms
+            .iter()
+            .find(|f| f.controls.is_empty())
+            .expect("one form must be broken");
+        assert!(
+            !broken_form.defects.is_empty(),
+            "the broken form must carry a defect naming the reason"
+        );
     }
 }

@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 use deform6::inspect;
 use deform6::read::pe::PeImage;
 use deform6::vb::header::{VbHeader, header_region};
+use deform6::vb::opcodes::OpcodeTable;
 
 /// The runtime name every corpus file imports. The sweep compares
 /// `Report::runtime_dll` against this literal, and never against
@@ -99,7 +100,8 @@ fn check_one(path: &Path) -> Result<(), String> {
     let data =
         std::fs::read(path).unwrap_or_else(|err| panic!("reading {}: {err}", path.display()));
 
-    let report = inspect(&data).map_err(|refusal| format!("inspect refused it: {refusal}"))?;
+    let report = inspect(&data, &OpcodeTable::builtin())
+        .map_err(|refusal| format!("inspect refused it: {refusal}"))?;
 
     if report.signature != SIGNATURE {
         return Err(format!(
@@ -171,4 +173,67 @@ fn check_one(path: &Path) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Plan 03-10, Task 1's own acceptance criterion: `inspect` over all 44
+/// corpus programs, asserting every one of them either gives a tree for
+/// every form it declares, or gives a `Defect` naming the byte offset --
+/// never a panic, and never a tree emitted over bytes the tiling check
+/// refused. `deform6::inspect`'s own `Result<Report, Refusal>` return type
+/// already makes a panic-free run of this loop the proof that nothing
+/// panicked: `std::panic::catch_unwind` is not needed on top of it, because
+/// `cargo test` itself already fails loudly the moment any one iteration
+/// aborts the test process instead of returning.
+#[test]
+fn every_form_across_the_corpus_gives_a_tree_or_a_named_defect() {
+    let files = executables();
+    assert_eq!(
+        files.len(),
+        44,
+        "found {} corpus executables, wanted 44",
+        files.len()
+    );
+
+    let table = OpcodeTable::builtin();
+    let mut failures = Vec::new();
+
+    for path in &files {
+        let data =
+            std::fs::read(path).unwrap_or_else(|err| panic!("reading {}: {err}", path.display()));
+        let report = match inspect(&data, &table) {
+            Ok(report) => report,
+            Err(refusal) => {
+                failures.push(format!(
+                    "{}: inspect refused the whole file: {refusal}",
+                    path.display()
+                ));
+                continue;
+            }
+        };
+
+        for form in &report.forms {
+            let has_tree = !form.controls.is_empty();
+            let has_named_defect = form.defects.iter().any(|d| {
+                matches!(
+                    d.kind,
+                    deform6::error::DefectKind::StructureUnreadable { .. }
+                )
+            });
+            if !has_tree && !has_named_defect {
+                failures.push(format!(
+                    "{}: form {:?} gives neither a tree nor a named defect: {:?}",
+                    path.display(),
+                    form.name,
+                    form.defects
+                ));
+            }
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "{} form(s) across the corpus gave neither a tree nor a named defect:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }
