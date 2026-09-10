@@ -53,15 +53,20 @@ pub(crate) mod support;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
+use deform6::Report;
 use deform6::read::pe::PeImage;
 use deform6::read::region::Va;
 use deform6::vb::classify::{self, ObjectKind as RecoveredKind};
+use deform6::vb::controltree::ControlKind;
 use deform6::vb::header::{VbHeader, header_region};
 use deform6::vb::object::{Object, ObjectTable};
+use deform6::vb::opcodes::OpcodeTable;
 use deform6::vb::privateobj::{ProcNames, Procedure, ProcedureCounts, ProcedureList};
 use deform6::vb::project::{ObjectTableHead, ProjectInfo};
+use deform6::vb::propstream::PropertyValue;
+use deform6::vb::{ControlReport, FormReport};
 
-use support::{source, vbp};
+use support::{frm, source, vbp};
 
 /// The count this whole harness is built to protect: 44 vendored
 /// executables. Asserted before the sweep starts, so a corpus file added
@@ -779,5 +784,488 @@ fn a_fabricated_procedure_name_passes_a_subset_check_and_fails_the_two_direction
     assert_eq!(
         diff.recovered_not_declared,
         vec!["fabricatedProcedureNothingDeclares".to_owned()]
+    );
+}
+
+// The forms and controls comparison: both directions, against `support::frm`,
+// the second, independent `.frm` reader, never against `deform6`'s own
+// output.
+
+/// One declared form: its own compiled name (the same name
+/// [`program_counts`] already joins recovered objects to) and its root
+/// `Begin VB.Form`/`VB.MDIForm` block, read through `support::frm`.
+struct DeclaredForm {
+    name: String,
+    root: frm::Block,
+}
+
+/// Reads every form `declared` names, through `support::frm`. A `Form=`
+/// line whose own compiled name did not resolve (no attribute, no fallback
+/// prefix) is skipped: there is nothing to join it to on the recovered
+/// side. `support/frm.rs`'s own whole-corpus test already proves one root
+/// form block per `.frm` file (54 across 54 files), so the first root
+/// block is the form.
+fn declared_forms(declared: &[vbp::DeclaredObject]) -> Vec<DeclaredForm> {
+    declared
+        .iter()
+        .filter(|d| d.kind == vbp::ObjectKind::Form && d.source_file.exists())
+        .filter_map(|d| {
+            let name = d.name.clone()?;
+            let form = frm::Form::read(&d.source_file);
+            let root = form.blocks().into_iter().next()?;
+            Some(DeclaredForm { name, root })
+        })
+        .collect()
+}
+
+/// One declared control, flattened from a declared form's own block tree in
+/// depth-first order. Index `0` of the flattened list (the form's own root
+/// block) is the form itself, matching `Report::forms`'s own
+/// `FormReport::controls[0]`.
+struct DeclaredControl {
+    name: String,
+    class: String,
+    array_index: Option<u16>,
+    properties: Vec<frm::Property>,
+}
+
+/// Flattens `root` (and every descendant) into `out`, in the same
+/// depth-first order `deform6::vb::controltree::walk` gives the recovered
+/// side.
+fn flatten_declared(root: &frm::Block, out: &mut Vec<DeclaredControl>) {
+    let array_index = root
+        .properties
+        .iter()
+        .find(|p| p.name == "Index")
+        .and_then(|p| p.value.parse::<u16>().ok());
+    out.push(DeclaredControl {
+        name: root.name.clone(),
+        class: root.class.clone(),
+        array_index,
+        properties: root.properties.clone(),
+    });
+    for child in &root.children {
+        flatten_declared(child, out);
+    }
+}
+
+/// The comparison key for one control: its own name, plus its array index
+/// when it has one, because a control array's elements share one name.
+fn control_key(name: &str, array_index: Option<u16>) -> String {
+    match array_index {
+        Some(index) => format!("{name}[{index}]"),
+        None => name.to_owned(),
+    }
+}
+
+/// Tells whether a recovered control's own type agrees with the class the
+/// `.frm` source's own `Begin` line names.
+///
+/// The recovered `cType` name maps to the class the `Begin` line names,
+/// with the `VB.` prefix removed: a `cType` of `4` gives `CommandButton`
+/// and the source line reads `Begin VB.CommandButton`. An external
+/// control's class name is compared whole, because its own `Begin` line
+/// reads the full programmatic class name and carries no `VB.` prefix.
+fn declared_class_name_matches(
+    declared_class: &str,
+    kind: &ControlKind,
+    external_class_name: Option<&str>,
+) -> bool {
+    if matches!(kind, ControlKind::External) {
+        return external_class_name.is_some_and(|class| class == declared_class);
+    }
+    let stripped = declared_class.strip_prefix("VB.").unwrap_or(declared_class);
+    stripped == format!("{kind:?}")
+}
+
+/// Gives the property name a recovered [`PropertyValue`] carries, or `None`
+/// for [`PropertyValue::Undecoded`], which names no property at all.
+fn recovered_property_name(value: &PropertyValue) -> Option<&str> {
+    match value {
+        PropertyValue::Byte { name, .. }
+        | PropertyValue::Boolean { name, .. }
+        | PropertyValue::Integer { name, .. }
+        | PropertyValue::Long { name, .. }
+        | PropertyValue::Single { name, .. }
+        | PropertyValue::Text { name, .. }
+        | PropertyValue::Position { name, .. }
+        | PropertyValue::Font { name, .. } => Some(name.as_str()),
+        PropertyValue::Undecoded { .. } => None,
+    }
+}
+
+/// Gives the text a recovered [`PropertyValue`] would carry in a `.frm`
+/// file, for the payload shapes a `.frm` writes as one plain `Name = Value`
+/// line: `Byte`, `Boolean`, `Integer`, `Long`, `Single` and `Text`.
+///
+/// `Position` and `Font` are excluded on purpose: a `.frm` file writes a
+/// position as four separate `Left`/`Top`/`Width`/`Height` lines and a font
+/// as a nested `BeginProperty Font` block, never as one line named
+/// `Position` or `Font`, so no declared property of either name ever exists
+/// to compare against; this function's own `None` is what lets the caller
+/// skip them by construction rather than by a special case. `Undecoded`
+/// gives `None` for the same reason `PropertyValue::undecoded_message`
+/// documents: this repository does not decode it, so there is nothing to
+/// compare, and it is never asked to guess.
+fn recovered_property_text(value: &PropertyValue) -> Option<String> {
+    match value {
+        PropertyValue::Byte { value, .. } => Some(value.to_string()),
+        PropertyValue::Boolean { value, .. } => Some(value.to_string()),
+        PropertyValue::Integer { value, .. } => Some(value.to_string()),
+        PropertyValue::Long { value, .. } => Some(value.to_string()),
+        PropertyValue::Single { value, .. } => Some(value.to_string()),
+        PropertyValue::Text { value, .. } => Some(value.clone()),
+        PropertyValue::Position { .. }
+        | PropertyValue::Font { .. }
+        | PropertyValue::Undecoded { .. } => None,
+    }
+}
+
+/// Strips a trailing `'...` VB6 comment from an unquoted `.frm` property
+/// value, the same way `WindowState = 1  'Minimized` reads as `1` once its
+/// own inline comment is dropped.
+///
+/// Never applied to a `Text` property's own declared value: that value has
+/// already been quote-stripped by `support::frm::split_property_line`, and
+/// a genuine apostrophe inside a caption is real text, not a comment
+/// marker. The caller only reaches this function for a numeric-payload
+/// property, where a trailing `'comment` can never be part of the value
+/// itself.
+fn strip_frm_comment(value: &str) -> &str {
+    value.split('\'').next().unwrap_or(value).trim()
+}
+
+/// Both directions of one form's own control diff: every declared control
+/// name (plus array index) with no matching recovered control, and every
+/// recovered one with no matching declared control.
+fn diff_controls(declared: &[DeclaredControl], recovered: &[ControlReport]) -> DirectionalDiff {
+    let declared_keys: BTreeSet<String> = declared
+        .iter()
+        .map(|c| control_key(&c.name, c.array_index))
+        .collect();
+    let recovered_keys: BTreeSet<String> = recovered
+        .iter()
+        .map(|c| control_key(&c.name, c.array_index))
+        .collect();
+    two_directional_diff(&declared_keys, &recovered_keys)
+}
+
+/// The four counts `tests/ratios.toml` pins for one program: how many forms
+/// the source declares and how many the tool recovered a real tree for, and
+/// the same pair for controls, summed over every form whose own tree the
+/// tool built.
+///
+/// A form whose own tree the tool could not build (`FormReport::controls`
+/// is empty; see `vb/mod.rs::compose_form`) still counts toward
+/// `form_declared`, because the source does declare it, and it is excluded
+/// from `control_declared`/`control_recovered` both: its own controls are
+/// already the reason `form_recovered` is short one, and counting them a
+/// second time as missing controls would double the same shortfall.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct FormsControlsCounts {
+    pub(crate) form_declared: u32,
+    pub(crate) form_recovered: u32,
+    pub(crate) control_declared: u32,
+    pub(crate) control_recovered: u32,
+}
+
+/// Computes [`FormsControlsCounts`] for one program, from its already-read
+/// declared objects and its already-built [`Report`].
+pub(crate) fn forms_controls_counts(
+    declared: &[vbp::DeclaredObject],
+    report: &Report,
+) -> FormsControlsCounts {
+    let mut counts = FormsControlsCounts::default();
+    for declared_form in declared_forms(declared) {
+        counts.form_declared = counts.form_declared.saturating_add(1);
+        let Some(recovered_form) = report.forms.iter().find(|f| f.name == declared_form.name)
+        else {
+            continue;
+        };
+        if recovered_form.controls.is_empty() {
+            continue;
+        }
+        counts.form_recovered = counts.form_recovered.saturating_add(1);
+
+        let mut declared_controls = Vec::new();
+        flatten_declared(&declared_form.root, &mut declared_controls);
+        counts.control_declared = counts
+            .control_declared
+            .saturating_add(u32::try_from(declared_controls.len()).unwrap_or(u32::MAX));
+        counts.control_recovered = counts
+            .control_recovered
+            .saturating_add(u32::try_from(recovered_form.controls.len()).unwrap_or(u32::MAX));
+    }
+    counts
+}
+
+/// Gives every form-level and control-level disagreement between `declared`
+/// and `report.forms`, in both directions, for one program: a declared form
+/// or control the tool did not recover, and a recovered one the source does
+/// not declare. Also checks, for every matched control pair, that the
+/// recovered type agrees with the declared class and that every recovered,
+/// named, plain-line property this repository decoded agrees with the
+/// declared text.
+pub(crate) fn form_control_mismatches(
+    declared: &[vbp::DeclaredObject],
+    report: &Report,
+) -> Vec<String> {
+    let mut failures = Vec::new();
+
+    let forms = declared_forms(declared);
+    let declared_names: BTreeSet<String> = forms.iter().map(|f| f.name.clone()).collect();
+    let recovered_names: BTreeSet<String> = report.forms.iter().map(|f| f.name.clone()).collect();
+    let form_diff = two_directional_diff(&declared_names, &recovered_names);
+    if !form_diff.is_empty() {
+        failures.push(format!(
+            "forms declared-but-not-recovered: {:?}; recovered-but-not-declared: {:?}",
+            form_diff.declared_not_recovered, form_diff.recovered_not_declared
+        ));
+    }
+
+    for declared_form in &forms {
+        let Some(recovered_form) = report.forms.iter().find(|f| f.name == declared_form.name)
+        else {
+            continue;
+        };
+        if recovered_form.controls.is_empty() {
+            continue;
+        }
+
+        let mut declared_controls = Vec::new();
+        flatten_declared(&declared_form.root, &mut declared_controls);
+
+        let control_diff = diff_controls(&declared_controls, &recovered_form.controls);
+        if !control_diff.is_empty() {
+            failures.push(format!(
+                "{}: controls declared-but-not-recovered: {:?}; recovered-but-not-declared: {:?}",
+                declared_form.name,
+                control_diff.declared_not_recovered,
+                control_diff.recovered_not_declared
+            ));
+        }
+
+        for declared_control in &declared_controls {
+            let Some(recovered_control) = recovered_form.controls.iter().find(|c| {
+                c.name == declared_control.name && c.array_index == declared_control.array_index
+            }) else {
+                continue;
+            };
+
+            let external_class_name = recovered_control
+                .external
+                .as_ref()
+                .map(|external| external.class_name.as_str());
+            if !declared_class_name_matches(
+                &declared_control.class,
+                &recovered_control.kind,
+                external_class_name,
+            ) {
+                failures.push(format!(
+                    "{}.{}: declared class {:?}, recovered kind {:?}",
+                    declared_form.name,
+                    declared_control.name,
+                    declared_control.class,
+                    recovered_control.kind
+                ));
+            }
+
+            for recovered_property in &recovered_control.properties {
+                let Some(name) = recovered_property_name(recovered_property) else {
+                    continue;
+                };
+                let Some(recovered_text) = recovered_property_text(recovered_property) else {
+                    continue;
+                };
+                let Some(declared_property) =
+                    declared_control.properties.iter().find(|p| p.name == name)
+                else {
+                    continue;
+                };
+                let declared_text = if matches!(recovered_property, PropertyValue::Text { .. }) {
+                    declared_property.value.as_str()
+                } else {
+                    strip_frm_comment(&declared_property.value)
+                };
+                if declared_text != recovered_text {
+                    failures.push(format!(
+                        "{}.{}.{name}: declared {:?}, recovered {:?}",
+                        declared_form.name,
+                        declared_control.name,
+                        declared_property.value,
+                        recovered_text
+                    ));
+                }
+            }
+        }
+    }
+
+    failures
+}
+
+#[test]
+fn every_declared_form_and_control_is_recovered_and_every_recovered_one_is_declared_across_the_corpus()
+ {
+    let exes = executables();
+    let projects = vbp::project_files();
+    let table = OpcodeTable::builtin();
+
+    let mut totals = FormsControlsCounts::default();
+    let mut failures = Vec::new();
+
+    for exe in &exes {
+        let data =
+            std::fs::read(exe).unwrap_or_else(|err| panic!("reading {}: {err}", exe.display()));
+        let report = deform6::inspect(&data, &table)
+            .unwrap_or_else(|err| panic!("{}: inspect refused the file: {err}", exe.display()));
+
+        let project_path = vbp::select_project_file(exe, &projects)
+            .unwrap_or_else(|err| panic!("{}: {err}", exe.display()));
+        let project = vbp::Project::read(&project_path);
+        let declared = project.declared_objects();
+
+        let program_failures = form_control_mismatches(&declared, &report);
+        for failure in program_failures {
+            failures.push(format!("{}: {failure}", exe.display()));
+        }
+
+        let counts = forms_controls_counts(&declared, &report);
+        totals.form_declared = totals.form_declared.saturating_add(counts.form_declared);
+        totals.form_recovered = totals.form_recovered.saturating_add(counts.form_recovered);
+        totals.control_declared = totals
+            .control_declared
+            .saturating_add(counts.control_declared);
+        totals.control_recovered = totals
+            .control_recovered
+            .saturating_add(counts.control_recovered);
+    }
+
+    assert!(
+        failures.is_empty(),
+        "{} form/control disagreement(s) across the corpus:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+
+    assert_eq!(
+        totals.form_declared, EXPECTED_FORM_RECOVERY_TOTAL,
+        "the source declares {} forms across the corpus, wanted {EXPECTED_FORM_RECOVERY_TOTAL}",
+        totals.form_declared
+    );
+    println!(
+        "forms: {} of {} recovered; controls: {} of {} recovered",
+        totals.form_recovered,
+        totals.form_declared,
+        totals.control_recovered,
+        totals.control_declared
+    );
+}
+
+/// The total corpus form count this differential relies on: 53, one short
+/// of `support/frm.rs`'s own whole-corpus, filesystem-walk total of 54
+/// (`the_whole_corpus_holds_fifty_four_root_form_blocks`).
+///
+/// The gap is the same orphaned project `support/vbp.rs`'s own doc comment
+/// already names: `Brightness-effect/Part 3 - DIBs/Brightness3.vbp`
+/// declares `dibBrightness.exe`, which this repository does not vendor.
+/// `[VERIFIED: local]` this session: the corpus's 44 `.vbp` files that do
+/// have a matching executable declare 54 `Form=` lines in total (matching
+/// the 54 files on disk), but this comparison walks executables, not raw
+/// `.vbp` files, per executable via `vbp::select_project_file`, so the one
+/// form the orphaned project alone declares is never reached: there is no
+/// compiled binary for `deform6::inspect` to recover it from.
+const EXPECTED_FORM_RECOVERY_TOTAL: u32 = 53;
+
+/// Fabricating a recovered form nothing declares passes a subset check and
+/// fails the two-directional check, the same shape
+/// [`fabricated_object_passes_a_subset_check_and_fails_the_two_directional_check`]
+/// already proves at the object layer.
+#[test]
+fn a_fabricated_form_fails_the_two_directional_check_and_names_it() {
+    let exe = corpus_root().join("vb6-code/Mandelbrot/Mandelbrot.exe");
+    let data = std::fs::read(&exe).unwrap_or_else(|err| panic!("reading {}: {err}", exe.display()));
+    let table = OpcodeTable::builtin();
+    let report = deform6::inspect(&data, &table).unwrap();
+
+    let mut doctored = report.forms.clone();
+    doctored.push(FormReport {
+        name: "fabricatedFormNothingDeclares".to_owned(),
+        controls: Vec::new(),
+        defects: Vec::new(),
+    });
+    let mut doctored_report = report;
+    doctored_report.forms = doctored;
+
+    let projects = vbp::project_files();
+    let project_path = vbp::select_project_file(&exe, &projects).unwrap();
+    let project = vbp::Project::read(&project_path);
+    let declared = project.declared_objects();
+
+    let failures = form_control_mismatches(&declared, &doctored_report);
+    assert!(
+        failures
+            .iter()
+            .any(|f| f.contains("fabricatedFormNothingDeclares")),
+        "a form nothing declares must be named in the failure list: {failures:?}"
+    );
+}
+
+/// Removing a recovered form the source does declare fails the two
+/// directional check in the other direction, and names it.
+#[test]
+fn removing_a_recovered_form_fails_the_two_directional_check_in_the_other_direction() {
+    let exe = corpus_root().join("vb6-code/Mandelbrot/Mandelbrot.exe");
+    let data = std::fs::read(&exe).unwrap_or_else(|err| panic!("reading {}: {err}", exe.display()));
+    let table = OpcodeTable::builtin();
+    let report = deform6::inspect(&data, &table).unwrap();
+    assert_eq!(
+        report.forms.len(),
+        1,
+        "Mandelbrot.exe must declare exactly one form for this test to remove it"
+    );
+    let removed_name = report.forms[0].name.clone();
+
+    let mut doctored_report = report;
+    doctored_report.forms.clear();
+
+    let projects = vbp::project_files();
+    let project_path = vbp::select_project_file(&exe, &projects).unwrap();
+    let project = vbp::Project::read(&project_path);
+    let declared = project.declared_objects();
+
+    let failures = form_control_mismatches(&declared, &doctored_report);
+    assert!(
+        failures.iter().any(|f| f.contains(&removed_name)),
+        "the missing form {removed_name:?} must be named in the failure list: {failures:?}"
+    );
+}
+
+/// VER-06 / D-04, proven again at this gate's own level, not only inside
+/// `support::frm`'s own self-tests (`support_selftest.rs`): `EXCLUSIONS`
+/// must still name exactly the one known upstream defect, `frmHMM.frx`,
+/// and `frmHMM.frm` beside it must never be excluded. If a future edit
+/// emptied `EXCLUSIONS`, `frmHMM.frx`'s own corrupted bytes would need to
+/// be treated as real evidence somewhere this repository reads a `.frx`
+/// file, which is the fault this exclusion exists to prevent.
+#[test]
+fn the_frm_hmm_frx_exclusion_still_names_the_one_upstream_defect() {
+    assert_eq!(
+        frm::EXCLUSIONS.len(),
+        1,
+        "support::frm::EXCLUSIONS holds {} entries; this differential gate expects exactly the \
+         one named exclusion, corpus/vb6-code/Hidden-Markov-model/frmHMM.frx, or a future .frx \
+         comparison would need to treat that file's own corrupted bytes as real evidence",
+        frm::EXCLUSIONS.len()
+    );
+    assert!(
+        frm::EXCLUSIONS[0].path.ends_with("frmHMM.frx"),
+        "the one exclusion this gate relies on must name frmHMM.frx, found {:?}",
+        frm::EXCLUSIONS[0].path
+    );
+
+    let frm_path = corpus_root().join("vb6-code/Hidden-Markov-model/frmHMM.frm");
+    assert!(
+        frm::excluded_reason(&frm_path).is_none(),
+        "frmHMM.frm itself must never be excluded, only frmHMM.frx beside it"
     );
 }

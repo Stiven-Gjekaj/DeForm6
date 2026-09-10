@@ -30,223 +30,415 @@
 # Rewrite this file with `cargo run -p xtask -- update-ratios`. Never edit
 # the counts by hand; a rewrite on a clean tree produces no diff, and that
 # is the check that the file and the tool agree.
+#
+# Plan 03-10 adds four more keys per program: `form_declared`,
+# `form_recovered`, `control_declared` and `control_recovered`. These pin
+# the same recovery ratio, over forms and controls, that FRM-01 through
+# FRM-06 promise, measured against `support::frm`, the second, independent
+# `.frm` reader `crates/deform6/tests/differential.rs` compares against. A
+# form whose own control tree the tool could not build still counts toward
+# `form_declared`; its own controls are excluded from
+# `control_declared`/`control_recovered` both, because that shortfall is
+# already the reason `form_recovered` is short one, and counting it twice
+# would double it.
+#
+# The totals over all 44 programs are 49 of 53 forms recovered and 607 of
+# 607 controls recovered, over the forms whose own tree the tool built.
+# `xtask update-ratios` does not yet write these four keys; a future rewrite
+# of this file with that command would drop them, tracked in `WINDOWS.md`.
 
 ["public-domain/HexScroll/Hex Scroll.exe"]
 recovered = 0
 declared = 23
 ratio = 0.00
+form_declared = 2
+form_recovered = 1
+control_declared = 5
+control_recovered = 5
 
 ["public-domain/LockWorkStation/LockWorkStation.exe"]
 recovered = 0
 declared = 1
 ratio = 0.00
+form_declared = 1
+form_recovered = 1
+control_declared = 1
+control_recovered = 1
 
 ["public-domain/PassGen/PassGen.exe"]
 recovered = 5
 declared = 83
 ratio = 0.06
+form_declared = 4
+form_recovered = 3
+control_declared = 51
+control_recovered = 51
 
 ["public-domain/SK-Gradient-Sample__VB6/demo/Project1.exe"]
 recovered = 0
 declared = 3
 ratio = 0.00
+form_declared = 1
+form_recovered = 1
+control_declared = 4
+control_recovered = 4
 
 ["public-domain/SK-MCI-Sample__VB6/demo/Project1.exe"]
 recovered = 0
 declared = 33
 ratio = 0.00
+form_declared = 1
+form_recovered = 1
+control_declared = 31
+control_recovered = 31
 
 ["public-domain/SK-TFTP-Sample__VB6/Client/demo/TFTPClient.exe"]
 recovered = 0
 declared = 15
 ratio = 0.00
+form_declared = 1
+form_recovered = 1
+control_declared = 13
+control_recovered = 13
 
 ["public-domain/SK-TFTP-Sample__VB6/Server/demo/Server.exe"]
 recovered = 0
 declared = 6
 ratio = 0.00
+form_declared = 1
+form_recovered = 1
+control_declared = 5
+control_recovered = 5
 
 ["public-domain/SK-Winsock-Sample__VB6/demo/SubReality_WinsockSample.exe"]
 recovered = 0
 declared = 5
 ratio = 0.00
+form_declared = 1
+form_recovered = 1
+control_declared = 10
+control_recovered = 10
 
 ["public-domain/UUID2/VB6/UUID2.exe"]
 recovered = 4
 declared = 25
 ratio = 0.16
+form_declared = 2
+form_recovered = 1
+control_declared = 5
+control_recovered = 5
 
 ["public-domain/dump/VB6/rot47/Rot47.exe"]
 recovered = 1
 declared = 10
 ratio = 0.10
+form_declared = 1
+form_recovered = 1
+control_declared = 8
+control_recovered = 8
 
 ["public-domain/machineLanguageConversion/ASCII/Ascii.exe"]
 recovered = 1
 declared = 6
 ratio = 0.17
+form_declared = 1
+form_recovered = 1
+control_declared = 5
+control_recovered = 5
 
 ["public-domain/machineLanguageConversion/Hex/Hex.exe"]
 recovered = 1
 declared = 7
 ratio = 0.14
+form_declared = 1
+form_recovered = 1
+control_declared = 6
+control_recovered = 6
 
 ["public-domain/machineLanguageConversion/Octal/Octal.exe"]
 recovered = 1
 declared = 6
 ratio = 0.17
+form_declared = 1
+form_recovered = 1
+control_declared = 5
+control_recovered = 5
 
 ["vb6-code/Artificial-life/Artificial Life.exe"]
 recovered = 13
 declared = 40
 ratio = 0.33
+form_declared = 1
+form_recovered = 1
+control_declared = 32
+control_recovered = 32
 
 ["vb6-code/Blacklight-effect/Blacklight.exe"]
 recovered = 5
 declared = 22
 ratio = 0.23
+form_declared = 1
+form_recovered = 1
+control_declared = 8
+control_recovered = 8
 
 ["vb6-code/Brightness-effect/Part 1 - Pure VB6/vbBrightness.exe"]
 recovered = 5
 declared = 7
 ratio = 0.71
+form_declared = 1
+form_recovered = 1
+control_declared = 6
+control_recovered = 6
 
 ["vb6-code/Brightness-effect/Part 2 - API - GetPixel and SetPixel/apiBrightness.exe"]
 recovered = 5
 declared = 9
 ratio = 0.56
+form_declared = 1
+form_recovered = 1
+control_declared = 6
+control_recovered = 6
 
 ["vb6-code/Brightness-effect/Part 4 - Even faster DIBs/Realtime_Brightness.exe"]
 recovered = 12
 declared = 19
 ratio = 0.63
+form_declared = 1
+form_recovered = 1
+control_declared = 6
+control_recovered = 6
 
 ["vb6-code/Color-shift-effect/ColorShift.exe"]
 recovered = 5
 declared = 20
 ratio = 0.25
+form_declared = 1
+form_recovered = 1
+control_declared = 7
+control_recovered = 7
 
 ["vb6-code/Colorize-effect/Colorize.exe"]
 recovered = 7
 declared = 30
 ratio = 0.23
+form_declared = 1
+form_recovered = 1
+control_declared = 13
+control_recovered = 13
 
 ["vb6-code/Contrast-effect/Contrast.exe"]
 recovered = 5
 declared = 21
 ratio = 0.24
+form_declared = 1
+form_recovered = 1
+control_declared = 8
+control_recovered = 8
 
 ["vb6-code/Curves-effect/Curves.exe"]
 recovered = 5
 declared = 27
 ratio = 0.19
+form_declared = 1
+form_recovered = 1
+control_declared = 7
+control_recovered = 7
 
 ["vb6-code/Custom-image-filters/Custom_Filters.exe"]
 recovered = 6
 declared = 28
 ratio = 0.21
+form_declared = 1
+form_recovered = 1
+control_declared = 38
+control_recovered = 38
 
 ["vb6-code/Diffuse-effect/Diffuse.exe"]
 recovered = 5
 declared = 26
 ratio = 0.19
+form_declared = 1
+form_recovered = 1
+control_declared = 14
+control_recovered = 14
 
 ["vb6-code/Edge-detection/Edge_Detection.exe"]
 recovered = 6
 declared = 21
 ratio = 0.29
+form_declared = 1
+form_recovered = 1
+control_declared = 9
+control_recovered = 9
 
 ["vb6-code/Emboss-engrave-effect/Emboss_Engrave.exe"]
 recovered = 12
 declared = 34
 ratio = 0.35
+form_declared = 1
+form_recovered = 1
+control_declared = 11
+control_recovered = 11
 
 ["vb6-code/Fill-image-region/Filling.exe"]
 recovered = 0
 declared = 4
 ratio = 0.00
+form_declared = 1
+form_recovered = 1
+control_declared = 3
+control_recovered = 3
 
 ["vb6-code/Fire-effect/Fast_Flames.exe"]
 recovered = 4
 declared = 18
 ratio = 0.22
+form_declared = 1
+form_recovered = 1
+control_declared = 18
+control_recovered = 18
 
 ["vb6-code/Game-physics-basic/Physics_Demo.exe"]
 recovered = 1
 declared = 14
 ratio = 0.07
+form_declared = 1
+form_recovered = 1
+control_declared = 19
+control_recovered = 19
 
 ["vb6-code/Gradient-2D/Gradient.exe"]
 recovered = 2
 declared = 11
 ratio = 0.18
+form_declared = 1
+form_recovered = 1
+control_declared = 5
+control_recovered = 5
 
 ["vb6-code/Grayscale-effect/Grayscale.exe"]
 recovered = 12
 declared = 34
 ratio = 0.35
+form_declared = 1
+form_recovered = 1
+control_declared = 18
+control_recovered = 18
 
 ["vb6-code/Hidden-Markov-model/HMM.exe"]
 recovered = 0
 declared = 12
 ratio = 0.00
+form_declared = 1
+form_recovered = 1
+control_declared = 51
+control_recovered = 51
 
 ["vb6-code/Histograms-advanced/Advanced Histogram Viewer.exe"]
 recovered = 9
 declared = 37
 ratio = 0.24
+form_declared = 2
+form_recovered = 2
+control_declared = 32
+control_recovered = 32
 
 ["vb6-code/Histograms-basic/Basic Histogram Viewer.exe"]
 recovered = 5
 declared = 26
 ratio = 0.19
+form_declared = 2
+form_recovered = 2
+control_declared = 22
+control_recovered = 22
 
 ["vb6-code/Levels-effect/Image Levels.exe"]
 recovered = 5
 declared = 42
 ratio = 0.12
+form_declared = 2
+form_recovered = 2
+control_declared = 43
+control_recovered = 43
 
 ["vb6-code/Mandelbrot/Mandelbrot.exe"]
 recovered = 0
 declared = 9
 ratio = 0.00
+form_declared = 1
+form_recovered = 1
+control_declared = 16
+control_recovered = 16
 
 ["vb6-code/Map-editor-2D/Map Editor.exe"]
 recovered = 0
 declared = 36
 ratio = 0.00
+form_declared = 2
+form_recovered = 1
+control_declared = 9
+control_recovered = 9
 
 ["vb6-code/Nature-effects/Nature_Filters.exe"]
 recovered = 16
 declared = 34
 ratio = 0.47
+form_declared = 1
+form_recovered = 1
+control_declared = 7
+control_recovered = 7
 
 ["vb6-code/Randomize-effects/RandomizationFX.exe"]
 recovered = 12
 declared = 29
 ratio = 0.41
+form_declared = 1
+form_recovered = 1
+control_declared = 12
+control_recovered = 12
 
 ["vb6-code/Scanner-TWAIN/VB_Scanner_Support.exe"]
 recovered = 0
 declared = 11
 ratio = 0.00
+form_declared = 1
+form_recovered = 1
+control_declared = 10
+control_recovered = 10
 
 ["vb6-code/Screen-capture/ScreenCapture.exe"]
 recovered = 0
 declared = 5
 ratio = 0.00
+form_declared = 1
+form_recovered = 1
+control_declared = 3
+control_recovered = 3
 
 ["vb6-code/Sepia-effect/Sepia.exe"]
 recovered = 5
 declared = 20
 ratio = 0.25
+form_declared = 1
+form_recovered = 1
+control_declared = 7
+control_recovered = 7
 
 ["vb6-code/Threshold-effect/Threshold.exe"]
 recovered = 5
 declared = 23
 ratio = 0.22
+form_declared = 1
+form_recovered = 1
+control_declared = 11
+control_recovered = 11
 
 ["vb6-code/Transparency-2D/Transparency.exe"]
 recovered = 5
 declared = 12
 ratio = 0.42
+form_declared = 1
+form_recovered = 1
+control_declared = 7
+control_recovered = 7

@@ -359,6 +359,10 @@ mod tests {
                 recovered: 1,
                 declared: 10,
                 ratio_text: "0.10".to_owned(),
+                form_declared: 0,
+                form_recovered: 0,
+                control_declared: 0,
+                control_recovered: 0,
             },
         );
         old.insert(
@@ -367,6 +371,10 @@ mod tests {
                 recovered: 2,
                 declared: 10,
                 ratio_text: "0.20".to_owned(),
+                form_declared: 0,
+                form_recovered: 0,
+                control_declared: 0,
+                control_recovered: 0,
             },
         );
         old.insert(
@@ -375,6 +383,10 @@ mod tests {
                 recovered: 3,
                 declared: 10,
                 ratio_text: "0.30".to_owned(),
+                form_declared: 0,
+                form_recovered: 0,
+                control_declared: 0,
+                control_recovered: 0,
             },
         );
         let measured = vec![

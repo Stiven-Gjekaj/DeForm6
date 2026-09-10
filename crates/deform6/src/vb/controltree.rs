@@ -608,6 +608,26 @@ fn block_fits(region: &Region<'_>, at: Off) -> bool {
 /// bytes left for another control block. Both are accounted directly, by
 /// measuring what remains against the stream's own declared length, rather
 /// than by a constant this repository has no second confirming sample for.
+/// The largest trailing span this repository treats as an unexplained
+/// footer rather than real control data a mis-terminated scope run left
+/// unexplored.
+///
+/// `03-RESEARCH.md` assumption A3 measured a 3-byte tail after
+/// `LockWorkStation.exe`'s own zero-children form; this bound gives more
+/// than double that margin. Plan 03-10's own differential gate, comparing
+/// against `support::frm` (a second, independent `.frm` reader), found a
+/// tail far larger than this margin silently swallowing real, named
+/// controls this format's own scope-byte grammar has a gap for: closing out
+/// of a menu control nested two levels deep, back to a sibling menu at the
+/// form's own top level, is a transition `03-RESEARCH.md`'s own corpus
+/// measurement (Grayscale's own single-level menu case) did not cover.
+/// Refusing a surprisingly large tail turns a silent wrong tree into the
+/// same honest, per-form refusal [`walk`]'s own caller already handles for
+/// every other unreadable structure, rather than trusting an unproven
+/// number of bytes to be a footer. This bound is chosen by this repository;
+/// it is never read from the file.
+const MAX_UNEXPLAINED_TAIL: u32 = 8;
+
 fn close_walk(
     region: &Region<'_>,
     stack: &mut Vec<usize>,
@@ -622,6 +642,15 @@ fn close_walk(
         stack.pop();
     }
     let tail = region.len().saturating_sub(end_at.get());
+    if tail > MAX_UNEXPLAINED_TAIL {
+        let offset = region.file_offset(end_at).map_or(0, Off::get);
+        return Err(damaged(format!(
+            "the control tree walk at file offset {offset:#x} would leave {tail} bytes \
+             unaccounted for, more than the {MAX_UNEXPLAINED_TAIL} byte margin this repository \
+             trusts as an unexplained footer; refusing rather than silently dropping what those \
+             bytes might hold"
+        )));
+    }
     if tail > 0 {
         tiling.account(tail)?;
     }

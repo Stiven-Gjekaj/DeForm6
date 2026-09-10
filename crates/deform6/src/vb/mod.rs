@@ -860,16 +860,17 @@ mod tests {
     ));
 
     /// The program with two forms that both give a real control tree on
-    /// unmodified bytes: `FrmHex` (14 controls) and `frmAbout` (5
-    /// controls). `[VERIFIED: local]` this session, via a survey over
-    /// every multi-form corpus program: `Map Editor.exe`'s own first form
-    /// already refuses on unmodified bytes (a genuine scope-grammar gap
-    /// this corpus form exercises, not something this plan's own
-    /// deliberate-breakage test should doctor further), so this file is
-    /// the corpus's own clean pair instead.
-    const HEX_SCROLL: &[u8] = include_bytes!(concat!(
+    /// unmodified bytes: `frmMain` (16 controls) and `frmHistogram` (16
+    /// controls). `[VERIFIED: local]` this session, via a survey over every
+    /// multi-form corpus program: `Map Editor.exe`'s own first form and
+    /// `Hex Scroll.exe`'s own two forms both already refuse on unmodified
+    /// bytes (a genuine scope-grammar gap this corpus exercises, tracked in
+    /// `03-10-SUMMARY.md` and `WINDOWS.md`, not something this plan's own
+    /// deliberate-breakage test should doctor further), so this file is the
+    /// corpus's own clean pair instead.
+    const HISTOGRAM_VIEWER: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../corpus/public-domain/HexScroll/Hex Scroll.exe"
+        "/../../corpus/vb6-code/Histograms-advanced/Advanced Histogram Viewer.exe"
     ));
 
     /// Gives a copy of `data` whose first imported DLL name is `replacement`.
@@ -1318,10 +1319,10 @@ mod tests {
         assert_eq!(first, second);
     }
 
-    /// `Hex Scroll.exe` declares two forms, both of which give a real
-    /// control tree on unmodified bytes. This test corrupts the second
-    /// form's own `GuiObjectInfo.lPropertiesLength` to a value far too
-    /// small for its real control tree (`8`, smaller than any real
+    /// `Advanced Histogram Viewer.exe` declares two forms, both of which
+    /// give a real control tree on unmodified bytes. This test corrupts
+    /// the second form's own `GuiObjectInfo.lPropertiesLength` to a value
+    /// far too small for its real control tree (`8`, smaller than any real
     /// control block's own header), so `controltree::walk` refuses for
     /// that one form. The instrument for this task's own deliberate
     /// breakage: the executor changed the per-form `match` in
@@ -1333,14 +1334,15 @@ mod tests {
     /// recorded in `03-10-SUMMARY.md`. Reverted before committing.
     #[test]
     fn a_tiling_failure_in_one_form_costs_only_that_form() {
-        let image = PeImage::parse(HEX_SCROLL).unwrap();
+        let image = PeImage::parse(HISTOGRAM_VIEWER).unwrap();
         let hdr = header_region(&image).unwrap();
         let header = VbHeader::read(&hdr).unwrap();
         let gui_table = crate::vb::gui::GuiTable::walk(&image, &header).unwrap();
         assert_eq!(
             gui_table.entries.len(),
             2,
-            "Hex Scroll.exe must declare two forms for this test to corrupt one of them"
+            "Advanced Histogram Viewer.exe must declare two forms for this test to corrupt one \
+             of them"
         );
 
         let region = image
@@ -1349,7 +1351,7 @@ mod tests {
         let at = region.file_offset(Off::new(0x59)).unwrap();
         let at = usize::try_from(at.get()).unwrap();
 
-        let mut bytes = HEX_SCROLL.to_vec();
+        let mut bytes = HISTOGRAM_VIEWER.to_vec();
         let corrupted: u32 = 8;
         bytes[at..at + 4].copy_from_slice(&corrupted.to_le_bytes());
 

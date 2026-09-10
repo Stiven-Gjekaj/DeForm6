@@ -88,6 +88,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use deform6::read::pe::PeImage;
+use deform6::vb::opcodes::OpcodeTable;
 use differential::support::{source, vbp};
 use differential::{ProgramCounts, program_counts};
 
@@ -167,17 +168,38 @@ pub(crate) const HEADER: &str = r#"# The pinned procedure recovery ratio, one en
 # Rewrite this file with `cargo run -p xtask -- update-ratios`. Never edit
 # the counts by hand; a rewrite on a clean tree produces no diff, and that
 # is the check that the file and the tool agree.
+#
+# Plan 03-10 adds four more keys per program: `form_declared`,
+# `form_recovered`, `control_declared` and `control_recovered`. These pin
+# the same recovery ratio, over forms and controls, that FRM-01 through
+# FRM-06 promise, measured against `support::frm`, the second, independent
+# `.frm` reader `crates/deform6/tests/differential.rs` compares against. A
+# form whose own control tree the tool could not build still counts toward
+# `form_declared`; its own controls are excluded from
+# `control_declared`/`control_recovered` both, because that shortfall is
+# already the reason `form_recovered` is short one, and counting it twice
+# would double it.
+#
+# The totals over all 44 programs are 49 of 53 forms recovered and 607 of
+# 607 controls recovered, over the forms whose own tree the tool built.
+# `xtask update-ratios` does not yet write these four keys; a future rewrite
+# of this file with that command would drop them, tracked in `WINDOWS.md`.
 
 "#;
 
-/// One pinned entry: the two counts and the ratio text exactly as the file
-/// holds it, so a hand-edited ratio can be compared as text against the
-/// text a fresh computation would produce.
+/// One pinned entry: the two procedure counts and the ratio text exactly as
+/// the file holds it, so a hand-edited ratio can be compared as text
+/// against the text a fresh computation would produce, plus the four form
+/// and control counts plan 03-10 adds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PinnedEntry {
     pub(crate) recovered: u32,
     pub(crate) declared: u32,
     pub(crate) ratio_text: String,
+    pub(crate) form_declared: u32,
+    pub(crate) form_recovered: u32,
+    pub(crate) control_declared: u32,
+    pub(crate) control_recovered: u32,
 }
 
 /// Parses `tests/ratios.toml`'s exact shape: `#`-prefixed comment lines and
@@ -194,6 +216,10 @@ pub(crate) fn parse_ratios_toml(text: &str) -> BTreeMap<String, PinnedEntry> {
     let mut recovered: Option<u32> = None;
     let mut declared: Option<u32> = None;
     let mut ratio_text: Option<String> = None;
+    let mut form_declared: Option<u32> = None;
+    let mut form_recovered: Option<u32> = None;
+    let mut control_declared: Option<u32> = None;
+    let mut control_recovered: Option<u32> = None;
 
     for raw_line in text.lines() {
         let line = raw_line.trim();
@@ -201,11 +227,15 @@ pub(crate) fn parse_ratios_toml(text: &str) -> BTreeMap<String, PinnedEntry> {
             continue;
         }
         if let Some(inner) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-            if let (Some(key), Some(r), Some(d), Some(rt)) = (
+            if let (Some(key), Some(r), Some(d), Some(rt), Some(fd), Some(fr), Some(cd), Some(cr)) = (
                 current_key.take(),
                 recovered.take(),
                 declared.take(),
                 ratio_text.take(),
+                form_declared.take(),
+                form_recovered.take(),
+                control_declared.take(),
+                control_recovered.take(),
             ) {
                 out.insert(
                     key,
@@ -213,6 +243,10 @@ pub(crate) fn parse_ratios_toml(text: &str) -> BTreeMap<String, PinnedEntry> {
                         recovered: r,
                         declared: d,
                         ratio_text: rt,
+                        form_declared: fd,
+                        form_recovered: fr,
+                        control_declared: cd,
+                        control_recovered: cr,
                     },
                 );
             }
@@ -254,17 +288,61 @@ pub(crate) fn parse_ratios_toml(text: &str) -> BTreeMap<String, PinnedEntry> {
             "ratio" => {
                 ratio_text = Some(value.to_owned());
             }
+            "form_declared" => {
+                form_declared = Some(value.parse().unwrap_or_else(|err| {
+                    panic!(
+                        "{}: form_declared {value:?}: {err}",
+                        ratios_toml_path().display()
+                    )
+                }));
+            }
+            "form_recovered" => {
+                form_recovered = Some(value.parse().unwrap_or_else(|err| {
+                    panic!(
+                        "{}: form_recovered {value:?}: {err}",
+                        ratios_toml_path().display()
+                    )
+                }));
+            }
+            "control_declared" => {
+                control_declared = Some(value.parse().unwrap_or_else(|err| {
+                    panic!(
+                        "{}: control_declared {value:?}: {err}",
+                        ratios_toml_path().display()
+                    )
+                }));
+            }
+            "control_recovered" => {
+                control_recovered = Some(value.parse().unwrap_or_else(|err| {
+                    panic!(
+                        "{}: control_recovered {value:?}: {err}",
+                        ratios_toml_path().display()
+                    )
+                }));
+            }
             other => panic!("{}: an unknown key {other:?}", ratios_toml_path().display()),
         }
     }
-    if let (Some(key), Some(r), Some(d), Some(rt)) = (current_key, recovered, declared, ratio_text)
-    {
+    if let (Some(key), Some(r), Some(d), Some(rt), Some(fd), Some(fr), Some(cd), Some(cr)) = (
+        current_key,
+        recovered,
+        declared,
+        ratio_text,
+        form_declared,
+        form_recovered,
+        control_declared,
+        control_recovered,
+    ) {
         out.insert(
             key,
             PinnedEntry {
                 recovered: r,
                 declared: d,
                 ratio_text: rt,
+                form_declared: fd,
+                form_recovered: fr,
+                control_declared: cd,
+                control_recovered: cr,
             },
         );
     }
@@ -350,6 +428,26 @@ fn counts_for(program: &Program, projects: &[PathBuf]) -> ProgramCounts {
     let declared = project.declared_objects();
 
     program_counts(&image, &declared, &recovered)
+}
+
+/// Computes [`differential::FormsControlsCounts`] for one already-read
+/// program, through [`deform6::inspect`] and
+/// [`differential::forms_controls_counts`] alone.
+fn forms_controls_counts_for(
+    program: &Program,
+    projects: &[PathBuf],
+    table: &OpcodeTable,
+) -> differential::FormsControlsCounts {
+    let report = deform6::inspect(&program.image_bytes, table)
+        .unwrap_or_else(|err| panic!("{}: inspect: {err}", program.key));
+
+    let exe_path = corpus_root().join(&program.key);
+    let project_path = vbp::select_project_file(&exe_path, projects)
+        .unwrap_or_else(|err| panic!("{}: {err}", program.key));
+    let project = vbp::Project::read(&project_path);
+    let declared = project.declared_objects();
+
+    differential::forms_controls_counts(&declared, &report)
 }
 
 /// The declared count [`ProgramCounts`] means when this file says
@@ -579,6 +677,60 @@ fn the_pinned_file_holds_forty_four_entries_and_the_totals_one_hundred_eighty_fi
 /// [`the_gate_passes_on_the_committed_file`] and
 /// [`a_missing_key_fails_the_real_gate`] run, so a broken key-set check can
 /// never pass one and silently ship in the other.
+/// Checks one program's pinned form/control counts against its measured
+/// counts. Reuses [`compare`], [`REGRESSION`] and [`MOVED_UP`]: a pinned
+/// number above the measured one means the pin claims more than the tool
+/// recovers (a regression in the tool); a pinned number below the measured
+/// one means the tool moved up.
+fn check_program_forms_controls(
+    key: &str,
+    pinned: &PinnedEntry,
+    measured: &differential::FormsControlsCounts,
+) -> Vec<String> {
+    let mut failures = Vec::new();
+
+    for (label, pinned_value, measured_value) in [
+        (
+            "form_declared",
+            pinned.form_declared,
+            measured.form_declared,
+        ),
+        (
+            "form_recovered",
+            pinned.form_recovered,
+            measured.form_recovered,
+        ),
+        (
+            "control_declared",
+            pinned.control_declared,
+            measured.control_declared,
+        ),
+        (
+            "control_recovered",
+            pinned.control_recovered,
+            measured.control_recovered,
+        ),
+    ] {
+        if let Some(direction) = compare(pinned_value, measured_value) {
+            let word = match direction {
+                Direction::Up => REGRESSION,
+                Direction::Down => MOVED_UP,
+            };
+            failures.push(format!(
+                "{key}: {word}: the pin claims {pinned_value} {label}, the tool measures \
+                 {measured_value}. Paste the new counts into tests/ratios.toml: form_declared = \
+                 {}, form_recovered = {}, control_declared = {}, control_recovered = {}",
+                measured.form_declared,
+                measured.form_recovered,
+                measured.control_declared,
+                measured.control_recovered
+            ));
+        }
+    }
+
+    failures
+}
+
 fn gate_failures(
     pinned: &BTreeMap<String, PinnedEntry>,
     progs: &[Program],
@@ -586,6 +738,7 @@ fn gate_failures(
 ) -> Vec<String> {
     let mut failures = Vec::new();
     let mut seen_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let table = OpcodeTable::builtin();
 
     for program in progs {
         seen_keys.insert(program.key.clone());
@@ -601,6 +754,13 @@ fn gate_failures(
             counts.recovered,
             declared_total(&counts),
             &missing,
+        ));
+
+        let forms_controls = forms_controls_counts_for(program, projects, &table);
+        failures.extend(check_program_forms_controls(
+            &program.key,
+            entry,
+            &forms_controls,
         ));
     }
 
@@ -785,6 +945,10 @@ fn a_stale_key_and_a_missing_key_fail_with_two_different_messages() {
             recovered: 0,
             declared: 1,
             ratio_text: "0.00".to_owned(),
+            form_declared: 0,
+            form_recovered: 0,
+            control_declared: 0,
+            control_recovered: 0,
         },
     );
     let stale_failures = gate_failures(&with_stale, &progs, &projects);
@@ -815,5 +979,96 @@ fn a_stale_key_and_a_missing_key_fail_with_two_different_messages() {
     assert_ne!(
         stale_failure, missing_failure,
         "a stale key and a missing key must produce two different messages"
+    );
+}
+
+// Plan 03-10, Task 3: the pinned form and control counts.
+
+#[test]
+fn raising_a_pinned_form_recovered_count_fails_with_regression() {
+    let pinned = read_pinned();
+    let projects = vbp::project_files();
+    let progs = programs();
+    let table = OpcodeTable::builtin();
+    let program = progs
+        .iter()
+        .find(|p| p.key.contains("Grayscale-effect"))
+        .expect("Grayscale-effect is a corpus program");
+    let entry = pinned
+        .get(&program.key)
+        .expect("Grayscale-effect is pinned");
+    let measured = forms_controls_counts_for(program, &projects, &table);
+
+    let doctored = PinnedEntry {
+        form_recovered: entry.form_recovered + 1,
+        ..entry.clone()
+    };
+    let failures = check_program_forms_controls(&program.key, &doctored, &measured);
+    assert!(
+        !failures.is_empty(),
+        "raising the pinned form_recovered count above what the tool measures must fail"
+    );
+    let message = failures.join("\n");
+    assert!(
+        message.contains(REGRESSION),
+        "raising a pin must print {REGRESSION:?}, got: {message}"
+    );
+    assert!(message.contains(&program.key));
+    assert!(message.contains("form_recovered"));
+}
+
+#[test]
+fn lowering_a_pinned_control_declared_count_fails_with_moved_up() {
+    let pinned = read_pinned();
+    let projects = vbp::project_files();
+    let progs = programs();
+    let table = OpcodeTable::builtin();
+    let program = progs
+        .iter()
+        .find(|p| p.key.contains("Grayscale-effect"))
+        .expect("Grayscale-effect is a corpus program");
+    let entry = pinned
+        .get(&program.key)
+        .expect("Grayscale-effect is pinned");
+    assert!(
+        entry.control_declared > 0,
+        "Grayscale-effect must declare at least one control for this test to lower it"
+    );
+    let measured = forms_controls_counts_for(program, &projects, &table);
+
+    let doctored = PinnedEntry {
+        control_declared: entry.control_declared - 1,
+        ..entry.clone()
+    };
+    let failures = check_program_forms_controls(&program.key, &doctored, &measured);
+    assert!(
+        !failures.is_empty(),
+        "lowering the pinned control_declared count below what the tool measures must fail"
+    );
+    let message = failures.join("\n");
+    assert!(
+        message.contains(MOVED_UP),
+        "lowering a pin must print {MOVED_UP:?}, got: {message}"
+    );
+    assert!(message.contains("control_declared"));
+}
+
+#[test]
+fn the_forms_and_controls_gate_passes_on_the_committed_file() {
+    let pinned = read_pinned();
+    let projects = vbp::project_files();
+    let progs = programs();
+    let table = OpcodeTable::builtin();
+
+    let mut failures = Vec::new();
+    for program in &progs {
+        let entry = pinned.get(&program.key).expect("every program is pinned");
+        let measured = forms_controls_counts_for(program, &projects, &table);
+        failures.extend(check_program_forms_controls(&program.key, entry, &measured));
+    }
+    assert!(
+        failures.is_empty(),
+        "the committed form/control pin must pass on the committed tree:\n{}",
+        failures.join("\n")
     );
 }
