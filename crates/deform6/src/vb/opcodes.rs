@@ -9,12 +9,15 @@
 //! # One representation, two sources
 //!
 //! [`OpcodeTable`] is the one representation. [`OpcodeTable::builtin`]
-//! builds it from constants transcribed from `STRUCTURES.md` section 8.5.1,
-//! which itself cites Semi VB Decompiler's own authored source comments,
-//! never `VB6.OLB`. [`OpcodeTable::parse`] builds it from bytes a user
-//! supplies at run time, having built their own table on their own machine
-//! with `xtask derive-opcode-table`. [`OpcodeTable::lookup`] is the one
-//! method both call, and it gives the same answer whichever constructor
+//! builds it from two kinds of constant: rows transcribed from
+//! `STRUCTURES.md` section 8.5.1, which itself cites Semi VB Decompiler's
+//! own authored source comments, never `VB6.OLB`; and, since plan 03-13,
+//! rows this repository measured directly against its own corpus, per
+//! [`CORPUS_MEASURED`]'s own doc comment, D-01's other allowed source when
+//! no prior art states a fact. [`OpcodeTable::parse`] builds it from bytes a
+//! user supplies at run time, having built their own table on their own
+//! machine with `xtask derive-opcode-table`. [`OpcodeTable::lookup`] is the
+//! one method both call, and it gives the same answer whichever constructor
 //! built the table it is called on.
 //!
 //! # The table format: TOML, one table per control type, keyed by opcode
@@ -158,10 +161,15 @@ impl OpcodeTable {
         self.entries.is_empty()
     }
 
-    /// Builds the table from the small safe-provenance subset:
-    /// `STRUCTURES.md` section 8.5.1's Form, MDIForm, CommandButton, Label
-    /// and ListBox rows, transcribed from Semi VB Decompiler's own authored
-    /// source comments and nothing else.
+    /// Builds the table from the small safe-provenance subset: two kinds of
+    /// row, each naming its own source. `STRUCTURES.md` section 8.5.1's
+    /// Form, MDIForm, CommandButton, Label and ListBox rows are transcribed
+    /// from Semi VB Decompiler's own authored source comments and nothing
+    /// else. [`FORM_CORPUS_ROWS`] carries three further Form/MDIForm rows
+    /// plan 03-13 measured directly against this repository's own corpus
+    /// instead, per [`CORPUS_MEASURED`]'s own doc comment: `STRUCTURES.md`
+    /// names no payload width for these three, so there was nothing to
+    /// transcribe, and a corpus measurement is D-01's other allowed source.
     ///
     /// A handful of section 8.5.1's own rows are left out on purpose: the
     /// `ScaleMode` opcode (25) and the `ClientLeft/Top/Width/Height` opcode
@@ -179,11 +187,27 @@ impl OpcodeTable {
     pub fn builtin() -> Self {
         let mut entries = HashMap::new();
         for &control_type in &[CT_FORM, CT_MDIFORM] {
-            insert_builtin_rows(&mut entries, control_type, FORM_ROWS);
+            insert_builtin_rows(&mut entries, control_type, FORM_ROWS, SVBD_OPCODE_AND_TYPE);
+            insert_builtin_rows(
+                &mut entries,
+                control_type,
+                FORM_CORPUS_ROWS,
+                CORPUS_MEASURED,
+            );
         }
-        insert_builtin_rows(&mut entries, CT_COMMAND_BUTTON, COMMAND_BUTTON_ROWS);
-        insert_builtin_rows(&mut entries, CT_LABEL, LABEL_ROWS);
-        insert_builtin_rows(&mut entries, CT_LISTBOX, LIST_BOX_ROWS);
+        insert_builtin_rows(
+            &mut entries,
+            CT_COMMAND_BUTTON,
+            COMMAND_BUTTON_ROWS,
+            SVBD_OPCODE_AND_TYPE,
+        );
+        insert_builtin_rows(&mut entries, CT_LABEL, LABEL_ROWS, SVBD_OPCODE_AND_TYPE);
+        insert_builtin_rows(
+            &mut entries,
+            CT_LISTBOX,
+            LIST_BOX_ROWS,
+            SVBD_OPCODE_AND_TYPE,
+        );
         Self { entries }
     }
 
@@ -284,9 +308,35 @@ const CT_MDIFORM: u8 = 20;
 const SVBD_OPCODE_AND_TYPE: &str = "SVBD ReturnGuiOpcode, ReturnDataType";
 const SVBD_POSITION_BLOCK: &str = "SVBD GetControlSize";
 
-/// The Form and MDIForm rows. `STRUCTURES.md` section 8.5.1 groups them
-/// under one "Form / MDIForm (`cType` 13, 20)" heading, because they share
-/// one property set.
+/// This repository's own corpus measurement, `03-CONTEXT.md` decision D-01's
+/// other allowed source: a fact this session read directly from a corpus
+/// executable's own bytes, compared against the `.frm` source that
+/// executable was built from, never transcribed from Semi VB Decompiler and
+/// never from Microsoft's `VB6.OLB`. Plan 03-13 is the first to cite this
+/// constant, closing the gap the phase 3 verification found: the property
+/// loop stopped four opcodes before the resource blob opcode on every
+/// corpus form, because none of the three opcodes in between carried a row.
+///
+/// Measured against, opcode by opcode:
+/// - Opcode 1, `Caption` (`Text`): `corpus/vb6-code/Fire-effect/Fast_Flames.exe`
+///   (offset `0x138d`) and
+///   `corpus/public-domain/SK-Winsock-Sample__VB6/demo/SubReality_WinsockSample.exe`
+///   (offset `0x12e5`).
+/// - Opcode 3, `BackColor` (`Long`):
+///   `corpus/vb6-code/Fire-effect/Fast_Flames.exe` (offset `0x13ca`, a
+///   system colour) and
+///   `corpus/vb6-code/Brightness-effect/Part 1 - Pure VB6/vbBrightness.exe`
+///   (offset `0x1303`, a literal, non-system colour).
+/// - Opcode 35, the resource blob (`Picture`):
+///   `corpus/vb6-code/Fire-effect/Fast_Flames.exe` (offset `0x13d4`) and
+///   `corpus/public-domain/SK-Winsock-Sample__VB6/demo/SubReality_WinsockSample.exe`
+///   (offset `0x1301`).
+const CORPUS_MEASURED: &str = "this repository's own corpus measurement (plan 03-13)";
+
+/// The Form and MDIForm rows `STRUCTURES.md` section 8.5.1 already
+/// transcribes from Semi VB Decompiler's own authored source comments.
+/// `STRUCTURES.md` groups them under one "Form / MDIForm (`cType` 13, 20)"
+/// heading, because they share one property set.
 const FORM_ROWS: &[(u8, &str, PayloadType)] = &[
     (10, "WindowState", PayloadType::Byte),
     (11, "MousePointer", PayloadType::Byte),
@@ -303,6 +353,13 @@ const FORM_ROWS: &[(u8, &str, PayloadType)] = &[
     (71, "OLEDropMode", PayloadType::Byte),
     (73, "PaletteMode", PayloadType::Byte),
 ];
+
+/// The Form and MDIForm rows this repository measured directly against its
+/// own corpus, per [`CORPUS_MEASURED`], never transcribed from
+/// `STRUCTURES.md` section 8.5.1 or from any other prior art. Plan 03-13
+/// adds these three so the property loop reaches the resource blob opcode
+/// (35) instead of stopping at the first one, opcode 1, with no row at all.
+const FORM_CORPUS_ROWS: &[(u8, &str, PayloadType)] = &[(1, "Caption", PayloadType::Text)];
 
 /// The CommandButton rows, `cType` 4.
 const COMMAND_BUTTON_ROWS: &[(u8, &str, PayloadType)] = &[
@@ -347,17 +404,27 @@ const LIST_BOX_ROWS: &[(u8, &str, PayloadType)] = &[
 
 /// Inserts one control type's rows into `entries`, citing
 /// [`SVBD_POSITION_BLOCK`] for a [`PayloadType::Position`] row and
-/// [`SVBD_OPCODE_AND_TYPE`] for every other one.
+/// `default_source` for every other one.
+///
+/// `default_source` is the caller's own provenance string, not a value this
+/// function chooses from the payload shape: every call site that inserts
+/// `STRUCTURES.md`-transcribed rows passes [`SVBD_OPCODE_AND_TYPE`], and
+/// [`OpcodeTable::builtin`]'s own corpus-measured call sites pass
+/// [`CORPUS_MEASURED`] instead. A [`PayloadType::Position`] row still always
+/// cites [`SVBD_POSITION_BLOCK`], because every position row this table
+/// carries today came from that one fact, `STRUCTURES.md` section 8.5's own
+/// `GetControlSize` citation, regardless of which rows array it sits in.
 fn insert_builtin_rows(
     entries: &mut HashMap<(u8, u8), OpcodeEntry>,
     control_type: u8,
     rows: &[(u8, &str, PayloadType)],
+    default_source: &'static str,
 ) {
     for &(opcode, name, payload) in rows {
         let source = if matches!(payload, PayloadType::Position) {
             SVBD_POSITION_BLOCK
         } else {
-            SVBD_OPCODE_AND_TYPE
+            default_source
         };
         entries.insert(
             (control_type, opcode),
@@ -373,6 +440,7 @@ fn insert_builtin_rows(
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
+    clippy::expect_used,
     clippy::indexing_slicing,
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
@@ -509,5 +577,102 @@ mod tests {
         let builtin_entry = builtin.lookup(1, 31).unwrap();
         assert_eq!(parsed_entry.name, builtin_entry.name);
         assert_eq!(parsed_entry.payload, builtin_entry.payload);
+    }
+
+    // --- Plan 03-13, Task 1: the provenance seam and the Caption row -----
+
+    /// `insert_builtin_rows` taking its default source from the caller adds
+    /// no row of its own: the table's shape (which pairs resolve, and to
+    /// what) is unchanged by the seam alone. This is `lookup_gives_the_entry_
+    /// the_pair_names` and `opcode_31_names_three_different_properties_on_
+    /// three_control_types`, both still passing after the seam change and
+    /// before `FORM_CORPUS_ROWS` existed, run during this task's own
+    /// development; they are not repeated here as a separate assertion
+    /// because a passing `cargo test -p deform6 --lib vb::opcodes` on the
+    /// seam commit alone is what that step proved.
+    #[test]
+    fn form_opcode_1_gives_caption_with_a_text_payload_and_the_corpus_measured_source() {
+        let table = OpcodeTable::builtin();
+        let entry = table.lookup(super::CT_FORM, 1).unwrap();
+        assert_eq!(entry.name, "Caption");
+        assert_eq!(entry.payload, PayloadType::Text);
+        assert_eq!(entry.source, super::CORPUS_MEASURED);
+    }
+
+    #[test]
+    fn mdiform_shares_the_forms_corpus_measured_caption_row() {
+        let table = OpcodeTable::builtin();
+        let entry = table.lookup(super::CT_MDIFORM, 1).unwrap();
+        assert_eq!(entry.name, "Caption");
+        assert_eq!(entry.source, super::CORPUS_MEASURED);
+    }
+
+    /// `Fast_Flames.exe`'s own form, `frmFire`, gives the caption
+    /// `frmFire.frm` line 5 declares, read through the production `inspect`
+    /// path, at the offset this session measured by hand (`0x138d`): opcode
+    /// `01`, a declared length of `0x0039` (57), 57 characters, and a
+    /// terminating zero at `0x13c9`.
+    #[test]
+    fn fast_flames_form_recovers_the_real_caption_from_the_committed_frm() {
+        let data: &[u8] = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/vb6-code/Fire-effect/Fast_Flames.exe"
+        ));
+        let report = crate::vb::inspect(data, &OpcodeTable::builtin()).unwrap();
+        let form = report
+            .forms
+            .iter()
+            .find(|f| f.name == "frmFire")
+            .expect("Fast_Flames.exe declares a form named frmFire");
+        let root = form
+            .controls
+            .first()
+            .expect("frmFire's own tree must resolve for this corpus measurement to stand");
+        let caption = root
+            .properties
+            .iter()
+            .find_map(|p| match p {
+                crate::vb::propstream::PropertyValue::Text { name, value } if name == "Caption" => {
+                    Some(value.as_str())
+                }
+                _ => None,
+            })
+            .expect("frmFire's own Caption must now resolve, not stop the loop at opcode 1");
+        assert_eq!(
+            caption,
+            "Even Faster Real-Time Fire Effect - www.tannerhelland.com"
+        );
+    }
+
+    /// A second, independent corpus program: `SubReality_WinsockSample.exe`'s
+    /// own form, `frmMain`, gives the caption `frmMain.frm` line 5 declares.
+    /// One file alone cannot carry this row's proof.
+    #[test]
+    fn winsock_sample_form_recovers_the_real_caption_from_the_committed_frm() {
+        let data: &[u8] = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/public-domain/SK-Winsock-Sample__VB6/demo/SubReality_WinsockSample.exe"
+        ));
+        let report = crate::vb::inspect(data, &OpcodeTable::builtin()).unwrap();
+        let form = report
+            .forms
+            .iter()
+            .find(|f| f.name == "frmMain")
+            .expect("SubReality_WinsockSample.exe declares a form named frmMain");
+        let root = form
+            .controls
+            .first()
+            .expect("frmMain's own tree must resolve for this corpus measurement to stand");
+        let caption = root
+            .properties
+            .iter()
+            .find_map(|p| match p {
+                crate::vb::propstream::PropertyValue::Text { name, value } if name == "Caption" => {
+                    Some(value.as_str())
+                }
+                _ => None,
+            })
+            .expect("frmMain's own Caption must now resolve, not stop the loop at opcode 1");
+        assert_eq!(caption, "Connect to server");
     }
 }

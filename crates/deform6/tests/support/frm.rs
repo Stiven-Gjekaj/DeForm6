@@ -152,20 +152,37 @@ pub struct Block {
 }
 
 /// Splits a `Name = Value` line at its first `=` sign, trims both sides,
-/// and drops a leading and trailing double quote when both are present.
+/// and drops a leading and trailing double quote when both are present,
+/// unescaping a doubled `""` inside the quoted value to one `"`.
 /// Gives `None` for a line with no `=`.
 ///
 /// Splits on the first `=` only. `Caption = "A = B"` carries an `=`
 /// inside its own value; splitting on every `=` sign truncates it. This
 /// is the RED-phase failure this task's own acceptance criteria names,
 /// captured in the SUMMARY for this plan.
+///
+/// VB6's own `.frm` writer escapes a literal `"` inside a quoted string by
+/// doubling it: `Caption = "Sepia / ""Antique"" Effect - www.tannerhelland.
+/// com"` (`corpus/vb6-code/Sepia-effect/Sepia.frm`) declares the caption
+/// `Sepia / "Antique" Effect - www.tannerhelland.com`, one embedded quote on
+/// each side, not two. Plan 03-13 found this the first time a `Text`
+/// payload's own recovered value reached the corpus-wide comparison this
+/// harness feeds: `deform6`'s own binary reader never doubles a quote (the
+/// bytes hold a single `"` in the middle of the declared length, nothing
+/// more), so a harness that only stripped the outer pair compared a
+/// doubled-quote `.frm` text against a single-quote recovered one and
+/// failed a form the tool actually reads correctly. `str::replace` runs
+/// only after the outer pair is confirmed present, so a value that is not
+/// quoted at all (a bare number, a `&H...&` colour, a `"name.frx":OFFSET`
+/// resource reference whose own trailing digits mean it never ends with a
+/// quote) is never touched by it.
 fn split_property_line(line: &str) -> Option<(String, String)> {
     let line = line.strip_suffix('\r').unwrap_or(line);
     let (name, value) = line.split_once('=')?;
     let name = name.trim().to_owned();
     let value = value.trim();
     let value = if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
-        value[1..value.len() - 1].to_owned()
+        value[1..value.len() - 1].replace("\"\"", "\"")
     } else {
         value.to_owned()
     };
@@ -421,6 +438,21 @@ mod tests {
             one[0].properties, four[0].properties,
             "a line with more than one space before the equals sign must parse the same as a \
              line with one space"
+        );
+    }
+
+    #[test]
+    fn a_doubled_quote_inside_a_quoted_value_unescapes_to_one_quote() {
+        let text = "Begin VB.Form Form1\n   Caption = \"Sepia / \"\"Antique\"\" Effect\"\nEnd\n";
+        let roots = parse_blocks(text);
+        assert_eq!(
+            roots[0].properties,
+            vec![Property {
+                name: "Caption".to_owned(),
+                value: "Sepia / \"Antique\" Effect".to_owned(),
+            }],
+            "a doubled quote inside a quoted value must unescape to one embedded quote, the \
+             way VB6's own .frm writer encodes a literal quote"
         );
     }
 

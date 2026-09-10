@@ -935,6 +935,40 @@ fn strip_frm_comment(value: &str) -> &str {
     value.split('\'').next().unwrap_or(value).trim()
 }
 
+/// Tells whether a declared `.frm` value names a resource file rather than
+/// carrying a literal: `"name.frx":OFFSET`, or `$"name.frx":OFFSET` for a
+/// Unicode-flagged resource reference. `support::frm::split_property_line`
+/// only strips a leading and trailing double quote when both are present;
+/// this shape's own trailing digits mean the leading quote survives into
+/// the value this function reads, which is what the check below looks for.
+///
+/// The corpus proves this shape is real, not a hypothetical: `Gradient.frm`
+/// declares `lblExplanation.Caption = $"Gradient.frx":0000`. No corpus
+/// Form's own `Caption` (this plan's new opcode 1 row) happens to use it,
+/// but a `Text`-typed row on another control type could reach this same
+/// shape in a later plan, and this check is written to hold for that case
+/// too, not only for the one this corpus happens to exercise today.
+fn declared_value_names_a_resource_file(value: &str) -> bool {
+    let value = value.strip_prefix('$').unwrap_or(value);
+    value.starts_with('"') && value.contains(".frx\":")
+}
+
+/// `declared_value_names_a_resource_file` on the two real shapes the corpus
+/// carries (`Gradient.frm`'s own `$"Gradient.frx":0000`, and every plain
+/// `"name.frx":OFFSET` line the earlier grep found), and on a plain literal
+/// caption that must never be mistaken for one.
+#[test]
+fn declared_value_names_a_resource_file_recognises_both_frx_shapes_and_not_a_plain_literal() {
+    assert!(declared_value_names_a_resource_file(
+        "$\"Gradient.frx\":0000"
+    ));
+    assert!(declared_value_names_a_resource_file("\"frmFire.frx\":0000"));
+    assert!(!declared_value_names_a_resource_file(
+        "Even Faster Real-Time Fire Effect - www.tannerhelland.com"
+    ));
+    assert!(!declared_value_names_a_resource_file("&H80000005&"));
+}
+
 /// Both directions of one form's own control diff: every declared control
 /// name (plus array index) with no matching recovered control, and every
 /// recovered one with no matching declared control.
@@ -1082,6 +1116,24 @@ pub(crate) fn form_control_mismatches(
                 else {
                     continue;
                 };
+
+                if matches!(recovered_property, PropertyValue::Text { .. })
+                    && declared_value_names_a_resource_file(&declared_property.value)
+                {
+                    // A declared value of the form `"name.frx":OFFSET` or
+                    // `$"name.frx":OFFSET` names a resource file, not a
+                    // literal (the corpus proves this shape reaches a
+                    // `Text`-typed row: `Gradient.frm`'s own `lblExplanation.
+                    // Caption` reads `$"Gradient.frx":0000`). There is no
+                    // literal on the declared side to compare against, so
+                    // this property's text comparison is skipped here, with
+                    // the reason recorded beside the skip. The property
+                    // itself is still counted as recovered: the match above
+                    // already found it by name, and only this one text
+                    // check is what does not run.
+                    continue;
+                }
+
                 let declared_text = if matches!(recovered_property, PropertyValue::Text { .. }) {
                     declared_property.value.as_str()
                 } else {
