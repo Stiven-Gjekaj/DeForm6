@@ -40,17 +40,17 @@ Version 1 recovers metadata. It does not recover statements.
 
 ### Forms
 
-- [x] **FRM-01**: The tool recovers the control tree of every form, with the
+- [ ] **FRM-01**: The tool recovers the control tree of every form, with the
       parent of each control.
-- [x] **FRM-02**: The tool recovers the type and the name of every control.
-- [x] **FRM-03**: The tool recovers the property values of every control, and
+- [ ] **FRM-02**: The tool recovers the type and the name of every control.
+- [ ] **FRM-03**: The tool recovers the property values of every control, and
       of the form itself.
-- [x] **FRM-04**: The tool recovers the CLSID of a third party OCX control, and
+- [ ] **FRM-04**: The tool recovers the CLSID of a third party OCX control, and
       says plainly that it cannot interpret that control's property blob
       without the control's own type library.
-- [x] **FRM-05**: The tool recovers the resource blobs and writes an `.frx`
+- [ ] **FRM-05**: The tool recovers the resource blobs and writes an `.frx`
       whose offsets the generated `.frm` agrees with.
-- [x] **FRM-06**: The tool recovers the event handler names bound to each
+- [ ] **FRM-06**: The tool recovers the event handler names bound to each
       control.
 
 ### Written output
@@ -114,7 +114,7 @@ Version 1 recovers metadata. It does not recover statements.
 - [x] **VER-05**: A recovery ratio per program is pinned in the repository. A
       fall fails the build and names what went missing. A rise fails the build
       and prints the new value to record.
-- [x] **VER-06**: The known defect in `frmHMM.frx` is excluded by name, with
+- [ ] **VER-06**: The known defect in `frmHMM.frx` is excluded by name, with
       the reason recorded, and never passes silently.
 
 ## v2 Requirements
@@ -159,8 +159,8 @@ Deferred. Tracked, not in this roadmap.
 | DET-01 to DET-06 | Phase 1 | Complete |
 | OBJ-01 to OBJ-06 | Phase 2 | Complete |
 | VER-01 to VER-05 | Phase 2 | Complete |
-| FRM-01 to FRM-06 | Phase 3 | Complete |
-| VER-06 | Phase 3 | Complete |
+| FRM-01 to FRM-06 | Phase 3 | Gaps Found |
+| VER-06 | Phase 3 | Gaps Found |
 | WRT-01 to WRT-07 | Phase 4 | Pending |
 | RPT-01 to RPT-06 | Phase 4 | Pending |
 | SAF-01 to SAF-05 | Phase 5 | Pending |
