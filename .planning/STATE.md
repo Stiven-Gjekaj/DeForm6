@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Forms
 status: verifying
-stopped_at: "Completed 03-15-PLAN.md (gap closure: frx::extract_blob wired into the property loop, the .frx offset cursor corrected)"
-last_updated: "2026-09-10T22:56:11.000Z"
+stopped_at: "Completed 03-16-PLAN.md (gap closure: the OCX CLSID field measured and reported honestly via oUuid, with an unconditional caveat)"
+last_updated: "2026-09-11T00:00:00.000Z"
 last_activity: 2026-09-10
 last_activity_desc: Phase 03 execution started
-state_head: 7901e15c7a195e75278a57cc4762b0fba213c2fc
+state_head: 29973edcc01aa6a9b86811c76b1cd5458e416922
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 35
-  completed_plans: 33
+  completed_plans: 34
   percent: 0
 ---
 
@@ -67,11 +67,15 @@ inferred.
 ## Current Position
 
 Phase: 03 (Forms) — EXECUTING (gap closure)
-Plan: 03-15 of 17 (gap closure wave 2 of 4)
-Status: 15/17 plans executed. `frx::extract_blob` now has a production
-call site; `BlobCursor::take` is corrected against eleven measured
-`.frx` gaps. Plans 03-16 (OCX CLSID field) and 03-17 (remaining code
-review findings) still open.
+Plan: 03-16 of 17 (gap closure wave 3 of 4)
+Status: 16/17 plans executed. The OCX CLSID field is measured: eighteen
+searches, six encodings across three corpus programs, never find the
+identifier a project file declares anywhere in the component table
+entry. `oUuid` (`248DD896-...`, one byte from the declared value) is
+now reported, with an honest caveat printed beside it. The FRM-04
+wording question this raises is open, for the human, in
+`03-16-SUMMARY.md`. Plan 03-17 (remaining code review findings) still
+open.
 `deform6 inspect` reports the object graph. It reads a form's control tree
 now: every control's type, name and array index, gated on the tiling check.
 Open defects: `.planning/WINDOWS.md` holds three, all of them limits that are
@@ -131,6 +135,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 | Phase 03-forms P13 | 20min | 3 tasks | 3 files |
 | Phase 03 P14 | single session | 3 tasks | 6 files |
 | Phase 03-forms P15 | 24min | 3 tasks | 7 files |
+| Phase 03-forms P16 | 55min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -190,6 +195,8 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-15: BlobCursor::take advances by declared_len + 4, not declared_len + 12 as STRUCTURES.md section 8.8 states, measured against eleven real gaps across two committed .frx files (FormPhysics.frx, nine gaps; frmTransparency.frx, two gaps). A .frx item on disk is the same four byte length field the executable already carries inline, followed directly by declared_len bytes; there is no separate twelve byte FRXITEMHDR.
 - [Phase 03]: 03-15: walk_properties's resource blob arm now calls frx::extract_blob and advances the cursor only by the count it returns. PropertyValue::Blob carries a recovered blob's offset, declared length, image length, format and .frx offset, never its bytes; PropertyValue::BlobUnreadable is a new, distinct state for a blob the file marks present but this reader could not read. compose_form owns one BlobCursor per form, threaded through compose_control into walk_properties.
 - [Phase 03]: 03-15: FRM-05 is not marked complete. The requirement needs both blob recovery and the .frx writer; this plan does the recovery half only, and the writer stays with phase 4 plan 04-04. Marking it here would repeat the exact requirements-tracking overstatement 03-VERIFICATION.md found.
+- [Phase 03]: 03-16: eighteen searches (six encodings, three corpus programs) never find the identifier a project file's Object= line declares anywhere in the external component table entry. oUuid decodes to a value one byte from the declared identifier; GUIDoffset/GUIDlength (the field 03-08 read) shares no digit pattern with it. join_component now reports oUuid and always attaches a caveat, since neither field is confirmed.
+- [Phase 03]: 03-16: FRM-04 is not marked complete. This plan raises, and does not answer, the question of whether FRM-04's own wording promises a CLSID the on-disk format cannot always deliver; REQUIREMENTS.md is left unchanged.
 
 ### Pending Todos
 
@@ -218,13 +225,13 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-10T22:56:11.000Z
-Stopped at: Completed 03-15-PLAN.md (gap closure: frx::extract_blob wired into the property loop, the .frx offset cursor corrected against eleven measured gaps)
+Last session: 2026-09-11T00:00:00.000Z
+Stopped at: Completed 03-16-PLAN.md (gap closure: the OCX CLSID field measured and reported honestly via oUuid, with an unconditional caveat)
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and
 confirmed rather than assumed.
 
-Next: `/gsd-execute-phase 3` to continue Phase 3 gap closure with plan 03-16
-(which component table field holds a third party control's identifier).
+Next: `/gsd-execute-phase 3` to continue Phase 3 gap closure with plan 03-17
+(the remaining code review findings).
 Resume file: None

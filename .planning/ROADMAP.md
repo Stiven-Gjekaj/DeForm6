@@ -326,7 +326,7 @@ Plans:
 
 **Gap closure wave 3** *(blocked on 03-15)*
 
-- [ ] 03-16-PLAN.md - Which component table field holds a third party control's identifier, settled by measurement, with the honest caveat
+- [x] 03-16-PLAN.md - Which component table field holds a third party control's identifier, settled by measurement, with the honest caveat
 
 **Gap closure wave 4** *(blocked on 03-14, 03-15 and 03-16)*
 
