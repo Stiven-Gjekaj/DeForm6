@@ -584,12 +584,21 @@ forever) must not be allowed to loop unbounded.
 
 **Example:**
 ```rust
-// Source: this document's Pattern 1 and STRUCTURES.md §8.9. Illustrative
-// only; the planner's own executor writes the real implementation against
-// the project's Region/Off/Defect types.
+// Source: this document's Pattern 1, STRUCTURES.md §8.9, and 03-04-SUMMARY.md's
+// own byte-level measurement against Grayscale.exe. Illustrative only; the
+// planner's own executor writes the real implementation against the
+// project's Region/Off/Defect types.
 const MAX_SCOPE_RUN: usize = 64; // generous; no real form nests this deep
 
-fn read_scope_run(region: &Region, at: Off) -> Option<(ScopeRun, Off)> {
+enum ScopeRun {
+    OpenChild { pops: u8 },
+    Sibling { pops: u8 },
+    EndForm { pops: u8 },
+    Menu { pops: u8 },
+    Unrecognised { byte: u8, pops: u8 },
+}
+
+fn read_scope_run(region: &Region, at: Off, current_is_menu: bool) -> Option<(ScopeRun, Off)> {
     if region.u8(at)? != 0xFF {
         return None; // not a separator here; caller decides what that means
     }
@@ -599,16 +608,31 @@ fn read_scope_run(region: &Region, at: Off) -> Option<(ScopeRun, Off)> {
         let b = region.u8(cursor)?;
         cursor = cursor.checked_add(1)?;
         match b {
-            0x01 => return Some((ScopeRun::OpenSibling, cursor)),
-            0x02 | 0x03 => pops = pops.saturating_add(1),
+            0x02 if current_is_menu => return Some((ScopeRun::OpenChild { pops }, cursor)),
+            0x02 => pops = pops.saturating_add(1),
+            0x01 => return Some((ScopeRun::OpenChild { pops }, cursor)),
+            0x03 => return Some((ScopeRun::Sibling { pops }, cursor)),
             0x04 => return Some((ScopeRun::EndForm { pops }, cursor)),
             0x05 => return Some((ScopeRun::Menu { pops }, cursor)),
-            _ => return Some((ScopeRun::Unrecognised { byte: b, pops }, cursor)),
+            other => return Some((ScopeRun::Unrecognised { byte: other, pops }, cursor)),
         }
     }
     None // ran MAX_SCOPE_RUN bytes with no terminator; refuse, do not loop
 }
 ```
+`0x02` and `0x03` no longer share one match arm. `03-04-SUMMARY.md`'s
+`key-decisions` block names the four real transitions this reading was
+measured against, in `corpus/vb6-code/Grayscale-effect/Grayscale.exe`:
+`0x02` always continues the run, `0x03` alone is the sibling terminal and
+adds no pop of its own, and a menu control (`cType` 19) reads a bare
+`0x02` as its own `OpenChild`-equivalent terminal instead of a pop,
+matching `current_is_menu` above. `STRUCTURES.md` section 8.9 is the
+authoritative statement of this grammar; a reader who needs the full rule
+goes there, not here. `.planning/WINDOWS.md` finding 7 records that one
+transition of this grammar, closing out of a menu nested two levels deep
+back to a form-level sibling menu, is still open; this document does not
+present the grammar as complete.
+
 The bound is a defensive limit, not a value read from the corpus; no real
 form in this session's measurement needed more than one pop before its
 terminator.
