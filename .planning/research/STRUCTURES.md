@@ -1571,7 +1571,7 @@ answer stated confidently would be worse than no answer.
 | 11 | Control array index location (§8.4) | `Index = N` in `.frm` | CLOSED 2026-09-10, 30 array elements across 2 files. The array `Index` is the two byte value at control block offset 0x05. Method and worked example in §14. |
 | 12 | Byte at control-block +0x02 ("uni") (§8.3) | possibly the string encoding flag | Compile ASCII vs non-Latin-1 caption, diff |
 | 13 | String encoding rule (§9.3) | every string property | Three named experiments in §9.3 |
-| 14 | Scope separator grammar (§8.9) | correct control nesting | Implement with the `lPropertiesLength` tiling check as a gate |
+| 14 | Scope separator grammar (§8.9) | correct control nesting | PARTIALLY CLOSED 2026-09-11, 5 transitions across 2 programs. The two-level-deep menu close (a top-level menu with a child, then a second top-level menu with children) is measured; method and worked example in §15. What remains open, narrowed from this row's own prior text: (1) a menu that is itself a sibling within an already-open menu group, opening its own child, is byte-identical to a confirmed sibling case and unresolved (`corpus/public-domain/PassGen/PassGen.exe`, `menuAbout`, offset `0x21d0`); (2) a separate, unexplained failure where an expected scope separator (`0xFF`) is not there at all (`corpus/vb6-code/Map-editor-2D/Map Editor.exe`, `Main`, offset `0x170e`, byte `0x37`). Both tracked in `WINDOWS.md`. |
 | 15 | Full opcode-to-property tables per control type (§8.5) | every property | Build from a type-library dump; ship as derived data |
 | 16 | Nine unknown dwords in `GUIObjectInfo` 0x35-0x58 (§8.2) | nothing known | Leave opaque |
 | 17 | Five unknown dwords in the external component entry (§7.3) | nothing known | Leave opaque |
@@ -1813,4 +1813,65 @@ because no corpus array index exceeds 24. DeForm6 reads two bytes
 defensively and gives a `Defect` when the high byte is non-zero, which
 surfaces the case rather than deciding it. A program with a control array
 index above 255 would close the question.
+
+---
+
+## 15. Gap 14, partially closed: the two-level-deep menu close, 2026-09-11
+
+Section 8.9 recommends: "read `0xFF`, then read scope bytes until one is
+`> 3` or `0`, counting `02`/`03` as pops." That reading, alone, covers the
+single-level menu case plan 03-04 measured (§14's own sibling companion,
+`Grayscale.exe`'s `mnuFile`/`mnuOpenImage`), but does not cover closing a
+menu nested two levels deep back to a sibling menu at the form's own top
+level: a top-level menu with a child, then a second top-level menu that
+also has children. This session measured that transition directly.
+
+**The rule.** The decision depends on which control the walk's own parent
+stack currently has at its top, not only on which control was just read:
+
+- When the stack top is **not** a menu, a bare `0xFF 0x02` (a run of one
+  byte after the leading `0xFF`) after a menu control means that menu opens
+  its own first child, matching plan 03-04's own finding, unchanged.
+- When the stack top **is** a menu, `0x03` behaves the way `0x02` behaves
+  for every other control: it adds a pop and the run continues. `0x02`
+  becomes the run's own sibling terminal, at whatever pop count the run has
+  accumulated (zero, if it is the run's own first byte).
+
+**The evidence.** Five independent real transitions, across two programs,
+all verified against each program's own committed `.frm` source, by name:
+
+| Program | Transition | Bytes | Stack top | Role |
+|---|---|---|---|---|
+| `corpus/public-domain/HexScroll/Hex Scroll.exe`, offset `0x16fd` | `menuExit` to `menuAbout` (sibling of `menuFile`) | `FF 03 02` | `menuFile` | one pop, then sibling |
+| `corpus/public-domain/UUID2/VB6/UUID2.exe`, offset `0x1918` | `menuExit` to `menuSettings` (sibling of `menuFile`) | `FF 03 02` | `menuFile` | one pop, then sibling |
+| `corpus/public-domain/UUID2/VB6/UUID2.exe`, offset `0x1986` | `menuSave` to `menuAbout` (sibling of `menuSettings`) | `FF 03 02` | `menuSettings` | one pop, then sibling |
+| `corpus/public-domain/UUID2/VB6/UUID2.exe`, offset `0x19cc` | `menuLicense` to `menuSep` (sibling, both children of `menuAbout`) | `FF 02` | `menuAbout` | zero pops, sibling |
+| `corpus/public-domain/HexScroll/Hex Scroll.exe`, offset `0x1743` | `menuLicense` to `menuSep` (sibling, both children of `menuAbout`) | `FF 02` | `menuAbout` | zero pops, sibling |
+
+The first three settle the transition this gap named: reading `0x03` as an
+immediate terminal (plan 03-04's own rule) stopped the run two bytes too
+early and left the real `0x02` byte to be misread as the start of a bogus
+next control block, which is the exact and only cause of the
+`MAX_UNEXPLAINED_TAIL` refusal `WINDOWS.md` finding 7 recorded. The last
+two, one measurement in each of two independent programs, settle a second
+case this gap's own text did not separately name: a bare `0x02` after a
+menu that is itself already a sibling within an open menu group.
+`FrmHex.frm` and `frmUUID2.frm` both now recover in full, matching the
+committed `.frm` parent for parent, by name.
+
+**What the measurement did not settle.** `corpus/public-domain/PassGen/PassGen.exe`
+holds a third shape: `menuAbout`, itself a sibling within an already-open
+menu (`menuHelp`), that genuinely opens its own child (`menuAboutForm`).
+Its own trailing separator, at file offset `0x21d0`, is a bare `0xFF 0x02`
+with the stack top a menu and zero pops, byte for byte identical to the
+two confirmed sibling transitions above, which need the opposite role. No
+byte in the control header or the property stream up to the separator
+distinguishes the two; this session found none. `frmPassGen` still builds
+a tree (the byte count tiles exactly, no control is lost), but
+`menuAboutForm`, `menuSeparatorC` and `menuWebsite` recover with `menuHelp`
+as their parent rather than `menuAbout`. Tracked as `WINDOWS.md`'s own
+finding for this program, open. `corpus/vb6-code/Map-editor-2D/Map Editor.exe`'s
+`Main` form fails for an unrelated reason (an expected scope separator
+that is not there, at file offset `0x170e`) and is tracked separately too;
+this session's own measurement did not explain it.
 
