@@ -43,14 +43,14 @@ Version 1 recovers metadata. It does not recover statements.
 - [ ] **FRM-01**: The tool recovers the control tree of every form, with the
       parent of each control.
 - [ ] **FRM-02**: The tool recovers the type and the name of every control.
-- [x] **FRM-03**: The tool recovers the property values of every control, and
+- [ ] **FRM-03**: The tool recovers the property values of every control, and
       of the form itself.
 - [ ] **FRM-04**: The tool recovers the CLSID of a third party OCX control, and
       says plainly that it cannot interpret that control's property blob
       without the control's own type library.
 - [ ] **FRM-05**: The tool recovers the resource blobs and writes an `.frx`
       whose offsets the generated `.frm` agrees with.
-- [ ] **FRM-06**: The tool recovers the event structure of each control:
+- [x] **FRM-06**: The tool recovers the event structure of each control:
       which event slots the compiled form binds, the index of each slot, and
       the native address of each bound handler. The tool does not recover
       the name of an event. The compiled file holds no such name. A name
