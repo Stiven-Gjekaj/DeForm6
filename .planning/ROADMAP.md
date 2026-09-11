@@ -28,7 +28,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: It reads the file** - PE parsing, VB6 detection, the VB header, the refusals, and the safety primitives every later phase depends on
 - [ ] **Phase 2: The object graph** - Objects, kinds, public procedure names, prototypes, the external table, and the differential harness that measures all of it
-- [ ] **Phase 3: Forms** - The control tree, control types and names, property values, the `.frx` blobs, and the event structure
+- [x] **Phase 3: Forms** - The control tree, control types and names, property values, the `.frx` blobs, and the event structure (completed 2026-09-11)
 - [ ] **Phase 4: It writes a project** - `extract` emits `.vbp`, `.frm`, `.frx`, `.bas` and `.cls`, plus the JSON confidence report
 - [ ] **Phase 5: Hostility** - `--salvage`, fuzzing in the gate, and the run-time robustness corpus
 - [ ] **Phase 6: Version 1.0** - The metadata deliverable is finished, measured, and documented with its limits stated
@@ -634,7 +634,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 |-------|----------------|--------|-----------|
 | 1. It reads the file | 7/8 | In Progress|  |
 | 2. The object graph | 4/10 | In Progress|  |
-| 3. Forms | 18/18 | In Progress|  |
+| 3. Forms | 18/18 | Complete    | 2026-09-11 |
 | 4. It writes a project | 0/9 | Not started | - |
 | 5. Hostility | 0/8 | Not started | - |
 | 6. Version 1.0 | 0/5 | Not started | - |

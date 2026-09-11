@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 03
-current_phase_name: Forms
-status: verifying
-stopped_at: "Completed 03-18-PLAN.md (gap closure: handler_address wired into EventReport, a live inspect run and the CLI; FRM-06 moved to [x], FRM-03 returned to [ ], both from a fresh corpus-wide measurement)"
-last_updated: "2026-09-11T16:42:04.765Z"
-last_activity: 2026-09-10
-last_activity_desc: Phase 03 execution started
-state_head: a1f638bfe2adadbe334c0d1d89a7d42bf83d1697
+current_phase: 2
+current_phase_name: The object graph
+status: planning
+stopped_at: Phase 03 complete, ready to plan Phase 2
+last_updated: "2026-09-11T17:34:45.502Z"
+last_activity: 2026-09-11
+last_activity_desc: Phase 03 complete, transitioned to Phase 2
+state_head: b139b9f2379c0da518ab6c9222363501b9e7d0c3
 progress:
   total_phases: 6
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 36
   completed_plans: 36
-  percent: 0
+  percent: 17
 ---
 
 ## Continue
@@ -66,9 +66,9 @@ inferred.
 
 ## Current Position
 
-Phase: 03 (Forms) — EXECUTING (gap closure)
-Plan: 17 of 17 (gap closure wave 4 of 4)
-Status: 16/17 plans executed. The OCX CLSID field is measured: eighteen
+Phase: 2 — The object graph
+Plan: Not started
+Status: Ready to plan
 searches, six encodings across three corpus programs, never find the
 identifier a project file declares anywhere in the component table
 entry. `oUuid` (`248DD896-...`, one byte from the declared value) is
@@ -83,7 +83,7 @@ stated rather than hidden. The section overlap rule has no test because no
 corpus file overlaps. The P-code branch has no real sample because every
 vendored project is native. `inspect` drops the defects it collects, because
 `Report` derives `PartialEq` and `Defect` does not.
-Last activity: 2026-09-10 — Phase 03 execution started
+Last activity: 2026-09-11 — Phase 03 complete, transitioned to Phase 2
 Plan 03-01 leads with an end to end tracer. Plan 03-02 withdraws the ROADMAP
 instruction to commit an opcode table built from a type library dump, because
 `AGENTS.md` bars a fixture calculated from a third party file. Plan 03-04
@@ -91,13 +91,13 @@ re-measures the scope-separator grammar directly against Grayscale.exe,
 since the research document's own prose does not reconcile byte-for-byte,
 and closes STRUCTURES.md gap 11.
 
-Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, which is 18 of 50
+Progress: [██░░░░░░░░] 17% of the 50 plans in the roadmap, which is 18 of 50
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 0
+- Total plans completed: 18
 - Average duration: -
 - Total execution time: -
 
@@ -105,7 +105,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 03 | 18 | - | - |
 
 **Recent Trend:**
 
@@ -233,7 +233,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-09-11T16:42:04.734Z
-Stopped at: Completed 03-18-PLAN.md (gap closure: handler_address wired into EventReport, a live inspect run and the CLI; FRM-06 moved to [x], FRM-03 returned to [ ], both from a fresh corpus-wide measurement)
+Stopped at: Phase 03 complete, ready to plan Phase 2
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and
