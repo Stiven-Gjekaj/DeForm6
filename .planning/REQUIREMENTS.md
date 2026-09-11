@@ -134,7 +134,7 @@ Version 1 recovers metadata. It does not recover statements.
 - [x] **VER-05**: A recovery ratio per program is pinned in the repository. A
       fall fails the build and names what went missing. A rise fails the build
       and prints the new value to record.
-- [ ] **VER-06**: The known defect in `frmHMM.frx` is excluded by name, with
+- [x] **VER-06**: The known defect in `frmHMM.frx` is excluded by name, with
       the reason recorded, and never passes silently.
 
 ## v2 Requirements
@@ -180,7 +180,7 @@ Deferred. Tracked, not in this roadmap.
 | OBJ-01 to OBJ-06 | Phase 2 | Complete |
 | VER-01 to VER-05 | Phase 2 | Complete |
 | FRM-01 to FRM-06 | Phase 3 | Gaps Found |
-| VER-06 | Phase 3 | Gaps Found |
+| VER-06 | Phase 3 | Complete |
 | WRT-01 to WRT-07 | Phase 4 | Pending |
 | RPT-01 to RPT-06 | Phase 4 | Pending |
 | SAF-01 to SAF-05 | Phase 5 | Pending |
