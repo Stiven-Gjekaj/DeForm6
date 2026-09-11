@@ -255,3 +255,19 @@ None beyond what this plan's own `<threat_model>` already names and mitigates. T
 ---
 *Phase: 03-forms*
 *Completed: 2026-09-11*
+
+## Self-Check: PASSED
+
+All 4 modified files (`crates/deform6/src/vb/controlinfo.rs`,
+`crates/deform6-cli/src/main.rs`, `crates/deform6-cli/tests/cli.rs`,
+`.planning/REQUIREMENTS.md`) and the 1 created file
+(`crates/deform6/tests/events.rs`) found on disk. All 4 commits
+(`7293e64`, `b77e0b5`, `e18095e`, `a1f638b`) found in `git log`.
+`cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`
+and `cargo test --workspace` all pass clean. `cargo test -p deform6
+--test events` gives 2 passed. `cargo test -p deform6-cli --test cli`
+gives 29 passed. `cargo run -p xtask -- update-ratios && git diff
+--exit-code -- tests/ratios.toml` confirms no recovered count moved.
+`grep -n 'FRM-03\|FRM-06' .planning/REQUIREMENTS.md` shows `FRM-03` at
+`[ ]` and `FRM-06` at `[x]`, each matching this SUMMARY's own recorded
+measurement.
