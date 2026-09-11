@@ -733,6 +733,19 @@ impl EventNameTable {
 /// module never derives a name from the slot index by counting, and never
 /// names an event from a control type this repository has not verified
 /// against a cited public source.
+///
+/// # `handler_address`, per the narrowed FRM-06 (plan 03-11, D-02)
+///
+/// The narrowed FRM-06 claims three facts about a bound slot: that it is
+/// bound, its own index, and the native address of its own handler. The
+/// first two states here carried only the first two facts until this field
+/// existed: [`StubHandler::handler_address`] was computed and
+/// byte-for-byte proven against a real corpus stub (`03-09-SUMMARY.md`),
+/// but reached no field on this type, so [`report_events`] threw it away
+/// and nothing past this function could ever print it. `Named` and
+/// `BoundUnnamed` each carry it now. `Unbound` gains no field: a slot with
+/// no handler has no address to carry, and an empty optional on that
+/// variant would be a meaningless field, not an honest absence.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EventReport {
     /// A bound slot whose name [`EventNameTable::lookup`] gave.
@@ -743,6 +756,12 @@ pub enum EventReport {
         index: u16,
         /// The event name a supplied table gave.
         event_name: String,
+        /// The bound handler's own native address, taken from
+        /// [`EventSlot::Bound`]'s own decoded `handler` unchanged. `None`
+        /// when `decode_stub` gave no handler: the stub address resolved to
+        /// no section, or held too few bytes to decode. The slot still
+        /// reports as bound either way; only the address is missing.
+        handler_address: Option<u32>,
     },
     /// A bound slot with no name available.
     BoundUnnamed {
@@ -750,11 +769,14 @@ pub enum EventReport {
         control_name: String,
         /// This slot's own ordinal.
         index: u16,
+        /// See [`EventReport::Named::handler_address`]'s own doc comment.
+        handler_address: Option<u32>,
     },
     /// An unbound slot: no handler in the source. VB6 declares a
     /// source-level event procedure only for a bound slot, so this module
     /// never attempts a name lookup for one: naming an event nothing calls
-    /// serves no recovery this repository writes.
+    /// serves no recovery this repository writes. An unbound slot has no
+    /// handler, so it carries no `handler_address` field at all.
     Unbound {
         /// The control's own name.
         control_name: String,
@@ -775,6 +797,7 @@ impl EventReport {
             Self::BoundUnnamed {
                 control_name,
                 index,
+                ..
             } => Some(format!(
                 "Event slot {index} on {control_name}: bound, name not available, no event \
                  name table loaded. Run with --event-name-table to supply one naming this \
@@ -820,17 +843,22 @@ pub fn report_events(
                 control_name: control_name.to_owned(),
                 index: *index,
             },
-            EventSlot::Bound { index, .. } => match names.lookup(control_type_name, *index) {
-                Some(event_name) => EventReport::Named {
-                    control_name: control_name.to_owned(),
-                    index: *index,
-                    event_name: event_name.to_owned(),
-                },
-                None => EventReport::BoundUnnamed {
-                    control_name: control_name.to_owned(),
-                    index: *index,
-                },
-            },
+            EventSlot::Bound { index, handler, .. } => {
+                let handler_address = handler.map(|h| h.handler_address);
+                match names.lookup(control_type_name, *index) {
+                    Some(event_name) => EventReport::Named {
+                        control_name: control_name.to_owned(),
+                        index: *index,
+                        event_name: event_name.to_owned(),
+                        handler_address,
+                    },
+                    None => EventReport::BoundUnnamed {
+                        control_name: control_name.to_owned(),
+                        index: *index,
+                        handler_address,
+                    },
+                }
+            }
         })
         .collect()
 }
@@ -1497,6 +1525,7 @@ mod tests {
                 control_name: "Command1".to_owned(),
                 index: 0,
                 event_name: "Click".to_owned(),
+                handler_address: None,
             }
         );
         assert!(reports[0].no_name_message().is_none());
@@ -1521,12 +1550,56 @@ mod tests {
             EventReport::BoundUnnamed {
                 control_name: "Command1".to_owned(),
                 index: 3,
+                handler_address: None,
             }
         );
         let message = reports[0].no_name_message().unwrap();
         assert!(message.contains('3'), "{message}");
         assert!(message.contains("Command1"), "{message}");
         assert!(message.contains("--event-name-table"), "{message}");
+    }
+
+    #[test]
+    fn a_bound_slot_with_a_decoded_handler_carries_its_address_in_both_no_name_states() {
+        let handler = Some(super::StubHandler {
+            is_method: false,
+            handler_address: 0x0040_10ED,
+        });
+        let table = super::EventTable {
+            slots: vec![EventSlot::Bound {
+                index: 0,
+                stub: Va::new(0x0040_1000),
+                handler,
+            }],
+            unsupported_control_type: None,
+            defects: Vec::new(),
+        };
+
+        let no_names = EventNameTable::default();
+        let unnamed = report_events("Command1", "CommandButton", &table, &no_names);
+        assert_eq!(
+            unnamed[0],
+            EventReport::BoundUnnamed {
+                control_name: "Command1".to_owned(),
+                index: 0,
+                handler_address: Some(0x0040_10ED),
+            }
+        );
+
+        let mut names = EventNameTable::default();
+        names
+            .entries
+            .insert(("CommandButton".to_owned(), 0), "Click".to_owned());
+        let named = report_events("Command1", "CommandButton", &table, &names);
+        assert_eq!(
+            named[0],
+            EventReport::Named {
+                control_name: "Command1".to_owned(),
+                index: 0,
+                event_name: "Click".to_owned(),
+                handler_address: Some(0x0040_10ED),
+            }
+        );
     }
 
     #[test]
@@ -1611,6 +1684,7 @@ mod tests {
         let bound = EventReport::BoundUnnamed {
             control_name: "Command1".to_owned(),
             index: 0,
+            handler_address: None,
         };
         let unbound = EventReport::Unbound {
             control_name: "Command1".to_owned(),
