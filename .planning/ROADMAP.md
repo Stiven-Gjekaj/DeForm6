@@ -210,10 +210,10 @@ Plans:
 
 **Goal**: `deform6 inspect` reports the control tree of every form with the
 correct parent for each control, the type and the name of each control, the
-property values of each control and of the form, the CLSID of each third-party
-OCX control, the resource blobs, and the event structure of each control:
-which event slots are bound, the index of each slot, and the address of each
-bound handler.
+property values of each control and of the form, the declared component
+identifier of each third-party OCX control, the resource blobs, and the event
+structure of each control: which event slots are bound, the index of each
+slot, and the address of each bound handler.
 
 **Depends on**: Phase 2
 
@@ -230,10 +230,15 @@ bound handler.
      types, control names and property values against the committed `.frm`
      files through `support/frm.rs`, a second independent reader. The pinned
      form ratio and the pinned control ratio hold.
-  3. A form that uses a third-party OCX reports the control's CLSID, resolved
-     by matching the class name against the external component table, and
-     states in plain words that the property blob is not interpretable without
-     that control's own type library.
+  3. A form that uses a third-party OCX reports the component identifier the
+     executable declares, resolved by matching the class name against the
+     external component table, and states in plain words that this identifier
+     is not confirmed against the control's registered CLSID. It also states
+     that the property blob is not interpretable without that control's own
+     type library. The criterion names the declared identifier, not the
+     registered CLSID, because eighteen searches over three corpus programs
+     and six encodings never find the registered identifier in the
+     executable. `STRUCTURES.md` section 7.3.1 holds that record.
   4. Every string property read lands the cursor exactly on the declared field
      end. A property whose read does not land there is reported as
      unrecoverable with its byte offset. No string read decides how far the

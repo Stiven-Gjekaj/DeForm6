@@ -45,9 +45,24 @@ Version 1 recovers metadata. It does not recover statements.
 - [ ] **FRM-02**: The tool recovers the type and the name of every control.
 - [ ] **FRM-03**: The tool recovers the property values of every control, and
       of the form itself.
-- [ ] **FRM-04**: The tool recovers the CLSID of a third party OCX control, and
-      says plainly that it cannot interpret that control's property blob
-      without the control's own type library.
+      This requirement stays open on purpose. Phase 3 recovers 122 named
+      property values against 683 records that report present and not
+      decoded, over 805 property records and five distinct property names.
+      Decision D-01 predicts this result: most pairs of a control type and a
+      property name stay open until a lawful property table exists. The
+      remaining table is a data build job that needs a human at a working
+      VB6 install, by the method of `STRUCTURES.md` section 13. That job is
+      outside phase 3. Phase 6 records the limit in the README.
+- [x] **FRM-04**: The tool recovers the component identifier that the
+      executable declares for a third party OCX control, and says plainly
+      that this identifier is not confirmed against the control's registered
+      CLSID. The tool also says plainly that it cannot interpret that
+      control's property blob without the control's own type library.
+      The wording names the declared identifier, not the registered CLSID,
+      because eighteen searches over three corpus programs and six encodings
+      never find the registered identifier in the executable. `STRUCTURES.md`
+      section 7.3.1 holds that record. This narrowing repeats the method that
+      decision D-02 used for FRM-06.
 - [ ] **FRM-05**: The tool recovers the resource blobs and writes an `.frx`
       whose offsets the generated `.frm` agrees with.
 - [x] **FRM-06**: The tool recovers the event structure of each control:
