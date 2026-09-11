@@ -695,6 +695,55 @@ fn winsock_sample_prints_the_clsid_and_the_opaque_blob_statement() {
     );
 }
 
+/// Plan 03-18: a bound event slot's own native handler address now reaches
+/// a live run. `gradient_sample_path`'s own `Command1` slot 0 is the stub
+/// `03-09-SUMMARY.md` proved byte for byte, and this test reads the address
+/// out of the live run's own output, never a corpus address written into
+/// the test as a literal.
+#[test]
+fn gradient_sample_prints_the_bound_handler_address_and_no_unbound_slot_carries_one() {
+    let path = gradient_sample_path();
+    let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+
+    let bound_line = stdout
+        .lines()
+        .find(|line| line.contains("event slot") && line.contains(": bound,"))
+        .expect("stdout must hold at least one bound event slot line");
+    assert!(
+        bound_line.contains("handler at 0x"),
+        "the bound slot line did not print a handler address: {bound_line:?}"
+    );
+
+    let address = bound_line
+        .split("handler at ")
+        .nth(1)
+        .and_then(|rest| rest.split(',').next())
+        .expect("the bound slot line must carry a parsable address")
+        .trim();
+    assert!(
+        address.starts_with("0x"),
+        "the extracted address did not carry the 0x prefix: {address:?}"
+    );
+    let hex_digits = &address[2..];
+    assert_eq!(
+        hex_digits.len(),
+        8,
+        "the address must print as eight hexadecimal digits: {address:?}"
+    );
+    u32::from_str_radix(hex_digits, 16)
+        .expect("the extracted text after the 0x prefix must parse as hexadecimal");
+
+    for line in stdout.lines() {
+        if line.contains("event slot") && line.contains(": unbound,") {
+            assert!(
+                !line.contains("0x"),
+                "an unbound slot line must carry no address: {line:?}"
+            );
+        }
+    }
+}
+
 /// Plan 03-16: a joined CLSID always carries a caveat naming what the value
 /// is not, since this repository's own research never confirmed either
 /// candidate field against a project file's own declared identifier. The

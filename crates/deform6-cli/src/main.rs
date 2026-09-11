@@ -778,17 +778,48 @@ fn print_clsid(indent: &str, clsid: Option<&Clsid>, reason: Option<&str>) {
     }
 }
 
-/// Prints one event slot: its index, its bound state, and its name or the
-/// stated reason for having none.
+/// Prints one event slot: its index, its bound state, its name or the
+/// stated reason for having none, and, for a bound slot, its handler's own
+/// native address or the stated reason it is not decoded. An unbound slot
+/// prints exactly what it printed before this plan: no address, no
+/// placeholder, no zero.
+///
+/// The address prints as eight hexadecimal digits with a `0x` prefix
+/// (`{:#010x}`), the same width `print_report`'s own `Header` line already
+/// uses for a full virtual address read from the file. `print_property`
+/// and the CLSID caveat both print a byte offset unpadded (`{:#x}`), but a
+/// byte offset is a small position inside one file and a handler address
+/// is a full address the same shape the Header line already prints, so
+/// this line follows the Header line, not the offset lines.
 fn print_event(indent: &str, event: &EventReport) {
     match event {
         EventReport::Named {
-            index, event_name, ..
-        } => println!("{indent}  event slot {index}: bound, {event_name}"),
-        EventReport::BoundUnnamed { index, .. } => println!(
-            "{indent}  event slot {index}: bound, not decoded. Run with --event-name-table to \
-             supply one."
-        ),
+            index,
+            event_name,
+            handler_address,
+            ..
+        } => match handler_address {
+            Some(address) => println!(
+                "{indent}  event slot {index}: bound, {event_name}, handler at {address:#010x}"
+            ),
+            None => println!(
+                "{indent}  event slot {index}: bound, {event_name}, handler address not decoded"
+            ),
+        },
+        EventReport::BoundUnnamed {
+            index,
+            handler_address,
+            ..
+        } => match handler_address {
+            Some(address) => println!(
+                "{indent}  event slot {index}: bound, handler at {address:#010x}, name not \
+                 decoded. Run with --event-name-table to supply one."
+            ),
+            None => println!(
+                "{indent}  event slot {index}: bound, handler address not decoded, name not \
+                 decoded. Run with --event-name-table to supply one."
+            ),
+        },
         EventReport::Unbound { index, .. } => println!(
             "{indent}  event slot {index}: unbound, not decoded. Run with --event-name-table to \
              supply one."
