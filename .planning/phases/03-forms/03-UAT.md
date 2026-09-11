@@ -24,10 +24,16 @@ result: pass
 reported: "Accept as correctly unmet, defer coverage"
 resolution: FRM-03 keeps its wording and stays open on purpose. REQUIREMENTS.md records the measurement, names decision D-01 as the cause, and defers the remaining table to the type library job that needs a human at a working VB6 install. Phase 6 records the limit in the README.
 
+### 3. FRM-01 and FRM-02, the every form and every control wording
+expected: The human records a deferral for both, narrows both to what ships, leaves both open with no record, or asks for more research into the one refusing form.
+result: pass
+reported: "Record the deferral, close the phase"
+resolution: FRM-01 and FRM-02 keep their wording and stay open on purpose. REQUIREMENTS.md records the measurement, names the one refusing form and its byte offset, and points at WINDOWS.md finding 9 for the two open grammar questions.
+
 ## Summary
 
-total: 2
-passed: 2
+total: 3
+passed: 3
 issues: 0
 pending: 0
 skipped: 0

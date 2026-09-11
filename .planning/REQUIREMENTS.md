@@ -42,7 +42,21 @@ Version 1 recovers metadata. It does not recover statements.
 
 - [ ] **FRM-01**: The tool recovers the control tree of every form, with the
       parent of each control.
+      This requirement stays open on purpose. Phase 3 recovers the tree of 52
+      of the 53 corpus forms. The form `Main` in `Map Editor.exe` refuses. The
+      refusal names byte offset 0x170e and the byte the code expected there.
+      A refusal is the correct result: the tool does not print a tree that it
+      cannot prove. The scope separator grammar for that one form is not
+      known. `WINDOWS.md` finding 9 holds the open question, and it also holds
+      the `menuAbout` nesting of `frmPassGen`, which the available bytes
+      cannot decide. Three plans measured this grammar against the corpus.
+      The remaining cases need bytes that this corpus does not supply.
 - [ ] **FRM-02**: The tool recovers the type and the name of every control.
+      This requirement stays open on purpose, for the same cause as FRM-01.
+      Phase 3 recovers the type and the name of 686 of 686 controls, over the
+      forms whose tree the tool builds. The controls of the one form that
+      refuses are absent from both sides of that count. The count is honest,
+      and it is not a count of every control in the corpus.
 - [ ] **FRM-03**: The tool recovers the property values of every control, and
       of the form itself.
       This requirement stays open on purpose. Phase 3 recovers 122 named
