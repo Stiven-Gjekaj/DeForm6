@@ -47,9 +47,10 @@ Version 1 recovers metadata. It does not recover statements.
       refusal names byte offset 0x170e and the byte the code expected there.
       A refusal is the correct result: the tool does not print a tree that it
       cannot prove. The scope separator grammar for that one form is not
-      known. `WINDOWS.md` finding 9 holds the open question, and it also holds
-      the `menuAbout` nesting of `frmPassGen`, which the available bytes
-      cannot decide. Three plans measured this grammar against the corpus.
+      known. `WINDOWS.md` finding 8 holds this open question. Finding 9 holds
+      a separate open question, the `menuAbout` nesting of `frmPassGen`,
+      which the available bytes cannot decide. Three plans measured this
+      grammar against the corpus.
       The remaining cases need bytes that this corpus does not supply.
 - [ ] **FRM-02**: The tool recovers the type and the name of every control.
       This requirement stays open on purpose, for the same cause as FRM-01.
