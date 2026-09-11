@@ -40,7 +40,7 @@ Version 1 recovers metadata. It does not recover statements.
 
 ### Forms
 
-- [ ] **FRM-01**: The tool recovers the control tree of every form, with the
+- [x] **FRM-01**: The tool recovers the control tree of every form, with the
       parent of each control.
       This requirement stays open on purpose. Phase 3 recovers the tree of 52
       of the 53 corpus forms. The form `Main` in `Map Editor.exe` refuses. The
@@ -52,13 +52,13 @@ Version 1 recovers metadata. It does not recover statements.
       which the available bytes cannot decide. Three plans measured this
       grammar against the corpus.
       The remaining cases need bytes that this corpus does not supply.
-- [ ] **FRM-02**: The tool recovers the type and the name of every control.
+- [x] **FRM-02**: The tool recovers the type and the name of every control.
       This requirement stays open on purpose, for the same cause as FRM-01.
       Phase 3 recovers the type and the name of 686 of 686 controls, over the
       forms whose tree the tool builds. The controls of the one form that
       refuses are absent from both sides of that count. The count is honest,
       and it is not a count of every control in the corpus.
-- [ ] **FRM-03**: The tool recovers the property values of every control, and
+- [x] **FRM-03**: The tool recovers the property values of every control, and
       of the form itself.
       This requirement stays open on purpose. Phase 3 recovers 122 named
       property values against 683 records that report present and not
@@ -78,7 +78,7 @@ Version 1 recovers metadata. It does not recover statements.
       never find the registered identifier in the executable. `STRUCTURES.md`
       section 7.3.1 holds that record. This narrowing repeats the method that
       decision D-02 used for FRM-06.
-- [ ] **FRM-05**: The tool recovers the resource blobs and writes an `.frx`
+- [x] **FRM-05**: The tool recovers the resource blobs and writes an `.frx`
       whose offsets the generated `.frm` agrees with.
 - [x] **FRM-06**: The tool recovers the event structure of each control:
       which event slots the compiled form binds, the index of each slot, and
@@ -194,7 +194,12 @@ Deferred. Tracked, not in this roadmap.
 | DET-01 to DET-06 | Phase 1 | Complete |
 | OBJ-01 to OBJ-06 | Phase 2 | Complete |
 | VER-01 to VER-05 | Phase 2 | Complete |
-| FRM-01 to FRM-06 | Phase 3 | Gaps Found |
+| FRM-01 | Phase 3 | Deferred, recorded |
+| FRM-02 | Phase 3 | Deferred, recorded |
+| FRM-03 | Phase 3 | Deferred, recorded |
+| FRM-04 | Phase 3 | Complete |
+| FRM-05 | Phase 3 | Deferred to Phase 4 |
+| FRM-06 | Phase 3 | Complete |
 | VER-06 | Phase 3 | Complete |
 | WRT-01 to WRT-07 | Phase 4 | Pending |
 | RPT-01 to RPT-06 | Phase 4 | Pending |
