@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 2
-current_phase_name: The object graph
+current_phase: 04
+current_phase_name: It writes a project
 status: planning
-stopped_at: Phase 03 complete, ready to plan Phase 2
-last_updated: "2026-09-11T17:34:45.502Z"
+stopped_at: Phase 03 complete and verified, ready to plan Phase 04
+last_updated: "2026-09-11T17:44:26.379Z"
 last_activity: 2026-09-11
-last_activity_desc: Phase 03 complete, transitioned to Phase 2
-state_head: b139b9f2379c0da518ab6c9222363501b9e7d0c3
+last_activity_desc: Phase 03 complete and verified, transitioned to Phase 04
+state_head: f546623dc1e00b4f6c688114140a2a2a784036c3
 progress:
   total_phases: 6
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 36
   completed_plans: 36
-  percent: 17
+  percent: 33
 ---
 
 ## Continue
@@ -62,11 +62,11 @@ See: .planning/PROJECT.md (updated 2026-09-07)
 Visual Basic project that opens in the VB6 IDE, with the forms and the names
 intact, and a report that says how much of it is proved and how much is
 inferred.
-**Current focus:** Phase 03 — Forms
+**Current focus:** Phase 04 — It writes a project
 
 ## Current Position
 
-Phase: 2 — The object graph
+Phase: 04 — It writes a project
 Plan: Not started
 Status: Ready to plan
 searches, six encodings across three corpus programs, never find the
@@ -83,7 +83,7 @@ stated rather than hidden. The section overlap rule has no test because no
 corpus file overlaps. The P-code branch has no real sample because every
 vendored project is native. `inspect` drops the defects it collects, because
 `Report` derives `PartialEq` and `Defect` does not.
-Last activity: 2026-09-11 — Phase 03 complete, transitioned to Phase 2
+Last activity: 2026-09-11 — Phase 02 complete, transitioned to Phase 03
 Plan 03-01 leads with an end to end tracer. Plan 03-02 withdraws the ROADMAP
 instruction to commit an opcode table built from a type library dump, because
 `AGENTS.md` bars a fixture calculated from a third party file. Plan 03-04
@@ -91,13 +91,13 @@ re-measures the scope-separator grammar directly against Grayscale.exe,
 since the research document's own prose does not reconcile byte-for-byte,
 and closes STRUCTURES.md gap 11.
 
-Progress: [██░░░░░░░░] 17% of the 50 plans in the roadmap, which is 18 of 50
+Progress: [███░░░░░░░] 33% of the 50 plans in the roadmap, which is 18 of 50
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 18
+- Total plans completed: 28
 - Average duration: -
 - Total execution time: -
 
@@ -106,6 +106,7 @@ Progress: [██░░░░░░░░] 17% of the 50 plans in the roadmap, w
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 03 | 18 | - | - |
+| 02 | 10 | - | - |
 
 **Recent Trend:**
 
@@ -233,7 +234,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-09-11T16:42:04.734Z
-Stopped at: Phase 03 complete, ready to plan Phase 2
+Stopped at: Phase 02 complete, ready to plan Phase 03
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and
