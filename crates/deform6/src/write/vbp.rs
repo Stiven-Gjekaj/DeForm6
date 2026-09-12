@@ -11,7 +11,7 @@
 use crate::vb::Report;
 use crate::vb::classify::ObjectKind;
 
-use super::model::{LineWriter, SafeName};
+use super::model::{LineWriter, NameKind, SafeName};
 
 /// Writes the thin `.vbp` this task's tracer needs.
 ///
@@ -21,20 +21,28 @@ use super::model::{LineWriter, SafeName};
 /// carrying its own VB name and its own file name separated by `; `, per
 /// section 1.3. `Startup=` names the first form in object table order, or
 /// `"Sub Main"` when the project holds no form at all.
+///
+/// This function names each component through its own, independent
+/// [`SafeName::new`] call, not through the one [`super::model::SafeNameIssuer`]
+/// `write::project` threads across the whole run: a name that collides with
+/// another component's name is plan 04-03's own job, once `ProjectModel`
+/// holds every name this run issues in one place. No corpus form in this
+/// task's own tracer collides, so this thin path names each component
+/// correctly today.
 #[must_use]
 pub(crate) fn write_vbp_thin(report: &Report) -> Vec<u8> {
     let mut writer = LineWriter::new();
     writer.push_line("Type=Exe");
 
     for form in &report.forms {
-        let name = SafeName::new(&form.name);
+        let (name, _faults) = SafeName::new(&form.name, NameKind::Form);
         writer.push_line(&format!("Form={}", name.file_name("frm")));
     }
 
     for object in &report.objects {
-        let name = SafeName::new(&object.name);
         match object.kind {
             ObjectKind::Module => {
+                let (name, _faults) = SafeName::new(&object.name, NameKind::Module);
                 writer.push_line(&format!(
                     "Module={}; {}",
                     name.as_str(),
@@ -42,6 +50,7 @@ pub(crate) fn write_vbp_thin(report: &Report) -> Vec<u8> {
                 ));
             }
             ObjectKind::Class => {
+                let (name, _faults) = SafeName::new(&object.name, NameKind::Class);
                 writer.push_line(&format!(
                     "Class={}; {}",
                     name.as_str(),
@@ -54,7 +63,7 @@ pub(crate) fn write_vbp_thin(report: &Report) -> Vec<u8> {
 
     match report.forms.first() {
         Some(form) => {
-            let name = SafeName::new(&form.name);
+            let (name, _faults) = SafeName::new(&form.name, NameKind::Form);
             writer.push_line(&format!("Startup=\"{}\"", name.as_str()));
         }
         None => writer.push_line("Startup=\"Sub Main\""),

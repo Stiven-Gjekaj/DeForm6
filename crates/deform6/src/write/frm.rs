@@ -15,7 +15,7 @@ use crate::vb::frx::{self, BlobCursor};
 use crate::vb::propstream::{FontBlock, PositionBlock, PropertyValue};
 use crate::vb::{ControlReport, FormReport};
 
-use super::model::{LineWriter, SafeName};
+use super::model::{LineWriter, NameKind, SafeName};
 
 /// The bytes of one form's `.frm` file and its own `.frx` resource file.
 pub(crate) struct ThinFormOutput {
@@ -63,7 +63,7 @@ pub(crate) fn write_form_thin(
     let children = children_of(&form.controls);
 
     if let Some(root) = form.controls.first() {
-        let name = SafeName::new(&root.name);
+        let (name, _faults) = SafeName::new(&root.name, NameKind::Form);
         write_control_block(
             &mut writer,
             &form.controls,
@@ -124,7 +124,7 @@ fn write_control_block(
     let own_indent = "   ".repeat(depth);
     let inner_depth = depth.saturating_add(1);
     let class = vb_class_name(&control.kind);
-    let name = SafeName::new(&control.name);
+    let (name, _faults) = SafeName::new(&control.name, name_kind_for(&control.kind));
     writer.push_line(&format!("{own_indent}Begin {class} {} ", name.as_str()));
 
     let rendered = collect_properties(control, data, blob_cursor, frx, frx_file_name)?;
@@ -185,6 +185,16 @@ fn vb_class_name(kind: &ControlKind) -> String {
         ControlKind::External | ControlKind::Unknown(_) => "Control",
     };
     format!("VB.{name}")
+}
+
+/// Gives the [`NameKind`] a control's own name is issued under: `Form` for
+/// the form or MDIForm root block, `Control` for everything else.
+fn name_kind_for(kind: &ControlKind) -> NameKind {
+    if matches!(kind, ControlKind::Form | ControlKind::MdiForm) {
+        NameKind::Form
+    } else {
+        NameKind::Control
+    }
 }
 
 /// Collects every property this control's own stream decoded into a

@@ -24,7 +24,7 @@ use crate::error::Refusal;
 use crate::report::ProjectReport;
 use crate::vb::Report;
 use crate::vb::classify::ObjectKind;
-use model::SafeName;
+use model::{NameKind, SafeNameIssuer};
 
 /// One file this phase writes: its own file name, and its own bytes.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -65,8 +65,13 @@ pub struct WrittenProject {
 /// would overflow a `u32`; see [`crate::vb::frx::BlobCursor::take`].
 pub fn project(report: &Report, data: &[u8]) -> Result<WrittenProject, Refusal> {
     let mut files: Vec<WrittenFile> = Vec::new();
+    // One issuer for the whole run, so two objects that sanitize or clamp
+    // to the same name are still told apart, in the order this function
+    // issues names in: the project name first, then every form, then every
+    // module and class, matching RPT-01's determinism requirement.
+    let mut names = SafeNameIssuer::new();
 
-    let project_name = SafeName::new(&report.project_name);
+    let (project_name, _project_faults) = names.issue(&report.project_name, NameKind::Project);
 
     let vbp_bytes = vbp::write_vbp_thin(report);
     files.push(WrittenFile {
@@ -75,7 +80,7 @@ pub fn project(report: &Report, data: &[u8]) -> Result<WrittenProject, Refusal> 
     });
 
     for form in &report.forms {
-        let form_name = SafeName::new(&form.name);
+        let (form_name, _faults) = names.issue(&form.name, NameKind::Form);
         let frx_name = form_name.file_name("frx");
         let output = frm::write_form_thin(form, data, &frx_name)?;
         files.push(WrittenFile {
@@ -91,14 +96,14 @@ pub fn project(report: &Report, data: &[u8]) -> Result<WrittenProject, Refusal> 
     for object in &report.objects {
         match object.kind {
             ObjectKind::Class => {
-                let name = SafeName::new(&object.name);
+                let (name, _faults) = names.issue(&object.name, NameKind::Class);
                 files.push(WrittenFile {
                     name: name.file_name("cls"),
                     bytes: code::write_cls_thin(&name),
                 });
             }
             ObjectKind::Module => {
-                let name = SafeName::new(&object.name);
+                let (name, _faults) = names.issue(&object.name, NameKind::Module);
                 files.push(WrittenFile {
                     name: name.file_name("bas"),
                     bytes: code::write_bas_thin(&name),
