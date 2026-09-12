@@ -388,22 +388,75 @@ Not applicable in the usual "library X was superseded by library Y" sense - VB6 
 | A3 | `extract`'s CLI flags are exactly `-o`/`--output`, `--report`, `--force` as the roadmap names them, with no other flags needed for v1 | Phase Requirements table, WRT-01 | Low risk: these three are already locked in `ROADMAP.md`'s plan 04-08 description; only the exact long-form spelling of `-o` (`--output` vs `--out` vs `--out-dir`) is a naming choice this research does not settle, since no prior `deform6-cli` convention exists for a directory-taking flag (only `Inspect`'s `--opcode-table`, which takes a file). |
 | A4 | The JSON report file name/location convention (`<dir>/<name>.report.json` beside the project, unless `--report <path>` overrides it) | Phase Requirements table, RPT-01 | Low-medium risk: ROADMAP.md's phase goal says "one JSON report beside it" but does not name the exact filename; the planner should lock this as a CONTEXT.md-equivalent decision during `/gsd-plan-phase`, since the structural check (04-09) and any future Phase 6 documentation both need to agree on it. |
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+All three questions below are now settled by the Phase 4 plans. Each question
+carries the plan and the task that settles it. A reader of this document alone
+can tell what stays open: nothing in this section does.
 
 1. **What does the JSON report's `path` key look like for a report item about the whole run (e.g. a `--opcode-table` note, or a top-level defect not tied to any object), versus a specific item like `/forms/frmMain/controls/cmdOk`?**
    - What we know: the roadmap's own example, `/forms/frmMain/controls/cmdOk`, and RPT-02's requirement that "each item [is] keyed by a path".
    - What's unclear: whether a run-level fact (e.g. "this run used the built-in opcode-table subset, not a user-supplied one") gets a synthetic path like `/` or `/meta`, or is not modeled as an "item" at all and instead lives in a separate top-level field outside the flat array.
    - Recommendation: plan 04-06 should define this explicitly; it does not block any other plan, since 04-06 owns `report.rs` alone in its own wave.
+   - **RESOLVED by plan 04-06, task 1** ("The path key, including the path for a fact that belongs to no object"). A run level fact stays an item in the flat array and takes a reserved path of its own, held in a named constant `META_PATH` in `crates/deform6/src/report.rs`. No separate top level field is added, so RPT-02's flat array stays the one place a script looks. The task's acceptance list asserts the constant is reachable and asserts a run level item carries the reserved path.
 
 2. **How does the extract subcommand behave on `corpus/vb6-code/Map-editor-2D/Map Editor.exe`, whose `Main` form's control tree refuses (WINDOWS.md finding 8, open)?**
    - What we know: `compose_form` already handles this gracefully at the `inspect` level (empty `controls`, a `StructureUnreadable` defect, form-level continuation, no crash).
    - What's unclear: whether roadmap success criterion 1 ("writes ... one `.frm` per form ... exits 0 ... for all 44 corpus programs") is satisfiable literally for this one form given zero of its real controls are recoverable, or whether the criterion is satisfied by writing a minimal, honestly-flagged `.frm` for `Main` (per Pitfall 2 above) while the report clearly marks every fact about it as unrecoverable.
    - Recommendation: confirm with the human during discuss-phase or plan-phase that "one `.frm` per form, honestly near-empty and flagged, for the one form the control-tree walk cannot fully resolve" satisfies the intent of success criterion 1, since this is a pre-existing, documented, open limitation (not something Phase 4 can close - WINDOWS.md finding 8 needs its own byte-level research, out of this phase's scope per the roadmap's own risk list, which does not mention it).
+   - **RESOLVED by plan 04-04, task 3 and plan 04-08, task 3.** The second reading wins: the tool writes a `.frm` for the form named `Main` and marks every fact about that form as unrecoverable. Plan 04-04, task 3 ("The empty form and the refused form are two different answers") tells a genuinely empty form apart from a refused one by a flag the model decides, and it asserts that `Map Editor.exe` writes a form file and produces at least one item of confidence `unrecoverable` whose evidence carries a byte offset. Plan 04-08, task 3 ("All 44 corpus programs, exit 0, nothing outside the directory") asserts the same program exits 0. WINDOWS.md finding 8 stays open; Phase 4 does not close it and does not hide it.
 
 3. **Should the `.frx` list-record format (FILE-FORMATS.md gap 5, `ComboBox`/`ListBox.List`) ever be reached by this phase, given no corpus control exercises it?**
    - What we know: FILE-FORMATS.md §4.6 documents the layout as `[b]`-tagged (unverified, from `vb6parse` alone) and explicitly warns of a known off-by-one bug vb6parse itself documents for a related record kind.
    - What's unclear: whether any of the 44 corpus programs' `ComboBox`/`ListBox` controls set a `List` property that reaches this code path at all during Phase 4's own writing (as opposed to Phase 3's reading, which already reports `Undecoded` for any opcode it has no safe-provenance table entry for).
    - Recommendation: given the `Undecoded` fallback already exists and this record type is `[b]`-only evidence, do not implement a `List` writer in this phase; let it fall through as an undecoded/omitted property, and record it explicitly in Assumptions/Open Questions of any plan that touches `ComboBox`/`ListBox`.
+   - **RESOLVED by plan 04-04, task 1** ("One cursor per form, and the resource file the form file agrees with"). The plan states the decision directly: *"Do not implement the list record kind: no corpus control exercises it, the layout comes from one secondary source, and that source documents an off by one bug of its own. A list property falls through as undecoded, which the value formatter already handles."* The phase writes only the record kinds the corpus proves: the picture record, the empty picture record and the long string record.
+
+## Spec-less Edge Probe
+
+This phase has no `SPEC.md`, so the edge probe ran over the seven write
+requirement IDs instead. The probe emitted exactly ten rows. Its own coverage
+block reads `applicable: 10, resolved: 0, unresolved: 10`. The table below
+holds every row and names how the plans dispose of it. The dispositions sum to
+ten.
+
+| # | Req | Category | Probe question | Disposition | Where the plans answer it |
+|---|-----|----------|----------------|-------------|---------------------------|
+| 1 | WRT-01 | unclassified | unclassified, review manually | flagged assumption | 04-01 and 04-08, section "Flagged assumption(s) from the spec-less edge probe". The planner's reading of the open edge is what the output directory holds when a run refuses part way. The run builds every file in memory before it writes a byte, so a refusal leaves the directory untouched. The answer is stated, not proved by the probe. |
+| 2 | WRT-02 | adjacency | When two things are exactly equal or just touch, do they merge, collide, or separate? | explicit | 04-03 truth: two objects whose recovered names sanitize or clamp to the same string get two distinct names from the model, so the project file never names one file on two component lines. |
+| 3 | WRT-02 | empty | What is the result for empty, single-element, or null input? | explicit | 04-03 truth: a program with zero forms writes a project file with no form line, a startup key naming a main procedure, at least one component line, and the run still exits 0. |
+| 4 | WRT-02 | ordering | When elements compare equal, is output order specified and stable? | explicit | 04-03 truth: component lines keep the recovered order and are never grouped by kind. |
+| 5 | WRT-03 | empty | What is the result for empty, single-element, or null input? | explicit | 04-04 truth: a genuinely empty form and a form whose control tree walk refused both arrive with an empty control list, and the model's own decided flag tells them apart. The refused one also produces an item of confidence `unrecoverable`. |
+| 6 | WRT-03 | encoding | Whose definition of length/equality applies, bytes, code points, grapheme clusters, or normalized form? | explicit | 04-01 truth: every length this phase counts is a byte count under the crate's own `char::from(byte)` Latin-1 as code point convention, never a Unicode scalar count and never a grapheme cluster count. 04-04 truth names the equality the ordering rule uses: case insensitive. |
+| 7 | WRT-04 | concurrency | If interrupted or run in parallel, what is guaranteed? | explicit | 04-08 truth: the run builds the whole project in memory before any byte reaches the disk, so an interrupted run leaves either nothing or a set of complete files. 04-08 prose adds the parallel half: the tool is a single threaded command line program, and two runs into two different directories cannot see each other. |
+| 8 | WRT-05 | concurrency | If interrupted or run in parallel, what is guaranteed? | backstop | 04-05 truth, marked `verification: backstop`: two calls to the code writer with the same model give byte identical output, and the writer reaches no process global mutable state, so two callers in two threads cannot see each other's output. |
+| 9 | WRT-06 | unclassified | unclassified, review manually | flagged assumption | 04-01, section "Flagged assumptions from the spec-less edge probe". The planner's reading of the open edge is a code page that is not Western. `FILE-FORMATS.md` gap 7 holds this open and no corpus file exercises it. The plan does not close it. The encoder substitutes the character and records the substitution in the report. |
+| 10 | WRT-07 | unclassified | unclassified, review manually | flagged assumption | 04-05, section "Flagged assumption from the spec-less edge probe". The planner's reading of the open edge is what a signature line says when the reader recovered a procedure name but no prototype, which happens for every procedure in a standard module. The plan writes a no argument procedure and a stated report item rather than a guessed argument list. |
+
+**Accounting: ten rows in, ten rows disposed.**
+
+| Disposition | Rows | Which |
+|-------------|------|-------|
+| flagged assumption (unclassified, stays unresolved) | 3 | 1, 9, 10 |
+| explicit answer in a plan | 6 | 2, 3, 4, 5, 6, 7 |
+| backstop truth | 1 | 8 |
+| **Total** | **10** | |
+
+Three rows are `unclassified` by construction. The probe names no edge for
+them. An unclassified row stays unresolved and becomes a flagged assumption in
+the plan that owns the requirement, where `/gsd-verify-work` picks it up. The
+other seven rows are classified. Six of them get an explicit answer and one
+gets a backstop truth.
+
+Two plans carry a truth marked `verification: backstop`: 04-03 and 04-05. Only
+the one in 04-05 disposes of a probe row, which is row 8. The backstop truth in
+04-03 is a determinism guarantee that plan adds for its own reason, because all
+three WRT-02 probe rows get an explicit answer instead.
+
+An earlier planning summary reported this split as "7 resolved explicit, 2
+backstop, 3 unclassified". Those numbers sum to twelve, not ten, so that
+summary is wrong. The correct split is three flagged, six explicit and one
+backstop.
 
 ## Environment Availability
 
