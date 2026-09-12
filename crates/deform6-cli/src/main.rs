@@ -67,6 +67,22 @@ enum Command {
         #[arg(long)]
         opcode_table: Option<PathBuf>,
     },
+
+    /// Reads one executable and writes a Visual Basic 6 project directory
+    /// that VB6 can open.
+    Extract {
+        /// The executable to read.
+        input: PathBuf,
+
+        /// The directory `extract` writes the project into.
+        ///
+        /// Every file this run writes is built in memory first; the
+        /// directory is created, and files land in it, only after the
+        /// whole project built without a refusal. Plan 04-08 adds
+        /// `--report` and `--force`.
+        #[arg(short, long)]
+        output: PathBuf,
+    },
 }
 
 /// The exit code a run of this program gives back to its caller.
@@ -124,6 +140,7 @@ fn run(cli: &Cli) -> Exit {
             input,
             opcode_table,
         } => run_inspect(input, opcode_table.as_deref()),
+        Command::Extract { input, output } => run_extract(input, output),
     }
 }
 
@@ -207,6 +224,60 @@ fn run_inspect(path: &Path, opcode_table_path: Option<&Path>) -> Exit {
             exit_for(refusal)
         }
     }
+}
+
+/// Reads `input`, runs [`deform6::inspect`] and then
+/// [`deform6::write::project`] over the bytes, and writes every returned
+/// file into `output`.
+///
+/// Every file this run produces is built in memory before any byte
+/// reaches the disk: `output` is created, and files are written into it,
+/// only after both calls succeed. A refusal from either call therefore
+/// leaves `output` exactly as it was before this run. Every new failure
+/// mode this subcommand introduces (an unreadable input file, a refusal
+/// from [`deform6::write::project`], or a directory or a file this run
+/// could not create) maps to [`Exit::Internal`], code 5, the same usage
+/// error bucket [`load_opcode_table`]'s own failures already use: the
+/// numbering must never move.
+fn run_extract(input: &Path, output: &Path) -> Exit {
+    let data = match std::fs::read(input) {
+        Ok(data) => data,
+        Err(err) => {
+            eprintln!("could not read {}: {err}", input.display());
+            return Exit::Internal;
+        }
+    };
+
+    let table = OpcodeTable::builtin();
+    let report = match deform6::inspect(&data, &table) {
+        Ok(report) => report,
+        Err(refusal) => {
+            eprintln!("{refusal}");
+            return exit_for(refusal);
+        }
+    };
+
+    let written = match deform6::write::project(&report, &data) {
+        Ok(written) => written,
+        Err(refusal) => {
+            eprintln!("{refusal}");
+            return Exit::Internal;
+        }
+    };
+
+    if let Err(err) = std::fs::create_dir_all(output) {
+        eprintln!("could not create {}: {err}", output.display());
+        return Exit::Internal;
+    }
+    for file in &written.files {
+        let path = output.join(&file.name);
+        if let Err(err) = std::fs::write(&path, &file.bytes) {
+            eprintln!("could not write {}: {err}", path.display());
+            return Exit::Internal;
+        }
+    }
+
+    Exit::Ok
 }
 
 /// Maps a refusal to the exit code the locked table gives it.

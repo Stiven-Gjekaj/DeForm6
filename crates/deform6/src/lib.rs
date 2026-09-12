@@ -13,7 +13,9 @@
 pub mod error;
 pub mod journal;
 pub mod read;
+pub mod report;
 pub mod vb;
+pub mod write;
 
 pub use error::Refusal;
 pub use vb::{Report, inspect};

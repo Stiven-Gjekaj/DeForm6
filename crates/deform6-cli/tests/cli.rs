@@ -808,3 +808,66 @@ fn the_real_joined_winsock_sample_never_prints_the_unjoined_reason_wording() {
         "the real, joined winsock sample must not print the no-match reason: {stdout:?}"
     );
 }
+
+// --- Plan 04-01, Task 1: `extract` writes a project directory -------------
+
+/// `corpus/vb6-code/Fire-effect/Fast_Flames.exe`, this task's one tracer
+/// program.
+fn fast_flames_path() -> PathBuf {
+    corpus_root().join("vb6-code/Fire-effect/Fast_Flames.exe")
+}
+
+/// `extract` creates the output directory, writes the five expected files
+/// into it, exits 0, and leaves the corpus directory it read from
+/// untouched. The output directory lives under `CARGO_TARGET_TMPDIR`, the
+/// path cargo gives an integration test binary for exactly this purpose.
+#[test]
+fn extract_creates_the_directory_and_writes_the_expected_files_leaving_the_corpus_untouched() {
+    let path = fast_flames_path();
+    let corpus_dir = path
+        .parent()
+        .expect("the corpus file has a parent directory");
+    let before = dir_snapshot(corpus_dir);
+
+    let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("deform6-cli-test-extract-{}", std::process::id()));
+    fs::remove_dir_all(&out_dir).ok();
+
+    let (code, _stdout, stderr) = run(&[
+        OsStr::new("extract"),
+        path.as_os_str(),
+        OsStr::new("-o"),
+        out_dir.as_os_str(),
+    ]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+
+    let entries: Vec<String> = fs::read_dir(&out_dir)
+        .expect("the output directory must exist")
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    for expected in [
+        "VBFire2.vbp",
+        "frmFire.frm",
+        "frmFire.frx",
+        "FastDrawing.cls",
+        "VBFire2.report.json",
+    ] {
+        assert!(
+            entries.iter().any(|entry| entry == expected),
+            "entries: {entries:?}"
+        );
+    }
+    assert_eq!(
+        entries.len(),
+        5,
+        "extract must write nothing else into the output directory: {entries:?}"
+    );
+
+    let after = dir_snapshot(corpus_dir);
+    assert_eq!(
+        before, after,
+        "extract must not change the corpus directory it read from"
+    );
+
+    fs::remove_dir_all(&out_dir).ok();
+}
