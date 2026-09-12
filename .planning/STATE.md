@@ -1,18 +1,18 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 4
+current_phase: 04
 current_phase_name: It writes a project
 status: executing
-stopped_at: Phase 03 complete and verified, ready to plan Phase 04
-last_updated: "2026-09-12T20:06:33.748Z"
-last_activity: 2026-09-11
-last_activity_desc: Phase 03 complete and verified, transitioned to Phase 04
-state_head: beb4c6df17503936f014b030e4b9d09b3bcdda1f
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-09-12T23:49:36.570Z"
+last_activity: 2026-09-12
+last_activity_desc: Phase 04 execution started
+state_head: 7e69bde35a9f0485508a9e162f7e7d40cd64281e
 progress:
   total_phases: 6
-  completed_phases: 2
+  completed_phases: 0
   total_plans: 45
-  completed_plans: 36
+  completed_plans: 37
   percent: 0
 ---
 
@@ -66,8 +66,8 @@ inferred.
 
 ## Current Position
 
-Phase: 4 (It writes a project) — READY TO EXECUTE
-Plan: Not started
+Phase: 04 (It writes a project) — EXECUTING
+Plan: 2 of 9
 Status: Ready to execute
 searches, six encodings across three corpus programs, never find the
 identifier a project file declares anywhere in the component table
@@ -83,7 +83,7 @@ stated rather than hidden. The section overlap rule has no test because no
 corpus file overlaps. The P-code branch has no real sample because every
 vendored project is native. `inspect` drops the defects it collects, because
 `Report` derives `PartialEq` and `Defect` does not.
-Last activity: 2026-09-11 — Phase 02 complete, transitioned to Phase 03
+Last activity: 2026-09-12 — Phase 04 execution started
 Plan 03-01 leads with an end to end tracer. Plan 03-02 withdraws the ROADMAP
 instruction to commit an opcode table built from a type library dump, because
 `AGENTS.md` bars a fixture calculated from a third party file. Plan 03-04
@@ -139,6 +139,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 | Phase 03-forms P16 | 55min | 3 tasks | 6 files |
 | Phase 03-forms P17 | single session | 3 tasks | 5 files |
 | Phase 03 P18 | single session | 3 tasks | 5 files |
+| Phase 04 P01 | 1 session | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -205,6 +206,11 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-17: controltree.rs's own em-dash count was 22 at this session's own measurement, not the review's own ten counted before four later plans wrote more prose; all 22 removed, and a whole crates/tests sweep confirms zero remain anywhere. FRM-01 and FRM-05 stay unchecked: this plan changes how the code is written, not what it reports.
 - [Phase 03]: 03-18: handler_address now reaches EventReport, a live inspect run and the terminal, closing the one code gap phase 3 re-verification found; FRM-06 moves to [x] and FRM-03 returns to [ ], both backed by a fresh corpus-wide measurement
 - [Phase 03]: 03-18: Fast_Flames.exe actually carries three bound event slots, not the one the plan text stated; retaking every measurement rather than trusting plan text is the discipline this phase repeats
+- [Phase 04]: SafeName's four fixed rules run empty-name, illegal-character, leading-letter, byte-clamp, in that order, because clamping before the leading-letter fix gives a different 40 byte result than after it.
+- [Phase 04]: Legal identifier characters are Unicode-alphanumeric, not ASCII-only, so a Latin-1 letter survives sanitization and is counted as one encoded byte, matching this crate's char::from(byte) read convention.
+- [Phase 04]: Control names never go through the collision-resolving SafeNameIssuer; only the root control and every project-level (project/form/module/class) name share it, since a repeated control name inside one form is a legitimate VB6 control array told apart by Index, not a filename collision.
+- [Phase 04]: BlobRef.frx_offset copies the read-time PropertyValue::Blob.frx_offset rather than recomputing via a second BlobCursor pass in model.rs, since ProjectModel does not reorder anything relative to the read pass.
+- [Phase 04]: TDD RED for tasks 2 and 3 was run and observed but never committed as a separate failing commit: AGENTS.md requires the full gate (including cargo test --workspace) to pass before every commit and requires code and its tests in the same commit.
 
 ### Pending Todos
 
@@ -233,8 +239,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-11T16:42:04.734Z
-Stopped at: Phase 02 complete, ready to plan Phase 03
+Last session: 2026-09-12T23:49:36.543Z
+Stopped at: Completed 04-01-PLAN.md
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and

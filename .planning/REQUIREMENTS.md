@@ -90,7 +90,7 @@ Version 1 recovers metadata. It does not recover statements.
 
 ### Written output
 
-- [ ] **WRT-01**: `deform6 extract <exe> -o <dir>` writes a project directory.
+- [x] **WRT-01**: `deform6 extract <exe> -o <dir>` writes a project directory.
 - [ ] **WRT-02**: The written `.vbp` lists every object and every control
       dependency the binary declares.
 - [ ] **WRT-03**: The written `.frm` follows the byte level layout the IDE
@@ -101,7 +101,7 @@ Version 1 recovers metadata. It does not recover statements.
       and menus are written last, because the IDE refuses a file otherwise.
 - [ ] **WRT-05**: The tool writes `.bas` and `.cls` files with the attribute
       preamble the IDE requires.
-- [ ] **WRT-06**: The tool writes CRLF line endings and the code page the IDE
+- [x] **WRT-06**: The tool writes CRLF line endings and the code page the IDE
       expects.
 - [ ] **WRT-07**: A procedure whose body cannot be recovered is written as a
       valid empty procedure with the correct signature, so the project still
