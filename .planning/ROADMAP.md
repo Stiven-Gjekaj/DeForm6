@@ -642,7 +642,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. It reads the file | 7/8 | In Progress|  |
+| 1. It reads the file | 8/8 | Complete    | 2026-09-07 |
 | 2. The object graph | 10/10 | Complete    | 2026-09-11 |
 | 3. Forms | 18/18 | Complete    | 2026-09-11 |
 | 4. It writes a project | 0/9 | Not started | - |
