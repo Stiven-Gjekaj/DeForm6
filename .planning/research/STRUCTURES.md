@@ -1377,9 +1377,20 @@ u8[imageLen] raw image bytes
 ```
 
 The `.frx` offset is **synthesised by the decompiler** as a running cursor that
-starts at 0 for each form and advances by `blobLen + 12` after each blob it
-emits. **[L]** (SVBD: `FRXAddress = FRXAddress + varHold + 12`, where `varHold`
-is the inline `blobLen`.)
+starts at 0 for each form and advances by `blobLen + 4` after each blob it
+emits, where `blobLen` is the length the executable declares inline. **[M]**
+(Measured in phase 3, plan 03-15: eleven consecutive gaps across
+`FormPhysics.frx` and `frmTransparency.frx`, each file ending exactly at its
+last item. The shipped constant is `FRX_ITEM_HEADER_LEN = 4`.)
+
+This corrects the figure this section carried before, which read `blobLen + 12`
+after the prior art. **[L]** (SVBD: `FRXAddress = FRXAddress + varHold + 12`,
+where `varHold` is the inline `blobLen`.) The two figures agree once the base is
+right. The executable's inline `blobLen` already equals `imageLen + 8`, so
+`blobLen + 4` covers the same distance as `imageLen + 12`. The 12 byte item
+header below is not in doubt. What was wrong was adding 12 to a `blobLen` that
+already held 8 of those bytes, which over-advanced the cursor by 8 bytes per
+blob. Add 4 to the declared `blobLen`, never 12.
 
 The `+12` is the size of the `.frx` item header that the decompiler writes but
 the EXE does not contain: **[C]** (SVBD `modFrx`, which credits Brad Martinez.)

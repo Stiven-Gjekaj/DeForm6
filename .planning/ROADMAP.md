@@ -410,8 +410,18 @@ RPT-01, RPT-02, RPT-03, RPT-04, RPT-05, RPT-06
 **Named risks**:
 
   - **The `.frx` offset is not stored in the executable.** It is a running
-    cursor that starts at 0 for each form and advances by `blobLen + 12` after
-    each blob. The `.frm` writer and the `.frx` writer are therefore one
+    cursor that starts at 0 for each form and advances by `blobLen + 4` after
+    each blob, where `blobLen` is the length the executable declares inline.
+    Phase 3 measured this against eleven consecutive gaps in two committed
+    `.frx` files, `FormPhysics.frx` and `frmTransparency.frx`, and each file
+    ends exactly at its last item. The shipped constant is
+    `FRX_ITEM_HEADER_LEN = 4` in `crates/deform6/src/vb/frx.rs`. An earlier
+    text here said `blobLen + 12`, after the prior art. The two agree once the
+    base is right: the executable's `blobLen` already holds `imageLen + 8`, so
+    `blobLen + 4` is the same distance as `imageLen + 12`, and the `.frx` item
+    header is still 12 bytes. Add 4 to the declared `blobLen`, never 12.
+    See `STRUCTURES.md` section 12 and plan 03-15's summary.
+    The `.frm` writer and the `.frx` writer are therefore one
     component. They cannot be split across two plans or two phases, and any
     offset computed independently of that cursor drifts. Plan 04-04 owns both.
   - **The silent truncation class.** The IDE cuts a control or class name
