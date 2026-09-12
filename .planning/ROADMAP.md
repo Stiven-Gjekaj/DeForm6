@@ -454,17 +454,57 @@ RPT-01, RPT-02, RPT-03, RPT-04, RPT-05, RPT-06
 
 Plans:
 
-- [ ] 04-01: `model.rs`, the recovered project model, the Windows-1252 and CRLF emitter primitives, the 40-character clamp, the identifier check
-- [ ] 04-02: Property value serialisation - integers, strings, booleans, enumerations, colours, floats, the `Font` block, blob references
-- [ ] 04-03: `write/vbp.rs` - component lines, the setting block order, `Startup=`, no stray `ResFile32=`
-- [ ] 04-04: `write/frm.rs` - the `.frm` and the `.frx` as one component driven by one cursor. Not splittable
-- [ ] 04-05: `write/code.rs` - `.bas` and `.cls` with the attribute preamble, and an empty procedure body with the correct signature
-- [ ] 04-06: `report.rs` - the flat item array, the path key, the three confidence words, `basis` and `evidence`, the defect array, deterministic output
-- [ ] 04-07: The uncertainty comment emitter, in code regions only, never in a `Begin` block and never in the `.vbp`
-- [ ] 04-08: The `extract` subcommand - `-o`, `--report`, `--force`, exit codes
-- [ ] 04-09: The structural recompilation check in the harness, and the ratios re-pinned
+**Wave 1**
 
-**Waves**: [04-01, 04-06] then [04-02, 04-03, 04-05] then [04-04, 04-07] then [04-08] then [04-09]
+- [ ] 04-01-PLAN.md - The end to end tracer, the `write` module set, `model.rs`, `SafeName`, the 40-byte clamp, the identifier check, and the Windows-1252 and CRLF emitter primitives
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 04-02-PLAN.md - Property value serialisation: integers, strings, booleans, enumerations, colours, floats, the `Font` block, blob references, and the omission path for an undecoded property
+- [ ] 04-03-PLAN.md - `write/vbp.rs`: component lines, the setting block order, `Startup=`, no stray `ResFile32=`
+- [ ] 04-05-PLAN.md - `write/code.rs`: `.bas` and `.cls` with the attribute preamble, the shared code region emitter, and an empty procedure body with the correct signature
+- [ ] 04-06-PLAN.md - `report.rs`: the flat item array, the path key, the three confidence words, `basis` and `evidence`, the defect array, deterministic output
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 04-04-PLAN.md - `write/frm.rs`: the `.frm` and the `.frx` as one component driven by one cursor. Not splittable
+- [ ] 04-07-PLAN.md - The uncertainty comment emitter, in code regions only, never in a `Begin` block and never in the `.vbp`
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 04-08-PLAN.md - The `extract` subcommand: `-o`, `--report`, `--force`, the resolved output directory, the containment check, exit codes
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 04-09-PLAN.md - The structural recompilation check in the harness, and the ratios re-pinned
+
+**Waves**: [04-01] then [04-02, 04-03, 04-05, 04-06] then [04-04, 04-07] then [04-08] then [04-09]
+
+Two changes from the wave order this section carried before planning, both
+forced by file ownership.
+
+Plan 04-01 leads with an end to end tracer, the same shape plan 03-01 used for
+Phase 3. It takes one corpus program, `Fast_Flames.exe`, the whole way from the
+executable to a written `.vbp`, `.frm`, `.frx`, `.cls` and JSON report, and it
+compares the written `.frx` against the committed `frmFire.frx` byte for byte.
+Every layer of this phase is new, so a phase built layer by layer would find an
+architectural fault after six committed layers instead of after one.
+
+Plan 04-06 therefore moves from wave 1 to wave 2. The tracer creates and owns
+`crates/deform6/src/report.rs` in wave 1, where it locks the shape of
+`ReportItem`, `Confidence` and `Evidence` so that the four wave 2 plans can
+build report items while 04-06 completes the builder. Plan 04-01 owns the whole
+`write` module set for the phase and creates all six module files, which is the
+pattern `crates/deform6/src/vb/mod.rs` states in its own doc comment: the
+modules are declared as a set, so that two plans in one wave never edit that
+file.
+
+No `CONTEXT.md` exists for this phase. Plan 04-01 records the four choices the
+planner had to make in its own "Planner assumptions locked in this plan"
+section, and each one is written into the JSON report at the `/meta` path so a
+reader of the output sees the choice: the `.vbp` file name, the report file
+name, the long spelling of the output flag, and where the resource blob bytes
+are re read from.
 
 ---
 
