@@ -291,3 +291,58 @@ fn two_calls_to_write_project_give_byte_identical_output_for_every_file() {
     let second = write::project(&report, FAST_FLAMES).unwrap();
     assert_eq!(first.files, second.files);
 }
+
+// --- Plan 04-01, Task 3: `ProjectModel` observed on the tracer's own file --
+
+/// One assertion per new model fact plan 04-01 task 3 adds, all observed on
+/// `Fast_Flames.exe` itself, so `ProjectModel` is exercised by the end to
+/// end path and not only by the unit tests in `write::model`.
+#[test]
+fn from_report_on_fast_flames_gives_one_form_one_class_and_a_matching_startup() {
+    let table = OpcodeTable::builtin();
+    let report = deform6::inspect(FAST_FLAMES, &table).unwrap();
+    let (model, items) = deform6::write::model::from_report(&report, FAST_FLAMES);
+
+    // One form, frmFire, whose control tree walk did not refuse.
+    assert_eq!(model.forms.len(), 1, "{:?}", model.forms);
+    let form = &model.forms[0];
+    assert_eq!(form.name.as_str(), "frmFire");
+    assert!(
+        !form.tree_refused,
+        "frmFire's own control tree walk did not refuse on this corpus file"
+    );
+
+    // One class, FastDrawing, and no module.
+    assert_eq!(model.code.len(), 1, "{:?}", model.code);
+    assert_eq!(model.code[0].name.as_str(), "FastDrawing");
+    assert_eq!(model.code[0].kind, deform6::write::model::CodeKind::Class);
+
+    // The startup form names frmFire, the only form this project declares,
+    // and the choice is recorded as an inferred report item.
+    match &model.startup {
+        deform6::write::model::Startup::Form(name) => assert_eq!(name.as_str(), "frmFire"),
+        other => panic!("expected Startup::Form(\"frmFire\"), got {other:?}"),
+    }
+    assert!(
+        items.iter().any(
+            |item| item.confidence == deform6::report::Confidence::Inferred
+                && item.basis.contains("does not declare a startup form")
+        ),
+        "{items:?}"
+    );
+
+    // Exactly one resource blob, the form's own Icon, at control index 0
+    // (the form's own outermost block).
+    assert_eq!(form.blobs.len(), 1, "{:?}", form.blobs);
+    assert_eq!(form.blobs[0].control_index, 0);
+    assert_eq!(form.blobs[0].property_name, "Icon");
+
+    // Every control's own depth is reachable and bounded by the tree's own
+    // size; the form's own root sits at depth 0.
+    assert_eq!(form.controls.first().map(|control| control.depth), Some(0));
+    assert!(
+        form.controls
+            .iter()
+            .all(|control| control.depth <= form.controls.len())
+    );
+}

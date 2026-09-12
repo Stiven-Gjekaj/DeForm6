@@ -359,15 +359,630 @@ fn is_legal_identifier_char(ch: char) -> bool {
     ch.is_alphanumeric() || ch == '_'
 }
 
+// --- Plan 04-01, Task 3: the complete `ProjectModel` -----------------------
+
+use crate::report::{Confidence, ReportItem};
+use crate::vb::classify::ObjectKind;
+use crate::vb::controltree::ControlKind;
+use crate::vb::functyp::Prototype;
+use crate::vb::propstream::PropertyValue;
+use crate::vb::{ControlReport, ObjectProcedures, ProcedureEntry, Report};
+
+/// Every fact the five writers (`vbp`, `frm`, `code`, `values`, `comment`)
+/// and the report builder (`report.rs`, plan 04-06) need from one recovered
+/// [`Report`]. Built once by [`from_report`]. No plan after this task adds
+/// a field here: a writer that finds it needs one more fact must find it
+/// already present, or the model was not complete.
+///
+/// | Field | Consumer |
+/// |---|---|
+/// | `name` | `write::vbp` (the `.vbp` file's own name), `report.rs` (the JSON report's own file name) |
+/// | `forms` | `write::frm` (one `.frm`/`.frx` pair per entry), `write::vbp` (`Form=` lines) |
+/// | `code` | `write::code` (one `.bas`/`.cls` per entry), `write::vbp` (`Module=`/`Class=` lines) |
+/// | `startup` | `write::vbp` (the `Startup=` line) |
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProjectModel {
+    /// The project's own safe name: the `.vbp` file's own stem and the
+    /// JSON report's own file name.
+    pub name: SafeName,
+    /// Every form the project declares, in [`Report::forms`]'s own order.
+    pub forms: Vec<FormModel>,
+    /// Every standard module and class the project declares, in
+    /// [`Report::objects`]'s own order (skipping every `Form`-kind entry,
+    /// which is joined into `forms` instead).
+    pub code: Vec<CodeModel>,
+    /// Which form starts the project, or [`Startup::SubMain`] when it has
+    /// none.
+    pub startup: Startup,
+}
+
+/// Which form starts the project.
+///
+/// | Field | Consumer |
+/// |---|---|
+/// | `Form`/`SubMain` | `write::vbp` (the `Startup=` line's own value) |
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Startup {
+    /// The named form starts the project: the first form in object table
+    /// order, when the project declares at least one.
+    Form(SafeName),
+    /// The project declares no form at all; `"Sub Main"` starts it.
+    SubMain,
+}
+
+/// One form: its own control tree, its own procedures (its code region's
+/// `Sub`/`Function`/`Property` signatures), and every resource blob its
+/// controls carry, in the order the `.frx` writer must pack them.
+///
+/// | Field | Consumer |
+/// |---|---|
+/// | `name` | `write::frm` (`Attribute VB_Name`, the `.frm`/`.frx` file names), `write::vbp` (`Form=`, `Startup=`) |
+/// | `tree_refused` | `write::frm` (an honestly empty `Begin...End` vs a genuinely empty one), `report.rs` |
+/// | `controls` | `write::frm` (the whole `Begin...End` tree) |
+/// | `procedures` | `write::code` (the form's own code region signatures) |
+/// | `blobs` | `write::frm` (the `.frx` file's own byte layout) |
+#[derive(Clone, Debug, PartialEq)]
+pub struct FormModel {
+    /// The form's own safe name.
+    pub name: SafeName,
+    /// `true` when this form's own control tree walk refused (a
+    /// `StructureUnreadable` defect naming `"ControlTree"`), as distinct
+    /// from a form that is genuinely empty. `04-RESEARCH.md` Pitfall 2:
+    /// both arrive with an empty `controls` list, and only this flag tells
+    /// them apart.
+    pub tree_refused: bool,
+    /// Every control this form's own tree holds, in the same depth-first
+    /// order [`FormReport::controls`] gives them: index 0 is always the
+    /// form's own outermost block.
+    pub controls: Vec<ControlModel>,
+    /// The form's own procedures, joined from the `Form`-kind object table
+    /// entry that shares this form's own name.
+    pub procedures: Vec<ProcedureModel>,
+    /// Every resource blob this form's own controls carry, in control tree
+    /// order: the order the `.frx` writer must pack them in.
+    pub blobs: Vec<BlobRef>,
+}
+
+/// One control: its own name, its own type, its own place in the tree, and
+/// the properties its own stream decoded.
+///
+/// | Field | Consumer |
+/// |---|---|
+/// | `name` | `write::frm` (the `Begin` line's own control name, `Index=`) |
+/// | `kind` | `write::frm` (the `Begin` line's own `VB.<Name>` class) |
+/// | `array_index` | `write::frm` (the `Index=` property) |
+/// | `parent` | `write::frm` (the tree's own nesting) |
+/// | `depth` | `write::frm` (indent, and the [`MAX_NESTING_DEPTH`] check) |
+/// | `is_menu` | `write::frm` (the menus-last ordering rule, plan 04-04) |
+/// | `is_external` | `write::frm` (the `Object.` prefix and the OCX colour branch, plan 04-04) |
+/// | `properties` | `write::values` (plan 04-02, every property line) |
+#[derive(Clone, Debug, PartialEq)]
+pub struct ControlModel {
+    /// The control's own safe name.
+    pub name: SafeName,
+    /// The control's own type.
+    pub kind: ControlKind,
+    /// The control array `Index`, when this control is one element of an
+    /// array: the reader's own value, or one this model generated in issue
+    /// order when the reader gave none and the name still repeats.
+    pub array_index: Option<u16>,
+    /// The index of this control's own parent in the same
+    /// [`FormModel::controls`] list. `None` for the form itself.
+    pub parent: Option<usize>,
+    /// This control's own nesting depth, computed once from the parent
+    /// chain: `0` for the form itself. Never recomputed by a writer.
+    pub depth: usize,
+    /// `true` for the menu control kind.
+    pub is_menu: bool,
+    /// `true` for the external (OCX) control kind.
+    pub is_external: bool,
+    /// Every property this control's own stream decoded, in stream order.
+    pub properties: Vec<PropertyValue>,
+}
+
+/// One standard module or one class: its own name and its own procedures.
+///
+/// | Field | Consumer |
+/// |---|---|
+/// | `name` | `write::code` (`Attribute VB_Name`, the file name), `write::vbp` (`Module=`/`Class=`) |
+/// | `kind` | `write::code` (`.bas` vs `.cls`, the preamble's own `VB_Creatable`/`VB_PredeclaredId`), `write::vbp` (`Module=` vs `Class=`) |
+/// | `procedures` | `write::code` (the code region's own signatures) |
+#[derive(Clone, Debug, PartialEq)]
+pub struct CodeModel {
+    /// The module's or the class's own safe name.
+    pub name: SafeName,
+    /// Whether this is a standard module or a class.
+    pub kind: CodeKind,
+    /// Every procedure this object's own arrays gave, joined by index.
+    pub procedures: Vec<ProcedureModel>,
+}
+
+/// Whether a [`CodeModel`] is a standard module or a class: the `.bas`
+/// versus `.cls` split, and the two attribute values that differ between
+/// them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CodeKind {
+    /// A `.bas` standard module.
+    Module,
+    /// A `.cls` class.
+    Class,
+}
+
+/// One procedure slot: its own recovered name, when it is public, and its
+/// own recovered prototype, when the type descriptor array resolved one.
+///
+/// | Field | Consumer |
+/// |---|---|
+/// | `name`/`prototype` | `write::code` (plan 04-05: an empty-body `Sub`/`Function`/`Property` with this signature, or nothing at all for a private slot) |
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProcedureModel {
+    /// The procedure's own recovered name. `None` for a private slot: per
+    /// OBJ-06, nothing is invented, no name and no placeholder.
+    pub name: Option<String>,
+    /// The procedure's own recovered prototype, when the type descriptor
+    /// array resolved one at the same index. `None` when it did not, or
+    /// when `name` is already `None`.
+    pub prototype: Option<Prototype>,
+}
+
+/// Which kind of `.frx` record a [`BlobRef`] names.
+///
+/// One variant today: the picture record, the only kind
+/// [`crate::vb::propstream::PropertyValue::Blob`] ever names, since
+/// `crate::vb::propstream` has no reader yet for the `$` long string record
+/// or the list record (`04-RESEARCH.md`'s own resolved open question 3).
+/// Plan 04-04 widens this the day a second kind's own reader exists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlobKind {
+    /// The inline picture record: `crate::vb::frx::extract_blob`'s own
+    /// eight byte header plus the image bytes.
+    Picture,
+}
+
+/// One resource blob one form's own controls carry, in control tree order:
+/// the order the `.frx` writer must pack the matching bytes in.
+///
+/// | Field | Consumer |
+/// |---|---|
+/// | every field | `write::frm` (plan 04-04: the `.frx` writer re-reads `source_offset..source_offset + 4 + declared_len` out of the executable's own bytes, the same range `crate::vb::propstream::PropertyValue::Blob` names, and writes the property line naming `frx_offset`) |
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlobRef {
+    /// The index, in [`FormModel::controls`], of the control this blob
+    /// belongs to.
+    pub control_index: usize,
+    /// The property this blob is the value of, such as `"Icon"`.
+    pub property_name: String,
+    /// The absolute file offset of the blob's own four byte length field
+    /// in the executable.
+    pub source_offset: u32,
+    /// The blob's own declared length (`blobLen`).
+    pub declared_len: u32,
+    /// The `.frx` offset [`crate::vb::frx::BlobCursor::take`] already gave
+    /// this blob, during the same read pass that recovered
+    /// [`crate::vb::propstream::PropertyValue::Blob`]. This model never
+    /// computes an offset a second way; see that type's own doc comment
+    /// for why the writer's own future pass (plan 04-04) still calls
+    /// `BlobCursor::take` again, over its own output order, rather than
+    /// reusing this field directly.
+    pub frx_offset: u32,
+    /// Which kind of `.frx` record this blob is.
+    pub kind: BlobKind,
+}
+
+/// Builds the complete [`ProjectModel`] a recovered [`Report`] describes,
+/// plus every [`ReportItem`] a choice this function made produced.
+///
+/// `data` is the executable's own bytes. This function does not read them
+/// itself (every [`BlobRef`] carries only the range a future writer must
+/// re-read); it takes `data` so its own signature already matches the one
+/// plan 04-04's `.frx` writer will need, and so a caller never has to
+/// thread the bytes through two different model-building calls.
+///
+/// # Determinism
+///
+/// Every name this function issues comes from one [`SafeNameIssuer`],
+/// walked in [`Report::forms`] then [`Report::objects`] order: two calls
+/// over the same `report` give the same [`ProjectModel`], field for field,
+/// because nothing here reads a hash keyed map to decide an order.
+#[must_use]
+pub fn from_report(report: &Report, _data: &[u8]) -> (ProjectModel, Vec<ReportItem>) {
+    let mut items = Vec::new();
+    let mut names = SafeNameIssuer::new();
+
+    let project_name = names.issue(&report.project_name, NameKind::Project).0;
+
+    let mut forms = Vec::new();
+    for form_report in &report.forms {
+        let (controls, mut control_items) = build_controls(&mut names, &form_report.controls);
+        items.append(&mut control_items);
+
+        let form_name = match controls.first() {
+            Some(root) => root.name.clone(),
+            None => names.issue(&form_report.name, NameKind::Form).0,
+        };
+
+        let tree_refused = form_report
+            .defects
+            .iter()
+            .any(|defect| defect.site.structure == "ControlTree");
+
+        let matching_object = report
+            .objects
+            .iter()
+            .find(|object| object.kind == ObjectKind::Form && object.name == form_report.name);
+        let procedures = match matching_object {
+            Some(object) => procedures_from(&object.procedures),
+            None => {
+                items.push(ReportItem {
+                    path: format!("/forms/{}", form_name.as_str()),
+                    confidence: Confidence::Unrecoverable,
+                    basis: "no object table entry of kind Form shares this form's own name; \
+                            its procedures cannot be recovered"
+                        .to_owned(),
+                    evidence: Vec::new(),
+                });
+                Vec::new()
+            }
+        };
+
+        let blobs = blob_refs(&form_report.controls);
+
+        forms.push(FormModel {
+            name: form_name,
+            tree_refused,
+            controls,
+            procedures,
+            blobs,
+        });
+    }
+
+    for object in &report.objects {
+        if object.kind == ObjectKind::Form {
+            let has_form_report = report.forms.iter().any(|form| form.name == object.name);
+            if !has_form_report {
+                let (name, _faults) = names.issue(&object.name, NameKind::Form);
+                items.push(ReportItem {
+                    path: format!("/forms/{}", name.as_str()),
+                    confidence: Confidence::Unrecoverable,
+                    basis: "an object table entry of kind Form names no matching GUI table \
+                            entry; it has no control tree"
+                        .to_owned(),
+                    evidence: Vec::new(),
+                });
+            }
+        }
+    }
+
+    let mut code = Vec::new();
+    for object in &report.objects {
+        match object.kind {
+            ObjectKind::Module => {
+                let (name, _faults) = names.issue(&object.name, NameKind::Module);
+                code.push(CodeModel {
+                    name,
+                    kind: CodeKind::Module,
+                    procedures: procedures_from(&object.procedures),
+                });
+            }
+            ObjectKind::Class => {
+                let (name, _faults) = names.issue(&object.name, NameKind::Class);
+                code.push(CodeModel {
+                    name,
+                    kind: CodeKind::Class,
+                    procedures: procedures_from(&object.procedures),
+                });
+            }
+            ObjectKind::Unknown(raw) => {
+                let (name, _faults) = names.issue(&object.name, NameKind::Module);
+                items.push(ReportItem {
+                    path: format!("/objects/{}", name.as_str()),
+                    confidence: Confidence::Inferred,
+                    basis: format!(
+                        "the object's own type value {raw:#010x} is not one this repository \
+                         classifies; it is treated as a module"
+                    ),
+                    evidence: Vec::new(),
+                });
+                code.push(CodeModel {
+                    name,
+                    kind: CodeKind::Module,
+                    procedures: procedures_from(&object.procedures),
+                });
+            }
+            ObjectKind::Form => {}
+        }
+    }
+
+    let startup = match forms.first() {
+        Some(form) => {
+            items.push(ReportItem {
+                path: crate::report::META_PATH.to_owned(),
+                confidence: Confidence::Inferred,
+                basis: "the executable does not declare a startup form; the first form in \
+                        object table order was chosen"
+                    .to_owned(),
+                evidence: Vec::new(),
+            });
+            Startup::Form(form.name.clone())
+        }
+        None => Startup::SubMain,
+    };
+
+    (
+        ProjectModel {
+            name: project_name,
+            forms,
+            code,
+            startup,
+        },
+        items,
+    )
+}
+
+/// Builds every [`ControlModel`] one form's own tree holds, resolving a
+/// control array `Index` the reader gave none for, per this task's own
+/// rule: use the reader's own index where it has one, generate one in
+/// issue order where it has none and the name still repeats.
+fn build_controls(
+    names: &mut SafeNameIssuer,
+    controls: &[ControlReport],
+) -> (Vec<ControlModel>, Vec<ReportItem>) {
+    let mut items = Vec::new();
+
+    // How many controls share each raw name, counted with an ordered
+    // `Vec`, never a hash keyed map: this list only ever answers "does
+    // this name repeat", not "in what order", so a `Vec` scanned linearly
+    // is both correct and simple for the corpus's own small control counts.
+    let mut name_counts: Vec<(String, usize)> = Vec::new();
+    for control in controls {
+        match name_counts
+            .iter_mut()
+            .find(|(name, _)| *name == control.name)
+        {
+            Some(entry) => entry.1 = entry.1.saturating_add(1),
+            None => name_counts.push((control.name.clone(), 1)),
+        }
+    }
+
+    let mut generated_counters: Vec<(String, u16)> = Vec::new();
+    let mut models = Vec::with_capacity(controls.len());
+
+    for (index, control) in controls.iter().enumerate() {
+        // Only the root control (the form itself, index 0) maps to a file
+        // name, so only it goes through the shared, collision-resolving
+        // issuer. A repeated name among the rest is a legitimate VB6
+        // control array, told apart by `Index`, never by a file-uniqueness
+        // suffix: two array elements are meant to share one name.
+        let (name, _faults) = if index == 0 {
+            names.issue(&control.name, name_kind_for_control(&control.kind))
+        } else {
+            SafeName::new(&control.name, name_kind_for_control(&control.kind))
+        };
+
+        let repeats = name_counts
+            .iter()
+            .find(|(existing, _)| *existing == control.name)
+            .is_some_and(|(_, count)| *count > 1);
+
+        let array_index = match control.array_index {
+            Some(value) => Some(value),
+            None if repeats => {
+                let value = match generated_counters
+                    .iter_mut()
+                    .find(|(existing, _)| *existing == control.name)
+                {
+                    Some(entry) => {
+                        let issued = entry.1;
+                        entry.1 = entry.1.saturating_add(1);
+                        issued
+                    }
+                    None => {
+                        generated_counters.push((control.name.clone(), 1));
+                        0
+                    }
+                };
+                items.push(ReportItem {
+                    path: format!("/forms/*/controls/{}", name.as_str()),
+                    confidence: Confidence::Inferred,
+                    basis: "the file gives no Index for this repeated control name; one was \
+                            generated in issue order"
+                        .to_owned(),
+                    evidence: Vec::new(),
+                });
+                Some(value)
+            }
+            None => None,
+        };
+
+        let depth = control_depth(controls, index);
+
+        models.push(ControlModel {
+            name,
+            kind: control.kind,
+            array_index,
+            parent: control.parent,
+            depth,
+            is_menu: matches!(control.kind, ControlKind::Menu),
+            is_external: matches!(control.kind, ControlKind::External),
+            properties: control.properties.clone(),
+        });
+    }
+
+    (models, items)
+}
+
+/// Gives the [`NameKind`] a control's own name is issued under: `Form` for
+/// the form or MDIForm root block, `Control` for everything else.
+fn name_kind_for_control(kind: &ControlKind) -> NameKind {
+    if matches!(kind, ControlKind::Form | ControlKind::MdiForm) {
+        NameKind::Form
+    } else {
+        NameKind::Control
+    }
+}
+
+/// Gives the depth of `controls[index]`: the number of `parent` hops back
+/// to the root, which is depth `0`. Bounded by `controls.len()`, the same
+/// defensive bound `deform6-cli`'s own `control_depth` uses: a cycle in
+/// `parent` links must not loop this walk forever, though no corpus
+/// program produces one.
+fn control_depth(controls: &[ControlReport], index: usize) -> usize {
+    let mut depth = 0_usize;
+    let mut current = index;
+    for _ in 0..=controls.len() {
+        let Some(parent) = controls.get(current).and_then(|control| control.parent) else {
+            return depth;
+        };
+        depth = depth.saturating_add(1);
+        current = parent;
+    }
+    depth
+}
+
+/// Reshapes an already-joined [`ObjectProcedures`] (the read side already
+/// joined the recovered names with the recovered prototypes, by index)
+/// into the [`ProcedureModel`] list the writers in this module need.
+fn procedures_from(procedures: &ObjectProcedures) -> Vec<ProcedureModel> {
+    match procedures {
+        ObjectProcedures::Slots(slots) => slots
+            .iter()
+            .map(|slot| match slot {
+                ProcedureEntry::Public { name, prototype } => ProcedureModel {
+                    name: Some(name.clone()),
+                    prototype: prototype.clone(),
+                },
+                ProcedureEntry::Private => ProcedureModel {
+                    name: None,
+                    prototype: None,
+                },
+            })
+            .collect(),
+        ObjectProcedures::NoNameArray { .. } => Vec::new(),
+    }
+}
+
+/// Collects every resource blob `controls` holds, in control tree order:
+/// the order [`FormModel::blobs`] must pack the matching `.frx` bytes in.
+fn blob_refs(controls: &[ControlReport]) -> Vec<BlobRef> {
+    let mut blobs = Vec::new();
+    for (index, control) in controls.iter().enumerate() {
+        for property in &control.properties {
+            if let PropertyValue::Blob {
+                name,
+                offset,
+                declared_len,
+                frx_offset,
+                ..
+            } = property
+            {
+                blobs.push(BlobRef {
+                    control_index: index,
+                    property_name: name.clone(),
+                    source_offset: *offset,
+                    declared_len: *declared_len,
+                    frx_offset: *frx_offset,
+                    kind: BlobKind::Picture,
+                });
+            }
+        }
+    }
+    blobs
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{LineWriter, NameFault, NameKind, SafeName, SafeNameIssuer, encode_windows_1252};
+    use super::{
+        CodeKind, Confidence, LineWriter, NameFault, NameKind, SafeName, SafeNameIssuer, Startup,
+        encode_windows_1252, from_report,
+    };
+    use crate::error::{Defect, DefectKind, Site};
+    use crate::read::region::Off;
+    use crate::vb::classify::ObjectKind;
+    use crate::vb::controltree::ControlKind;
+    use crate::vb::propstream::PropertyValue;
+    use crate::vb::runtime::Runtime;
+    use crate::vb::{ControlReport, FormReport, ObjectProcedures, ObjectReport, Report};
+
+    /// Builds a minimal, valid [`Report`] over the given objects and
+    /// forms. Every other field carries a literal this module's own model
+    /// building never reads, so a test can hold on to exactly the two
+    /// lists it cares about, per `AGENTS.md`'s "build the state a test
+    /// needs inside the test".
+    fn minimal_report(objects: Vec<ObjectReport>, forms: Vec<FormReport>) -> Report {
+        Report {
+            file_len: 0,
+            section_count: 0,
+            runtime: Runtime::Vb6,
+            runtime_dll: "MSVBVM60.DLL".to_owned(),
+            signature: *b"VB5!",
+            header_offset: Off::new(0),
+            runtime_build: 0,
+            project_name: "TestProject".to_owned(),
+            title: String::new(),
+            exe_name: String::new(),
+            help_file: String::new(),
+            native: true,
+            object_count: u16::try_from(objects.len()).unwrap_or(0),
+            objects,
+            declarations: Vec::new(),
+            components: Vec::new(),
+            forms,
+            defects: Vec::new(),
+        }
+    }
+
+    /// Builds a minimal [`ControlReport`] naming `name` and `kind`, with
+    /// every optional field empty and no properties.
+    fn minimal_control(name: &str, kind: ControlKind, parent: Option<usize>) -> ControlReport {
+        ControlReport {
+            name: name.to_owned(),
+            kind,
+            array_index: None,
+            parent,
+            properties: Vec::new(),
+            external: None,
+            external_reason: None,
+            ocx_header: None,
+            opaque_message: None,
+            events: Vec::new(),
+        }
+    }
+
+    /// Builds a minimal [`ObjectReport`] naming `name` and `kind`, with no
+    /// procedures and no gaps.
+    fn minimal_object(name: &str, kind: ObjectKind) -> ObjectReport {
+        ObjectReport {
+            name: name.to_owned(),
+            kind,
+            procedures: ObjectProcedures::Slots(Vec::new()),
+            gaps: Vec::new(),
+        }
+    }
+
+    /// Builds the [`Defect`] `compose_form` records when a form's own
+    /// control tree walk refuses.
+    fn control_tree_defect() -> Defect {
+        Defect {
+            site: Site {
+                offset: 0,
+                rva: None,
+                structure: "ControlTree",
+                field: "read",
+            },
+            kind: DefectKind::StructureUnreadable {
+                offset: 0,
+                reason: "synthetic, built inside the test".to_owned(),
+            },
+        }
+    }
 
     #[test]
     fn encode_windows_1252_inverts_char_from_byte_for_every_byte_value() {
@@ -537,5 +1152,267 @@ mod tests {
             name.as_str(),
             name.file_name("frm").trim_end_matches(".frm")
         );
+    }
+
+    // --- Plan 04-01, Task 3: `ProjectModel` ---------------------------------
+
+    #[test]
+    fn a_project_with_zero_forms_gives_sub_main_and_no_form_bearing_entry() {
+        let report = minimal_report(Vec::new(), Vec::new());
+        let (model, _items) = from_report(&report, &[]);
+        assert!(model.forms.is_empty());
+        assert_eq!(model.startup, Startup::SubMain);
+    }
+
+    #[test]
+    fn a_project_with_at_least_one_form_gives_startup_form_and_an_inferred_item() {
+        let form = FormReport {
+            name: "frmMain".to_owned(),
+            controls: vec![minimal_control("frmMain", ControlKind::Form, None)],
+            defects: Vec::new(),
+        };
+        let object = minimal_object("frmMain", ObjectKind::Form);
+        let report = minimal_report(vec![object], vec![form]);
+
+        let (model, items) = from_report(&report, &[]);
+
+        assert_eq!(model.forms.len(), 1);
+        let Startup::Form(name) = &model.startup else {
+            panic!("expected Startup::Form, got {:?}", model.startup);
+        };
+        assert_eq!(name.as_str(), "frmMain");
+        assert!(
+            items
+                .iter()
+                .any(|item| item.confidence == Confidence::Inferred
+                    && item.basis.contains("does not declare a startup form")),
+            "{items:?}"
+        );
+    }
+
+    #[test]
+    fn a_form_with_an_empty_control_list_and_a_control_tree_defect_gives_tree_refused_true() {
+        let form = FormReport {
+            name: "frmBroken".to_owned(),
+            controls: Vec::new(),
+            defects: vec![control_tree_defect()],
+        };
+        let report = minimal_report(Vec::new(), vec![form]);
+        let (model, _items) = from_report(&report, &[]);
+        assert_eq!(model.forms.len(), 1);
+        assert!(model.forms[0].tree_refused);
+    }
+
+    #[test]
+    fn a_form_with_an_empty_control_list_and_no_defect_gives_tree_refused_false() {
+        let form = FormReport {
+            name: "frmEmpty".to_owned(),
+            controls: Vec::new(),
+            defects: Vec::new(),
+        };
+        let report = minimal_report(Vec::new(), vec![form]);
+        let (model, _items) = from_report(&report, &[]);
+        assert_eq!(model.forms.len(), 1);
+        assert!(!model.forms[0].tree_refused);
+    }
+
+    #[test]
+    fn a_repeated_control_name_with_no_reader_supplied_index_gets_generated_indexes_in_issue_order()
+    {
+        let form = FormReport {
+            name: "frmArray".to_owned(),
+            controls: vec![
+                minimal_control("frmArray", ControlKind::Form, None),
+                minimal_control("Text1", ControlKind::TextBox, Some(0)),
+                minimal_control("Text1", ControlKind::TextBox, Some(0)),
+                minimal_control("Text1", ControlKind::TextBox, Some(0)),
+            ],
+            defects: Vec::new(),
+        };
+        let report = minimal_report(Vec::new(), vec![form]);
+        let (model, items) = from_report(&report, &[]);
+
+        let text_controls: Vec<&super::ControlModel> = model.forms[0]
+            .controls
+            .iter()
+            .filter(|control| control.name.as_str() == "Text1")
+            .collect();
+        assert_eq!(text_controls.len(), 3);
+        let indexes: Vec<Option<u16>> = text_controls.iter().map(|c| c.array_index).collect();
+        assert_eq!(indexes, vec![Some(0), Some(1), Some(2)]);
+
+        let generated_items = items
+            .iter()
+            .filter(|item| item.basis.contains("generated in issue order"))
+            .count();
+        assert_eq!(generated_items, 3, "{items:?}");
+    }
+
+    #[test]
+    fn a_control_with_its_own_reader_given_index_is_never_overwritten() {
+        let form = FormReport {
+            name: "frmArray".to_owned(),
+            controls: vec![
+                minimal_control("frmArray", ControlKind::Form, None),
+                minimal_control("Text1", ControlKind::TextBox, Some(0)),
+            ],
+            defects: Vec::new(),
+        };
+        let mut controls = form.controls.clone();
+        if let Some(text) = controls.get_mut(1) {
+            text.array_index = Some(7);
+        }
+        let form = FormReport { controls, ..form };
+        let report = minimal_report(Vec::new(), vec![form]);
+        let (model, _items) = from_report(&report, &[]);
+        assert_eq!(
+            model.forms[0].controls.get(1).and_then(|c| c.array_index),
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn an_object_of_unknown_kind_becomes_a_module_and_names_the_raw_type_value() {
+        let object = minimal_object("Weird1", ObjectKind::Unknown(0xDEAD_BEEF));
+        let report = minimal_report(vec![object], Vec::new());
+        let (model, items) = from_report(&report, &[]);
+
+        assert_eq!(model.code.len(), 1);
+        assert_eq!(model.code[0].kind, CodeKind::Module);
+        assert!(
+            items.iter().any(|item| item.basis.contains("0xdeadbeef")),
+            "{items:?}"
+        );
+    }
+
+    #[test]
+    fn a_form_object_with_no_matching_form_report_gives_an_unrecoverable_item() {
+        let object = minimal_object("frmOrphan", ObjectKind::Form);
+        let report = minimal_report(vec![object], Vec::new());
+        let (_model, items) = from_report(&report, &[]);
+        assert!(
+            items
+                .iter()
+                .any(|item| item.confidence == Confidence::Unrecoverable
+                    && item.path.contains("frmOrphan")),
+            "{items:?}"
+        );
+    }
+
+    #[test]
+    fn a_form_report_with_no_matching_object_gives_an_unrecoverable_item_and_still_builds_a_form() {
+        let form = FormReport {
+            name: "frmNoObject".to_owned(),
+            controls: vec![minimal_control("frmNoObject", ControlKind::Form, None)],
+            defects: Vec::new(),
+        };
+        let report = minimal_report(Vec::new(), vec![form]);
+        let (model, items) = from_report(&report, &[]);
+
+        assert_eq!(model.forms.len(), 1, "the form must still be built");
+        assert!(
+            items
+                .iter()
+                .any(|item| item.confidence == Confidence::Unrecoverable
+                    && item.path.contains("frmNoObject")),
+            "{items:?}"
+        );
+    }
+
+    #[test]
+    fn a_project_with_an_empty_object_list_gives_no_code_and_no_panic() {
+        let report = minimal_report(Vec::new(), Vec::new());
+        let (model, _items) = from_report(&report, &[]);
+        assert!(model.code.is_empty());
+    }
+
+    #[test]
+    fn control_depth_is_computed_once_from_the_parent_chain() {
+        let form = FormReport {
+            name: "frmNested".to_owned(),
+            controls: vec![
+                minimal_control("frmNested", ControlKind::Form, None),
+                minimal_control("Frame1", ControlKind::Frame, Some(0)),
+                minimal_control("Command1", ControlKind::CommandButton, Some(1)),
+            ],
+            defects: Vec::new(),
+        };
+        let report = minimal_report(Vec::new(), vec![form]);
+        let (model, _items) = from_report(&report, &[]);
+        let depths: Vec<usize> = model.forms[0].controls.iter().map(|c| c.depth).collect();
+        assert_eq!(depths, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn is_menu_and_is_external_are_true_only_for_their_own_control_kind() {
+        let form = FormReport {
+            name: "frmMenu".to_owned(),
+            controls: vec![
+                minimal_control("frmMenu", ControlKind::Form, None),
+                minimal_control("mnuFile", ControlKind::Menu, Some(0)),
+                minimal_control("wsPop", ControlKind::External, Some(0)),
+                minimal_control("Command1", ControlKind::CommandButton, Some(0)),
+            ],
+            defects: Vec::new(),
+        };
+        let report = minimal_report(Vec::new(), vec![form]);
+        let (model, _items) = from_report(&report, &[]);
+        let controls = &model.forms[0].controls;
+        assert!(!controls[0].is_menu && !controls[0].is_external);
+        assert!(controls[1].is_menu && !controls[1].is_external);
+        assert!(!controls[2].is_menu && controls[2].is_external);
+        assert!(!controls[3].is_menu && !controls[3].is_external);
+    }
+
+    #[test]
+    fn blob_refs_are_collected_in_control_tree_order() {
+        let mut root = minimal_control("frmPics", ControlKind::Form, None);
+        root.properties = vec![PropertyValue::Blob {
+            name: "Icon".to_owned(),
+            offset: 0x100,
+            declared_len: 20,
+            image_len: 12,
+            format: crate::vb::frx::ImageFormat::Unknown(Vec::new()),
+            frx_offset: 0,
+        }];
+        let mut child = minimal_control("Picture1", ControlKind::PictureBox, Some(0));
+        child.properties = vec![PropertyValue::Blob {
+            name: "Picture".to_owned(),
+            offset: 0x200,
+            declared_len: 30,
+            image_len: 22,
+            format: crate::vb::frx::ImageFormat::Unknown(Vec::new()),
+            frx_offset: 24,
+        }];
+        let form = FormReport {
+            name: "frmPics".to_owned(),
+            controls: vec![root, child],
+            defects: Vec::new(),
+        };
+        let report = minimal_report(Vec::new(), vec![form]);
+        let (model, _items) = from_report(&report, &[]);
+
+        let blobs = &model.forms[0].blobs;
+        assert_eq!(blobs.len(), 2);
+        assert_eq!(blobs[0].control_index, 0);
+        assert_eq!(blobs[0].property_name, "Icon");
+        assert_eq!(blobs[1].control_index, 1);
+        assert_eq!(blobs[1].property_name, "Picture");
+    }
+
+    #[test]
+    fn two_runs_over_the_same_report_give_an_equal_model_and_equal_items() {
+        let form = FormReport {
+            name: "frmMain".to_owned(),
+            controls: vec![minimal_control("frmMain", ControlKind::Form, None)],
+            defects: Vec::new(),
+        };
+        let object = minimal_object("frmMain", ObjectKind::Form);
+        let report = minimal_report(vec![object], vec![form]);
+
+        let (first_model, first_items) = from_report(&report, &[]);
+        let (second_model, second_items) = from_report(&report, &[]);
+        assert_eq!(first_model, second_model);
+        assert_eq!(first_items, second_items);
     }
 }
