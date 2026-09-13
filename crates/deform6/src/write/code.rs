@@ -17,6 +17,10 @@
 //! signature, and the shared code region.
 
 use super::model::{LineWriter, SafeName};
+use crate::report::{Confidence, ReportItem};
+use crate::vb::functyp::{Argument, DefaultValue, PropertyKind, Prototype, TypeEntry, VbType};
+use crate::vb::{ObjectProcedures, ProcedureEntry};
+use crate::write::values::escape_inline_string;
 
 /// Writes the thin `.cls` file this task's tracer needs: the fixed
 /// thirteen line preamble `.planning/research/FILE-FORMATS.md` section 5.2
@@ -157,6 +161,293 @@ pub fn bas_header_line(name: &SafeName) -> String {
     format!("Attribute VB_Name = \"{}\"", name.as_str())
 }
 
+// --- Plan 04-05, Task 2: the empty procedure with the right signature ------
+
+/// One written procedure's own signature line and its matching closing
+/// line. The body between them holds nothing: not a comment, not a
+/// placeholder statement, nothing. Plan 04-07 owns the uncertainty
+/// comment, and this plan writes no body line of any kind.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Signature {
+    /// The whole signature line: the scope word, the procedure, function
+    /// or property word, the name, the argument list, and the return type
+    /// when the procedure is a function.
+    pub declaration: String,
+    /// The matching closing line: `End Sub`, `End Function` or
+    /// `End Property`.
+    pub closing: &'static str,
+}
+
+/// Builds one procedure's [`Signature`]: the scope word (`"Public"` or
+/// `"Private"`), the procedure, function or property word, `name`, the
+/// argument list in declaration order, and the return type when the
+/// prototype names a function.
+///
+/// `prototype` is `None` for two different facts this crate never
+/// collapses into one: a public procedure whose type descriptor did not
+/// resolve (its argument list is not in the file), and a private slot,
+/// which this crate never invents a name for (`OBJ-06`). Both give the
+/// same shape here, a no argument procedure, because neither carries an
+/// argument list to write; the caller decides `name` and the scope word,
+/// and records the difference as a distinct report item.
+///
+/// Reuses the exact join order `crates/deform6-cli/src/main.rs`'s own
+/// `format_prototype`/`format_argument`/`format_type_entry`/
+/// `format_vb_type`/`format_default` already established and measured
+/// against the corpus in Phase 2: `Optional`/`ByRef` prefix, the name,
+/// `()` for an array, `As <type>`, `= <default>`.
+#[must_use]
+pub fn format_signature(scope: &str, name: &str, prototype: Option<&Prototype>) -> Signature {
+    let Some(prototype) = prototype else {
+        return Signature {
+            declaration: format!("{scope} Sub {name}()"),
+            closing: "End Sub",
+        };
+    };
+
+    let (head, closing) = signature_head(prototype);
+    let args: Vec<String> = prototype
+        .arguments
+        .iter()
+        .enumerate()
+        .map(|(index, arg)| format_argument(arg, index))
+        .collect();
+    let mut declaration = format!("{scope} {head} {name}({})", args.join(", "));
+    if let Some(return_type) = &prototype.return_type {
+        declaration.push_str(" As ");
+        declaration.push_str(&format_type_entry(return_type));
+    }
+    Signature {
+        declaration,
+        closing,
+    }
+}
+
+/// Gives the head word (`"Sub"`, `"Function"`, `"Property Get"`,
+/// `"Property Let"` or `"Property Set"`) and the matching closing line for
+/// `prototype`. No wildcard arm: a sixth [`PropertyKind`] variant is a
+/// compile error until this table names its own word.
+fn signature_head(prototype: &Prototype) -> (&'static str, &'static str) {
+    match prototype.property_kind {
+        PropertyKind::None => {
+            if prototype.return_type.is_some() {
+                ("Function", "End Function")
+            } else {
+                ("Sub", "End Sub")
+            }
+        }
+        PropertyKind::Get => ("Property Get", "End Property"),
+        PropertyKind::Let => ("Property Let", "End Property"),
+        PropertyKind::Set => ("Property Set", "End Property"),
+    }
+}
+
+/// Renders one argument: the `Optional`/`ByRef` prefix, the name, `()` for
+/// an array, ` As <type>`, and ` = <default>` when the reader recovered
+/// one. `index` names this argument's own position in the declaration,
+/// used only to build a placeholder when the reader's own name did not
+/// resolve (an empty `Argument::name`, a real and documented gap on
+/// `Argument::name`): a blank identifier is not legal Visual Basic, and
+/// this crate's whole purpose is a project that still builds.
+fn format_argument(arg: &Argument, index: usize) -> String {
+    let name = if arg.name.is_empty() {
+        format!("Arg{}", index.saturating_add(1))
+    } else {
+        arg.name.clone()
+    };
+
+    let mut prefix = String::new();
+    if arg.entry.optional {
+        prefix.push_str("Optional ");
+    }
+    if arg.entry.by_ref {
+        prefix.push_str("ByRef ");
+    }
+
+    let mut piece = format!("{prefix}{name}");
+    if arg.entry.array {
+        piece.push_str("()");
+    }
+    piece.push_str(" As ");
+    piece.push_str(&format_type_entry(&arg.entry));
+    if let Some(default) = &arg.default {
+        piece.push_str(" = ");
+        piece.push_str(&format_default(default));
+    }
+    piece
+}
+
+/// Renders a [`TypeEntry`]'s own base type. Modifiers are the caller's own
+/// job: this function only ever names the type after `As`.
+fn format_type_entry(entry: &TypeEntry) -> String {
+    format_vb_type(&entry.vb_type)
+}
+
+/// Renders a [`VbType`] as the legal Visual Basic keyword this crate
+/// writes into a signature line. No wildcard arm: a type code this table
+/// does not hold is a compile error until somebody decides its word.
+///
+/// Three variants this crate cannot resolve to a real class or interface
+/// name (`Internal`, `ComIFace`, `ComObj`, each carrying only a raw,
+/// unresolved address) write the same word a plain `VbType::Object` does:
+/// `Object` is the one legal Visual Basic keyword that covers all of
+/// them, and this crate never writes the raw address into the signature
+/// line itself, since that address is not a type name. `Unknown` (a type
+/// code this table has never measured) writes `Variant`, the one type
+/// every value can hold. `HResult` writes `Long`, its own underlying COM
+/// representation, since Visual Basic has no `HResult` keyword. All four
+/// substitutions exist for one reason: `WRT-07` asks for a project that
+/// still builds, and a signature line naming an invented keyword, or no
+/// keyword at all, would not build.
+fn format_vb_type(vb_type: &VbType) -> String {
+    match vb_type {
+        VbType::Boolean => "Boolean".to_owned(),
+        VbType::Byte => "Byte".to_owned(),
+        VbType::Integer => "Integer".to_owned(),
+        VbType::Long => "Long".to_owned(),
+        VbType::Single => "Single".to_owned(),
+        VbType::Double => "Double".to_owned(),
+        VbType::Date => "Date".to_owned(),
+        VbType::Currency => "Currency".to_owned(),
+        VbType::Variant => "Variant".to_owned(),
+        VbType::Str => "String".to_owned(),
+        VbType::Object | VbType::Internal(_) | VbType::ComIFace(_) | VbType::ComObj(_) => {
+            "Object".to_owned()
+        }
+        VbType::HResult => "Long".to_owned(),
+        VbType::Unknown(_) => "Variant".to_owned(),
+    }
+}
+
+/// Renders an `Optional` argument's own recovered default as a legal
+/// Visual Basic literal. No wildcard arm.
+///
+/// `Boolean` writes the capitalised keywords `True`/`False`: Rust's own
+/// `bool` display gives the lower case `true`/`false`, which is not a
+/// legal Visual Basic literal and would not compile. `Text` is escaped
+/// through [`escape_inline_string`] (plan 04-02's own inline string rule):
+/// wrapped in double quotes with every inner double quote doubled, never
+/// through Rust's own debug formatting, which escapes with a backslash
+/// Visual Basic does not accept.
+fn format_default(default: &DefaultValue) -> String {
+    match default {
+        DefaultValue::Empty => "Empty".to_owned(),
+        DefaultValue::Integer(value) => value.to_string(),
+        DefaultValue::Single(value) => value.to_string(),
+        DefaultValue::Boolean(value) => (if *value { "True" } else { "False" }).to_owned(),
+        DefaultValue::Byte(value) => value.to_string(),
+        DefaultValue::Text(value) => escape_inline_string(value),
+    }
+}
+
+/// The generated name a private procedure's own signature uses. `OBJ-06`
+/// forbids inventing a recovered name; this is not one. The file holds a
+/// null where the real name would be, and this crate must still write a
+/// legal Visual Basic identifier for the `Sub` statement to exist at all.
+/// `index` is this procedure's own position in the object's procedure
+/// array, so two private slots in the same object never collide.
+fn generated_procedure_name(index: usize) -> String {
+    format!("UnnamedProcedure{index}")
+}
+
+/// Builds one procedure slot's own [`Signature`] and, when the slot is not
+/// a full recovery, the one [`ReportItem`] naming why.
+///
+/// The three procedure shapes this crate ever meets are three different
+/// facts about the file, and each gets its own report item rather than
+/// being collapsed into "no signature": a public procedure with a
+/// prototype is a full recovery and gets none; a public procedure with no
+/// prototype is a name without a shape (every procedure in a standard
+/// module meets this, since a standard module carries no type
+/// descriptors at all); a private slot is a name the file marks null.
+/// `path` is left empty: this function knows only the procedure, never the
+/// object or the form it belongs to, so the caller fills in the real path
+/// before the item enters the project report, the same convention
+/// `write::values::format_value` already established.
+#[must_use]
+pub fn format_procedure_entry(
+    entry: &ProcedureEntry,
+    index: usize,
+) -> (Signature, Option<ReportItem>) {
+    match entry {
+        ProcedureEntry::Public { name, prototype } => match prototype {
+            Some(prototype) => (format_signature("Public", name, Some(prototype)), None),
+            None => {
+                let signature = format_signature("Public", name, None);
+                let item = ReportItem {
+                    path: String::new(),
+                    confidence: Confidence::Inferred,
+                    basis: format!(
+                        "{name} has no recovered prototype; this object's own type \
+                         descriptor array did not resolve one, which happens for every \
+                         procedure in a standard module by construction, so the argument \
+                         list is not in the file"
+                    ),
+                    evidence: Vec::new(),
+                };
+                (signature, Some(item))
+            }
+        },
+        ProcedureEntry::Private => {
+            let name = generated_procedure_name(index);
+            let signature = format_signature("Private", &name, None);
+            let item = ReportItem {
+                path: String::new(),
+                confidence: Confidence::Unrecoverable,
+                basis: format!(
+                    "the file holds a null where this procedure's own name would be; \
+                     {name} is generated for this signature, never recovered"
+                ),
+                evidence: Vec::new(),
+            };
+            (signature, Some(item))
+        }
+    }
+}
+
+/// Builds every procedure line `procedures` gives, in the reader's own
+/// array order, plus every [`ReportItem`] the three procedure shapes and
+/// the no-name-array shape produced.
+///
+/// An object that carries no procedure name array at all
+/// ([`ObjectProcedures::NoNameArray`]) writes no signature at all: the
+/// count is real (`proc_count`, read from the file), and the names are
+/// genuinely not there to write. A report item carrying the count is the
+/// honest answer; writing zero signatures with no item would read as an
+/// object with no procedures, which is a different, false claim.
+#[must_use]
+pub fn format_procedures(procedures: &ObjectProcedures) -> (Vec<String>, Vec<ReportItem>) {
+    let mut lines = Vec::new();
+    let mut items = Vec::new();
+
+    match procedures {
+        ObjectProcedures::NoNameArray { proc_count } => {
+            items.push(ReportItem {
+                path: String::new(),
+                confidence: Confidence::Unrecoverable,
+                basis: format!(
+                    "this object declares {proc_count} procedure slot(s), but it carries \
+                     no procedure name array at all; no signature can be written for any \
+                     of them"
+                ),
+                evidence: Vec::new(),
+            });
+        }
+        ObjectProcedures::Slots(entries) => {
+            for (index, entry) in entries.iter().enumerate() {
+                let (signature, item) = format_procedure_entry(entry, index);
+                lines.push(signature.declaration);
+                lines.push(signature.closing.to_owned());
+                if let Some(item) = item {
+                    items.push(item);
+                }
+            }
+        }
+    }
+
+    (lines, items)
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -282,5 +573,256 @@ mod tests {
     #[test]
     fn cls_preamble_properties_holds_exactly_five_entries() {
         assert_eq!(CLS_PREAMBLE_PROPERTIES.len(), 5);
+    }
+}
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "a test builds its own literal; a wrong value must fail loudly"
+)]
+mod signatures {
+    use super::{format_procedure_entry, format_procedures, format_signature};
+    use crate::read::region::Va;
+    use crate::vb::functyp::{
+        Argument, DefaultValue, OptionalDefaultsOutcome, PropertyKind, Prototype, TypeEntry, VbType,
+    };
+    use crate::vb::{ObjectProcedures, ProcedureEntry};
+
+    fn entry(vb_type: VbType) -> TypeEntry {
+        TypeEntry {
+            vb_type,
+            optional: false,
+            array: false,
+            by_ref: false,
+        }
+    }
+
+    fn prototype(
+        arguments: Vec<Argument>,
+        is_function: bool,
+        return_type: Option<TypeEntry>,
+    ) -> Prototype {
+        Prototype {
+            member_id: 0x6003_0001,
+            v_off: 0,
+            const_ffff: 0xFFFF,
+            nul1: 0,
+            property_kind: PropertyKind::None,
+            is_function,
+            arguments,
+            return_type,
+            optional_defaults: OptionalDefaultsOutcome::NoOptionalVals,
+        }
+    }
+
+    #[test]
+    fn a_function_with_two_arguments_one_optional_and_one_an_array_gives_an_exact_signature() {
+        let proto = prototype(
+            vec![
+                Argument {
+                    name: "Bar".to_owned(),
+                    entry: TypeEntry {
+                        optional: true,
+                        ..entry(VbType::Long)
+                    },
+                    default: None,
+                },
+                Argument {
+                    name: "Baz".to_owned(),
+                    entry: TypeEntry {
+                        array: true,
+                        ..entry(VbType::Variant)
+                    },
+                    default: None,
+                },
+            ],
+            true,
+            Some(entry(VbType::Long)),
+        );
+        let signature = format_signature("Public", "Foo", Some(&proto));
+        assert_eq!(
+            signature.declaration,
+            "Public Function Foo(Optional Bar As Long, Baz() As Variant) As Long"
+        );
+        assert_eq!(signature.closing, "End Function");
+    }
+
+    #[test]
+    fn a_by_reference_argument_carries_its_modifier_before_the_name() {
+        let proto = prototype(
+            vec![Argument {
+                name: "Value".to_owned(),
+                entry: TypeEntry {
+                    by_ref: true,
+                    ..entry(VbType::Integer)
+                },
+                default: None,
+            }],
+            false,
+            None,
+        );
+        let signature = format_signature("Public", "Grow", Some(&proto));
+        assert_eq!(
+            signature.declaration,
+            "Public Sub Grow(ByRef Value As Integer)"
+        );
+        assert_eq!(signature.closing, "End Sub");
+    }
+
+    #[test]
+    fn an_argument_with_a_recovered_default_carries_it_after_the_type() {
+        let proto = prototype(
+            vec![Argument {
+                name: "Flags".to_owned(),
+                entry: TypeEntry {
+                    optional: true,
+                    ..entry(VbType::Long)
+                },
+                default: Some(DefaultValue::Integer(3)),
+            }],
+            false,
+            None,
+        );
+        let signature = format_signature("Public", "Configure", Some(&proto));
+        assert_eq!(
+            signature.declaration,
+            "Public Sub Configure(Optional Flags As Long = 3)"
+        );
+    }
+
+    #[test]
+    fn a_sub_with_no_arguments_and_no_return_type_gives_a_plain_signature() {
+        let proto = prototype(vec![], false, None);
+        let signature = format_signature("Public", "Tick", Some(&proto));
+        assert_eq!(signature.declaration, "Public Sub Tick()");
+        assert_eq!(signature.closing, "End Sub");
+    }
+
+    #[test]
+    fn a_property_get_gives_property_get_head_and_end_property_closing() {
+        let mut proto = prototype(vec![], true, Some(entry(VbType::Long)));
+        proto.property_kind = PropertyKind::Get;
+        let signature = format_signature("Public", "Count", Some(&proto));
+        assert_eq!(signature.declaration, "Public Property Get Count() As Long");
+        assert_eq!(signature.closing, "End Property");
+    }
+
+    #[test]
+    fn a_property_let_gives_property_let_head_and_end_property_closing() {
+        let mut proto = prototype(
+            vec![Argument {
+                name: "Value".to_owned(),
+                entry: entry(VbType::Long),
+                default: None,
+            }],
+            false,
+            None,
+        );
+        proto.property_kind = PropertyKind::Let;
+        let signature = format_signature("Public", "Count", Some(&proto));
+        assert_eq!(
+            signature.declaration,
+            "Public Property Let Count(Value As Long)"
+        );
+        assert_eq!(signature.closing, "End Property");
+    }
+
+    #[test]
+    fn format_signature_never_produces_a_body_line() {
+        let proto = prototype(vec![], false, None);
+        let signature = format_signature("Public", "Tick", Some(&proto));
+        let lines = vec![signature.declaration, signature.closing.to_owned()];
+        assert_eq!(lines.len(), 2, "{lines:?}");
+    }
+
+    #[test]
+    fn a_public_procedure_with_no_prototype_gives_a_no_argument_signature_and_one_inferred_item() {
+        let entry_value = ProcedureEntry::Public {
+            name: "Fire".to_owned(),
+            prototype: None,
+        };
+        let (signature, item) = format_procedure_entry(&entry_value, 0);
+        assert_eq!(signature.declaration, "Public Sub Fire()");
+        let item = item.expect("a report item must be produced");
+        assert_eq!(item.confidence, crate::report::Confidence::Inferred);
+    }
+
+    #[test]
+    fn a_private_procedure_gives_a_private_no_argument_signature_under_a_generated_name() {
+        let (signature, item) = format_procedure_entry(&ProcedureEntry::Private, 2);
+        assert_eq!(signature.declaration, "Private Sub UnnamedProcedure2()");
+        let item = item.expect("a report item must be produced");
+        assert_eq!(item.confidence, crate::report::Confidence::Unrecoverable);
+    }
+
+    #[test]
+    fn an_unknown_vb_type_writes_variant_and_a_com_type_writes_object() {
+        let unknown_proto = prototype(
+            vec![Argument {
+                name: "Raw".to_owned(),
+                entry: entry(VbType::Unknown(0x7F)),
+                default: None,
+            }],
+            false,
+            None,
+        );
+        let signature = format_signature("Public", "Weird", Some(&unknown_proto));
+        assert_eq!(signature.declaration, "Public Sub Weird(Raw As Variant)");
+
+        let com_proto = prototype(
+            vec![Argument {
+                name: "Obj".to_owned(),
+                entry: entry(VbType::ComObj(Va::new(0x1000))),
+                default: None,
+            }],
+            false,
+            None,
+        );
+        let signature = format_signature("Public", "Take", Some(&com_proto));
+        assert_eq!(signature.declaration, "Public Sub Take(Obj As Object)");
+    }
+
+    #[test]
+    fn a_default_boolean_value_writes_the_capitalised_vb6_keyword_not_rusts_lower_case() {
+        let proto = prototype(
+            vec![Argument {
+                name: "Flag".to_owned(),
+                entry: TypeEntry {
+                    optional: true,
+                    ..entry(VbType::Boolean)
+                },
+                default: Some(DefaultValue::Boolean(true)),
+            }],
+            false,
+            None,
+        );
+        let signature = format_signature("Public", "Toggle", Some(&proto));
+        assert!(signature.declaration.contains("= True"), "{signature:?}");
+        assert!(!signature.declaration.contains("true"), "{signature:?}");
+    }
+
+    #[test]
+    fn an_empty_argument_name_gets_a_generated_placeholder_not_a_blank_identifier() {
+        let proto = prototype(
+            vec![Argument {
+                name: String::new(),
+                entry: entry(VbType::Long),
+                default: None,
+            }],
+            false,
+            None,
+        );
+        let signature = format_signature("Public", "Broken", Some(&proto));
+        assert_eq!(signature.declaration, "Public Sub Broken(Arg1 As Long)");
+    }
+
+    #[test]
+    fn an_object_with_no_procedure_name_array_gives_no_lines_and_one_item_naming_the_count() {
+        let (lines, items) = format_procedures(&ObjectProcedures::NoNameArray { proc_count: 7 });
+        assert!(lines.is_empty());
+        assert_eq!(items.len(), 1);
+        let item = items.first().expect("one report item must exist");
+        assert!(item.basis.contains('7'), "{item:?}");
     }
 }
