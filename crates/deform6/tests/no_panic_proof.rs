@@ -35,6 +35,10 @@
 
 use std::path::{Path, PathBuf};
 
+use deform6::inspect;
+use deform6::journal::Mode;
+use deform6::vb::opcodes::OpcodeTable;
+
 /// The count `crates/deform6/tests/corpus_sweep.rs`,
 /// `crates/deform6/tests/differential.rs` and
 /// `crates/xtask/src/main.rs::MINIMUM_PROGRAM_COUNT` all pin. This file
@@ -333,4 +337,123 @@ fn the_counted_report_prints_a_line_per_source_and_a_total_line() {
         regression: MINIMUM_REGRESSION_INPUTS,
     };
     print_report(&absent_counts);
+}
+
+/// One input this proof reads, tagged with which of the three sources it
+/// came from, for the per-input log line the sweep below prints.
+struct Input {
+    source: &'static str,
+    path: PathBuf,
+}
+
+/// Gathers every input from all three sources, sorted within each source,
+/// alongside the [`Counts`] this run took while gathering them. The
+/// vendored and regression sources are always gathered; the fetched
+/// source is gathered only when [`fetched_programs`] reports it present,
+/// matching the same absent-is-not-zero rule the counting functions
+/// above hold to.
+fn gather_inputs() -> (Vec<Input>, Counts) {
+    let vendored = vendored_executables();
+    let fetched_dir = fetched_root();
+    let fetched_count = fetched_programs(&fetched_dir);
+    let fetched_files = match fetched_count {
+        FetchedCount::Present(_) => {
+            let mut out = Vec::new();
+            walk_plain_into(&fetched_dir, &mut out);
+            out.sort();
+            out
+        }
+        FetchedCount::Absent => Vec::new(),
+    };
+    let regression = regression_inputs(&regressions_root());
+
+    let counts = Counts {
+        vendored: vendored.len(),
+        fetched: fetched_count,
+        regression: regression.len(),
+    };
+
+    let mut inputs = Vec::with_capacity(vendored.len() + fetched_files.len() + regression.len());
+    for path in vendored {
+        inputs.push(Input {
+            source: "vendored",
+            path,
+        });
+    }
+    for path in fetched_files {
+        inputs.push(Input {
+            source: "fetched",
+            path,
+        });
+    }
+    for path in regression {
+        inputs.push(Input {
+            source: "regression",
+            path,
+        });
+    }
+    (inputs, counts)
+}
+
+/// Reads one input and drives it through both modes and the writer.
+///
+/// Prints the source, the path and the mode before each call runs, never
+/// after: the aborting release profile ends the process the instant one
+/// of these calls panics, and a message built after the call would never
+/// reach the log. Asserts nothing about the result. A refusal is the
+/// correct answer for most of these inputs; the assertion this whole
+/// file makes is that the process is still running once every input has
+/// been read, which is why `inspect`'s and `write::project`'s own return
+/// values are discarded with `let _ =` rather than matched on.
+fn drive_one(source: &str, path: &Path, opcode_table: &OpcodeTable) {
+    let data =
+        std::fs::read(path).unwrap_or_else(|err| panic!("reading {}: {err}", path.display()));
+
+    println!("no_panic_proof: {source} {} Mode::Strict", path.display());
+    let _ = inspect(&data, opcode_table, Mode::Strict);
+
+    println!("no_panic_proof: {source} {} Mode::Salvage", path.display());
+    let salvage_result = inspect(&data, opcode_table, Mode::Salvage);
+
+    if let Ok(report) = salvage_result {
+        println!(
+            "no_panic_proof: {source} {} Mode::Salvage (write::project)",
+            path.display()
+        );
+        let _ = deform6::write::project(&report, &data, Mode::Salvage);
+    }
+}
+
+/// Roadmap success criterion 5, and SAF-01: one run reads every file in
+/// the vendored corpus, every file in the fetched robustness set and
+/// every file in the regression directory, drives each one through
+/// `Mode::Strict` and `Mode::Salvage`, and calls the writer on every
+/// successful salvage result. No process aborts, and the number of
+/// inputs read equals the total [`gather_inputs`] counted, which in turn
+/// is the sum of the three counts each source's own function above took.
+///
+/// This test proves what `cargo test` can prove: the test profile does
+/// not set `panic = "abort"`, so a panic here unwinds and `cargo test`
+/// reports it as a failed test, which is still a loud, gate-blocking
+/// failure. The stronger claim, that the aborting release profile itself
+/// survives every input, is proved separately by running this same test
+/// under `cargo test --release`; see 05-08-SUMMARY.md for that run's own
+/// command, counts, duration and peak resident set.
+#[test]
+fn every_input_this_repository_can_reach_runs_through_both_modes_and_the_writer() {
+    let (inputs, counts) = gather_inputs();
+    print_report(&counts);
+
+    let opcode_table = OpcodeTable::builtin();
+    for input in &inputs {
+        drive_one(input.source, &input.path, &opcode_table);
+    }
+
+    assert_eq!(
+        inputs.len(),
+        counts.total(),
+        "read {} inputs across all three sources, but the sources counted to {}",
+        inputs.len(),
+        counts.total()
+    );
 }
