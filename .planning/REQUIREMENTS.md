@@ -201,9 +201,13 @@ Deferred. Tracked, not in this roadmap.
 | FRM-05 | Phase 3 | Deferred to Phase 4 |
 | FRM-06 | Phase 3 | Complete |
 | VER-06 | Phase 3 | Complete |
-| WRT-01, WRT-02 | Phase 4 | Complete |
+| WRT-01 | Phase 4 | Complete |
+| WRT-02 | Phase 4 | Complete |
 | WRT-03 | Phase 4 | Open, unit proved only |
-| WRT-04 to WRT-07 | Phase 4 | Complete |
+| WRT-04 | Phase 4 | Complete |
+| WRT-05 | Phase 4 | Complete |
+| WRT-06 | Phase 4 | Complete |
+| WRT-07 | Phase 4 | Complete |
 | RPT-01 to RPT-06 | Phase 4 | Complete |
 | SAF-01 to SAF-05 | Phase 5 | Pending |
 
