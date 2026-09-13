@@ -449,7 +449,8 @@ fn push_substitution_item(items: &mut Vec<ReportItem>, substituted: &[char]) {
 
 /// Emits the code region every `.bas`, `.cls` and `.frm` file shares:
 /// [`crate::write::comment::uncertainty_comments`]'s own lines for every
-/// `items` entry at or under `path_prefix`, then one empty procedure per
+/// `items` entry, and every procedure-level item `procedures` itself
+/// produced, at or under `path_prefix`; then one empty procedure per
 /// procedure slot `procedures` recovered, in the reader's own array order.
 ///
 /// This is the one call site [`crate::write::comment::uncertainty_comments`]
@@ -461,6 +462,18 @@ fn push_substitution_item(items: &mut Vec<ReportItem>, substituted: &[char]) {
 /// own: the code region is genuinely the same in all three file kinds,
 /// unlike the line templates above it, which differ in all three.
 ///
+/// [`format_procedures`] leaves every item's own `path` empty, per
+/// [`format_procedure_entry`]'s own doc comment: it knows only the
+/// procedure, never the object or form the caller eventually fills that
+/// path in with. Filling it with `path_prefix` here, before the
+/// [`crate::write::comment::uncertainty_comments`] call, is what lets a
+/// procedure-level item become a comment line in this same call: without
+/// it, an empty path never sits at or under `path_prefix`, so the item
+/// would reach only the JSON report and never the file a reader has open.
+/// This fill matches the one `crate::write::merge_items` performs on the
+/// same empty path later, so the item's final path in the JSON report is
+/// unchanged.
+///
 /// Reaches no process global mutable state: everything this function needs
 /// comes in as a parameter, and everything it produces comes back as a
 /// return value. Two calls with the same input give byte identical output.
@@ -470,8 +483,21 @@ pub fn write_code_region(
     path_prefix: &str,
     procedures: &ObjectProcedures,
 ) -> (Vec<String>, Vec<ReportItem>) {
-    let mut lines: Vec<String> = crate::write::comment::uncertainty_comments(items, path_prefix);
     let (procedure_lines, procedure_items) = format_procedures(procedures);
+    let procedure_items: Vec<ReportItem> = procedure_items
+        .into_iter()
+        .map(|mut item| {
+            if item.path.is_empty() {
+                item.path = path_prefix.to_owned();
+            }
+            item
+        })
+        .collect();
+
+    let mut comment_source: Vec<ReportItem> = items.to_vec();
+    comment_source.extend(procedure_items.iter().cloned());
+    let mut lines: Vec<String> =
+        crate::write::comment::uncertainty_comments(&comment_source, path_prefix);
     lines.extend(procedure_lines);
     (lines, procedure_items)
 }
@@ -773,15 +799,43 @@ mod tests {
     }
 
     #[test]
-    fn an_object_with_no_procedure_name_array_writes_no_lines_and_one_item_via_write_code_region() {
+    fn an_object_with_no_procedure_name_array_writes_a_comment_and_one_item_via_write_code_region()
+    {
+        // WR-03: before the fix, this fact reached only the JSON report:
+        // format_procedures's own item carried an empty path, which never
+        // sat at or under path_prefix, so write_code_region's own call to
+        // uncertainty_comments never saw it. write_code_region now fills
+        // the empty path with path_prefix before that call, so the same
+        // doubt the JSON report already states now also reaches a comment
+        // line in the written file.
         let (lines, items) = write_code_region(
             &[],
             "/modules/Mod1",
             &ObjectProcedures::NoNameArray { proc_count: 7 },
         );
-        assert!(lines.is_empty());
+        assert!(lines.iter().any(|line| line.contains('7')), "{lines:?}");
         assert_eq!(items.len(), 1);
         assert!(items[0].basis.contains('7'), "{items:?}");
+        assert_eq!(items[0].path, "/modules/Mod1", "{items:?}");
+    }
+
+    #[test]
+    fn a_public_procedure_with_no_prototype_produces_a_comment_line_naming_it() {
+        // WR-03: every procedure in a standard module meets this shape by
+        // construction (04-07's own SUMMARY), so this is the corpus-wide
+        // case the fix must cover, not an edge case.
+        let procedures = ObjectProcedures::Slots(vec![ProcedureEntry::Public {
+            name: "Fire".to_owned(),
+            prototype: None,
+        }]);
+        let (lines, items) = write_code_region(&[], "/modules/Mod1", &procedures);
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("Fire") && line.contains("no recovered prototype")),
+            "{lines:?}"
+        );
+        assert_eq!(items.len(), 1);
     }
 
     // --- Task 2: the one call site, and the comment's own position -----
