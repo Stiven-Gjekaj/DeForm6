@@ -569,16 +569,39 @@ and every crash it finds becomes a committed test that replays on stable Rust.
 
 Plans:
 
-- [ ] 05-01: The strict and salvage split wired end to end, `--salvage` on both subcommands, every assumption recorded in the report
-- [ ] 05-02: The bound check audit - every count and length field from the parse order, checked against the real file size
-- [ ] 05-03: The fuzz crate - `cargo fuzz init` with the workspace flag, the `exclude` line, and a target that calls both modes
-- [ ] 05-04: The CI fuzz jobs - the bounded pull request run, the longer cron run, and corpus seeding from `corpus/`
-- [ ] 05-05: `regressions.rs`, the stable replay, the count assertion, and the written crash-to-test procedure
-- [ ] 05-06: The stable fuzz smoke test - a fixed seed mutation of corpus files, in the normal gate, no dependency
-- [ ] 05-07: `corpus/manifest.toml` with pinned hashes, `xtask fetch-corpus`, and `corpus/fetched/` kept out of the repository
-- [ ] 05-08: The no-panic proof run over the vendored corpus, the fetched set, and every regression input
+- [ ] 05-01-PLAN.md - The third severity, the strict and salvage split wired end to end, `--salvage` on both subcommands, every assumption recorded in the report
+- [ ] 05-02-PLAN.md - The bound check audit, every count and length field from the parse order, and the capacity wall that keeps the audit done
+- [ ] 05-03-PLAN.md - The fuzz crate, the generated scaffold with the workspace flag, a target that calls both modes, and the two bounded `xtask` commands
+- [ ] 05-04-PLAN.md - The CI fuzz jobs, the bounded pull request run, the longer cron run, and seeding from `corpus/` and the regression inputs
+- [ ] 05-05-PLAN.md - `regressions.rs`, the stable replay, the count assertion, the owned seed, and the written crash-to-test procedure
+- [ ] 05-06-PLAN.md - The stable fuzz smoke test, a fixed seed mutation of corpus files, in the normal gate, no dependency
+- [ ] 05-07-PLAN.md - `corpus/manifest.toml` with pinned hashes, `xtask fetch-corpus` and `xtask pin-corpus`, and `corpus/fetched/` kept out of the repository
+- [ ] 05-08-PLAN.md - The no-panic proof run over the vendored corpus, the fetched set, and every regression input
 
-**Waves**: [05-01, 05-02, 05-03, 05-07] then [05-04, 05-05, 05-06] then [05-08]
+**Waves**: [05-01, 05-07] then [05-02, 05-03, 05-06] then [05-05] then [05-04, 05-08]
+
+The waves depart from the list above in three places, and each departure has a
+stated reason.
+
+Plan 05-02 moves to wave 2, because it edits `crates/deform6/src/vb/mod.rs`,
+which plan 05-01 owns in wave 1, and because its `ImplausibleCount` refusal
+needs the severity ladder plan 05-01 builds.
+
+Plan 05-03 moves to wave 2, because its fuzz target calls `inspect` with a mode
+that plan 05-01 adds, and because it edits `crates/xtask/src/main.rs`, which
+plan 05-07 owns in wave 1.
+
+Plan 05-04 moves to wave 4 and plan 05-05 to wave 3, because both fuzz jobs
+seed from `crates/deform6/tests/regressions/`, and plan 05-05 is what creates
+that directory and its first input.
+
+One measurement taken during planning shapes plan 05-01 and belongs here. 36 of
+the 44 vendored corpus programs raise at least one defect today, 430 defects in
+all. A strict mode that refused on any `Recoverable` defect would therefore
+refuse 36 undamaged programs and break the phase 2, 3 and 4 gates. Every one of
+those 430 defects costs one item and puts nothing in its place. Plan 05-01 adds
+a third severity, `Tolerated`, so that strict mode refuses a file whose read had
+to assume a value and does not refuse a file whose read simply recovered less.
 
 ---
 
