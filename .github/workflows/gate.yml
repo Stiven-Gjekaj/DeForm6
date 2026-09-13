@@ -75,3 +75,13 @@ jobs:
       # first day somebody makes a field public or adds a `Deref`.
       - name: Prove the Region wall
         run: sh scripts/prove-region-wall.sh
+
+      # The lint wall and the region wall both catch a bad shape written
+      # by hand. Neither catches an allocation sized from a count that
+      # already reached a variable, because that shape is neither a bad
+      # primitive nor a type the compiler refuses. This step is the only
+      # guard on that one: it fails when a new capacity sized allocation
+      # under crates/deform6/src/ has not been traced and added to the
+      # audited list the script holds.
+      - name: Prove the capacity wall
+        run: sh scripts/prove-capacity-wall.sh
