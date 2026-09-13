@@ -91,7 +91,7 @@ re-measures the scope-separator grammar directly against Grayscale.exe,
 since the research document's own prose does not reconcile byte-for-byte,
 and closes STRUCTURES.md gap 11.
 
-Progress: [██░░░░░░░░] 17% of the 50 plans in the roadmap, which is 18 of 50
+Progress: [█████████░] 87% of the 53 written plans, which is 46 of 53
 
 ## Performance Metrics
 
