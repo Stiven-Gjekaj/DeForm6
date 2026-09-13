@@ -292,13 +292,26 @@ impl SafeName {
 /// Issues [`SafeName`] values one at a time, making a colliding name
 /// distinct from every name already issued.
 ///
-/// Holds every name issued so far in an ordered `Vec`, never a hash keyed
-/// map: the collision suffix depends on the order names are issued in, and
-/// an iteration order that varies per process would make the written
-/// report vary per process too (RPT-01).
+/// Holds every name issued so far in a `HashSet`, for `issue`'s own
+/// existence check, and never iterates it: the collision suffix depends
+/// only on the order names are issued in, never on this set's own internal
+/// layout, so a process dependent hash seed cannot change the written
+/// report (RPT-01).
+///
+/// Also remembers, per colliding original name, the next suffix to try in
+/// `next_suffix`. A hostile file that drives thousands of objects or
+/// controls to the same raw name once made every one of those items retry
+/// every suffix from 1 up to its own turn number, an `O(n)` search for the
+/// `n`-th collision and an `O(n^2)` total across all of them, even with an
+/// `O(1)` set lookup. Picking up from the last suffix this exact name used
+/// keeps the common case `O(1)` amortised per call; the set lookup below
+/// still guards the rare case where an unrelated item's own raw name
+/// already holds the guessed candidate, so the guess is a fast path, never
+/// a shortcut that skips the check.
 #[derive(Default)]
 pub struct SafeNameIssuer {
-    issued: Vec<String>,
+    issued: std::collections::HashSet<String>,
+    next_suffix: std::collections::HashMap<String, u32>,
 }
 
 impl SafeNameIssuer {
@@ -315,21 +328,24 @@ impl SafeNameIssuer {
     pub fn issue(&mut self, raw: &str, kind: NameKind) -> (SafeName, Vec<NameFault>) {
         let (mut safe, mut faults) = SafeName::new(raw, kind);
 
-        if self.issued.iter().any(|name| name == safe.as_str()) {
+        if self.issued.contains(safe.as_str()) {
             let original = safe.as_str().to_owned();
-            let mut suffix: u32 = 1;
+            let mut suffix: u32 = *self.next_suffix.get(&original).unwrap_or(&1);
             loop {
                 let candidate = suffixed(&original, suffix);
                 if !self.issued.contains(&candidate) {
                     safe.value = candidate;
-                    faults.push(NameFault::Collided { with: original });
+                    faults.push(NameFault::Collided {
+                        with: original.clone(),
+                    });
+                    self.next_suffix.insert(original, suffix.saturating_add(1));
                     break;
                 }
                 suffix = suffix.saturating_add(1);
             }
         }
 
-        self.issued.push(safe.as_str().to_owned());
+        self.issued.insert(safe.as_str().to_owned());
         (safe, faults)
     }
 }
@@ -1154,6 +1170,29 @@ mod tests {
         let (name, _faults) = SafeName::new("frmFire", NameKind::Form);
         assert_eq!(name.file_name("frm"), "frmFire.frm");
         assert_eq!(name.file_name("frx"), "frmFire.frx");
+    }
+
+    /// A hostile file can drive thousands of objects or controls to the
+    /// exact same raw name. Before `SafeNameIssuer` remembered the next
+    /// suffix to try per original name, the `n`-th of these items retried
+    /// every suffix from 1 up to its own turn number, an `O(n)` search
+    /// that made the whole batch `O(n^2)`; one such file took over two
+    /// minutes to write. This test asserts only correctness (every name
+    /// stays distinct), not speed, but it runs a batch large enough that a
+    /// return of the old behaviour would make `cargo test` itself take a
+    /// very long time to pass.
+    #[test]
+    fn a_thousand_controls_with_the_same_raw_name_each_get_a_distinct_name() {
+        let mut issuer = SafeNameIssuer::new();
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..1000 {
+            let (name, _faults) = issuer.issue("Command1", NameKind::Control);
+            assert!(
+                seen.insert(name.as_str().to_owned()),
+                "issue gave back a name already given out: {}",
+                name.as_str()
+            );
+        }
     }
 
     #[test]
