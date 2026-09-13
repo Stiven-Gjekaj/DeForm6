@@ -2,18 +2,19 @@
 gsd_state_version: "1.0"
 current_phase: 5
 current_phase_name: Hostility
+current_plan: 4
 status: executing
-stopped_at: Completed 05-07-PLAN.md
-last_updated: "2026-09-13T15:08:29.787Z"
+stopped_at: Completed 05-02-PLAN.md
+last_updated: "2026-09-13T16:27:32.443Z"
 last_activity: 2026-09-13
-last_activity_desc: Plan 05-07 executed - corpus manifest, fetch-corpus and pin-corpus, three programs pinned
-state_head: e69c15768bce8295912b77e4ac81358db3156f25
+last_activity_desc: "Plan 05-02 executed - GuiTable::walk bounds wFormCount, capacity audit wall added"
+state_head: 4572b36357c363184bc71a19d8109872b6d1c762
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 53
-  completed_plans: 47
-  percent: 89
+  completed_plans: 48
+  percent: 91
 ---
 
 ## Continue
@@ -62,36 +63,18 @@ See: .planning/PROJECT.md (updated 2026-09-07)
 Visual Basic project that opens in the VB6 IDE, with the forms and the names
 intact, and a report that says how much of it is proved and how much is
 inferred.
-**Current focus:** Phase 5 — Hostility
+**Current focus:** Phase 5, Hostility
 
 ## Current Position
 
 Phase: 5 (Hostility) - EXECUTING
-Plan: 05-01 and 05-07 complete (wave 1 done), wave 2 (05-02, 05-03, 05-06) next
+Current Plan: 4
+Total Plans in Phase: 8
+Plan: 05-01, 05-02 and 05-07 complete; wave 2 continues (05-03, 05-06 next)
 Status: Executing
-searches, six encodings across three corpus programs, never find the
-identifier a project file declares anywhere in the component table
-entry. `oUuid` (`248DD896-...`, one byte from the declared value) is
-now reported, with an honest caveat printed beside it. The FRM-04
-wording question this raises is open, for the human, in
-`03-16-SUMMARY.md`. Plan 03-17 (remaining code review findings) still
-open.
-`deform6 inspect` reports the object graph. It reads a form's control tree
-now: every control's type, name and array index, gated on the tiling check.
-Open defects: `.planning/WINDOWS.md` holds three, all of them limits that are
-stated rather than hidden. The section overlap rule has no test because no
-corpus file overlaps. The P-code branch has no real sample because every
-vendored project is native. `inspect` drops the defects it collects, because
-`Report` derives `PartialEq` and `Defect` does not.
-Last activity: 2026-09-13 — Phase 5 planned, 8 plans in 4 waves
-Plan 03-01 leads with an end to end tracer. Plan 03-02 withdraws the ROADMAP
-instruction to commit an opcode table built from a type library dump, because
-`AGENTS.md` bars a fixture calculated from a third party file. Plan 03-04
-re-measures the scope-separator grammar directly against Grayscale.exe,
-since the research document's own prose does not reconcile byte-for-byte,
-and closes STRUCTURES.md gap 11.
+Last activity: 2026-09-13 - Plan 05-02 executed - GuiTable::walk bounds wFormCount before the loop, and scripts/prove-capacity-wall.sh audits every other capacity sized allocation the library builds
 
-Progress: [█████████░] 89% of the 53 written plans, which is 47 of 53
+Progress: [██████████████████░░] 91% of the 53 written plans, which is 48 of 53
 
 ## Performance Metrics
 
@@ -151,6 +134,7 @@ Progress: [█████████░] 89% of the 53 written plans, which is
 | Phase 04 P09 | 1 session | 3 tasks | 3 files |
 | Phase 05 P01 | 1 session | 3 tasks | 24 files |
 | Phase 05 P07 | 1 session | 3 tasks | 5 files |
+| Phase 05 P02 | 1 session | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -246,6 +230,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-07: ureq and sha2 are pinned to the exact versions 05-RESEARCH.md audited (=3.4.1, =0.11.0) as plain, non-workspace xtask dependencies.
 - [Phase 05]: 05-07: pin-corpus regenerates the whole manifest from parsed data and re-parses the rendered result before writing, preserving the header comment above the first table byte for byte, rather than appending text to the end.
 - [Phase 05]: 05-07: the human cleared the task 3 checkpoint by pinning map-editor-2d, passgen and transparency-2d. All three are already vendored under corpus/, so the set proves the fetch/hash/verify path end to end but adds no parser shape the gate does not already exercise; a later plan should add a real new shape (p-code, ActiveX/OCX, third party controls, packed, or a different service pack).
+- [Phase 5]: Task 2's capacity audit measured 14 sites across 9 files, not the plan's 13/8 or the research's 6; zero were unbounded.
+- [Phase 5]: The five sites the plan flagged for particular attention (privateobj.rs, functyp.rs) are each already bounded by their own preceding array.subregion check, independent of any upstream clamp; proven with new regression tests rather than left as a comment.
+- [Phase 5]: The success-criterion-4 end to end assertion runs at GuiTable::walk, not through inspect(): a synthetic image refuses earlier (no runtime import), and a patched real corpus file refuses on lStructSize before the ImplausibleCount defect reaches Journal::record, in both modes.
 
 ### Pending Todos
 
@@ -274,8 +261,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-13T15:08:29.755Z
-Stopped at: Completed 05-07-PLAN.md
+Last session: 2026-09-13T16:27:32.411Z
+Stopped at: Completed 05-02-PLAN.md
 
 Plan 05-01 is done: 5 commits, cargo test --workspace at 887 passed, 0 failed,
 up from the 872 baseline this plan started at.
