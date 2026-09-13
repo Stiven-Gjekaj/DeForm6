@@ -180,19 +180,12 @@ fn write_components(
 
     for component in &report.components {
         match object_line(component) {
-            Some((line, item)) => {
+            Ok((line, item)) => {
                 writer.push_line(&line);
                 written = written.saturating_add(1);
                 items.push(item);
             }
-            None => items.push(ReportItem {
-                path: format!("/components/{}", component.name),
-                confidence: Confidence::Unrecoverable,
-                basis: "this component's own sixteen byte identifier did not resolve; no \
-                        Object= line was written for it"
-                    .to_owned(),
-                evidence: Vec::new(),
-            }),
+            Err(item) => items.push(item),
         }
     }
 
@@ -219,9 +212,10 @@ fn find_code<'m>(model: &'m ProjectModel, kind: CodeKind, raw_name: &str) -> Opt
 }
 
 /// Builds the `Object=` line one declared external component gives, and the
-/// report item stating the identifier is not confirmed. `None` when the
-/// component's own sixteen byte identifier did not resolve at all, per
-/// [`Component::ouuid_text`]'s own doc comment.
+/// report item stating the identifier is not confirmed. `Err` (naming the
+/// reason) when the component's own sixteen byte identifier did not resolve
+/// at all, per [`Component::ouuid_text`]'s own doc comment, or when the
+/// component's own recovered file name holds a line break.
 ///
 /// The written identifier is the closest field this repository ever
 /// resolves to a declared `Object=` identifier, never the confirmed one:
@@ -233,9 +227,33 @@ fn find_code<'m>(model: &'m ProjectModel, kind: CodeKind, raw_name: &str) -> Opt
 /// The file name is written verbatim, never through a [`SafeName`]: it
 /// names a file that already exists on the machine the project rebuilds
 /// on, not a file this phase writes, so [`SafeName`]'s own rules (built for
-/// a name this phase turns into a path it creates) do not apply to it.
-fn object_line(component: &Component) -> Option<(String, ReportItem)> {
-    let identifier = component.ouuid_text.as_ref()?;
+/// a name this phase turns into a path it creates) do not apply to it. It
+/// still gets the same T-4-05 line-break guard [`write_quoted_setting`]
+/// gives every other raw field this file writes: a raw carriage return or
+/// line feed in the file name would end the `Object=` line early and inject
+/// an attacker-chosen extra line into the `.vbp`.
+fn object_line(component: &Component) -> Result<(String, ReportItem), ReportItem> {
+    let Some(identifier) = component.ouuid_text.as_ref() else {
+        return Err(ReportItem {
+            path: format!("/components/{}", component.name),
+            confidence: Confidence::Unrecoverable,
+            basis: "this component's own sixteen byte identifier did not resolve; no \
+                    Object= line was written for it"
+                .to_owned(),
+            evidence: Vec::new(),
+        });
+    };
+    if component.file_name.contains('\r') || component.file_name.contains('\n') {
+        return Err(ReportItem {
+            path: format!("/components/{}", component.name),
+            confidence: Confidence::Unrecoverable,
+            basis: "this component's own recovered file name holds a line break; writing it \
+                    inline would end the Object= line early, so no Object= line was written \
+                    for it"
+                .to_owned(),
+            evidence: Vec::new(),
+        });
+    }
     let line = format!("Object={{{identifier}}}#1.0#0; {}", component.file_name);
     let item = ReportItem {
         path: format!("/components/{}", component.name),
@@ -251,7 +269,7 @@ fn object_line(component: &Component) -> Option<(String, ReportItem)> {
             note: None,
         }],
     };
-    Some((line, item))
+    Ok((line, item))
 }
 
 // ---------------------------------------------------------------------
@@ -569,6 +587,26 @@ mod tests {
         let (model, _items) = from_report(&report, &[]);
         let (bytes, items) = write_vbp(&report, &model);
         assert!(!lines(&bytes).iter().any(|line| line.starts_with("Object=")));
+        assert!(items.iter().any(|item| item.path.contains("Winsock")));
+    }
+
+    #[test]
+    fn a_component_whose_file_name_holds_a_line_break_writes_no_object_line_and_an_item() {
+        // CR-03: a raw line break in a component's own recovered file name
+        // must not reach the .vbp: it would end the Object= line early and
+        // inject an attacker-chosen extra line, the same T-4-05 threat
+        // write_quoted_setting already guards every other raw field
+        // against.
+        let component = resolved_component("Winsock", "MSWINSCK.OCX\r\nEvilKey=Injected");
+        let report = minimal_report(Vec::new(), Vec::new(), vec![component]);
+        let (model, _items) = from_report(&report, &[]);
+        let (bytes, items) = write_vbp(&report, &model);
+        assert!(!lines(&bytes).iter().any(|line| line.starts_with("Object=")));
+        assert!(
+            !lines(&bytes).iter().any(|line| line.contains("EvilKey")),
+            "the crafted file name must not inject its own extra line: {:?}",
+            lines(&bytes)
+        );
         assert!(items.iter().any(|item| item.path.contains("Winsock")));
     }
 
