@@ -1,0 +1,15 @@
+# This file names the run time robustness set.
+#
+# The programs it names carry no licence that permits redistribution.
+# Their bytes are never committed. This file is committed.
+#
+# The pinned hash proves that the bytes are the bytes. It says nothing
+# about whether the address still resolves.
+#
+# One table names one program. Each table holds two keys: url, the
+# address to fetch it from, and sha256, the lower case hexadecimal
+# digest the fetched bytes must match.
+#
+# This file holds no licence field. corpus/NOTICES records the licence
+# and the origin for the vendored corpus. Its own stated scope is
+# corpus/ proper, not this manifest. Do not add a licence field here.

@@ -48,6 +48,7 @@
 )]
 mod ratios;
 
+mod fetch_corpus;
 mod opcode_table;
 
 use std::path::Path;
@@ -71,6 +72,7 @@ fn run(args: Vec<String>) -> i32 {
         Some("derive-opcode-table") => {
             opcode_table::derive_opcode_table(args.get(1..).unwrap_or(&[]))
         }
+        Some("fetch-corpus") => fetch_corpus::run(args.get(1..).unwrap_or(&[])),
         Some("--help" | "-h") => {
             println!("{USAGE}");
             0
@@ -86,7 +88,8 @@ fn run(args: Vec<String>) -> i32 {
     }
 }
 
-const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | derive-opcode-table";
+const USAGE: &str =
+    "usage: cargo run -p xtask -- update-ratios | derive-opcode-table | fetch-corpus";
 
 /// The number of corpus programs `update-ratios` refuses to write fewer
 /// than. Matches `EXPECTED_PROGRAM_COUNT` in `crates/deform6/tests/ratios.rs`
