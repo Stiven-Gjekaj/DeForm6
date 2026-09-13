@@ -2,19 +2,19 @@
 gsd_state_version: "1.0"
 current_phase: 5
 current_phase_name: Hostility
-current_plan: 4
+current_plan: 5
 status: executing
-stopped_at: Completed 05-02-PLAN.md
-last_updated: "2026-09-13T16:27:32.443Z"
+stopped_at: Completed 05-03-PLAN.md
+last_updated: "2026-09-13T16:44:46.783Z"
 last_activity: 2026-09-13
-last_activity_desc: "Plan 05-02 executed - GuiTable::walk bounds wFormCount, capacity audit wall added"
-state_head: 4572b36357c363184bc71a19d8109872b6d1c762
+last_activity_desc: "Plan 05-03 executed - the fuzz crate, the target driving both modes, and the bounded xtask fuzz-pr/fuzz-cron campaigns"
+state_head: f9ee26bc8fa61318914bcdcfafabe7146c9f2118
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 53
-  completed_plans: 48
-  percent: 91
+  completed_plans: 49
+  percent: 92
 ---
 
 ## Continue
@@ -68,13 +68,13 @@ inferred.
 ## Current Position
 
 Phase: 5 (Hostility) - EXECUTING
-Current Plan: 4
+Current Plan: 5
 Total Plans in Phase: 8
-Plan: 05-01, 05-02 and 05-07 complete; wave 2 continues (05-03, 05-06 next)
-Status: Executing
-Last activity: 2026-09-13 - Plan 05-02 executed - GuiTable::walk bounds wFormCount before the loop, and scripts/prove-capacity-wall.sh audits every other capacity sized allocation the library builds
+Plan: 05-01, 05-02, 05-03 and 05-07 complete; wave 2 continues (05-06 next)
+Status: Ready to execute
+Last activity: 2026-09-13 - Plan 05-03 executed - the fuzz crate, the target driving deform6::inspect/write::project in both Mode::Strict and Mode::Salvage, and the bounded xtask fuzz-pr/fuzz-cron campaigns
 
-Progress: [█████████░] 91% of the 53 written plans, which is 48 of 53
+Progress: [█████████░] 92% of the 53 written plans, which is 49 of 53
 
 ## Performance Metrics
 
@@ -135,6 +135,7 @@ Progress: [█████████░] 91% of the 53 written plans, which is
 | Phase 05 P01 | 1 session | 3 tasks | 24 files |
 | Phase 05 P07 | 1 session | 3 tasks | 5 files |
 | Phase 05 P02 | 1 session | 3 tasks | 6 files |
+| Phase 05 P03 | 1 session | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -233,6 +234,8 @@ Recent decisions affecting current work:
 - [Phase 5]: Task 2's capacity audit measured 14 sites across 9 files, not the plan's 13/8 or the research's 6; zero were unbounded.
 - [Phase 5]: The five sites the plan flagged for particular attention (privateobj.rs, functyp.rs) are each already bounded by their own preceding array.subregion check, independent of any upstream clamp; proven with new regression tests rather than left as a comment.
 - [Phase 5]: The success-criterion-4 end to end assertion runs at GuiTable::walk, not through inspect(): a synthetic image refuses earlier (no runtime import), and a patched real corpus file refuses on lStructSize before the ImplausibleCount defect reaches Journal::record, in both modes.
+- [Phase 5]: Task 1 (nightly toolchain, cargo-fuzz) was already satisfied before this executor started; the fuzz crate was generated with cargo fuzz init --fuzzing-workspace true rather than hand written
+- [Phase 5]: CRON_RUNS set to 500000, measured against the 237 byte worst case crate::error::damaged message, a safety factor of roughly 18 below the resident set limit
 
 ### Pending Todos
 
@@ -261,8 +264,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-13T16:27:32.411Z
-Stopped at: Completed 05-02-PLAN.md
+Last session: 2026-09-13T16:44:46.751Z
+Stopped at: Completed 05-03-PLAN.md
 
 Plan 05-01 is done: 5 commits, cargo test --workspace at 887 passed, 0 failed,
 up from the 872 baseline this plan started at.

@@ -565,7 +565,7 @@ and every crash it finds becomes a committed test that replays on stable Rust.
     code is the least exercised in the crate, so the fuzz target must call both
     modes, not one.
 
-**Plans**: 3/8 plans executed
+**Plans**: 4/8 plans executed
 
 Plans:
 **Wave 1**
@@ -576,7 +576,7 @@ Plans:
 **Wave 2** *(blocked on Wave 1 completion)*
 
 - [x] 05-02-PLAN.md - The bound check audit, every count and length field from the parse order, and the capacity wall that keeps the audit done
-- [ ] 05-03-PLAN.md - The fuzz crate, the generated scaffold with the workspace flag, a target that calls both modes, and the two bounded `xtask` commands
+- [x] 05-03-PLAN.md - The fuzz crate, the generated scaffold with the workspace flag, a target that calls both modes, and the two bounded `xtask` commands
 - [ ] 05-06-PLAN.md - The stable fuzz smoke test, a fixed seed mutation of corpus files, in the normal gate, no dependency
 
 **Wave 3** *(blocked on Wave 2 completion)*
@@ -719,5 +719,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 2. The object graph | 10/10 | Complete    | 2026-09-11 |
 | 3. Forms | 18/18 | Complete    | 2026-09-11 |
 | 4. It writes a project | 9/9 | Complete    | 2026-09-13 |
-| 5. Hostility | 3/8 | In Progress|  |
+| 5. Hostility | 4/8 | In Progress|  |
 | 6. Version 1.0 | 0/5 | Not started | - |
