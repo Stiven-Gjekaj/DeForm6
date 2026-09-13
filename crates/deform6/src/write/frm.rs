@@ -67,14 +67,11 @@ fn append_blob(
     blob_cursor: &mut BlobCursor,
     frx: &mut Vec<u8>,
 ) -> Result<Option<u32>, Refusal> {
-    let blob = frx::Blob {
-        header: [0u8; 8],
-        image: Vec::new(),
-        declared_len,
-        offset,
-    };
-    let frx_offset = blob_cursor.take(&blob)?;
-
+    // Check the byte range fits inside `data` before the cursor advances.
+    // The cursor's own offset must move only on the path that actually
+    // appends bytes to `frx`: a refusal here must leave the cursor exactly
+    // where it was, or every blob written after this one in the same form
+    // would be assigned a `.frx` offset that overstates its real position.
     let Ok(start) = usize::try_from(offset) else {
         return Ok(None);
     };
@@ -90,6 +87,14 @@ fn append_blob(
     let Some(bytes) = data.get(start..end) else {
         return Ok(None);
     };
+
+    let blob = frx::Blob {
+        header: [0u8; 8],
+        image: Vec::new(),
+        declared_len,
+        offset,
+    };
+    let frx_offset = blob_cursor.take(&blob)?;
 
     frx.extend_from_slice(bytes);
     Ok(Some(frx_offset))
@@ -1106,6 +1111,70 @@ mod tests {
         assert!(
             frm_text.contains(":0000"),
             "the real blob after the unreadable one must still start at offset zero: {frm_text}"
+        );
+    }
+
+    #[test]
+    fn a_blob_whose_range_does_not_fit_leaves_the_cursor_unmoved_for_the_next_blob() {
+        // CR-01: `append_blob` must check the byte range fits inside `data`
+        // before it calls `BlobCursor::take`. If the check ran after the
+        // take, a blob whose range does not fit still advances the cursor
+        // as if it had been written, and every blob after it in the same
+        // form gets a `.frx` offset that overstates its real position.
+        let (name, _faults) = SafeName::new("frmDrift", NameKind::Form);
+        let control = ControlModel {
+            name: name.clone(),
+            kind: ControlKind::Form,
+            array_index: None,
+            parent: None,
+            depth: 0,
+            is_menu: false,
+            is_external: false,
+            properties: vec![
+                // "Icon" sorts before "Picture", so it is processed first;
+                // its declared range (1000..1012) runs past the end of the
+                // twelve byte `data` below.
+                PropertyValue::Blob {
+                    name: "Icon".to_owned(),
+                    offset: 1000,
+                    declared_len: 8,
+                    image_len: 0,
+                    format: crate::vb::frx::ImageFormat::Unknown(Vec::new()),
+                    frx_offset: 0,
+                },
+                // "Picture"'s own declared range (0..12) fits exactly.
+                PropertyValue::Blob {
+                    name: "Picture".to_owned(),
+                    offset: 0,
+                    declared_len: 8,
+                    image_len: 0,
+                    format: crate::vb::frx::ImageFormat::Unknown(Vec::new()),
+                    frx_offset: 0,
+                },
+            ],
+        };
+        let form = FormModel {
+            name,
+            tree_refused: false,
+            controls: vec![control],
+            procedures: Vec::new(),
+            blobs: Vec::new(),
+        };
+        let mut data = 8_u32.to_le_bytes().to_vec();
+        data.extend_from_slice(&[0u8; 8]);
+
+        let (files, items) = write_form(&form, &[], &data).expect("write_form must succeed");
+        assert!(
+            items
+                .iter()
+                .any(|item| item.confidence == crate::report::Confidence::Unrecoverable),
+            "Icon's own out of range blob must produce a report item: {items:?}"
+        );
+        let frm_text = String::from_utf8_lossy(&files.frm);
+        assert!(
+            frm_text.contains(":0000"),
+            "Picture's own .frx offset must be zero, the same offset it would carry if Icon's \
+             out of range blob had never advanced the cursor at all: {frm_text}"
         );
     }
 
