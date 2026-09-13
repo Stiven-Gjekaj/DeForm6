@@ -1,6 +1,8 @@
 //! `fetch-corpus`: fetches every entry `corpus/manifest.toml` pins,
 //! verifies each one against its own pinned SHA-256, and writes it under
-//! `corpus/fetched/`.
+//! `corpus/fetched/`. `pin-corpus`: fetches one address once, hashes it,
+//! and appends the entry to the manifest, so a human never computes a
+//! SHA-256 by hand.
 //!
 //! Per `AGENTS.md`'s "What may enter this repository": the run time
 //! robustness set carries no licence that permits redistribution, so its
@@ -257,6 +259,134 @@ fn fetch_all() -> Result<usize, String> {
     Ok(entries.len())
 }
 
+/// Refuses `url` when it is not an https address, before any fetch.
+fn refuse_insecure_url(url: &str) -> Result<(), String> {
+    if url.starts_with("https://") {
+        Ok(())
+    } else {
+        Err(format!("{url} is not an https address"))
+    }
+}
+
+/// Gives the lines of `text` that come before the first table header,
+/// unchanged: `pin-corpus` preserves this text byte for byte across a
+/// rewrite, rather than reformatting or dropping it.
+fn split_header(text: &str) -> String {
+    let mut header = String::new();
+    for line in text.lines() {
+        if line.trim_start().starts_with('[') {
+            break;
+        }
+        header.push_str(line);
+        header.push('\n');
+    }
+    header
+}
+
+/// Renders one manifest entry as a quoted `[key]` table header followed
+/// by its two fields, using `toml::Value`'s own `Display` for correct
+/// TOML string escaping.
+fn render_entry(key: &str, entry: &Entry) -> String {
+    format!(
+        "[{}]\nurl = {}\nsha256 = {}\n",
+        toml::Value::String(key.to_owned()),
+        toml::Value::String(entry.url.clone()),
+        toml::Value::String(entry.sha256.clone())
+    )
+}
+
+/// Renders `header`, unchanged, followed by every entry in `entries`,
+/// sorted by key: the whole manifest file, rebuilt from structured data
+/// rather than grown by appending text to the end.
+fn render_manifest(header: &str, entries: &BTreeMap<String, Entry>) -> String {
+    let mut out = header.to_owned();
+    for (key, entry) in entries {
+        out.push('\n');
+        out.push_str(&render_entry(key, entry));
+    }
+    out
+}
+
+/// Parses `text`, refuses an unsafe or duplicate `name`, adds `name`
+/// pinned to `url`/`sha256`, and renders the whole file back, keeping
+/// whatever text came before the first table header unchanged. Touches
+/// neither the network nor the file system, so a test drives it
+/// directly with a manifest built inside the test.
+fn add_entry(text: &str, name: &str, url: &str, sha256: &str) -> Result<String, String> {
+    refuse_unsafe_key(name)?;
+    let mut entries = parse_manifest(text)?;
+    if let Some(existing) = entries.get(name) {
+        return Err(format!(
+            "{name} is already pinned to {}, refusing to overwrite",
+            existing.url
+        ));
+    }
+    entries.insert(
+        name.to_owned(),
+        Entry {
+            url: url.to_owned(),
+            sha256: sha256.to_owned(),
+        },
+    );
+    let header = split_header(text);
+    let rendered = render_manifest(&header, &entries);
+    rendered
+        .parse::<toml::Table>()
+        .map(|_| ())
+        .map_err(|err| format!("the manifest this command rendered is not valid TOML: {err}"))?;
+    Ok(rendered)
+}
+
+/// Fetches `url` once, hashes the bytes, and pins `name` to that hash in
+/// `corpus/manifest.toml`. Never writes the fetched bytes anywhere:
+/// pinning is not fetching, so a person can pin an entry from a machine
+/// that has no room for the file.
+fn pin_inner(name: &str, url: &str) -> Result<String, String> {
+    refuse_unsafe_key(name)?;
+    refuse_insecure_url(url)?;
+
+    let path = manifest_path();
+    let text = std::fs::read_to_string(&path)
+        .map_err(|err| format!("reading {}: {err}", path.display()))?;
+
+    let existing_entries = parse_manifest(&text)?;
+    if let Some(existing) = existing_entries.get(name) {
+        return Err(format!(
+            "{name} is already pinned to {}, refusing to overwrite",
+            existing.url
+        ));
+    }
+
+    let bytes = fetch_bytes(url).map_err(|err| format!("{name}: fetching {url}: {err}"))?;
+    let hash = compute_sha256_hex(&bytes);
+
+    let rendered = add_entry(&text, name, url, &hash)?;
+    std::fs::write(&path, &rendered).map_err(|err| format!("writing {}: {err}", path.display()))?;
+
+    Ok(hash)
+}
+
+/// Runs `pin-corpus <name> <url>`.
+pub fn run_pin(args: &[String]) -> i32 {
+    match args {
+        [name, url] => match pin_inner(name, url) {
+            Ok(hash) => {
+                println!("{name}");
+                println!("{hash}");
+                0
+            }
+            Err(message) => {
+                eprintln!("xtask: {message}");
+                1
+            }
+        },
+        _ => {
+            eprintln!("xtask: usage: cargo run -p xtask -- pin-corpus <name> <url>");
+            1
+        }
+    }
+}
+
 /// Runs `fetch-corpus`. Takes no arguments.
 pub fn run(_args: &[String]) -> i32 {
     match fetch_all() {
@@ -284,8 +414,8 @@ mod tests {
     )]
 
     use super::{
-        MINIMUM_MANIFEST_ENTRIES, check_minimum_manifest_entries, compute_sha256_hex,
-        destination_path, is_valid_sha256_hex, parse_manifest, verify_hash,
+        MINIMUM_MANIFEST_ENTRIES, add_entry, check_minimum_manifest_entries, compute_sha256_hex,
+        destination_path, is_valid_sha256_hex, parse_manifest, refuse_insecure_url, verify_hash,
     };
     use std::path::Path;
 
@@ -415,5 +545,83 @@ mod tests {
     fn destination_path_refuses_a_parent_directory_component() {
         let resolved_dir = Path::new("/tmp/deform6-fetch-corpus-test");
         assert!(destination_path("..", resolved_dir).is_err());
+    }
+
+    #[test]
+    fn refuse_insecure_url_refuses_a_non_https_address() {
+        assert!(refuse_insecure_url("http://example.invalid/a.exe").is_err());
+        assert!(refuse_insecure_url("https://example.invalid/a.exe").is_ok());
+    }
+
+    #[test]
+    fn add_entry_appends_to_an_empty_manifest_and_preserves_the_header() {
+        let text = "# a header comment\n# a second header line\n";
+        let rendered = add_entry(
+            text,
+            "a-program",
+            "https://example.invalid/a.exe",
+            KNOWN_SHA256_ABC,
+        )
+        .expect("adding to an empty manifest must succeed");
+        assert!(rendered.starts_with(text), "{rendered}");
+        let entries = parse_manifest(&rendered).expect("the rendered manifest must parse");
+        assert_eq!(entries.len(), 1);
+        let entry = entries
+            .get("a-program")
+            .expect("the new entry must be present");
+        assert_eq!(entry.url, "https://example.invalid/a.exe");
+        assert_eq!(entry.sha256, KNOWN_SHA256_ABC);
+    }
+
+    #[test]
+    fn add_entry_adds_a_second_entry_and_keeps_the_first() {
+        let text = format!(
+            "# header\n\n[\"a-program\"]\nurl = \"https://example.invalid/a.exe\"\nsha256 = \"{KNOWN_SHA256_ABC}\"\n"
+        );
+        let other_hash = "b".repeat(64);
+        let rendered = add_entry(
+            &text,
+            "b-program",
+            "https://example.invalid/b.exe",
+            &other_hash,
+        )
+        .expect("adding a second entry must succeed");
+        let entries = parse_manifest(&rendered).expect("the rendered manifest must parse");
+        assert_eq!(entries.len(), 2);
+        assert!(entries.contains_key("a-program"));
+        assert!(entries.contains_key("b-program"));
+    }
+
+    #[test]
+    fn add_entry_refuses_a_duplicate_name() {
+        let text = format!(
+            "[\"a-program\"]\nurl = \"https://example.invalid/a.exe\"\nsha256 = \"{KNOWN_SHA256_ABC}\"\n"
+        );
+        let err = add_entry(
+            &text,
+            "a-program",
+            "https://example.invalid/other.exe",
+            KNOWN_SHA256_ABC,
+        )
+        .expect_err("a duplicate name must refuse");
+        assert!(err.contains("a-program"), "{err}");
+    }
+
+    #[test]
+    fn add_entry_refuses_a_name_with_a_path_separator() {
+        assert!(
+            add_entry(
+                "",
+                "a/program",
+                "https://example.invalid/a.exe",
+                KNOWN_SHA256_ABC
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn add_entry_refuses_a_name_with_a_parent_directory_component() {
+        assert!(add_entry("", "..", "https://example.invalid/a.exe", KNOWN_SHA256_ABC).is_err());
     }
 }
