@@ -178,11 +178,13 @@ pub fn path_for_code(kind: CodeKind, name: &SafeName) -> String {
 /// Issues a report item's own path, extending, never overwriting, a path
 /// that collides with one already issued.
 ///
-/// Holds every path issued so far in a `HashSet`, for `issue`'s own
+/// Holds every path issued so far in an ordered set, for `issue`'s own
 /// existence check, and never iterates it: the suffix a collision gets
-/// depends only on the order a caller calls `issue`, never on this set's
-/// own internal layout, so a process dependent hash seed cannot change the
-/// written report, and RPT-05's determinism requirement still holds.
+/// depends only on the order a caller calls `issue`. The set is ordered
+/// and not hash keyed, so it carries no seed that could differ between two
+/// runs. Phase 4 made that a source assertion: `report.rs` holds no
+/// `HashMap`. Keep it that way, because RPT-05 asks for a byte identical
+/// report and a hash keyed container is how that quietly stops being true.
 ///
 /// Also remembers, per colliding base path, the next suffix to try in
 /// `next_suffix`. A hostile file that drives thousands of items to the same
@@ -196,8 +198,8 @@ pub fn path_for_code(kind: CodeKind, name: &SafeName) -> String {
 /// that skips the check.
 #[derive(Default)]
 pub struct PathIssuer {
-    issued: std::collections::HashSet<String>,
-    next_suffix: std::collections::HashMap<String, u32>,
+    issued: std::collections::BTreeSet<String>,
+    next_suffix: std::collections::BTreeMap<String, u32>,
 }
 
 impl PathIssuer {

@@ -292,11 +292,13 @@ impl SafeName {
 /// Issues [`SafeName`] values one at a time, making a colliding name
 /// distinct from every name already issued.
 ///
-/// Holds every name issued so far in a `HashSet`, for `issue`'s own
+/// Holds every name issued so far in an ordered set, for `issue`'s own
 /// existence check, and never iterates it: the collision suffix depends
-/// only on the order names are issued in, never on this set's own internal
-/// layout, so a process dependent hash seed cannot change the written
-/// report (RPT-01).
+/// only on the order names are issued in. The set is ordered and not hash
+/// keyed, so it carries no seed that could differ between two runs. Phase
+/// 4 made that a source assertion: `model.rs` holds no `HashMap`. Keep it
+/// that way, because RPT-01 asks for a byte identical report and a hash
+/// keyed container is how that quietly stops being true.
 ///
 /// Also remembers, per colliding original name, the next suffix to try in
 /// `next_suffix`. A hostile file that drives thousands of objects or
@@ -310,8 +312,8 @@ impl SafeName {
 /// a shortcut that skips the check.
 #[derive(Default)]
 pub struct SafeNameIssuer {
-    issued: std::collections::HashSet<String>,
-    next_suffix: std::collections::HashMap<String, u32>,
+    issued: std::collections::BTreeSet<String>,
+    next_suffix: std::collections::BTreeMap<String, u32>,
 }
 
 impl SafeNameIssuer {
