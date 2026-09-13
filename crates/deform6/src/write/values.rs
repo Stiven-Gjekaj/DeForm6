@@ -23,6 +23,105 @@
 use crate::report::{Confidence, Evidence, ReportItem};
 use crate::vb::propstream::{FontBlock, PositionBlock, PropertyValue};
 
+/// The three property names this corpus proves carry a colour.
+/// `FILE-FORMATS.md` section 3.6: `BackColor` (240 lines), `ForeColor`
+/// (203 lines) and `FillColor` (3 lines), out of 446 colour values total.
+/// The shape lookup is by this exact name, never by payload type: the
+/// reader's own `PayloadType` (`crate::vb::opcodes`) has no `Colour`
+/// variant, because it was built to decode bytes, not to remember display
+/// intent.
+pub const COLOUR_PROPERTIES: [&str; 3] = ["BackColor", "ForeColor", "FillColor"];
+
+/// The sixteen enumeration member names `FILE-FORMATS.md` section 3.5
+/// proves, and only these: `(property name, value, member name)`. Taken
+/// from section 3.5's own list and from nowhere else, then matched to the
+/// property that carries each one by grepping every corpus `.frm` file
+/// this session for a line of the exact shape `Name = Value  'Member`. A
+/// value this table does not name still writes a bare number, with no
+/// comment at all: section 3.5 states the comment is decoration the
+/// loader ignores, so leaving one off for a value outside this proven set
+/// is safe.
+pub const ENUM_MEMBERS: &[(&str, i64, &str)] = &[
+    ("Appearance", 0, "Flat"),
+    ("BorderStyle", 0, "None"),
+    ("FillStyle", 0, "Solid"),
+    ("BackStyle", 0, "Transparent"),
+    ("Value", 1, "Checked"),
+    ("BorderStyle", 1, "Fixed Single"),
+    ("Alignment", 1, "Right Justify"),
+    ("Alignment", 2, "Center"),
+    ("StartUpPosition", 2, "CenterScreen"),
+    ("MousePointer", 2, "Cross"),
+    ("Style", 2, "Dropdown List"),
+    ("ScrollBars", 3, "Both"),
+    ("ScaleMode", 3, "Pixel"),
+    ("StartUpPosition", 3, "Windows Default"),
+    ("BorderStyle", 4, "Fixed ToolWindow"),
+    ("MousePointer", 99, "Custom"),
+];
+
+/// Which written shape a name-keyed numeric property takes. Never decided
+/// from the payload type: the reader's own payload type carries no colour
+/// variant and no enumeration variant, because it was built to decode
+/// bytes, not to remember display intent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ValueShape {
+    /// `BackColor`, `ForeColor` or `FillColor`: [`format_colour`] decides
+    /// the rest, branching on the control rather than on the value.
+    Colour,
+    /// Every other numeric property: a plain decimal, with a known
+    /// enumeration comment when [`enum_member_name`] finds one for it.
+    PlainNumber,
+}
+
+/// Gives the [`ValueShape`] property `name` takes.
+#[must_use]
+pub fn shape_for(name: &str) -> ValueShape {
+    if COLOUR_PROPERTIES.contains(&name) {
+        ValueShape::Colour
+    } else {
+        ValueShape::PlainNumber
+    }
+}
+
+/// Gives the enumeration member name `(name, value)` names, or `None` when
+/// [`ENUM_MEMBERS`] holds no such pair. Never a guess: a value outside the
+/// table takes no comment, per `FILE-FORMATS.md` section 3.5.
+#[must_use]
+pub fn enum_member_name(name: &str, value: i64) -> Option<&'static str> {
+    ENUM_MEMBERS
+        .iter()
+        .find(|(row_name, row_value, _)| *row_name == name && *row_value == value)
+        .map(|(_, _, member)| *member)
+}
+
+/// Formats a colour value: eight upper case hex digits between `&H` and
+/// `&` on an intrinsic control, or the same signed value as a plain
+/// decimal on an external (OCX) control. `FILE-FORMATS.md` section 3.6:
+/// the two forms carry the same bit pattern (the one corpus file that
+/// proves the OCX form writes `-2147483643` where an intrinsic control
+/// writes `&H80000005&` for the same value), so both are built from the
+/// one signed value the reader gave, never from two different readings.
+#[must_use]
+pub fn format_colour(value: i32, is_external: bool) -> String {
+    if is_external {
+        value.to_string()
+    } else {
+        format!("&H{:08X}&", value.cast_unsigned())
+    }
+}
+
+/// Formats a plain number, adding the known enumeration comment when
+/// [`enum_member_name`] finds one for `name` and `value`, and writing a
+/// bare number, with no comment at all, otherwise.
+#[must_use]
+fn format_number_with_enum_comment(name: &str, value: i64) -> String {
+    match enum_member_name(name, value) {
+        Some(member) => format!("{value}  '{member}"),
+        None => value.to_string(),
+    }
+}
+
 /// Formats a boolean the exact way the IDE writes one: `0` then three
 /// spaces then `'False`, or `-1` then two spaces then `'True`.
 /// `FILE-FORMATS.md` section 3.4: there is no other spelling. Any value
@@ -98,21 +197,34 @@ fn position_coordinates(value: &PositionBlock) -> [(&'static str, String); 4] {
     ]
 }
 
+/// Formats a font size from its own points and its own ten-thousandths
+/// remainder, both already computed by the reader
+/// ([`FontBlock::size_points`], [`FontBlock::size_remainder`]). Builds the
+/// fraction from the remainder's own decimal digits, trimming trailing
+/// zeros, rather than reconstructing a floating point value: `AGENTS.md`
+/// asks for the number that can be proved, and a digit trim never rounds.
+#[must_use]
+fn format_font_size(size_points: u32, size_remainder: u32) -> String {
+    if size_remainder == 0 {
+        return size_points.to_string();
+    }
+    let digits = format!("{size_remainder:04}");
+    let trimmed = digits.trim_end_matches('0');
+    format!("{size_points}.{trimmed}")
+}
+
 /// Gives the seven `Font` block lines in the fixed order the IDE always
 /// writes them: `Name`, `Size`, `Charset`, `Weight`, `Underline`,
 /// `Italic`, `Strikethrough`. `FILE-FORMATS.md` section 3.9: 235 of 235
 /// blocks in the corpus hold exactly these seven keys, in exactly this
 /// order.
-///
-/// `Size` is written from [`FontBlock::size_points`] alone here: the exact
-/// fraction [`FontBlock::size_remainder`] carries is plan 04-02 task 2's
-/// own job (`format_font_size`), one of the six measured value grammars
-/// this task's own scope does not yet cover. The order and the other six
-/// keys are already final.
 fn font_lines(value: &FontBlock) -> [(&'static str, String); 7] {
     [
         ("Name", escape_inline_string(&value.name)),
-        ("Size", value.size_points.to_string()),
+        (
+            "Size",
+            format_font_size(value.size_points, value.size_remainder),
+        ),
         ("Charset", i64::from(value.charset).to_string()),
         ("Weight", i64::from(value.weight).to_string()),
         ("Underline", format_boolean(value.underline)),
@@ -146,6 +258,11 @@ pub enum FormattedValue {
 /// Turns one decoded (or undecoded) property into a [`FormattedValue`],
 /// plus a [`ReportItem`] when the property is omitted.
 ///
+/// `is_external` decides the colour branch ([`format_colour`]): an
+/// intrinsic control writes `&H`-bracketed hex, an external (OCX) control
+/// writes a plain signed decimal, for the same value. Every other shape
+/// ignores it.
+///
 /// The `path` field of a returned [`ReportItem`] is always empty: this
 /// function knows only the property, never the form or the control it
 /// belongs to. The caller fills in the real path before the item enters
@@ -153,19 +270,31 @@ pub enum FormattedValue {
 ///
 /// The match below has one arm for each variant of [`PropertyValue`] and
 /// no wildcard arm: a variant this crate adds later fails to compile here
-/// until somebody decides how to write it. Most of the arms below give a
-/// plain, rough shape for now: the exact colour, enumeration, string and
-/// font grammars are this plan's own task 2 and task 3. The undecoded and
-/// unreadable-blob arms are this task's own job, and are already final.
+/// until somebody decides how to write it.
 #[must_use]
-pub fn format_value(value: &PropertyValue) -> (FormattedValue, Option<ReportItem>) {
+pub fn format_value(
+    value: &PropertyValue,
+    is_external: bool,
+) -> (FormattedValue, Option<ReportItem>) {
     match value {
-        PropertyValue::Byte { value, .. } => (FormattedValue::Line(value.to_string()), None),
+        PropertyValue::Byte { name, value } => (
+            FormattedValue::Line(format_number_with_enum_comment(name, i64::from(*value))),
+            None,
+        ),
         PropertyValue::Boolean { value, .. } => {
             (FormattedValue::Line(format_boolean(*value != 0)), None)
         }
-        PropertyValue::Integer { value, .. } => (FormattedValue::Line(value.to_string()), None),
-        PropertyValue::Long { value, .. } => (FormattedValue::Line(value.to_string()), None),
+        PropertyValue::Integer { name, value } => (
+            FormattedValue::Line(format_number_with_enum_comment(name, i64::from(*value))),
+            None,
+        ),
+        PropertyValue::Long { name, value } => {
+            let text = match shape_for(name) {
+                ValueShape::Colour => format_colour(*value, is_external),
+                ValueShape::PlainNumber => format_number_with_enum_comment(name, i64::from(*value)),
+            };
+            (FormattedValue::Line(text), None)
+        }
         PropertyValue::Single { value, .. } => (FormattedValue::Line(value.to_string()), None),
         PropertyValue::Text { value, .. } => {
             (FormattedValue::Line(escape_inline_string(value)), None)
@@ -229,12 +358,15 @@ pub fn format_value(value: &PropertyValue) -> (FormattedValue, Option<ReportItem
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{FormattedValue, font_lines, format_value, position_coordinates};
+    use super::{
+        COLOUR_PROPERTIES, FormattedValue, font_lines, format_colour, format_value,
+        position_coordinates,
+    };
     use crate::report::Confidence;
     use crate::vb::propstream::{FontBlock, PositionBlock, PropertyValue};
 
     fn assert_line(value: &PropertyValue) -> String {
-        match format_value(value).0 {
+        match format_value(value, false).0 {
             FormattedValue::Line(text) => text,
             other => panic!("expected a Line, got {other:?}"),
         }
@@ -334,7 +466,7 @@ mod tests {
                 height: 4,
             },
         };
-        match format_value(&value).0 {
+        match format_value(&value, false).0 {
             FormattedValue::Multi(lines) => assert_eq!(lines.len(), 4),
             other => panic!("expected a Multi, got {other:?}"),
         }
@@ -368,6 +500,7 @@ mod tests {
             ]
         );
         assert_eq!(lines[0], ("Name", "\"Arial\"".to_owned()));
+        assert_eq!(lines[1], ("Size", "8.25".to_owned()));
         assert_eq!(lines[2], ("Charset", "0".to_owned()));
         assert_eq!(lines[3], ("Weight", "400".to_owned()));
         assert_eq!(lines[4], ("Underline", "0   'False".to_owned()));
@@ -391,7 +524,7 @@ mod tests {
                 name: "Segoe UI".to_owned(),
             },
         };
-        match format_value(&value).0 {
+        match format_value(&value, false).0 {
             FormattedValue::Multi(lines) => assert_eq!(lines.len(), 7),
             other => panic!("expected a Multi, got {other:?}"),
         }
@@ -407,7 +540,7 @@ mod tests {
             format: crate::vb::frx::ImageFormat::Unknown(Vec::new()),
             frx_offset: 0,
         };
-        assert_eq!(format_value(&value).0, FormattedValue::Resource);
+        assert_eq!(format_value(&value, false).0, FormattedValue::Resource);
     }
 
     #[test]
@@ -418,7 +551,7 @@ mod tests {
             control_type: "Form".to_owned(),
             bytes_not_read: 6,
         };
-        let (formatted, item) = format_value(&value);
+        let (formatted, item) = format_value(&value, false);
         assert_eq!(formatted, FormattedValue::Omit);
         let item = item.expect("an omitted undecoded property must carry a report item");
         assert_eq!(item.confidence, Confidence::Unrecoverable);
@@ -439,8 +572,8 @@ mod tests {
             name: "Icon".to_owned(),
             offset: 0x20,
         };
-        let (undecoded_formatted, undecoded_item) = format_value(&undecoded);
-        let (unreadable_formatted, unreadable_item) = format_value(&unreadable);
+        let (undecoded_formatted, undecoded_item) = format_value(&undecoded, false);
+        let (unreadable_formatted, unreadable_item) = format_value(&unreadable, false);
         assert_eq!(undecoded_formatted, FormattedValue::Omit);
         assert_eq!(unreadable_formatted, FormattedValue::Omit);
         let undecoded_item = undecoded_item.expect("undecoded must carry a report item");
@@ -481,9 +614,133 @@ mod tests {
             },
         ];
         for value in &values {
-            if let FormattedValue::Line(text) = format_value(value).0 {
+            if let FormattedValue::Line(text) = format_value(value, false).0 {
                 assert!(!text.is_empty(), "{value:?} gave an empty line");
             }
         }
+    }
+
+    // --- Task 2: the six measured value grammars --------------------------
+
+    #[test]
+    fn colour_properties_holds_exactly_the_three_corpus_proven_names() {
+        assert_eq!(COLOUR_PROPERTIES, ["BackColor", "ForeColor", "FillColor"]);
+    }
+
+    #[test]
+    fn a_colour_on_an_intrinsic_control_writes_eight_upper_case_hex_digits_bracketed() {
+        let text = format_colour(-2_147_483_643, false);
+        // "&H" (2) + eight hex digits (8) + "&" (1) = 11, not the plan
+        // text's own stated twelve: counted directly against
+        // "&H80000005&", the literal example FILE-FORMATS.md section 3.6
+        // and the corpus both give.
+        assert_eq!(text.len(), 11, "{text}");
+        assert!(text.starts_with("&H"), "{text}");
+        assert!(text.ends_with('&'), "{text}");
+        let digits = text
+            .strip_prefix("&H")
+            .and_then(|rest| rest.strip_suffix('&'))
+            .expect("checked starts_with/ends_with above");
+        assert_eq!(digits.len(), 8, "{text}");
+        assert!(
+            digits
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_lowercase()),
+            "{text}"
+        );
+        assert_eq!(text, "&H80000005&");
+    }
+
+    #[test]
+    fn the_same_signed_colour_value_on_an_external_control_writes_a_plain_decimal() {
+        let text = format_colour(-2_147_483_643, true);
+        assert_eq!(text, "-2147483643");
+        assert!(!text.contains('&'), "{text}");
+    }
+
+    #[test]
+    fn a_long_back_color_through_format_value_branches_on_is_external() {
+        let value = PropertyValue::Long {
+            name: "BackColor".to_owned(),
+            value: -2_147_483_643,
+        };
+        assert_eq!(
+            format_value(&value, false).0,
+            FormattedValue::Line("&H80000005&".to_owned())
+        );
+        assert_eq!(
+            format_value(&value, true).0,
+            FormattedValue::Line("-2147483643".to_owned())
+        );
+    }
+
+    #[test]
+    fn an_enumeration_value_the_table_does_not_name_writes_a_bare_number() {
+        let value = PropertyValue::Byte {
+            name: "SomeUnknownEnumProperty".to_owned(),
+            value: 5,
+        };
+        let text = assert_line(&value);
+        assert_eq!(text, "5");
+        assert!(!text.contains('\''), "{text}");
+    }
+
+    #[test]
+    fn an_enumeration_value_the_table_names_writes_the_number_two_spaces_and_the_name() {
+        let value = PropertyValue::Byte {
+            name: "BorderStyle".to_owned(),
+            value: 1,
+        };
+        assert_eq!(assert_line(&value), "1  'Fixed Single");
+    }
+
+    #[test]
+    fn a_string_holding_one_double_quote_is_escaped_by_doubling_it_and_never_a_backslash() {
+        let text = super::escape_inline_string("Animate \"Explosion\"");
+        assert_eq!(text, "\"Animate \"\"Explosion\"\"\"");
+        assert!(!text.contains('\\'), "{text}");
+    }
+
+    #[test]
+    fn a_float_formats_with_a_full_stop_separator() {
+        let value = PropertyValue::Single {
+            name: "ASingle".to_owned(),
+            value: 9.75,
+        };
+        let text = assert_line(&value);
+        assert!(text.contains('.'), "{text}");
+        assert!(!text.contains(','), "{text}");
+        assert_eq!(text, "9.75");
+    }
+
+    #[test]
+    fn the_font_size_reconstructs_the_exact_fraction_from_points_and_remainder() {
+        assert_eq!(super::format_font_size(8, 2_500), "8.25");
+        assert_eq!(super::format_font_size(9, 7_500), "9.75");
+        assert_eq!(super::format_font_size(10, 0), "10");
+    }
+
+    /// `corpus/vb6-code/Fire-effect/frmFire.frm` line 4:
+    /// `BackColor       =   &H80000005&`. Read through the production
+    /// `inspect` path (`vb::opcodes` plan 03-13), `frmFire`'s own
+    /// `BackColor` decodes to the signed value `-2_147_483_643`.
+    #[test]
+    fn the_fast_flames_back_color_line_matches_the_committed_frm_byte_for_byte() {
+        let value = PropertyValue::Long {
+            name: "BackColor".to_owned(),
+            value: -2_147_483_643,
+        };
+        assert_eq!(assert_line(&value), "&H80000005&");
+    }
+
+    /// `corpus/vb6-code/Curves-effect/Curves.frm` line 3:
+    /// `BorderStyle     =   1  'Fixed Single`.
+    #[test]
+    fn the_curves_border_style_line_matches_the_committed_frm_byte_for_byte() {
+        let value = PropertyValue::Byte {
+            name: "BorderStyle".to_owned(),
+            value: 1,
+        };
+        assert_eq!(assert_line(&value), "1  'Fixed Single");
     }
 }
