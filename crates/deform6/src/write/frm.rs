@@ -17,7 +17,9 @@ use crate::vb::propstream::{FontBlock, PositionBlock, PropertyValue};
 use crate::vb::{ControlReport, FormReport, ObjectProcedures, ProcedureEntry};
 use crate::write::values;
 
-use super::model::{ControlModel, FormModel, LineWriter, NameKind, ProcedureModel, SafeName};
+use super::model::{
+    ControlModel, FormModel, LineWriter, MAX_NESTING_DEPTH, NameKind, ProcedureModel, SafeName,
+};
 
 /// The bytes of one form's `.frm` file and its own `.frx` resource file.
 pub(crate) struct ThinFormOutput {
@@ -657,6 +659,97 @@ fn children_of_model(controls: &[ControlModel]) -> Vec<Vec<usize>> {
     children
 }
 
+/// Gives `kids` reordered so every non-menu child precedes every menu
+/// child, keeping each group's own relative order unchanged.
+/// `.planning/research/FILE-FORMATS.md` section 2.5: a hard load
+/// requirement, not a display preference; the IDE's own documented error
+/// is `Line 'item1': All controls must precede menus; can't load control
+/// 'item2'.` `sort_by_key` is stable, so this is the whole rule: split
+/// into two groups by one boolean key, keeping the original order inside
+/// each group.
+fn child_order(kids: &[usize], controls: &[ControlModel]) -> Vec<usize> {
+    let mut ordered = kids.to_vec();
+    ordered.sort_by_key(|&index| controls.get(index).is_some_and(|control| control.is_menu));
+    ordered
+}
+
+/// The intrinsic control classes `.planning/research/FILE-FORMATS.md`
+/// section 2.4 counts in the corpus, by their own bare name (without the
+/// `VB.` prefix): `Label` 125, `PictureBox` 80, `TextBox` 66, `Menu` 46,
+/// `CommandButton` 45, `Form` 36, `HScrollBar` 22, `Frame` 19, `CheckBox`
+/// 15, `OptionButton` 12, `ComboBox` 10, `Line` 7, `ListBox` 3,
+/// `VScrollBar` 1. A kind not on this list is written from the kind name
+/// the reader gave, with an `inferred` report item naming the gap, per
+/// this task's own action text.
+const CORPUS_PROVEN_CLASSES: [&str; 14] = [
+    "Label",
+    "PictureBox",
+    "TextBox",
+    "Menu",
+    "CommandButton",
+    "Form",
+    "HScrollBar",
+    "Frame",
+    "CheckBox",
+    "OptionButton",
+    "ComboBox",
+    "Line",
+    "ListBox",
+    "VScrollBar",
+];
+
+/// Gives the `VB.<Name>` class `control` writes on its own `Begin` line,
+/// or `None` when the control's own kind could not be named at all.
+///
+/// A kind the reader could not name at all
+/// ([`ControlKind::Unknown`]) writes no block: a guessed class name
+/// produces a file that loads with the wrong control on it, which is
+/// worse than a file that is missing one, so this gives `None` and an
+/// `unrecoverable` report item carrying the raw type value instead.
+///
+/// A kind the reader could name, but [`CORPUS_PROVEN_CLASSES`] does not
+/// prove, is still written from that kind's own name: the multiple
+/// document interface form is the named case, held open by
+/// `FILE-FORMATS.md` gap 9 with zero corpus instances. An `inferred`
+/// report item names the gap; the file is never silently written as if it
+/// were measured.
+fn class_name_for(
+    form: &FormModel,
+    control: &ControlModel,
+    index: usize,
+    items: &mut Vec<ReportItem>,
+) -> Option<String> {
+    if let ControlKind::Unknown(raw) = control.kind {
+        items.push(ReportItem {
+            path: control_report_path(form, control, index),
+            confidence: Confidence::Unrecoverable,
+            basis: format!(
+                "this control's own type value {raw:#04x} is not one this repository names; \
+                 writing a guessed class would produce a file that loads with the wrong \
+                 control on it, so no block is written for it"
+            ),
+            evidence: Vec::new(),
+        });
+        return None;
+    }
+
+    let class = vb_class_name(&control.kind);
+    let bare_name = class.strip_prefix("VB.").unwrap_or(class.as_str());
+    if !CORPUS_PROVEN_CLASSES.contains(&bare_name) {
+        items.push(ReportItem {
+            path: control_report_path(form, control, index),
+            confidence: Confidence::Inferred,
+            basis: format!(
+                "{class} is written from the kind name the reader gave; no corpus program \
+                 exercises it"
+            ),
+            evidence: Vec::new(),
+        });
+    }
+
+    Some(class)
+}
+
 /// Writes one control's own `Begin ... End` block, its own properties in
 /// their own resolved emission order, and every one of its own children,
 /// depth first.
@@ -676,16 +769,42 @@ fn write_model_control_block(
         return Ok(());
     };
     let depth = control.depth;
+
+    if depth > MAX_NESTING_DEPTH {
+        items.push(ReportItem {
+            path: control_report_path(form, control, index),
+            confidence: Confidence::Unrecoverable,
+            basis: format!(
+                "{} sits at nesting depth {depth}, past the documented limit of \
+                 {MAX_NESTING_DEPTH}; the IDE refuses a file that deep, so this control is \
+                 omitted",
+                control.name.as_str()
+            ),
+            evidence: Vec::new(),
+        });
+        return Ok(());
+    }
+
+    let Some(class) = class_name_for(form, control, index, items) else {
+        return Ok(());
+    };
+
     let own_indent = " ".repeat(FRM_INDENT.saturating_mul(depth));
-    let class = vb_class_name(&control.kind);
 
     writer.push_line(&format!(
         "{own_indent}Begin {class} {} ",
         control.name.as_str()
     ));
 
-    let (pending, mut render_items) = collect_pending_lines(form, control, index);
+    let (mut pending, mut render_items) = collect_pending_lines(form, control, index);
     items.append(&mut render_items);
+
+    if let Some(array_index) = control.array_index {
+        pending.push((
+            "Index".to_owned(),
+            PendingLine::Plain(array_index.to_string()),
+        ));
+    }
 
     let mut order: Vec<usize> = (0..pending.len()).collect();
     if !control.is_external {
@@ -742,7 +861,7 @@ fn write_model_control_block(
     write_resolved_lines(writer, &resolved, depth.saturating_add(1));
 
     if let Some(kids) = children.get(index) {
-        for &child in kids {
+        for child in child_order(kids, &form.controls) {
             write_model_control_block(
                 writer,
                 form,
@@ -903,6 +1022,23 @@ pub fn write_form(form: &FormModel, data: &[u8]) -> Result<(FormFiles, Vec<Repor
     ))
 }
 
+/// `crates/deform6/tests/support/frm.rs`'s own independent `.frm` reader,
+/// reused unmodified by [`tests::a_written_form_reads_back_through_the_independent_reader_and_matches_the_model`].
+/// Declared at this file's own top level, not nested inside `mod tests`:
+/// `#[path]` on a module nested inside an inline module resolves relative
+/// to that module's own implied (and here, nonexistent) directory, never
+/// relative to the file that names it, so nesting this declaration inside
+/// `mod tests` fails to find the file at all.
+#[cfg(test)]
+#[path = "../../tests/support/frm.rs"]
+#[allow(
+    dead_code,
+    reason = "this file's own reader exercises only Form::read and parse_blocks; the rest of \
+              support/frm.rs's own public surface (Exclusion, EXCLUSIONS, excluded_reason) is \
+              plan 04-09's own concern and stays dead code from this file's point of view"
+)]
+mod support_frm;
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -914,8 +1050,8 @@ pub fn write_form(form: &FormModel, data: &[u8]) -> Result<(FormFiles, Vec<Repor
 )]
 mod tests {
     use super::{
-        BlobCursor, ControlKind, EMPTY_PICTURE_RECORD, PropertyValue, write_empty_picture_record,
-        write_form,
+        BlobCursor, ControlKind, EMPTY_PICTURE_RECORD, FRM_INDENT, FRM_NAME_PAD, PropertyValue,
+        pad_name, write_empty_picture_record, write_form,
     };
     use crate::vb::frx;
     use crate::vb::opcodes::OpcodeTable;
@@ -927,6 +1063,19 @@ mod tests {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../corpus")
             .join(relative)
+    }
+
+    /// Reads `path` as Latin-1 bytes, this crate's own read and write
+    /// convention: each byte maps to its own code point, never
+    /// `String::from_utf8_lossy`.
+    fn read_latin1(path: &std::path::Path) -> String {
+        let bytes = std::fs::read(path).expect("reading the file");
+        bytes.iter().copied().map(char::from).collect()
+    }
+
+    /// Reads back a written form's own `.frm` bytes as Latin-1 text.
+    fn frm_text(files: &super::FormFiles) -> String {
+        files.frm.iter().copied().map(char::from).collect()
     }
 
     /// Runs `inspect` and `from_report` over a corpus executable, at run
@@ -1240,5 +1389,655 @@ mod tests {
         );
         assert!(frm_text.contains("\"frmOrder.frx\":0000"), "{frm_text}");
         assert!(frm_text.contains("\"frmOrder.frx\":000C"), "{frm_text}");
+    }
+
+    // --- Plan 04-04, Task 2: the block layout ------------------------------
+
+    #[test]
+    fn frm_name_pad_is_sixteen_and_frm_indent_is_three() {
+        assert_eq!(FRM_NAME_PAD, 16);
+        assert_eq!(FRM_INDENT, 3);
+    }
+
+    #[test]
+    fn pad_name_gives_exactly_one_space_for_a_name_at_or_over_the_width() {
+        // `.planning/research/FILE-FORMATS.md` section 3.1: the field is a
+        // minimum, not a truncation, so a name at or over sixteen
+        // characters still gets exactly one space, never zero.
+        assert_eq!(pad_name("StartUpPosition", 16), "StartUpPosition ");
+        assert_eq!(
+            pad_name("AVeryLongPropertyName", 16),
+            "AVeryLongPropertyName "
+        );
+        assert_eq!(pad_name("Caption", 16), "Caption         ");
+    }
+
+    #[test]
+    fn a_begin_line_ends_with_one_space_and_the_matching_end_line_ends_with_no_space() {
+        let (name, _faults) = SafeName::new("frmSpacing", NameKind::Form);
+        let control = ControlModel {
+            name: name.clone(),
+            kind: ControlKind::Form,
+            array_index: None,
+            parent: None,
+            depth: 0,
+            is_menu: false,
+            is_external: false,
+            properties: Vec::new(),
+        };
+        let form = FormModel {
+            name,
+            tree_refused: false,
+            controls: vec![control],
+            procedures: Vec::new(),
+            blobs: Vec::new(),
+        };
+        let (files, _items) = write_form(&form, &[]).expect("write_form must succeed");
+        let text = frm_text(&files);
+        let begin_line = text
+            .lines()
+            .find(|line| line.starts_with("Begin "))
+            .expect("a Begin line must exist");
+        assert!(begin_line.ends_with(' '), "{begin_line:?}");
+        let end_line = text
+            .lines()
+            .find(|line| line == &"End")
+            .expect("an End line at column zero must exist");
+        assert!(!end_line.ends_with(' '), "{end_line:?}");
+    }
+
+    #[test]
+    fn a_property_lines_equals_sign_sits_at_the_same_column_as_a_real_corpus_line() {
+        let corpus_text = read_latin1(&corpus_path("vb6-code/Fire-effect/frmFire.frm"));
+        let real_line = corpus_text
+            .lines()
+            .find(|line| line.trim_start().starts_with("BackColor"))
+            .expect("frmFire.frm must declare a BackColor line");
+        let real_eq_column = real_line.find('=').expect("the real line must hold an =");
+
+        let (name, _faults) = SafeName::new("frmSpacing2", NameKind::Form);
+        let control = ControlModel {
+            name: name.clone(),
+            kind: ControlKind::Form,
+            array_index: None,
+            parent: None,
+            depth: 0,
+            is_menu: false,
+            is_external: false,
+            properties: vec![PropertyValue::Long {
+                name: "BackColor".to_owned(),
+                value: -2_147_483_643,
+            }],
+        };
+        let form = FormModel {
+            name,
+            tree_refused: false,
+            controls: vec![control],
+            procedures: Vec::new(),
+            blobs: Vec::new(),
+        };
+        let (files, _items) = write_form(&form, &[]).expect("write_form must succeed");
+        let text = frm_text(&files);
+        let written_line = text
+            .lines()
+            .find(|line| line.contains("BackColor"))
+            .expect("a BackColor line must be written");
+        let written_eq_column = written_line
+            .find('=')
+            .expect("the written line must hold an =");
+        assert_eq!(
+            written_eq_column, real_eq_column,
+            "real: {real_line:?}, written: {written_line:?}"
+        );
+    }
+
+    #[test]
+    fn the_indent_at_depth_zero_one_and_two_is_zero_three_and_six_spaces() {
+        let (form_name, _faults) = SafeName::new("frmDeep", NameKind::Form);
+        let (frame_name, _faults) = SafeName::new("Frame1", NameKind::Control);
+        let (cmd_name, _faults) = SafeName::new("Command1", NameKind::Control);
+        let controls = vec![
+            ControlModel {
+                name: form_name.clone(),
+                kind: ControlKind::Form,
+                array_index: None,
+                parent: None,
+                depth: 0,
+                is_menu: false,
+                is_external: false,
+                properties: Vec::new(),
+            },
+            ControlModel {
+                name: frame_name,
+                kind: ControlKind::Frame,
+                array_index: None,
+                parent: Some(0),
+                depth: 1,
+                is_menu: false,
+                is_external: false,
+                properties: Vec::new(),
+            },
+            ControlModel {
+                name: cmd_name,
+                kind: ControlKind::CommandButton,
+                array_index: None,
+                parent: Some(1),
+                depth: 2,
+                is_menu: false,
+                is_external: false,
+                properties: Vec::new(),
+            },
+        ];
+        let form = FormModel {
+            name: form_name,
+            tree_refused: false,
+            controls,
+            procedures: Vec::new(),
+            blobs: Vec::new(),
+        };
+        let (files, _items) = write_form(&form, &[]).expect("write_form must succeed");
+        let text = frm_text(&files);
+        let begin_form = text
+            .lines()
+            .find(|line| line.contains("Begin VB.Form"))
+            .expect("the form's own Begin line must exist");
+        assert!(begin_form.starts_with("Begin "), "{begin_form:?}");
+        let begin_frame = text
+            .lines()
+            .find(|line| line.contains("Begin VB.Frame"))
+            .expect("the frame's own Begin line must exist");
+        assert!(begin_frame.starts_with("   Begin "), "{begin_frame:?}");
+        let begin_cmd = text
+            .lines()
+            .find(|line| line.contains("Begin VB.CommandButton"))
+            .expect("the command button's own Begin line must exist");
+        assert!(begin_cmd.starts_with("      Begin "), "{begin_cmd:?}");
+    }
+
+    #[test]
+    fn a_control_below_depth_seven_is_omitted_with_one_report_item_each() {
+        let (form_name, _faults) = SafeName::new("frmDeepChain", NameKind::Form);
+        let mut controls = vec![ControlModel {
+            name: form_name.clone(),
+            kind: ControlKind::Form,
+            array_index: None,
+            parent: None,
+            depth: 0,
+            is_menu: false,
+            is_external: false,
+            properties: Vec::new(),
+        }];
+        for level in 1..=8usize {
+            let (name, _faults) = SafeName::new(&format!("Frame{level}"), NameKind::Control);
+            controls.push(ControlModel {
+                name,
+                kind: ControlKind::Frame,
+                array_index: None,
+                parent: Some(level.saturating_sub(1)),
+                depth: level,
+                is_menu: false,
+                is_external: false,
+                properties: Vec::new(),
+            });
+        }
+        let form = FormModel {
+            name: form_name,
+            tree_refused: false,
+            controls,
+            procedures: Vec::new(),
+            blobs: Vec::new(),
+        };
+        let (files, items) = write_form(&form, &[]).expect("write_form must succeed");
+        let text = frm_text(&files);
+        assert!(text.contains("Frame7"), "{text}");
+        assert!(!text.contains("Frame8"), "{text}");
+        let depth_items: Vec<_> = items
+            .iter()
+            .filter(|item| {
+                item.confidence == crate::report::Confidence::Unrecoverable
+                    && item.basis.contains("nesting depth")
+            })
+            .collect();
+        assert_eq!(depth_items.len(), 1, "{items:?}");
+    }
+
+    #[test]
+    fn a_top_level_mdiform_writes_its_own_class_and_one_inferred_item() {
+        let (name, _faults) = SafeName::new("MDIMain", NameKind::Form);
+        let control = ControlModel {
+            name: name.clone(),
+            kind: ControlKind::MdiForm,
+            array_index: None,
+            parent: None,
+            depth: 0,
+            is_menu: false,
+            is_external: false,
+            properties: Vec::new(),
+        };
+        let form = FormModel {
+            name,
+            tree_refused: false,
+            controls: vec![control],
+            procedures: Vec::new(),
+            blobs: Vec::new(),
+        };
+        let (files, items) = write_form(&form, &[]).expect("write_form must succeed");
+        let text = frm_text(&files);
+        assert!(text.contains("Begin VB.MDIForm MDIMain"), "{text}");
+        assert!(
+            items.iter().any(
+                |item| item.confidence == crate::report::Confidence::Inferred
+                    && item.basis.contains("VB.MDIForm")
+            ),
+            "{items:?}"
+        );
+    }
+
+    #[test]
+    fn a_corpus_proven_class_produces_no_inferred_item() {
+        let (name, _faults) = SafeName::new("frmProven", NameKind::Form);
+        let control = ControlModel {
+            name: name.clone(),
+            kind: ControlKind::Form,
+            array_index: None,
+            parent: None,
+            depth: 0,
+            is_menu: false,
+            is_external: false,
+            properties: Vec::new(),
+        };
+        let form = FormModel {
+            name,
+            tree_refused: false,
+            controls: vec![control],
+            procedures: Vec::new(),
+            blobs: Vec::new(),
+        };
+        let (_files, items) = write_form(&form, &[]).expect("write_form must succeed");
+        assert!(
+            !items
+                .iter()
+                .any(|item| item.confidence == crate::report::Confidence::Inferred),
+            "{items:?}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_control_kind_writes_no_block_and_names_the_raw_type_value() {
+        let (form_name, _faults) = SafeName::new("frmUnknownKind", NameKind::Form);
+        let (weird_name, _faults) = SafeName::new("Weird1", NameKind::Control);
+        let controls = vec![
+            ControlModel {
+                name: form_name.clone(),
+                kind: ControlKind::Form,
+                array_index: None,
+                parent: None,
+                depth: 0,
+                is_menu: false,
+                is_external: false,
+                properties: Vec::new(),
+            },
+            ControlModel {
+                name: weird_name,
+                kind: ControlKind::Unknown(0x7F),
+                array_index: None,
+                parent: Some(0),
+                depth: 1,
+                is_menu: false,
+                is_external: false,
+                properties: Vec::new(),
+            },
+        ];
+        let form = FormModel {
+            name: form_name,
+            tree_refused: false,
+            controls,
+            procedures: Vec::new(),
+            blobs: Vec::new(),
+        };
+        let (files, items) = write_form(&form, &[]).expect("write_form must succeed");
+        let text = frm_text(&files);
+        assert!(!text.contains("Weird1"), "{text}");
+        assert!(
+            items.iter().any(
+                |item| item.confidence == crate::report::Confidence::Unrecoverable
+                    && item.basis.contains("0x7f")
+            ),
+            "{items:?}"
+        );
+    }
+
+    #[test]
+    fn a_repeated_control_name_gets_an_index_property_on_every_element() {
+        let (form_name, _faults) = SafeName::new("frmArray", NameKind::Form);
+        let (text_name, _faults) = SafeName::new("Text1", NameKind::Control);
+        let controls = vec![
+            ControlModel {
+                name: form_name.clone(),
+                kind: ControlKind::Form,
+                array_index: None,
+                parent: None,
+                depth: 0,
+                is_menu: false,
+                is_external: false,
+                properties: Vec::new(),
+            },
+            ControlModel {
+                name: text_name.clone(),
+                kind: ControlKind::TextBox,
+                array_index: Some(0),
+                parent: Some(0),
+                depth: 1,
+                is_menu: false,
+                is_external: false,
+                properties: Vec::new(),
+            },
+            ControlModel {
+                name: text_name,
+                kind: ControlKind::TextBox,
+                array_index: Some(1),
+                parent: Some(0),
+                depth: 1,
+                is_menu: false,
+                is_external: false,
+                properties: Vec::new(),
+            },
+        ];
+        let form = FormModel {
+            name: form_name,
+            tree_refused: false,
+            controls,
+            procedures: Vec::new(),
+            blobs: Vec::new(),
+        };
+        let (files, _items) = write_form(&form, &[]).expect("write_form must succeed");
+        let text = frm_text(&files);
+        assert_eq!(text.matches("Index").count(), 2, "{text}");
+    }
+
+    #[test]
+    fn a_written_form_reads_back_through_the_independent_reader_and_matches_the_model() {
+        let (form_name, _faults) = SafeName::new("frmRoundTrip", NameKind::Form);
+        let (cmd_name, _faults) = SafeName::new("Command1", NameKind::Control);
+        let controls = vec![
+            ControlModel {
+                name: form_name.clone(),
+                kind: ControlKind::Form,
+                array_index: None,
+                parent: None,
+                depth: 0,
+                is_menu: false,
+                is_external: false,
+                properties: vec![PropertyValue::Text {
+                    name: "Caption".to_owned(),
+                    value: "Hi".to_owned(),
+                }],
+            },
+            ControlModel {
+                name: cmd_name,
+                kind: ControlKind::CommandButton,
+                array_index: None,
+                parent: Some(0),
+                depth: 1,
+                is_menu: false,
+                is_external: false,
+                properties: vec![PropertyValue::Text {
+                    name: "Caption".to_owned(),
+                    value: "OK".to_owned(),
+                }],
+            },
+        ];
+        let form = FormModel {
+            name: form_name,
+            tree_refused: false,
+            controls,
+            procedures: Vec::new(),
+            blobs: Vec::new(),
+        };
+        let (files, _items) = write_form(&form, &[]).expect("write_form must succeed");
+        let text = frm_text(&files);
+        let roots = super::support_frm::parse_blocks(&text);
+        assert_eq!(roots.len(), 1, "{roots:?}");
+        let root = &roots[0];
+        assert_eq!(root.class, "VB.Form");
+        assert_eq!(root.name, "frmRoundTrip");
+        assert_eq!(root.children.len(), 1, "{root:?}");
+        assert_eq!(root.children[0].class, "VB.CommandButton");
+        assert_eq!(root.children[0].name, "Command1");
+    }
+}
+
+// --- Plan 04-04, Task 2: the three ordering rules, in their own test module
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    reason = "a test builds its own literal; a wrong value must fail loudly"
+)]
+mod ordering {
+    use super::{ControlKind, PropertyValue, write_form};
+    use crate::vb::propstream::FontBlock;
+    use crate::write::model::{ControlModel, FormModel, NameKind, SafeName};
+
+    fn frm_text(files: &super::FormFiles) -> String {
+        files.frm.iter().copied().map(char::from).collect()
+    }
+
+    #[test]
+    fn a_menu_child_is_emitted_after_every_non_menu_child_regardless_of_model_order() {
+        let (form_name, _faults) = SafeName::new("frmMenuOrder", NameKind::Form);
+        let (menu_name, _faults) = SafeName::new("mnuFile", NameKind::Control);
+        let (cmd_name, _faults) = SafeName::new("Command1", NameKind::Control);
+        // The model itself holds the menu first, on purpose: the writer's
+        // own ordering rule, not the model's own order, must decide.
+        let controls = vec![
+            ControlModel {
+                name: form_name.clone(),
+                kind: ControlKind::Form,
+                array_index: None,
+                parent: None,
+                depth: 0,
+                is_menu: false,
+                is_external: false,
+                properties: Vec::new(),
+            },
+            ControlModel {
+                name: menu_name,
+                kind: ControlKind::Menu,
+                array_index: None,
+                parent: Some(0),
+                depth: 1,
+                is_menu: true,
+                is_external: false,
+                properties: Vec::new(),
+            },
+            ControlModel {
+                name: cmd_name,
+                kind: ControlKind::CommandButton,
+                array_index: None,
+                parent: Some(0),
+                depth: 1,
+                is_menu: false,
+                is_external: false,
+                properties: Vec::new(),
+            },
+        ];
+        let form = FormModel {
+            name: form_name,
+            tree_refused: false,
+            controls,
+            procedures: Vec::new(),
+            blobs: Vec::new(),
+        };
+        let (files, _items) = write_form(&form, &[]).expect("write_form must succeed");
+        let text = frm_text(&files);
+        let menu_pos = text
+            .find("Begin VB.Menu")
+            .expect("the menu's own Begin line must exist");
+        let cmd_pos = text
+            .find("Begin VB.CommandButton")
+            .expect("the command button's own Begin line must exist");
+        assert!(
+            cmd_pos < menu_pos,
+            "the non-menu child must be written first: {text}"
+        );
+    }
+
+    #[test]
+    fn property_names_come_out_case_insensitive_ascending_with_a_property_block_sorted_in() {
+        let (name, _faults) = SafeName::new("frmSort", NameKind::Form);
+        let control = ControlModel {
+            name: name.clone(),
+            kind: ControlKind::Form,
+            array_index: None,
+            parent: None,
+            depth: 0,
+            is_menu: false,
+            is_external: false,
+            properties: vec![
+                PropertyValue::Byte {
+                    name: "Zulu".to_owned(),
+                    value: 1,
+                },
+                PropertyValue::Font {
+                    name: "Font".to_owned(),
+                    value: FontBlock {
+                        charset: 0,
+                        italic: false,
+                        underline: false,
+                        strikethrough: false,
+                        weight: 400,
+                        size_raw: 80_000,
+                        size_points: 8,
+                        size_remainder: 0,
+                        name: "Arial".to_owned(),
+                    },
+                },
+                PropertyValue::Byte {
+                    name: "apple".to_owned(),
+                    value: 2,
+                },
+            ],
+        };
+        let form = FormModel {
+            name,
+            tree_refused: false,
+            controls: vec![control],
+            procedures: Vec::new(),
+            blobs: Vec::new(),
+        };
+        let (files, _items) = write_form(&form, &[]).expect("write_form must succeed");
+        let text = frm_text(&files);
+        let apple_pos = text.find("apple").expect("apple must be written");
+        let font_pos = text
+            .find("BeginProperty Font")
+            .expect("the Font block must be written");
+        let zulu_pos = text.find("Zulu").expect("Zulu must be written");
+        assert!(
+            apple_pos < font_pos && font_pos < zulu_pos,
+            "expected apple, then Font, then Zulu: {text}"
+        );
+    }
+
+    #[test]
+    fn every_property_line_precedes_every_nested_begin_line() {
+        let (form_name, _faults) = SafeName::new("frmOrder2", NameKind::Form);
+        let (cmd_name, _faults) = SafeName::new("Command1", NameKind::Control);
+        let controls = vec![
+            ControlModel {
+                name: form_name.clone(),
+                kind: ControlKind::Form,
+                array_index: None,
+                parent: None,
+                depth: 0,
+                is_menu: false,
+                is_external: false,
+                properties: vec![PropertyValue::Text {
+                    name: "Caption".to_owned(),
+                    value: "Hi".to_owned(),
+                }],
+            },
+            ControlModel {
+                name: cmd_name,
+                kind: ControlKind::CommandButton,
+                array_index: None,
+                parent: Some(0),
+                depth: 1,
+                is_menu: false,
+                is_external: false,
+                properties: Vec::new(),
+            },
+        ];
+        let form = FormModel {
+            name: form_name,
+            tree_refused: false,
+            controls,
+            procedures: Vec::new(),
+            blobs: Vec::new(),
+        };
+        let (files, _items) = write_form(&form, &[]).expect("write_form must succeed");
+        let text = frm_text(&files);
+        let caption_pos = text.find("Caption").expect("Caption must be written");
+        let begin_cmd_pos = text
+            .find("Begin VB.CommandButton")
+            .expect("the command button's own Begin line must exist");
+        assert!(
+            caption_pos < begin_cmd_pos,
+            "every property must precede every nested Begin line: {text}"
+        );
+    }
+
+    #[test]
+    fn an_external_controls_properties_are_not_reordered() {
+        let (form_name, _faults) = SafeName::new("frmExternal", NameKind::Form);
+        let (ext_name, _faults) = SafeName::new("wsPop", NameKind::Control);
+        let controls = vec![
+            ControlModel {
+                name: form_name.clone(),
+                kind: ControlKind::Form,
+                array_index: None,
+                parent: None,
+                depth: 0,
+                is_menu: false,
+                is_external: false,
+                properties: Vec::new(),
+            },
+            ControlModel {
+                name: ext_name,
+                kind: ControlKind::External,
+                array_index: None,
+                parent: Some(0),
+                depth: 1,
+                is_menu: false,
+                is_external: true,
+                properties: vec![
+                    PropertyValue::Byte {
+                        name: "Zeta".to_owned(),
+                        value: 1,
+                    },
+                    PropertyValue::Byte {
+                        name: "Alpha".to_owned(),
+                        value: 2,
+                    },
+                ],
+            },
+        ];
+        let form = FormModel {
+            name: form_name,
+            tree_refused: false,
+            controls,
+            procedures: Vec::new(),
+            blobs: Vec::new(),
+        };
+        let (files, _items) = write_form(&form, &[]).expect("write_form must succeed");
+        let text = frm_text(&files);
+        let zeta_pos = text.find("Zeta").expect("Zeta must be written");
+        let alpha_pos = text.find("Alpha").expect("Alpha must be written");
+        assert!(
+            zeta_pos < alpha_pos,
+            "an external control's own stream order must survive unsorted: {text}"
+        );
     }
 }
