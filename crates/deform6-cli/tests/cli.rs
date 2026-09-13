@@ -1111,3 +1111,278 @@ fn extract_into_a_symlinked_directory_writes_at_the_real_directory() {
     fs::remove_file(&link_path).ok();
     fs::remove_file(&report_path).ok();
 }
+
+// --- Plan 04-08, Task 3: all 44 corpus programs, exit 0, nothing outside
+// the directory ----------------------------------------------------------
+
+/// The count `04-08-PLAN.md`'s own verification pins: the number of `.exe`
+/// files the corpus vendors today. A sweep that reads fewer than this
+/// silently passes every other assertion it makes, which is the failure
+/// shape `AGENTS.md` itself names: "a search for some names is not a
+/// search for all of them."
+const CORPUS_EXECUTABLE_COUNT: usize = 44;
+
+/// Walks `corpus/` recursively and gives every file whose extension is
+/// `.exe`, compared case-insensitively, sorted so the sweep below runs in
+/// a stable order.
+fn all_corpus_executables() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    walk_for_executables(&corpus_root(), &mut out);
+    out.sort();
+    out
+}
+
+fn walk_for_executables(dir: &Path, out: &mut Vec<PathBuf>) {
+    let entries =
+        fs::read_dir(dir).unwrap_or_else(|err| panic!("reading {}: {err}", dir.display()));
+    for entry in entries {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        if path.is_dir() {
+            walk_for_executables(&path, out);
+        } else if path
+            .extension()
+            .and_then(std::ffi::OsStr::to_str)
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
+        {
+            out.push(path);
+        }
+    }
+}
+
+/// The number of forms, among `report`'s own, whose own control tree holds
+/// at least one control carrying a readable resource blob: the same fact
+/// [`deform6::write::frm::FormFiles::frx`] being `Some` or `None` turns on,
+/// since a form that names no blob gets no `.frx` file beside it.
+fn forms_holding_a_blob(report: &deform6::Report) -> usize {
+    report
+        .forms
+        .iter()
+        .filter(|form| {
+            form.controls.iter().any(|control| {
+                control.properties.iter().any(|property| {
+                    matches!(
+                        property,
+                        deform6::vb::propstream::PropertyValue::Blob { .. }
+                    )
+                })
+            })
+        })
+        .count()
+}
+
+/// The number of modules and classes `report`'s own object table declares:
+/// one `.bas` or `.cls` file each, per roadmap success criterion 1.
+fn module_and_class_count(report: &deform6::Report) -> usize {
+    report
+        .objects
+        .iter()
+        .filter(|object| {
+            matches!(
+                object.kind,
+                deform6::vb::classify::ObjectKind::Module
+                    | deform6::vb::classify::ObjectKind::Class
+            )
+        })
+        .count()
+}
+
+/// Roadmap success criterion 1, run over the whole corpus: every one of
+/// the 44 programs extracts, exits 0, and writes exactly the file count
+/// per kind the recovered report proves -- one project file, one form
+/// file per form, one resource file per form that holds a blob, one
+/// module or class file per module and class, and one report -- with
+/// nothing written outside its own output directory. A repository-wide
+/// listing, taken once before the sweep and once after, proves the whole
+/// sweep together changed nothing outside the resolved output
+/// directories it was given.
+#[test]
+fn all_corpus_programs_extract_with_exit_zero_and_the_written_file_count_matches_the_report() {
+    let executables = all_corpus_executables();
+    assert_eq!(
+        executables.len(),
+        CORPUS_EXECUTABLE_COUNT,
+        "the sweep read {} executable(s) but the corpus is pinned to hold {}; the corpus \
+         changed size and this count needs re-measuring",
+        executables.len(),
+        CORPUS_EXECUTABLE_COUNT
+    );
+
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("the repository root must resolve");
+    let before = dir_snapshot(&repo_root);
+
+    let table = deform6::vb::opcodes::OpcodeTable::builtin();
+    let mut total_by_kind: std::collections::BTreeMap<&'static str, usize> =
+        std::collections::BTreeMap::new();
+
+    for (index, exe_path) in executables.iter().enumerate() {
+        let data = fs::read(exe_path)
+            .unwrap_or_else(|err| panic!("reading {}: {err}", exe_path.display()));
+        let report = deform6::inspect(&data, &table).unwrap_or_else(|refusal| {
+            panic!("{} did not inspect cleanly: {refusal}", exe_path.display())
+        });
+
+        let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join(format!("deform6-cli-sweep-{}-{index}", std::process::id()));
+        fs::remove_dir_all(&out_dir).ok();
+
+        let (code, stdout, stderr) = run(&[
+            OsStr::new("extract"),
+            exe_path.as_os_str(),
+            OsStr::new("-o"),
+            out_dir.as_os_str(),
+        ]);
+        assert_eq!(
+            code,
+            0,
+            "{}: extract must exit 0; stderr was: {stderr}",
+            exe_path.display()
+        );
+        assert!(
+            stdout.is_empty(),
+            "{}: extract prints nothing to stdout by default: {stdout:?}",
+            exe_path.display()
+        );
+
+        let entries: Vec<String> = fs::read_dir(&out_dir)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "{}: reading {}: {err}",
+                    exe_path.display(),
+                    out_dir.display()
+                )
+            })
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+
+        let vbp_count = entries.iter().filter(|e| e.ends_with(".vbp")).count();
+        assert_eq!(
+            vbp_count,
+            1,
+            "{}: expected exactly one .vbp, got: {entries:?}",
+            exe_path.display()
+        );
+
+        let frm_count = entries.iter().filter(|e| e.ends_with(".frm")).count();
+        assert_eq!(
+            frm_count,
+            report.forms.len(),
+            "{}: .frm count {frm_count} did not match the recovered form count {}: {entries:?}",
+            exe_path.display(),
+            report.forms.len()
+        );
+
+        let expected_frx = forms_holding_a_blob(&report);
+        let frx_count = entries.iter().filter(|e| e.ends_with(".frx")).count();
+        assert_eq!(
+            frx_count,
+            expected_frx,
+            "{}: .frx count {frx_count} did not match the number of forms holding a blob \
+             {expected_frx}: {entries:?}",
+            exe_path.display()
+        );
+
+        let expected_code = module_and_class_count(&report);
+        let code_count = entries
+            .iter()
+            .filter(|e| e.ends_with(".bas") || e.ends_with(".cls"))
+            .count();
+        assert_eq!(
+            code_count,
+            expected_code,
+            "{}: module/class file count {code_count} did not match the recovered count \
+             {expected_code}: {entries:?}",
+            exe_path.display()
+        );
+
+        let report_count = entries
+            .iter()
+            .filter(|e| e.ends_with(".report.json"))
+            .count();
+        assert_eq!(
+            report_count,
+            1,
+            "{}: expected exactly one report file, got: {entries:?}",
+            exe_path.display()
+        );
+
+        let expected_total = 1 + report.forms.len() + expected_frx + expected_code + 1;
+        assert_eq!(
+            entries.len(),
+            expected_total,
+            "{}: wrote {} file(s), expected {expected_total}: {entries:?}",
+            exe_path.display(),
+            entries.len()
+        );
+
+        *total_by_kind.entry("vbp").or_insert(0) += vbp_count;
+        *total_by_kind.entry("frm").or_insert(0) += frm_count;
+        *total_by_kind.entry("frx").or_insert(0) += frx_count;
+        *total_by_kind.entry("bas_or_cls").or_insert(0) += code_count;
+        *total_by_kind.entry("report_json").or_insert(0) += report_count;
+
+        fs::remove_dir_all(&out_dir).ok();
+    }
+
+    // Printed once, for the SUMMARY to quote verbatim: the total number of
+    // files this sweep wrote across all 44 programs, by kind.
+    println!("plan 04-08 corpus sweep totals: {total_by_kind:?}");
+
+    let after = dir_snapshot(&repo_root);
+    assert_eq!(
+        before, after,
+        "the whole sweep changed a file somewhere in the repository working tree"
+    );
+}
+
+/// Research open question 2, settled: `Map Editor.exe`'s own `Main` form,
+/// whose control tree walk refuses (`.planning/WINDOWS.md` finding 8),
+/// still exits 0, still gets a `.frm` file, and the report marks it
+/// `unrecoverable` rather than silently omitting it.
+#[test]
+fn map_editor_writes_a_form_file_for_its_refused_form_and_the_report_marks_it_unrecoverable() {
+    let path = map_editor_path();
+    let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "deform6-cli-test-map-editor-refused-form-{}",
+        std::process::id()
+    ));
+    fs::remove_dir_all(&out_dir).ok();
+
+    let (code, _stdout, stderr) = run(&[
+        OsStr::new("extract"),
+        path.as_os_str(),
+        OsStr::new("-o"),
+        out_dir.as_os_str(),
+    ]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+
+    let entries: Vec<String> = fs::read_dir(&out_dir)
+        .expect("the output directory must exist")
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        entries.iter().any(|entry| entry == "Main.frm"),
+        "the refused form must still get a .frm file: {entries:?}"
+    );
+
+    let data = fs::read(&path).unwrap();
+    let table = deform6::vb::opcodes::OpcodeTable::builtin();
+    let report = deform6::inspect(&data, &table).expect("Map Editor.exe must inspect cleanly");
+    let written = deform6::write::project(&report, &data).expect("write::project must not refuse");
+    let main_form_path = deform6::report::path_for_form(
+        &deform6::write::model::SafeName::new("Main", deform6::write::model::NameKind::Form).0,
+    );
+    assert!(
+        written.report.items.iter().any(|item| {
+            item.path == main_form_path
+                && item.confidence == deform6::report::Confidence::Unrecoverable
+        }),
+        "no item at {main_form_path:?} is graded unrecoverable: {:?}",
+        written.report.items
+    );
+
+    fs::remove_dir_all(&out_dir).ok();
+}
