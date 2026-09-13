@@ -450,7 +450,7 @@ RPT-01, RPT-02, RPT-03, RPT-04, RPT-05, RPT-06
   - **STRUCTURES gap 1 lands here.** The `.vbp` `Title=` and `ExeName32=` keys
     depend on the disputed `VBHeader` 0x58 and 0x5C reading from Phase 1.
 
-**Plans**: 3/9 plans executed
+**Plans**: 4/9 plans executed
 
 Plans:
 
@@ -462,7 +462,7 @@ Plans:
 
 - [x] 04-02-PLAN.md - Property value serialisation: integers, strings, booleans, enumerations, colours, floats, the `Font` block, blob references, and the omission path for an undecoded property
 - [x] 04-03-PLAN.md - `write/vbp.rs`: component lines, the setting block order, `Startup=`, no stray `ResFile32=`
-- [ ] 04-05-PLAN.md - `write/code.rs`: `.bas` and `.cls` with the attribute preamble, the shared code region emitter, and an empty procedure body with the correct signature
+- [x] 04-05-PLAN.md - `write/code.rs`: `.bas` and `.cls` with the attribute preamble, the shared code region emitter, and an empty procedure body with the correct signature
 - [ ] 04-06-PLAN.md - `report.rs`: the flat item array, the path key, the three confidence words, `basis` and `evidence`, the defect array, deterministic output
 
 **Wave 3** *(blocked on Wave 2 completion)*
@@ -685,6 +685,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 1. It reads the file | 8/8 | Complete    | 2026-09-07 |
 | 2. The object graph | 10/10 | Complete    | 2026-09-11 |
 | 3. Forms | 18/18 | Complete    | 2026-09-11 |
-| 4. It writes a project | 3/9 | In Progress|  |
+| 4. It writes a project | 4/9 | In Progress|  |
 | 5. Hostility | 0/8 | Not started | - |
 | 6. Version 1.0 | 0/5 | Not started | - |

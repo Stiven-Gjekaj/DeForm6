@@ -99,11 +99,11 @@ Version 1 recovers metadata. It does not recover statements.
       `Begin` and `BeginProperty`, none on `End` and `EndProperty`.
 - [ ] **WRT-04**: Properties are written in alphabetical order within a block,
       and menus are written last, because the IDE refuses a file otherwise.
-- [ ] **WRT-05**: The tool writes `.bas` and `.cls` files with the attribute
+- [x] **WRT-05**: The tool writes `.bas` and `.cls` files with the attribute
       preamble the IDE requires.
 - [x] **WRT-06**: The tool writes CRLF line endings and the code page the IDE
       expects.
-- [ ] **WRT-07**: A procedure whose body cannot be recovered is written as a
+- [x] **WRT-07**: A procedure whose body cannot be recovered is written as a
       valid empty procedure with the correct signature, so the project still
       builds.
 
