@@ -114,6 +114,15 @@ const EXPECTED_TOTAL_FORM_RECOVERED: u32 = 52;
 const EXPECTED_TOTAL_CONTROL_DECLARED: u32 = 686;
 const EXPECTED_TOTAL_CONTROL_RECOVERED: u32 = 686;
 
+/// The pinned write side property totals over all 44 programs, plan 04-09's
+/// own measurement this session: 807 property records recovered (matching
+/// the 807 total FRM-03's own re-measured count states, across six
+/// distinct property names), of which 136 property lines were actually
+/// written. This is a coverage number for this tool's own writer, not a
+/// recovery number against source; see `tests/ratios.toml`'s own header.
+const EXPECTED_TOTAL_PROPERTY_DECLARED: u32 = 807;
+const EXPECTED_TOTAL_PROPERTY_WRITTEN: u32 = 136;
+
 /// Editing a pinned number **up** means the pin now claims more procedures
 /// than the tool recovers: something the pin expects went missing. This
 /// describes what happened to the tool, never to the file -- reasoning
@@ -212,6 +221,14 @@ pub(crate) struct PinnedEntry {
     pub(crate) form_recovered: u32,
     pub(crate) control_declared: u32,
     pub(crate) control_recovered: u32,
+    /// The count of property records the tool recovered for this program,
+    /// over every control the write path visited. A coverage number for
+    /// this tool's own writer, not a recovery number against the original
+    /// source: see `HEADER`'s own paragraph on the distinction.
+    pub(crate) property_declared: u32,
+    /// The count of property lines the writer actually emitted for this
+    /// program, over the same run `property_declared` was counted from.
+    pub(crate) property_written: u32,
 }
 
 /// Parses `tests/ratios.toml`'s exact shape: `#`-prefixed comment lines and
@@ -232,6 +249,8 @@ pub(crate) fn parse_ratios_toml(text: &str) -> BTreeMap<String, PinnedEntry> {
     let mut form_recovered: Option<u32> = None;
     let mut control_declared: Option<u32> = None;
     let mut control_recovered: Option<u32> = None;
+    let mut property_declared: Option<u32> = None;
+    let mut property_written: Option<u32> = None;
 
     for raw_line in text.lines() {
         let line = raw_line.trim();
@@ -239,7 +258,18 @@ pub(crate) fn parse_ratios_toml(text: &str) -> BTreeMap<String, PinnedEntry> {
             continue;
         }
         if let Some(inner) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-            if let (Some(key), Some(r), Some(d), Some(rt), Some(fd), Some(fr), Some(cd), Some(cr)) = (
+            if let (
+                Some(key),
+                Some(r),
+                Some(d),
+                Some(rt),
+                Some(fd),
+                Some(fr),
+                Some(cd),
+                Some(cr),
+                Some(pd),
+                Some(pw),
+            ) = (
                 current_key.take(),
                 recovered.take(),
                 declared.take(),
@@ -248,6 +278,8 @@ pub(crate) fn parse_ratios_toml(text: &str) -> BTreeMap<String, PinnedEntry> {
                 form_recovered.take(),
                 control_declared.take(),
                 control_recovered.take(),
+                property_declared.take(),
+                property_written.take(),
             ) {
                 out.insert(
                     key,
@@ -259,6 +291,8 @@ pub(crate) fn parse_ratios_toml(text: &str) -> BTreeMap<String, PinnedEntry> {
                         form_recovered: fr,
                         control_declared: cd,
                         control_recovered: cr,
+                        property_declared: pd,
+                        property_written: pw,
                     },
                 );
             }
@@ -332,10 +366,37 @@ pub(crate) fn parse_ratios_toml(text: &str) -> BTreeMap<String, PinnedEntry> {
                     )
                 }));
             }
+            "property_declared" => {
+                property_declared = Some(value.parse().unwrap_or_else(|err| {
+                    panic!(
+                        "{}: property_declared {value:?}: {err}",
+                        ratios_toml_path().display()
+                    )
+                }));
+            }
+            "property_written" => {
+                property_written = Some(value.parse().unwrap_or_else(|err| {
+                    panic!(
+                        "{}: property_written {value:?}: {err}",
+                        ratios_toml_path().display()
+                    )
+                }));
+            }
             other => panic!("{}: an unknown key {other:?}", ratios_toml_path().display()),
         }
     }
-    if let (Some(key), Some(r), Some(d), Some(rt), Some(fd), Some(fr), Some(cd), Some(cr)) = (
+    if let (
+        Some(key),
+        Some(r),
+        Some(d),
+        Some(rt),
+        Some(fd),
+        Some(fr),
+        Some(cd),
+        Some(cr),
+        Some(pd),
+        Some(pw),
+    ) = (
         current_key,
         recovered,
         declared,
@@ -344,6 +405,8 @@ pub(crate) fn parse_ratios_toml(text: &str) -> BTreeMap<String, PinnedEntry> {
         form_recovered,
         control_declared,
         control_recovered,
+        property_declared,
+        property_written,
     ) {
         out.insert(
             key,
@@ -355,6 +418,8 @@ pub(crate) fn parse_ratios_toml(text: &str) -> BTreeMap<String, PinnedEntry> {
                 form_recovered: fr,
                 control_declared: cd,
                 control_recovered: cr,
+                property_declared: pd,
+                property_written: pw,
             },
         );
     }
@@ -402,6 +467,10 @@ pub(crate) fn format_ratio(recovered: u32, declared: u32) -> String {
 /// function that renders this shape, and it is the same function
 /// `xtask update-ratios` calls to write every one of the four new keys
 /// (`WINDOWS.md` finding 8, closed this plan).
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one line per pinned key, matching the file's own shape"
+)]
 pub(crate) fn format_entry(
     key: &str,
     recovered: u32,
@@ -410,11 +479,14 @@ pub(crate) fn format_entry(
     form_recovered: u32,
     control_declared: u32,
     control_recovered: u32,
+    property_declared: u32,
+    property_written: u32,
 ) -> String {
     format!(
         "[\"{key}\"]\nrecovered = {recovered}\ndeclared = {declared}\nratio = {}\n\
          form_declared = {form_declared}\nform_recovered = {form_recovered}\n\
-         control_declared = {control_declared}\ncontrol_recovered = {control_recovered}\n",
+         control_declared = {control_declared}\ncontrol_recovered = {control_recovered}\n\
+         property_declared = {property_declared}\nproperty_written = {property_written}\n",
         format_ratio(recovered, declared)
     )
 }
@@ -487,6 +559,107 @@ fn forms_controls_counts_for(
     let declared = project.declared_objects();
 
     differential::forms_controls_counts(&declared, &report)
+}
+
+/// One program's write side property counts: how many property records
+/// the read side recovered, and how many property lines the write path
+/// actually emitted from them, in the one run that measured both. A
+/// coverage number for this tool's own writer, never a recovery number
+/// against source: see `tests/ratios.toml`'s own header for the
+/// distinction plan 04-09 draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PropertyCounts {
+    pub(crate) declared: u32,
+    pub(crate) written: u32,
+}
+
+/// `true` when `offset..offset + 4 + declared_len` fits inside `data`,
+/// mirroring `crate::write::frm::append_blob`'s own bound check exactly:
+/// this measures whether the real writer would have written this blob's
+/// own resource reference line, not a second, independently derived rule.
+fn blob_range_fits(offset: u32, declared_len: u32, data: &[u8]) -> bool {
+    let Ok(start) = usize::try_from(offset) else {
+        return false;
+    };
+    let Ok(declared) = usize::try_from(declared_len) else {
+        return false;
+    };
+    let Some(total) = 4_usize.checked_add(declared) else {
+        return false;
+    };
+    let Some(end) = start.checked_add(total) else {
+        return false;
+    };
+    data.get(start..end).is_some()
+}
+
+/// Counts how many property lines one property's own
+/// [`deform6::write::values::format_value`] decision produces: `Line` is
+/// one, `Multi` is however many named lines it holds (four for a
+/// `Position`, seven for a `Font`), `Omit` is none, and `Resource` is one
+/// only for a `Blob` whose own declared byte range fits inside `data` --
+/// the same case the real writer actually packs into the `.frx` -- and
+/// none for every other `Resource` case (an over-length `Text`, which the
+/// real writer omits for want of a byte range to move it into).
+fn property_lines_written(
+    property: &deform6::vb::propstream::PropertyValue,
+    formatted: &deform6::write::values::FormattedValue,
+    data: &[u8],
+) -> u32 {
+    use deform6::vb::propstream::PropertyValue;
+    use deform6::write::values::FormattedValue;
+
+    match formatted {
+        FormattedValue::Line(_) => 1,
+        FormattedValue::Multi(lines) => u32::try_from(lines.len()).unwrap_or(0),
+        FormattedValue::Resource => match property {
+            PropertyValue::Blob {
+                offset,
+                declared_len,
+                ..
+            } if blob_range_fits(*offset, *declared_len, data) => 1,
+            _ => 0,
+        },
+        FormattedValue::Omit => 0,
+    }
+}
+
+/// Computes [`PropertyCounts`] for one already-read program's own bytes,
+/// through [`deform6::inspect`] and [`deform6::write::model::from_report`]
+/// alone: one run gives both the declared count and the written count, per
+/// this plan's own "measure once" rule -- the same rule [`program_counts`]
+/// and [`differential::forms_controls_counts`] already follow.
+///
+/// `pub(crate)`, not private: `crates/xtask` reaches this directly, the
+/// same way it reaches [`declared_total`], since `Program` (the type
+/// [`property_counts_for`] wraps this in for this file's own tests) is
+/// private to this module and unreachable from `crates/xtask`'s own
+/// `main.rs`, which reads its own bytes independently.
+pub(crate) fn property_counts(key: &str, data: &[u8], table: &OpcodeTable) -> PropertyCounts {
+    let report =
+        deform6::inspect(data, table).unwrap_or_else(|err| panic!("{key}: inspect: {err}"));
+    let (model, _items) = deform6::write::model::from_report(&report, data);
+
+    let mut declared = 0_u32;
+    let mut written = 0_u32;
+    for form in &model.forms {
+        for control in &form.controls {
+            for property in &control.properties {
+                declared = declared.saturating_add(1);
+                let (formatted, _item) =
+                    deform6::write::values::format_value(property, control.is_external);
+                written =
+                    written.saturating_add(property_lines_written(property, &formatted, data));
+            }
+        }
+    }
+
+    PropertyCounts { declared, written }
+}
+
+/// Wraps [`property_counts`] for this file's own [`Program`] fixture.
+fn property_counts_for(program: &Program, table: &OpcodeTable) -> PropertyCounts {
+    property_counts(&program.key, &program.image_bytes, table)
 }
 
 /// The declared count [`ProgramCounts`] means when this file says
@@ -573,6 +746,10 @@ fn compare(pinned: u32, measured: u32) -> Option<Direction> {
 /// Checks one program's pinned entry against its measured counts, giving
 /// every failure message this program produces (zero, one, or two: the
 /// recovered count and the declared count are checked independently).
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one paste-block builder consuming every field the pin holds, matching format_entry's own shape"
+)]
 fn check_program(
     key: &str,
     pinned: &PinnedEntry,
@@ -580,6 +757,7 @@ fn check_program(
     measured_declared: u32,
     missing: &[String],
     measured_fc: &differential::FormsControlsCounts,
+    measured_pc: &PropertyCounts,
 ) -> Vec<String> {
     let mut failures = Vec::new();
 
@@ -592,6 +770,7 @@ fn check_program(
             measured_declared,
             missing,
             measured_fc,
+            measured_pc,
         ));
     }
     if let Some(direction) = compare(pinned.declared, measured_declared) {
@@ -602,6 +781,7 @@ fn check_program(
             measured_recovered,
             measured_declared,
             measured_fc,
+            measured_pc,
         ));
     }
 
@@ -617,6 +797,10 @@ fn check_program(
     failures
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one paste-block builder consuming every field the pin holds, matching format_entry's own shape"
+)]
 fn recovered_mismatch_message(
     key: &str,
     direction: Direction,
@@ -625,6 +809,7 @@ fn recovered_mismatch_message(
     measured_declared: u32,
     missing: &[String],
     measured_fc: &differential::FormsControlsCounts,
+    measured_pc: &PropertyCounts,
 ) -> String {
     match direction {
         Direction::Up => {
@@ -653,6 +838,8 @@ fn recovered_mismatch_message(
                 measured_fc.form_recovered,
                 measured_fc.control_declared,
                 measured_fc.control_recovered,
+                measured_pc.declared,
+                measured_pc.written,
             )
         ),
     }
@@ -679,6 +866,7 @@ fn declared_mismatch_message(
     measured_recovered: u32,
     measured_declared: u32,
     measured_fc: &differential::FormsControlsCounts,
+    measured_pc: &PropertyCounts,
 ) -> String {
     match direction {
         Direction::Up => format!(
@@ -696,6 +884,8 @@ fn declared_mismatch_message(
                 measured_fc.form_recovered,
                 measured_fc.control_declared,
                 measured_fc.control_recovered,
+                measured_pc.declared,
+                measured_pc.written,
             )
         ),
     }
@@ -767,6 +957,27 @@ fn the_pinned_file_holds_fifty_two_of_fifty_three_forms_and_six_hundred_eighty_s
     assert_eq!(total_control_recovered, EXPECTED_TOTAL_CONTROL_RECOVERED);
 }
 
+#[test]
+fn the_pinned_file_holds_eight_hundred_seven_property_records_and_one_hundred_thirty_six_written_lines()
+ {
+    let pinned = read_pinned();
+
+    let total_property_declared: u32 = pinned.values().map(|e| e.property_declared).sum();
+    let total_property_written: u32 = pinned.values().map(|e| e.property_written).sum();
+    assert_eq!(total_property_declared, EXPECTED_TOTAL_PROPERTY_DECLARED);
+    assert_eq!(total_property_written, EXPECTED_TOTAL_PROPERTY_WRITTEN);
+
+    let distinct_ratios: std::collections::BTreeSet<String> = pinned
+        .values()
+        .map(|e| format_ratio(e.property_written, e.property_declared))
+        .collect();
+    assert!(
+        distinct_ratios.len() > 1,
+        "a pin with one ratio value across the whole corpus could never move and could never \
+         fail: {distinct_ratios:?}"
+    );
+}
+
 /// Runs the whole gate: every corpus program checked against `pinned`, in
 /// both directions on the key set (a program with no entry, and an entry
 /// with no program, per the both-directions rule `differential.rs`
@@ -783,6 +994,7 @@ fn check_program_forms_controls(
     key: &str,
     pinned: &PinnedEntry,
     measured: &differential::FormsControlsCounts,
+    measured_pc: &PropertyCounts,
 ) -> Vec<String> {
     let mut failures = Vec::new();
 
@@ -824,6 +1036,60 @@ fn check_program_forms_controls(
                     measured.form_recovered,
                     measured.control_declared,
                     measured.control_recovered,
+                    measured_pc.declared,
+                    measured_pc.written,
+                )
+            ));
+        }
+    }
+
+    failures
+}
+
+/// Checks one program's pinned write side property counts
+/// (`property_declared`, `property_written`) against its own measured
+/// [`PropertyCounts`], the same way [`check_program_forms_controls`]
+/// checks the form and control counts: a coverage number for this tool's
+/// own writer, never a recovery number against source, per
+/// `tests/ratios.toml`'s own header.
+fn check_program_properties(
+    key: &str,
+    pinned: &PinnedEntry,
+    measured: &differential::FormsControlsCounts,
+    measured_pc: &PropertyCounts,
+) -> Vec<String> {
+    let mut failures = Vec::new();
+
+    for (label, pinned_value, measured_value) in [
+        (
+            "property_declared",
+            pinned.property_declared,
+            measured_pc.declared,
+        ),
+        (
+            "property_written",
+            pinned.property_written,
+            measured_pc.written,
+        ),
+    ] {
+        if let Some(direction) = compare(pinned_value, measured_value) {
+            let word = match direction {
+                Direction::Up => REGRESSION,
+                Direction::Down => MOVED_UP,
+            };
+            failures.push(format!(
+                "{key}: {word}: the pin claims {pinned_value} {label}, the tool measures \
+                 {measured_value}. Paste this block into tests/ratios.toml:\n{}",
+                format_entry(
+                    key,
+                    pinned.recovered,
+                    pinned.declared,
+                    measured.form_declared,
+                    measured.form_recovered,
+                    measured.control_declared,
+                    measured.control_recovered,
+                    measured_pc.declared,
+                    measured_pc.written,
                 )
             ));
         }
@@ -850,6 +1116,7 @@ fn gate_failures(
         let counts = counts_for(program, projects);
         let missing = declared_not_recovered_names(program, projects);
         let forms_controls = forms_controls_counts_for(program, projects, &table);
+        let property_counts = property_counts_for(program, &table);
         failures.extend(check_program(
             &program.key,
             entry,
@@ -857,12 +1124,21 @@ fn gate_failures(
             declared_total(&counts),
             &missing,
             &forms_controls,
+            &property_counts,
         ));
 
         failures.extend(check_program_forms_controls(
             &program.key,
             entry,
             &forms_controls,
+            &property_counts,
+        ));
+
+        failures.extend(check_program_properties(
+            &program.key,
+            entry,
+            &forms_controls,
+            &property_counts,
         ));
     }
 
@@ -931,6 +1207,7 @@ fn raising_a_pinned_recovered_count_fails_with_regression() {
     let counts = counts_for(program, &projects);
     let missing = declared_not_recovered_names(program, &projects);
     let forms_controls = forms_controls_counts_for(program, &projects, &table);
+    let property_counts = property_counts_for(program, &table);
 
     let doctored = PinnedEntry {
         recovered: entry.recovered + 1,
@@ -943,6 +1220,7 @@ fn raising_a_pinned_recovered_count_fails_with_regression() {
         declared_total(&counts),
         &missing,
         &forms_controls,
+        &property_counts,
     );
     assert!(
         !failures.is_empty(),
@@ -983,6 +1261,7 @@ fn lowering_a_pinned_recovered_count_fails_with_moved_up_and_the_exact_paste_blo
     let counts = counts_for(program, &projects);
     let missing = declared_not_recovered_names(program, &projects);
     let forms_controls = forms_controls_counts_for(program, &projects, &table);
+    let property_counts = property_counts_for(program, &table);
 
     let doctored = PinnedEntry {
         recovered: entry.recovered - 1,
@@ -995,6 +1274,7 @@ fn lowering_a_pinned_recovered_count_fails_with_moved_up_and_the_exact_paste_blo
         declared_total(&counts),
         &missing,
         &forms_controls,
+        &property_counts,
     );
     assert!(!failures.is_empty());
     let message = failures.join("\n");
@@ -1011,6 +1291,8 @@ fn lowering_a_pinned_recovered_count_fails_with_moved_up_and_the_exact_paste_blo
         forms_controls.form_recovered,
         forms_controls.control_declared,
         forms_controls.control_recovered,
+        property_counts.declared,
+        property_counts.written,
     );
     assert!(
         message.contains(&expected_block),
@@ -1042,6 +1324,10 @@ fn editing_only_the_ratio_fails_because_it_disagrees_with_its_own_counts() {
         control_declared: entry.control_declared,
         control_recovered: entry.control_recovered,
     };
+    let property_counts = PropertyCounts {
+        declared: entry.property_declared,
+        written: entry.property_written,
+    };
     let failures = check_program(
         key,
         &doctored,
@@ -1049,6 +1335,7 @@ fn editing_only_the_ratio_fails_because_it_disagrees_with_its_own_counts() {
         entry.declared,
         &[],
         &forms_controls,
+        &property_counts,
     );
     assert!(
         !failures.is_empty(),
@@ -1080,6 +1367,8 @@ fn a_stale_key_and_a_missing_key_fail_with_two_different_messages() {
             form_recovered: 0,
             control_declared: 0,
             control_recovered: 0,
+            property_declared: 0,
+            property_written: 0,
         },
     );
     let stale_failures = gate_failures(&with_stale, &progs, &projects);
@@ -1129,12 +1418,13 @@ fn raising_a_pinned_form_recovered_count_fails_with_regression() {
         .get(&program.key)
         .expect("Grayscale-effect is pinned");
     let measured = forms_controls_counts_for(program, &projects, &table);
+    let measured_pc = property_counts_for(program, &table);
 
     let doctored = PinnedEntry {
         form_recovered: entry.form_recovered + 1,
         ..entry.clone()
     };
-    let failures = check_program_forms_controls(&program.key, &doctored, &measured);
+    let failures = check_program_forms_controls(&program.key, &doctored, &measured, &measured_pc);
     assert!(
         !failures.is_empty(),
         "raising the pinned form_recovered count above what the tool measures must fail"
@@ -1166,12 +1456,13 @@ fn lowering_a_pinned_control_declared_count_fails_with_moved_up() {
         "Grayscale-effect must declare at least one control for this test to lower it"
     );
     let measured = forms_controls_counts_for(program, &projects, &table);
+    let measured_pc = property_counts_for(program, &table);
 
     let doctored = PinnedEntry {
         control_declared: entry.control_declared - 1,
         ..entry.clone()
     };
-    let failures = check_program_forms_controls(&program.key, &doctored, &measured);
+    let failures = check_program_forms_controls(&program.key, &doctored, &measured, &measured_pc);
     assert!(
         !failures.is_empty(),
         "lowering the pinned control_declared count below what the tool measures must fail"
@@ -1195,11 +1486,116 @@ fn the_forms_and_controls_gate_passes_on_the_committed_file() {
     for program in &progs {
         let entry = pinned.get(&program.key).expect("every program is pinned");
         let measured = forms_controls_counts_for(program, &projects, &table);
-        failures.extend(check_program_forms_controls(&program.key, entry, &measured));
+        let measured_pc = property_counts_for(program, &table);
+        failures.extend(check_program_forms_controls(
+            &program.key,
+            entry,
+            &measured,
+            &measured_pc,
+        ));
     }
     assert!(
         failures.is_empty(),
         "the committed form/control pin must pass on the committed tree:\n{}",
+        failures.join("\n")
+    );
+}
+
+// Plan 04-09, Task 3: the pinned write side property counts.
+
+#[test]
+fn raising_a_pinned_property_declared_count_fails_with_regression() {
+    let pinned = read_pinned();
+    let projects = vbp::project_files();
+    let progs = programs();
+    let table = OpcodeTable::builtin();
+    let program = progs
+        .iter()
+        .find(|p| p.key.contains("Grayscale-effect"))
+        .expect("Grayscale-effect is a corpus program");
+    let entry = pinned
+        .get(&program.key)
+        .expect("Grayscale-effect is pinned");
+    let measured = forms_controls_counts_for(program, &projects, &table);
+    let measured_pc = property_counts_for(program, &table);
+
+    let doctored = PinnedEntry {
+        property_declared: entry.property_declared + 1,
+        ..entry.clone()
+    };
+    let failures = check_program_properties(&program.key, &doctored, &measured, &measured_pc);
+    assert!(
+        !failures.is_empty(),
+        "raising the pinned property_declared count above what the tool measures must fail"
+    );
+    let message = failures.join("\n");
+    assert!(
+        message.contains(REGRESSION),
+        "raising a pin must print {REGRESSION:?}, got: {message}"
+    );
+    assert!(message.contains(&program.key));
+    assert!(message.contains("property_declared"));
+}
+
+#[test]
+fn lowering_a_pinned_property_written_count_fails_with_moved_up() {
+    let pinned = read_pinned();
+    let projects = vbp::project_files();
+    let progs = programs();
+    let table = OpcodeTable::builtin();
+    let program = progs
+        .iter()
+        .find(|p| p.key.contains("Grayscale-effect"))
+        .expect("Grayscale-effect is a corpus program");
+    let entry = pinned
+        .get(&program.key)
+        .expect("Grayscale-effect is pinned");
+    assert!(
+        entry.property_written > 0,
+        "Grayscale-effect must write at least one property line for this test to lower it"
+    );
+    let measured = forms_controls_counts_for(program, &projects, &table);
+    let measured_pc = property_counts_for(program, &table);
+
+    let doctored = PinnedEntry {
+        property_written: entry.property_written - 1,
+        ..entry.clone()
+    };
+    let failures = check_program_properties(&program.key, &doctored, &measured, &measured_pc);
+    assert!(
+        !failures.is_empty(),
+        "lowering the pinned property_written count below what the tool measures must fail"
+    );
+    let message = failures.join("\n");
+    assert!(
+        message.contains(MOVED_UP),
+        "lowering a pin must print {MOVED_UP:?}, got: {message}"
+    );
+    assert!(message.contains("property_written"));
+}
+
+#[test]
+fn the_properties_gate_passes_on_the_committed_file() {
+    let pinned = read_pinned();
+    let projects = vbp::project_files();
+    let progs = programs();
+    let table = OpcodeTable::builtin();
+
+    let mut failures = Vec::new();
+    for program in &progs {
+        let entry = pinned.get(&program.key).expect("every program is pinned");
+        let measured = forms_controls_counts_for(program, &projects, &table);
+        let measured_pc = property_counts_for(program, &table);
+        failures.extend(check_program_properties(
+            &program.key,
+            entry,
+            &measured,
+            &measured_pc,
+        ));
+    }
+    assert!(
+        failures.is_empty(),
+        "the committed property pin must pass on the committed tree:\n{}",
         failures.join("\n")
     );
 }

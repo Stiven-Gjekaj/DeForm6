@@ -106,6 +106,8 @@ struct Measured {
     form_recovered: u32,
     control_declared: u32,
     control_recovered: u32,
+    property_declared: u32,
+    property_written: u32,
 }
 
 /// Gives one program's key: the executable's path relative to `corpus/`,
@@ -153,6 +155,7 @@ fn measure_all() -> Result<Vec<Measured>, String> {
         let report = deform6::inspect(&bytes, &table)
             .map_err(|err| format!("{}: inspect: {err}", exe.display()))?;
         let forms_controls = forms_controls_counts(&declared, &report);
+        let property_counts = ratios::property_counts(&key, &bytes, &table);
 
         out.push(Measured {
             key,
@@ -162,6 +165,8 @@ fn measure_all() -> Result<Vec<Measured>, String> {
             form_recovered: forms_controls.form_recovered,
             control_declared: forms_controls.control_declared,
             control_recovered: forms_controls.control_recovered,
+            property_declared: property_counts.declared,
+            property_written: property_counts.written,
         });
     }
 
@@ -187,6 +192,8 @@ fn render(measured: &[Measured]) -> String {
             m.form_recovered,
             m.control_declared,
             m.control_recovered,
+            m.property_declared,
+            m.property_written,
         ));
     }
     format!("{}{body}", ratios::HEADER)
@@ -332,6 +339,8 @@ mod tests {
                 form_recovered: 0,
                 control_declared: 0,
                 control_recovered: 0,
+                property_declared: 0,
+                property_written: 0,
             },
             Measured {
                 key: "a/A.exe".to_owned(),
@@ -341,6 +350,8 @@ mod tests {
                 form_recovered: 0,
                 control_declared: 0,
                 control_recovered: 0,
+                property_declared: 0,
+                property_written: 0,
             },
         ];
         let rendered = render(&measured);
@@ -374,6 +385,8 @@ mod tests {
             form_recovered: 1,
             control_declared: 9,
             control_recovered: 9,
+            property_declared: 5,
+            property_written: 6,
         }];
         let rendered = render(&measured);
         let expected_block = super::ratios::format_entry(
@@ -384,6 +397,8 @@ mod tests {
             1,
             9,
             9,
+            5,
+            6,
         );
         assert!(
             rendered.ends_with(&expected_block),
@@ -412,6 +427,8 @@ mod tests {
                 form_recovered: 0,
                 control_declared: 0,
                 control_recovered: 0,
+                property_declared: 0,
+                property_written: 0,
             },
         );
         old.insert(
@@ -424,6 +441,8 @@ mod tests {
                 form_recovered: 0,
                 control_declared: 0,
                 control_recovered: 0,
+                property_declared: 0,
+                property_written: 0,
             },
         );
         old.insert(
@@ -436,6 +455,8 @@ mod tests {
                 form_recovered: 0,
                 control_declared: 0,
                 control_recovered: 0,
+                property_declared: 0,
+                property_written: 0,
             },
         );
         let measured = vec![
@@ -447,6 +468,8 @@ mod tests {
                 form_recovered: 0,
                 control_declared: 0,
                 control_recovered: 0,
+                property_declared: 0,
+                property_written: 0,
             },
             Measured {
                 key: "unchanged/B.exe".to_owned(),
@@ -456,6 +479,8 @@ mod tests {
                 form_recovered: 0,
                 control_declared: 0,
                 control_recovered: 0,
+                property_declared: 0,
+                property_written: 0,
             },
             Measured {
                 key: "new/D.exe".to_owned(),
@@ -465,6 +490,8 @@ mod tests {
                 form_recovered: 0,
                 control_declared: 0,
                 control_recovered: 0,
+                property_declared: 0,
+                property_written: 0,
             },
         ];
         let lines = describe_changes(&old, &measured);
