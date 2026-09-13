@@ -215,14 +215,22 @@ fn signature_head(prototype: &Prototype) -> (&'static str, &'static str) {
 /// an array, ` As <type>`, and ` = <default>` when the reader recovered
 /// one. `index` names this argument's own position in the declaration,
 /// used only to build a placeholder when the reader's own name did not
-/// resolve (an empty `Argument::name`, a real and documented gap on
-/// `Argument::name`): a blank identifier is not legal Visual Basic, and
-/// this crate's whole purpose is a project that still builds.
+/// resolve, or did not read as a legal identifier: a blank or illegal
+/// identifier is not legal Visual Basic, and this crate's whole purpose is
+/// a project that still builds.
+///
+/// The legality check is `crate::vb::privateobj::is_plausible_identifier`,
+/// the same check a procedure name already passes before it is ever
+/// written; an argument name gets no other sanitisation pass (unlike a
+/// form, control, module, class or project name, which is always routed
+/// through `SafeName`), so this is the one gate that stops a raw byte such
+/// as a space, a parenthesis, a comma, or a line break from reaching a
+/// written signature line.
 fn format_argument(arg: &Argument, index: usize) -> String {
-    let name = if arg.name.is_empty() {
-        format!("Arg{}", index.saturating_add(1))
-    } else {
+    let name = if crate::vb::privateobj::is_plausible_identifier(arg.name.as_bytes()) {
         arg.name.clone()
+    } else {
+        format!("Arg{}", index.saturating_add(1))
     };
 
     let mut prefix = String::new();
@@ -1048,6 +1056,37 @@ mod signatures {
         );
         let signature = format_signature("Public", "Broken", Some(&proto));
         assert_eq!(signature.declaration, "Public Sub Broken(Arg1 As Long)");
+    }
+
+    #[test]
+    fn an_illegal_argument_name_gets_a_generated_placeholder_not_a_raw_byte() {
+        // CR-02: a recovered argument name with a space is not a legal VB6
+        // identifier; writing it verbatim into a signature line gives
+        // source that does not compile. A name holding a line break is
+        // worse: it injects an attacker-chosen extra line into the
+        // signature. Both must fall back to the same Arg<N> placeholder an
+        // empty name already gets.
+        let proto = prototype(
+            vec![
+                Argument {
+                    name: "my arg".to_owned(),
+                    entry: entry(VbType::Long),
+                    default: None,
+                },
+                Argument {
+                    name: "bad\r\nname".to_owned(),
+                    entry: entry(VbType::Long),
+                    default: None,
+                },
+            ],
+            false,
+            None,
+        );
+        let signature = format_signature("Public", "Broken", Some(&proto));
+        assert_eq!(
+            signature.declaration,
+            "Public Sub Broken(Arg1 As Long, Arg2 As Long)"
+        );
     }
 
     #[test]

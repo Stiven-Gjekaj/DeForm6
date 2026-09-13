@@ -640,7 +640,12 @@ fn resolve_entry(pe: &PeImage<'_>, window: &Region<'_>, index: u32) -> (Procedur
 /// ASCII letter or an underscore, and every byte is an ASCII alphanumeric
 /// character or an underscore. An empty slice is not plausible: a NUL as the
 /// very first byte terminates `cstr` immediately and gives no name at all.
-fn is_plausible_identifier(bytes: &[u8]) -> bool {
+///
+/// `pub(crate)`: `write::code::format_argument` reuses this exact check
+/// for a recovered argument name, rather than writing a second one. An
+/// argument name has no `SafeName` pass of its own (it never becomes a file
+/// name), so this is the one legality gate it gets.
+pub(crate) fn is_plausible_identifier(bytes: &[u8]) -> bool {
     let Some(&first) = bytes.first() else {
         return false;
     };
