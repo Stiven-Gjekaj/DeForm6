@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 current_phase: 5
 current_phase_name: Hostility
 status: executing
-stopped_at: Phase 5 planned, 8 plans written, ready to execute
-last_updated: "2026-09-13T12:27:29.582Z"
+stopped_at: Phase 5 plan 05-01 complete, 1 of 8 plans done, wave 1 continues with 05-07
+last_updated: "2026-09-13T14:22:28Z"
 last_activity: 2026-09-13
-last_activity_desc: Phase 5 planned, 8 plans in 4 waves
-state_head: 7b2f1805ac03a09905344407d8ebfb1c05d06df7
+last_activity_desc: Plan 05-01 executed - third severity, strict/salvage policy wired, --salvage on both subcommands
+state_head: ff80249
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 53
-  completed_plans: 45
-  percent: 17
+  completed_plans: 46
+  percent: 87
 ---
 
 ## Continue
@@ -66,9 +66,9 @@ inferred.
 
 ## Current Position
 
-Phase: 5 (Hostility) — READY TO EXECUTE
-Plan: Not started
-Status: Ready to execute
+Phase: 5 (Hostility) - EXECUTING
+Plan: 05-01 complete, 05-07 next (wave 1)
+Status: Executing
 searches, six encodings across three corpus programs, never find the
 identifier a project file declares anywhere in the component table
 entry. `oUuid` (`248DD896-...`, one byte from the declared value) is
@@ -149,6 +149,7 @@ Progress: [██░░░░░░░░] 17% of the 50 plans in the roadmap, w
 | Phase 04 P07 | 1 session | 2 tasks | 3 files |
 | Phase 04 P08 | 1 session | 3 tasks | 8 files |
 | Phase 04 P09 | 1 session | 3 tasks | 3 files |
+| Phase 05 P01 | 1 session | 3 tasks | 24 files |
 
 ## Accumulated Context
 
@@ -237,6 +238,10 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-07: write_code_region's own signature changed to call uncertainty_comments itself (items + a path prefix), rather than taking a pre-built comment line list, so the comment emitter has exactly one call site; this necessarily touched write_form's own call in frm.rs, one file outside this plan's own files_modified list, since a caller of a changed shared function signature must be updated for the crate to compile.
 - [Phase 04]: 04-08: write::project wired to the full writers (write_vbp, write_form, write_cls, write_bas) and report::build, closing the thin-vs-full gap every prior 04-* plan left staged; the four thin writers and their own helpers removed as dead code.
 - [Phase 04]: 04-08: extract's containment check (plan_writes) lexically normalises the joined candidate path with no syscall, since the file does not exist yet to canonicalize, and compares its own resolved parent against the resolved output directory by value, never a string prefix.
+- [Phase 05]: 05-01: Severity gains a third value, Tolerated, for a defect that costs one item and assumes nothing in its place; eight DefectKind arms move to it (UnreadablePointer, StructureUnreadable, EmptyName, IndexHighByteSet, GuidLengthUnexpected, OcxReservedFieldUnexpected, BlobLenTooSmall, UnrecoverableString), five stay Recoverable (ImplausibleCount, SectionOverlap, NoNulTerminator, CountMismatch, ClassNameNoDot).
+- [Phase 05]: 05-01: Journal::record is wired into deform6::inspect as a post-hoc policy loop over the whole finished defect list, never a branch inside a read function, so the strict defect list and the salvage defect list are the same list.
+- [Phase 05]: 05-01: Assumption lines from a salvage run go into the existing free text ProjectReport.limits array via a new report::assumption_lines helper, not a new field and not a new Confidence value, per research assumption A2.
+- [Phase 05]: 05-01: The corpus's real defect count is 429, not the 430 05-RESEARCH.md estimated (428 UnreadablePointer, 1 StructureUnreadable, not 2); the census test's own first draft double counted a form-scoped defect already folded into Report::defects by compose_form. 05-01-PLAN.md and ROADMAP.md are corrected to 429.
 
 ### Pending Todos
 
@@ -265,13 +270,13 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-13T04:28:15.173Z
-Stopped at: Phase 04 complete, ready to plan Phase 5
+Last session: 2026-09-13T14:22:28Z
+Stopped at: Phase 5 plan 05-01 complete (third severity, strict/salvage policy, --salvage on inspect and extract)
 
-Phase 1 is complete: all eight plans executed, 134 tests pass across the
-workspace, and every ROADMAP success criterion for the phase was run and
-confirmed rather than assumed.
+Plan 05-01 is done: 5 commits, cargo test --workspace at 887 passed, 0 failed,
+up from the 872 baseline this plan started at. Wave 1 also holds 05-07
+(the run-time corpus manifest and fetch tooling), independent of 05-01.
 
-Next: `/gsd-execute-phase 3` to continue Phase 3 gap closure with plan 03-17
-(the remaining code review findings).
+Next: `/gsd-execute-phase 5` to continue with 05-07, or straight to wave 2
+(05-02, 05-03, 05-06) once 05-07 lands, per ROADMAP.md's own wave order.
 Resume file: None

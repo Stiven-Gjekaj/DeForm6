@@ -125,9 +125,9 @@ Version 1 recovers metadata. It does not recover statements.
 ### Hostile input
 
 - [ ] **SAF-01**: The tool does not panic on any input.
-- [ ] **SAF-02**: The tool refuses a damaged file by default, and names the
+- [x] **SAF-02**: The tool refuses a damaged file by default, and names the
       byte offset and what it expected to find there.
-- [ ] **SAF-03**: `--salvage` recovers what it can from a damaged file and
+- [x] **SAF-03**: `--salvage` recovers what it can from a damaged file and
       marks in the report everything it had to assume.
 - [ ] **SAF-04**: The tool never sizes an allocation from a length field in the
       file without checking that length against the real size of the file.
@@ -209,7 +209,11 @@ Deferred. Tracked, not in this roadmap.
 | WRT-06 | Phase 4 | Complete |
 | WRT-07 | Phase 4 | Complete |
 | RPT-01 to RPT-06 | Phase 4 | Complete |
-| SAF-01 to SAF-05 | Phase 5 | Pending |
+| SAF-01 | Phase 5 | Pending |
+| SAF-02 | Phase 5 | Complete |
+| SAF-03 | Phase 5 | Complete |
+| SAF-04 | Phase 5 | Pending |
+| SAF-05 | Phase 5 | Pending |
 
 Phase 6 owns no new requirement. It measures the whole set end to end and turns
 the result into the released documentation.

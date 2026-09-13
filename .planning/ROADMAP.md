@@ -570,7 +570,7 @@ and every crash it finds becomes a committed test that replays on stable Rust.
 Plans:
 **Wave 1**
 
-- [ ] 05-01-PLAN.md - The third severity, the strict and salvage split wired end to end, `--salvage` on both subcommands, every assumption recorded in the report
+- [x] 05-01-PLAN.md - The third severity, the strict and salvage split wired end to end, `--salvage` on both subcommands, every assumption recorded in the report
 - [ ] 05-07-PLAN.md - `corpus/manifest.toml` with pinned hashes, `xtask fetch-corpus` and `xtask pin-corpus`, and `corpus/fetched/` kept out of the repository
 
 **Wave 2** *(blocked on Wave 1 completion)*
