@@ -186,6 +186,11 @@ pub fn write_vbp(report: &Report, model: &ProjectModel) -> (Vec<u8>, Vec<ReportI
 
     write_settings(&mut writer, report, model, &mut items);
 
+    // A blank line always separates the setting block from the section
+    // header: measured on every corpus `.vbp` that carries the section
+    // (`Fast_Flames.exe`'s own `FlameTest.vbp`, `Map Editor.vbp`,
+    // `LockWorkStation.vbp`), never omitted.
+    writer.push_line("");
     writer.push_line("[MS Transaction Server]");
     writer.push_line("AutoRefresh=1");
 
@@ -720,6 +725,16 @@ mod tests {
     }
 
     #[test]
+    fn a_blank_line_separates_the_setting_block_from_the_section_header() {
+        let report = minimal_report(Vec::new(), Vec::new(), Vec::new());
+        let (model, _items) = from_report(&report, &[]);
+        let (bytes, _items) = write_vbp(&report, &model);
+        let all = lines(&bytes);
+        let len = all.len();
+        assert_eq!(all.get(len.saturating_sub(3)), Some(&String::new()));
+    }
+
+    #[test]
     fn title_exe_name_and_help_file_come_from_the_report_verbatim() {
         let mut report = minimal_report(Vec::new(), Vec::new(), Vec::new());
         report.title = "FlameTest".to_owned();
@@ -730,5 +745,81 @@ mod tests {
         assert!(lines(&bytes).contains(&"Title=\"FlameTest\"".to_owned()));
         assert!(lines(&bytes).contains(&"ExeName32=\"Fast_Flames.exe\"".to_owned()));
         assert!(lines(&bytes).contains(&"HelpFile=\"help.hlp\"".to_owned()));
+    }
+
+    // --- Task 3: the three edge shapes a project file has to survive -------
+
+    #[test]
+    fn a_model_with_zero_forms_gives_the_whole_loadable_shape() {
+        let objects = vec![minimal_object("Mod1", ObjectKind::Module)];
+        let report = minimal_report(objects, Vec::new(), Vec::new());
+        let (model, _items) = from_report(&report, &[]);
+        let (bytes, _items) = write_vbp(&report, &model);
+        let all = lines(&bytes);
+        assert_eq!(all.first(), Some(&"Type=Exe".to_owned()));
+        assert!(all.iter().any(|line| line.starts_with("Module=")));
+        assert!(!all.iter().any(|line| line.starts_with("Form=")));
+        assert!(all.contains(&"Startup=\"Sub Main\"".to_owned()));
+    }
+
+    #[test]
+    fn a_model_with_exactly_one_form_and_nothing_else_gives_startup_naming_it() {
+        let objects = vec![minimal_object("frmSolo", ObjectKind::Form)];
+        let forms = vec![minimal_form("frmSolo")];
+        let report = minimal_report(objects, forms, Vec::new());
+        let (model, _items) = from_report(&report, &[]);
+        let (bytes, _items) = write_vbp(&report, &model);
+        assert!(lines(&bytes).contains(&"Startup=\"frmSolo\"".to_owned()));
+        let form_lines: Vec<String> = lines(&bytes)
+            .into_iter()
+            .filter(|line| {
+                line.starts_with("Form=")
+                    || line.starts_with("Module=")
+                    || line.starts_with("Class=")
+            })
+            .collect();
+        assert_eq!(form_lines, vec!["Form=frmSolo.frm".to_owned()]);
+    }
+
+    #[test]
+    fn two_objects_whose_raw_names_collide_name_two_different_files() {
+        let objects = vec![
+            minimal_object(&"A".repeat(40), ObjectKind::Module),
+            minimal_object(&"A".repeat(45), ObjectKind::Module),
+        ];
+        let report = minimal_report(objects, Vec::new(), Vec::new());
+        let (model, _items) = from_report(&report, &[]);
+        let (bytes, _items) = write_vbp(&report, &model);
+        let module_lines: Vec<String> = lines(&bytes)
+            .into_iter()
+            .filter(|line| line.starts_with("Module="))
+            .collect();
+        assert_eq!(module_lines.len(), 2, "{module_lines:?}");
+        assert_ne!(module_lines[0], module_lines[1]);
+    }
+
+    #[test]
+    fn a_model_whose_only_object_is_of_unknown_kind_still_gives_one_component_line() {
+        let objects = vec![minimal_object("Weird1", ObjectKind::Unknown(0xDEAD_BEEF))];
+        let report = minimal_report(objects, Vec::new(), Vec::new());
+        let (model, _items) = from_report(&report, &[]);
+        let (bytes, _items) = write_vbp(&report, &model);
+        assert!(lines(&bytes).contains(&"Module=Weird1; Weird1.bas".to_owned()));
+    }
+
+    #[test]
+    fn two_calls_to_the_writer_on_one_model_give_byte_identical_output() {
+        let objects = vec![
+            minimal_object("frmMain", ObjectKind::Form),
+            minimal_object("ClsA", ObjectKind::Class),
+        ];
+        let forms = vec![minimal_form("frmMain")];
+        let components = vec![resolved_component("Winsock", "MSWINSCK.OCX")];
+        let report = minimal_report(objects, forms, components);
+        let (model, _items) = from_report(&report, &[]);
+        let (first, first_items) = write_vbp(&report, &model);
+        let (second, second_items) = write_vbp(&report, &model);
+        assert_eq!(first, second);
+        assert_eq!(first_items, second_items);
     }
 }
