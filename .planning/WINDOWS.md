@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 11
+open_count: 12
 waived_count: 0
 fixed_count: 4
-total_count: 15
-last_updated: 2026-09-13T20:55:00.202Z
+total_count: 16
+last_updated: 2026-09-13T22:10:36.258Z
 ---
 
 # Broken Windows Ledger
@@ -30,6 +30,7 @@ last_updated: 2026-09-13T20:55:00.202Z
 | 13 | 04 | deviation | crates/deform6/src/write/mod.rs |  | write::project merges four independently-built ReportItem sources (write_vbp, write_form per form, write_cls/write_bas per code object, and report::build's own model_items plus its separate per-property confidence grading) through one shared PathIssuer, so a colliding path is caught, but the two property-level derivations are not unified: a control whose stream carries an Undecoded or unreadable Blob property earns one item from the writer that omitted its own line (at the control's own path) and a second, independent item from report::build's own item_for_property walk (at the more specific property path). Both are correct and both carry evidence; this is redundant, not wrong, and is documented on write::project's own doc comment. A future plan should have report::build consume the items the writers already collected instead of re-deriving property confidence a second time. | open |  | 2026-09-13T03:34:36.370Z |  |
 | 14 | 05 | deviation | crates/deform6/src/error.rs |  | crate::error::damaged (Box::leak) leaks one short string per call, by design, and every strict refusal on a Recoverable defect now reaches it through refusal_for_defect (plan 05-01), not only the rarer direct damaged() call sites in gui.rs, frx.rs and controltree.rs it served before. Plan 05-03 measured the longest message any damaged() call site in this crate can produce at 237 bytes (crates/deform6/src/vb/controltree.rs, the control tree walk's own unexplained tail message, every numeric field at its widest) and named the leak detection flag that works around it: -detect_leaks=0 (DETECT_LEAKS in crates/xtask/src/fuzz.rs), paired with an iteration bound (CRON_RUNS) chosen at least ten times below the point the leak alone would reach the fuzz run's own resident set limit. The cost is three places: a single command line run leaks once and exits, so a person running the tool never sees it; a caller that embeds the library and reads many files in one process grows without bound; the fuzzer reaches it once per iteration, which is why leak detection is off in both fuzz commands. The fix is widening Refusal::Damaged to carry an owned String instead of a leaked &'static str; Phase 3 decision 03-17 measured that change at 108 construction and pattern sites and chose to centralise the leak in damaged() instead of removing it, and that decision stands. What would reopen it: a caller that reads many files in one process inside this repository. Plan 05-08's own no panic proof run is the first such caller; its measured peak resident set is the number to watch. Measured by plan 05-08's own no panic proof run: `cargo test --release -p deform6 --test no_panic_proof` (48 inputs -- 44 vendored, 3 fetched, 1 regression -- each driven through Mode::Strict and Mode::Salvage, plus a write::project call on every successful salvage result, 96 inspect calls and up to 48 write calls in one process), measured with `/usr/bin/time -l`: maximum resident set size 5406720 bytes (about 5.16 MiB), peak memory footprint 4145488 bytes (about 3.95 MiB), wall clock 0.02s. The leak's own worst case per call, 237 bytes (measured by plan 05-03), puts its total contribution across every call this run makes at a few tens of kilobytes at most, far below the resolution of the 5 MiB figure above. At this input set's current size the leak is not the number driving peak resident set. The leak itself is not fixed by this measurement and remains present; a caller that reads orders of magnitude more files in one process, or the corpus growing by the same order, would need this number remeasured. | open |  | 2026-09-13T16:42:15.452Z |  |
 | 15 | 05 | deviation | crates/deform6/tests/regressions.rs |  | 05-05-PLAN.md's task 1 behavior line claims the seed carries a VB header with a declared form count of 0xFFFF; the shipped image embeds no VBHeader and deform6::inspect refuses it at runtime_of with NoVbRuntime in both modes, never reaching GuiTable::walk. Documented in regressions.rs's own module doc comment. | open |  | 2026-09-13T19:29:31.994Z |  |
+| 16 | 05 | deviation | crates/xtask/src/fuzz.rs |  | libFuzzer's -detect_leaks=0 is not enough on its own. It stops libFuzzer checking for leaks during a run. AddressSanitizer runs LeakSanitizer again when the process exits, and that second check reads ASAN_OPTIONS, never the libFuzzer command line. The first real CI run therefore failed on the deliberate crate::error::damaged leak this project accepts (finding 14): 553150 bytes in 6379 allocations, with the empty input written out as crash-da39a3ee5e6b4b0d3255bfef95601890afd80709, a crash artifact naming no defect. LeakSanitizer does not run on macOS and does run on Linux, so two local sixty second campaigns and a two hundred thousand run campaign all passed while the first ubuntu-latest run did not. xtask::fuzz::run_cargo now sets ASAN_OPTIONS=detect_leaks=0 on the spawned process, appending to any value a caller already set, so a Linux developer running the command by hand gets the same behaviour as CI. Four unit tests pin the value. This does not fix the leak; it stops the leak being reported as a crash. Finding 14 stays open. | open |  | 2026-09-13T22:10:36.258Z |  |
 
 ````json
 [
@@ -211,6 +212,18 @@ last_updated: 2026-09-13T20:55:00.202Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-13T19:29:31.994Z",
+    "resolved_at": null
+  },
+  {
+    "id": 16,
+    "kind": "deviation",
+    "phase": "05",
+    "file": "crates/xtask/src/fuzz.rs",
+    "line": null,
+    "description": "libFuzzer's -detect_leaks=0 is not enough on its own. It stops libFuzzer checking for leaks during a run. AddressSanitizer runs LeakSanitizer again when the process exits, and that second check reads ASAN_OPTIONS, never the libFuzzer command line. The first real CI run therefore failed on the deliberate crate::error::damaged leak this project accepts (finding 14): 553150 bytes in 6379 allocations, with the empty input written out as crash-da39a3ee5e6b4b0d3255bfef95601890afd80709, a crash artifact naming no defect. LeakSanitizer does not run on macOS and does run on Linux, so two local sixty second campaigns and a two hundred thousand run campaign all passed while the first ubuntu-latest run did not. xtask::fuzz::run_cargo now sets ASAN_OPTIONS=detect_leaks=0 on the spawned process, appending to any value a caller already set, so a Linux developer running the command by hand gets the same behaviour as CI. Four unit tests pin the value. This does not fix the leak; it stops the leak being reported as a crash. Finding 14 stays open.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-13T22:10:36.258Z",
     "resolved_at": null
   }
 ]
