@@ -37,6 +37,7 @@ pub use crate::error::Refusal;
 use std::collections::HashMap;
 
 use crate::error::{Defect, DefectKind, Site};
+use crate::journal::{Journal, Mode};
 use crate::read::pe::PeImage;
 use crate::read::region::{Off, Rva, Va};
 use classify::ObjectKind;
@@ -332,7 +333,19 @@ pub struct Report {
 /// `opcode_table` names every property this run can decode by name; a
 /// caller with no opinion of its own passes [`OpcodeTable::builtin`]. This
 /// is the one file-free entry point the command line crate calls: it reads
-/// no file and reaches no state outside `data` and `opcode_table`.
+/// no file and reaches no state outside `data`, `opcode_table` and `mode`.
+///
+/// `mode` decides the disposition of the finished read, never its route:
+/// every read function below runs exactly the same way regardless of
+/// `mode`, and the two modes therefore read the same bytes and collect the
+/// same defect list. Only what this function does with that list at the
+/// end differs. A [`Mode::Strict`] run refuses on the first
+/// `Recoverable` defect the list holds, naming it through
+/// [`crate::error::refusal_for_defect`]; a
+/// [`Mode::Salvage`] run never does. Neither mode ever
+/// refuses on a `Tolerated` defect: it costs one item and the run assumed
+/// nothing in its place, so there is nothing for a salvage run to have
+/// assumed that a strict run should refuse over.
 ///
 /// # Errors
 ///
@@ -340,12 +353,9 @@ pub struct Report {
 /// when the bytes are not a 32 bit i386 portable executable,
 /// [`Refusal::NoVbRuntime`], [`Refusal::IsVb5`] or [`Refusal::IsVb4`] when the
 /// image names no Visual Basic 6 runtime, and [`Refusal::Damaged`] when a
-/// Visual Basic 6 structure does not resolve.
-pub fn inspect(
-    data: &[u8],
-    opcode_table: &OpcodeTable,
-    _mode: crate::journal::Mode,
-) -> Result<Report, Refusal> {
+/// Visual Basic 6 structure does not resolve, or when `mode` is
+/// [`Mode::Strict`] and a `Recoverable` defect was found.
+pub fn inspect(data: &[u8], opcode_table: &OpcodeTable, mode: Mode) -> Result<Report, Refusal> {
     let pe = PeImage::parse(data)?;
     let (runtime, runtime_dll) = runtime_of(&pe)?;
 
@@ -409,6 +419,25 @@ pub fn inspect(
         .iter()
         .map(|entry| compose_form(&pe, entry, &object_table.objects, &tables, &mut defects))
         .collect();
+
+    // The policy lives in `Journal::record` and nowhere else: this loop
+    // hands it every defect this run collected, in the order it collected
+    // them, with the unit value as the fallback, because the value this
+    // read already produced does not change here. The whole list is
+    // recorded before this function refuses on any of it, which is what
+    // makes the defect list a strict run collects and the defect list a
+    // salvage run collects the same list: a strict run that refused at the
+    // first error would only ever see a prefix of it.
+    let mut journal = Journal::new(mode);
+    let mut first_refusal: Option<Defect> = None;
+    for defect in &defects {
+        if journal.record(defect.clone(), ()).is_err() && first_refusal.is_none() {
+            first_refusal = Some(defect.clone());
+        }
+    }
+    if let Some(defect) = first_refusal {
+        return Err(crate::error::refusal_for_defect(&defect));
+    }
 
     Ok(Report {
         // The saturating conversions over-report a slice larger than 4 GiB
@@ -846,7 +875,7 @@ fn compose_procedures(names: ProcNames, prototypes: PrototypeList) -> ObjectProc
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{ObjectProcedures, ProcedureEntry, Refusal, Report, inspect};
+    use super::{Mode, ObjectProcedures, ProcedureEntry, Refusal, Report, inspect};
     use crate::vb::opcodes::OpcodeTable;
 
     /// The opcode table every test in this module reads properties through,
@@ -956,7 +985,7 @@ mod tests {
     }
 
     fn mandelbrot_report() -> Report {
-        inspect(MANDELBROT, &builtin_table(), crate::journal::Mode::Strict).unwrap()
+        inspect(MANDELBROT, &builtin_table(), Mode::Strict).unwrap()
     }
 
     /// The `.vbp` beside the executable declares these four values.
@@ -1007,7 +1036,7 @@ mod tests {
     #[test]
     fn an_empty_slice_is_not_a_portable_executable() {
         assert_eq!(
-            inspect(&[], &builtin_table(), crate::journal::Mode::Strict),
+            inspect(&[], &builtin_table(), Mode::Strict),
             Err(Refusal::NotPe)
         );
     }
@@ -1027,7 +1056,7 @@ mod tests {
         let head = header_offset_the_hard_way(&bytes);
         assert_ne!(&bytes[head..head + 4], b"VB5!");
         assert_eq!(
-            inspect(&bytes, &builtin_table(), crate::journal::Mode::Strict),
+            inspect(&bytes, &builtin_table(), Mode::Strict),
             Err(Refusal::IsVb5)
         );
     }
@@ -1096,12 +1125,18 @@ mod tests {
     /// real `wTotalObjects` of `3`, this is the one shape of that structure's
     /// own defect a corpus file can be made to produce, and it is what the
     /// test proves reaches `Report.defects`.
+    ///
+    /// `CountMismatch` is `Recoverable`, so plan 05-01 task 2's own policy
+    /// now refuses this patched file in `Mode::Strict`: the test asks for
+    /// `Mode::Salvage` instead, which is what lets a run that hit this exact
+    /// defect still reach `Ok(Report)` and put the defect on
+    /// `Report.defects`, the fact this test exists to prove.
     #[test]
     fn a_capacity_below_the_object_count_reaches_the_caller_as_a_defect() {
         let at = object_table_field_offset(GRAYSCALE, 0x2C);
         let bytes = with_u16_at(GRAYSCALE, at, 1);
 
-        let report = inspect(&bytes, &builtin_table(), crate::journal::Mode::Strict).unwrap();
+        let report = inspect(&bytes, &builtin_table(), Mode::Salvage).unwrap();
         let defect = report
             .defects
             .iter()
@@ -1201,7 +1236,7 @@ mod tests {
         let mut bytes = GRAYSCALE.to_vec();
         bytes[at..at + 4].copy_from_slice(&nowhere.to_le_bytes());
 
-        let report = inspect(&bytes, &builtin_table(), crate::journal::Mode::Strict).unwrap();
+        let report = inspect(&bytes, &builtin_table(), Mode::Strict).unwrap();
         let object = report
             .objects
             .iter()
@@ -1254,7 +1289,7 @@ mod tests {
     /// imports, per this task's fourth behaviour.
     #[test]
     fn grayscale_gives_three_objects_twelve_public_names_and_eight_imports() {
-        let report = inspect(GRAYSCALE, &builtin_table(), crate::journal::Mode::Strict).unwrap();
+        let report = inspect(GRAYSCALE, &builtin_table(), Mode::Strict).unwrap();
 
         assert_eq!(report.objects.len(), 3);
         let kinds: Vec<ObjectKind> = report.objects.iter().map(|o| o.kind).collect();
@@ -1285,7 +1320,7 @@ mod tests {
     /// `Sub_Module` (`proc_count` 7), both standard modules, per D-13.
     #[test]
     fn map_editor_reports_its_two_modules_as_unreachable_and_not_as_empty() {
-        let report = inspect(MAP_EDITOR, &builtin_table(), crate::journal::Mode::Strict).unwrap();
+        let report = inspect(MAP_EDITOR, &builtin_table(), Mode::Strict).unwrap();
 
         let modules: Vec<(&str, &ObjectProcedures)> = report
             .objects
@@ -1344,7 +1379,7 @@ mod tests {
         let mut bytes = MANDELBROT.to_vec();
         bytes[at..at + 2].copy_from_slice(&0_u16.to_le_bytes());
 
-        let report = inspect(&bytes, &builtin_table(), crate::journal::Mode::Strict).unwrap();
+        let report = inspect(&bytes, &builtin_table(), Mode::Strict).unwrap();
         assert!(
             report.forms.is_empty(),
             "a zero form count must give an empty forms list: {:?}",
@@ -1358,8 +1393,8 @@ mod tests {
     #[test]
     fn two_runs_over_the_same_bytes_give_equal_reports() {
         let table = builtin_table();
-        let first = inspect(MANDELBROT, &table, crate::journal::Mode::Strict).unwrap();
-        let second = inspect(MANDELBROT, &table, crate::journal::Mode::Strict).unwrap();
+        let first = inspect(MANDELBROT, &table, Mode::Strict).unwrap();
+        let second = inspect(MANDELBROT, &table, Mode::Strict).unwrap();
         assert_eq!(first, second);
     }
 
@@ -1399,7 +1434,7 @@ mod tests {
         let corrupted: u32 = 8;
         bytes[at..at + 4].copy_from_slice(&corrupted.to_le_bytes());
 
-        let report = inspect(&bytes, &builtin_table(), crate::journal::Mode::Strict).unwrap();
+        let report = inspect(&bytes, &builtin_table(), Mode::Strict).unwrap();
         assert_eq!(
             report.forms.len(),
             2,

@@ -502,6 +502,26 @@ pub(crate) fn damaged(message: String) -> Refusal {
     Refusal::Damaged(leaked)
 }
 
+/// Builds the [`Refusal`] a strict run gives back for `defect`.
+///
+/// This is the one place a [`Defect`] becomes a [`Refusal`]. The message
+/// names three things: the defect kind's own sentence, which already
+/// interpolates the byte offset in hexadecimal, the structure name from
+/// [`Site::structure`], and the field name from [`Site::field`].
+///
+/// This reaches [`damaged`], and therefore leaks one short string per
+/// refusal, the same cost `damaged`'s own doc comment already names. The
+/// fuzz job in plan 05-03 turns leak detection off for exactly this reason:
+/// a strict run over a hostile file now reaches this function far more
+/// often than the three call sites `damaged` was written for.
+#[must_use]
+pub fn refusal_for_defect(defect: &Defect) -> Refusal {
+    damaged(format!(
+        "{} ({}.{})",
+        defect.kind, defect.site.structure, defect.site.field
+    ))
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,

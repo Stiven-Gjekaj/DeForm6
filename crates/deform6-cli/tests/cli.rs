@@ -809,6 +809,74 @@ fn the_real_joined_winsock_sample_never_prints_the_unjoined_reason_wording() {
     );
 }
 
+// --- Plan 05-01, Task 2: `--salvage` on `inspect` -------------------------
+
+/// Copies `data` and writes `value` into the two bytes at
+/// `VBHeader.wExternalCount`, learning the header's own file offset from
+/// `deform6::inspect` over the unpatched bytes. Mirrors
+/// `crates/deform6/tests/salvage.rs`'s own helper of the same purpose; that
+/// file proves the library behaviour, this one proves the command line
+/// surface, and the two never diverge because both learn the offset from
+/// the same call rather than a literal each keeps separately.
+fn patched_fast_flames_missing_a_nul_terminator() -> Vec<u8> {
+    let data = fs::read(fast_flames_path()).unwrap();
+    let table = deform6::vb::opcodes::OpcodeTable::builtin();
+    let unpatched = deform6::inspect(&data, &table, deform6::journal::Mode::Salvage)
+        .expect("the shipped file must inspect cleanly in salvage mode");
+    let at = unpatched.header_offset.get().checked_add(0x46).unwrap();
+    let at = usize::try_from(at).unwrap();
+    let mut patched = data;
+    patched[at..at + 2].copy_from_slice(&1_u16.to_le_bytes());
+    patched
+}
+
+/// Absent `--salvage`, a file whose read had to assume a value refuses,
+/// exit code 4, naming the byte offset. The patched bytes are written to a
+/// process-unique path under the OS temp directory and removed again
+/// before this test returns; they are never committed, so this is not the
+/// third party fixture `AGENTS.md` bars from the repository.
+#[test]
+fn inspect_on_a_patched_file_exits_four_and_names_the_offset() {
+    let patched = patched_fast_flames_missing_a_nul_terminator();
+    let path = std::env::temp_dir().join(format!(
+        "deform6-cli-test-patched-fast-flames-{}.exe",
+        std::process::id()
+    ));
+    fs::write(&path, &patched).unwrap();
+    let (code, stdout, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    fs::remove_file(&path).ok();
+
+    assert_eq!(code, 4, "stdout was: {stdout:?}, stderr was: {stderr:?}");
+    assert!(stdout.is_empty(), "stdout was: {stdout:?}");
+    assert!(
+        stderr.contains("0x1da4"),
+        "stderr must name the byte offset 0x1da4: {stderr:?}"
+    );
+}
+
+/// With `--salvage`, the same patched file produces its report and exits 0.
+#[test]
+fn inspect_with_salvage_on_the_same_patched_file_exits_zero_and_prints_the_report() {
+    let patched = patched_fast_flames_missing_a_nul_terminator();
+    let path = std::env::temp_dir().join(format!(
+        "deform6-cli-test-patched-fast-flames-salvage-{}.exe",
+        std::process::id()
+    ));
+    fs::write(&path, &patched).unwrap();
+    let (code, stdout, stderr) = run(&[
+        OsStr::new("inspect"),
+        OsStr::new("--salvage"),
+        path.as_os_str(),
+    ]);
+    fs::remove_file(&path).ok();
+
+    assert_eq!(code, 0, "stderr was: {stderr}");
+    assert!(
+        stdout.contains("File"),
+        "a successful run must print the report: {stdout:?}"
+    );
+}
+
 // --- Plan 04-01, Task 1: `extract` writes a project directory -------------
 
 /// `corpus/vb6-code/Fire-effect/Fast_Flames.exe`, this task's one tracer

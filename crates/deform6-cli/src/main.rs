@@ -73,6 +73,18 @@ enum Command {
         /// same reason `input` is.
         #[arg(long)]
         opcode_table: Option<PathBuf>,
+
+        /// Continues past a defect this run had to assume a value for,
+        /// instead of refusing.
+        ///
+        /// Absent this flag, a defect that cost the read an assumption
+        /// refuses the file, exit code 4, naming the byte offset and what
+        /// the parser expected there. With this flag, the run still
+        /// produces its report, and the report names every assumption the
+        /// run made. Either way, a defect that cost nothing (an item
+        /// dropped, with nothing invented in its place) never refuses.
+        #[arg(long)]
+        salvage: bool,
     },
 
     /// Reads one executable and writes a Visual Basic 6 project directory
@@ -119,9 +131,12 @@ enum Command {
 
 /// The exit code a run of this program gives back to its caller.
 ///
-/// Per `CONTEXT.md`, all six are defined now, even though `Damaged` has no
-/// `--salvage` route in this phase. `Damaged` is in fact already reachable: a
-/// truncated Visual Basic 6 file produces it.
+/// Per `CONTEXT.md`, all six are defined now. `Damaged` now has a
+/// `--salvage` route on both subcommands: absent the flag, a `Recoverable`
+/// defect refuses with this code, naming the byte offset; with the flag,
+/// the same defect no longer refuses, and the run produces its report
+/// instead. A truncated Visual Basic 6 file, which cannot be salvaged,
+/// still gives this code in either mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 enum Exit {
@@ -171,13 +186,26 @@ fn run(cli: &Cli) -> Exit {
         Command::Inspect {
             input,
             opcode_table,
-        } => run_inspect(input, opcode_table.as_deref()),
+            salvage,
+        } => run_inspect(input, opcode_table.as_deref(), mode_for(*salvage)),
         Command::Extract {
             input,
             output,
             report,
             force,
         } => run_extract(input, output, report.as_deref(), *force),
+    }
+}
+
+/// The [`deform6::journal::Mode`] a `--salvage` flag selects.
+///
+/// One line, named, so both subcommands read the flag through the same
+/// word rather than each writing its own `if salvage { .. } else { .. }`.
+const fn mode_for(salvage: bool) -> deform6::journal::Mode {
+    if salvage {
+        deform6::journal::Mode::Salvage
+    } else {
+        deform6::journal::Mode::Strict
     }
 }
 
@@ -237,7 +265,17 @@ fn load_opcode_table(opcode_table_path: Option<&Path>) -> Result<(OpcodeTable, S
 /// known. The opcode table is loaded before the executable is read, so a
 /// bad `--opcode-table` argument is reported as the usage error it is,
 /// before this run does any work over the file under inspection.
-fn run_inspect(path: &Path, opcode_table_path: Option<&Path>) -> Exit {
+///
+/// `mode` comes from `--salvage`, per [`mode_for`]. A refusal on a
+/// [`deform6::journal::Mode::Strict`] run still maps to
+/// [`Exit::Damaged`], the same code a truncated file already gave before
+/// this flag existed: the exit code table does not grow a new entry for
+/// this, per `CONTEXT.md`'s own locked numbering.
+fn run_inspect(
+    path: &Path,
+    opcode_table_path: Option<&Path>,
+    mode: deform6::journal::Mode,
+) -> Exit {
     let (table, table_summary) = match load_opcode_table(opcode_table_path) {
         Ok(loaded) => loaded,
         Err(exit) => return exit,
@@ -251,7 +289,7 @@ fn run_inspect(path: &Path, opcode_table_path: Option<&Path>) -> Exit {
         }
     };
 
-    match deform6::inspect(&data, &table, deform6::journal::Mode::Strict) {
+    match deform6::inspect(&data, &table, mode) {
         Ok(report) => {
             print_report(path, &report, &table_summary);
             Exit::Ok
