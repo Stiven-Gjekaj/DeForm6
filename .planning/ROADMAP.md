@@ -568,14 +568,24 @@ and every crash it finds becomes a committed test that replays on stable Rust.
 **Plans**: 8 plans
 
 Plans:
+**Wave 1**
 
 - [ ] 05-01-PLAN.md - The third severity, the strict and salvage split wired end to end, `--salvage` on both subcommands, every assumption recorded in the report
+- [ ] 05-07-PLAN.md - `corpus/manifest.toml` with pinned hashes, `xtask fetch-corpus` and `xtask pin-corpus`, and `corpus/fetched/` kept out of the repository
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 05-02-PLAN.md - The bound check audit, every count and length field from the parse order, and the capacity wall that keeps the audit done
 - [ ] 05-03-PLAN.md - The fuzz crate, the generated scaffold with the workspace flag, a target that calls both modes, and the two bounded `xtask` commands
-- [ ] 05-04-PLAN.md - The CI fuzz jobs, the bounded pull request run, the longer cron run, and seeding from `corpus/` and the regression inputs
-- [ ] 05-05-PLAN.md - `regressions.rs`, the stable replay, the count assertion, the owned seed, and the written crash-to-test procedure
 - [ ] 05-06-PLAN.md - The stable fuzz smoke test, a fixed seed mutation of corpus files, in the normal gate, no dependency
-- [ ] 05-07-PLAN.md - `corpus/manifest.toml` with pinned hashes, `xtask fetch-corpus` and `xtask pin-corpus`, and `corpus/fetched/` kept out of the repository
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 05-05-PLAN.md - `regressions.rs`, the stable replay, the count assertion, the owned seed, and the written crash-to-test procedure
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 05-04-PLAN.md - The CI fuzz jobs, the bounded pull request run, the longer cron run, and seeding from `corpus/` and the regression inputs
 - [ ] 05-08-PLAN.md - The no-panic proof run over the vendored corpus, the fetched set, and every regression input
 
 **Waves**: [05-01, 05-07] then [05-02, 05-03, 05-06] then [05-05] then [05-04, 05-08]
