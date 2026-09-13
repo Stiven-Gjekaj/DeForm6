@@ -1,0 +1,730 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::integer_division,
+    reason = "a test builds the state it needs and must fail loudly when that state is wrong"
+)]
+
+//! The structural recompilation check.
+//!
+//! Full recompilation cannot run here. It needs the Visual Basic 6 IDE on
+//! Windows, and this sandbox has neither. This file is the check that runs
+//! in its place: it drives the real write path over all 44 corpus programs,
+//! then reads every file it wrote back through the second, independent
+//! reader in `tests/support/`, the same reader `differential.rs` already
+//! uses to read the original corpus. Nothing here claims that a run of this
+//! file starts the VB6 IDE, opens a project, or compiles one; it proves only
+//! that the files this phase writes are shaped the way the roadmap says
+//! they must be.
+//!
+//! **This file names nothing from `deform6::write::frm`,
+//! `deform6::write::vbp`, `deform6::write::code`, `deform6::write::values`
+//! or `deform6::write::comment`.** Its one reach into the writing side of
+//! the library is [`deform6::write::project`], the entry point that
+//! produces the files. Every fact this file checks about the files that
+//! entry point returns comes from `tests/support/frm.rs` and
+//! `tests/support/vbp.rs`: a checker that shared a parser with the writer it
+//! tests would agree with a bug in that writer, and the failure would be
+//! invisible.
+
+#[path = "support/mod.rs"]
+#[allow(
+    dead_code,
+    reason = "cargo compiles this shared module into every test binary and this one uses only \
+              the frm and vbp readers"
+)]
+mod support;
+
+use std::path::{Path, PathBuf};
+
+use deform6::vb::opcodes::OpcodeTable;
+use support::frm::{self, Block};
+use support::vbp;
+
+/// The longest control or class name the roadmap allows: 40 characters.
+/// Stated here as a plain number, not imported from
+/// `deform6::write::model::MAX_NAME_LEN`: this check proves the roadmap's
+/// own number, not the writer's own constant, so a change to one without
+/// the other is a loud failure rather than an agreement between two copies
+/// of the same value.
+const MAX_LEGAL_NAME_LEN: usize = 40;
+
+/// The deepest a control tree may nest, per the roadmap: 7.
+const MAX_LEGAL_NESTING_DEPTH: usize = 7;
+
+// --- Task 1: the corpus walk and the write path, driven once per program --
+
+/// Gives the directory that holds the `corpus/` this workspace vendors.
+fn corpus_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus")
+}
+
+/// Walks `corpus/` recursively and gives every file whose extension is
+/// `.exe`, compared case-insensitively, sorted.
+fn executables() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    walk(&corpus_root(), &mut out);
+    out.sort();
+    out
+}
+
+fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries {
+        let Ok(entry) = entry else { continue };
+        let path = entry.path();
+        if path.is_dir() {
+            walk(&path, out);
+        } else if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
+        {
+            out.push(path);
+        }
+    }
+}
+
+/// A fresh, empty temporary directory this run owns, named after `label` so
+/// two programs in the same run never collide.
+fn fresh_dir(label: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "deform6-extract-structural-{}-{label}",
+        std::process::id()
+    ));
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::create_dir_all(&dir).expect("creating a fresh temp directory must succeed");
+    dir
+}
+
+/// One corpus program, read, inspected, written into its own temporary
+/// directory, and read back through nothing but the independent readers.
+struct ExtractedProgram {
+    /// The executable's own path, relative to `corpus/`, for every failure
+    /// message this file prints.
+    key: String,
+    /// The directory this program's own files were written into.
+    dir: PathBuf,
+    /// Every file [`deform6::write::project`] returned for this program.
+    files: Vec<deform6::write::WrittenFile>,
+}
+
+/// Runs the whole write path once over `exe`, then writes every file it
+/// returned to a fresh temporary directory. Panics loudly on any refusal:
+/// the corpus is vendored and fixed, and roadmap success criterion 1 states
+/// plainly that every one of the 44 programs writes and exits 0.
+fn extract_one(exe: &Path, root: &Path, label: &str) -> ExtractedProgram {
+    let key = exe.strip_prefix(root).unwrap_or(exe).display().to_string();
+    let data =
+        std::fs::read(exe).unwrap_or_else(|err| panic!("{key}: reading the executable: {err}"));
+    let table = OpcodeTable::builtin();
+    let report = deform6::inspect(&data, &table)
+        .unwrap_or_else(|err| panic!("{key}: inspect refused this program: {err}"));
+
+    let written = deform6::write::project(&report, &data)
+        .unwrap_or_else(|err| panic!("{key}: write::project refused this program: {err}"));
+
+    let dir = fresh_dir(label);
+    for file in &written.files {
+        std::fs::write(dir.join(&file.name), &file.bytes)
+            .unwrap_or_else(|err| panic!("{key}: writing {}: {err}", file.name));
+    }
+
+    ExtractedProgram {
+        key,
+        dir,
+        files: written.files,
+    }
+}
+
+// --- Named assertion 1: every component line names a file that exists -----
+
+/// Checks every `Form=`, `Module=` and `Class=` line one written `.vbp`
+/// declares against the files that actually exist beside it, through
+/// `support::vbp::Project::declared_objects`, the independent reader
+/// `differential.rs` already trusts for the same fact over the original
+/// corpus.
+fn check_components_name_existing_files(
+    program_key: &str,
+    declared: &[vbp::DeclaredObject],
+) -> Vec<String> {
+    let mut failures = Vec::new();
+    for object in declared {
+        if !object.source_file.exists() {
+            failures.push(format!(
+                "{program_key}: a {:?} component line names {}, which does not exist",
+                object.kind,
+                object.source_file.display()
+            ));
+        }
+    }
+    failures
+}
+
+// --- Named assertion 2: Startup= names a form a Form= line brings in ------
+
+/// Checks the written `.vbp`'s own `Startup=` value against the forms its
+/// own `Form=` lines declare. `"Sub Main"` is the one value this project's
+/// own writer gives when it declares no form at all, per `write::vbp`'s own
+/// rule; every other value must equal one declared form's own recovered
+/// name.
+fn check_startup_names_a_declared_form(
+    program_key: &str,
+    startup: Option<&str>,
+    declared: &[vbp::DeclaredObject],
+) -> Vec<String> {
+    let Some(startup) = startup else {
+        return vec![format!(
+            "{program_key}: the written .vbp names no Startup= value at all"
+        )];
+    };
+    if startup == "Sub Main" {
+        return Vec::new();
+    }
+    let names_a_form = declared.iter().any(|object| {
+        object.kind == vbp::ObjectKind::Form && object.name.as_deref() == Some(startup)
+    });
+    if names_a_form {
+        Vec::new()
+    } else {
+        vec![format!(
+            "{program_key}: Startup=\"{startup}\" names no form a Form= line brings in"
+        )]
+    }
+}
+
+// --- Named assertion 3: every control and class name is a legal identifier
+
+/// Checks one recovered name: a legal VB6 identifier starts with an ASCII
+/// letter, holds only letters, digits and underscores after that, and is
+/// [`MAX_LEGAL_NAME_LEN`] characters or fewer. Gives the failure message
+/// naming `context` and `name` when the check fails, or `None` when it
+/// passes.
+fn check_one_identifier(context: &str, name: &str) -> Option<String> {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return Some(format!("{context}: the name is empty"));
+    };
+    if !first.is_ascii_alphabetic() {
+        return Some(format!(
+            "{context}: {name:?} does not start with an ASCII letter"
+        ));
+    }
+    if !chars.all(|ch| ch.is_alphanumeric() || ch == '_') {
+        return Some(format!(
+            "{context}: {name:?} holds a character that is not a letter, a digit or an underscore"
+        ));
+    }
+    let len = name.chars().count();
+    if len > MAX_LEGAL_NAME_LEN {
+        return Some(format!(
+            "{context}: {name:?} is {len} characters long, over the {MAX_LEGAL_NAME_LEN} \
+             character limit"
+        ));
+    }
+    None
+}
+
+/// Walks a written form's own parsed control tree (root and every
+/// descendant) and checks every control's own name as a legal identifier.
+fn check_control_identifiers(file_label: &str, block: &Block, failures: &mut Vec<String>) {
+    let context = format!("{file_label}: control {:?}", block.name);
+    if let Some(message) = check_one_identifier(&context, &block.name) {
+        failures.push(message);
+    }
+    for child in &block.children {
+        check_control_identifiers(file_label, child, failures);
+    }
+}
+
+// --- Named assertion 4: nesting depth is 7 or less -------------------------
+
+/// Walks a written form's own parsed control tree and checks that no
+/// control sits deeper than [`MAX_LEGAL_NESTING_DEPTH`].
+fn check_nesting_depth(file_label: &str, block: &Block, depth: usize, failures: &mut Vec<String>) {
+    if depth > MAX_LEGAL_NESTING_DEPTH {
+        failures.push(format!(
+            "{file_label}: control {:?} sits at nesting depth {depth}, over the \
+             {MAX_LEGAL_NESTING_DEPTH} level limit",
+            block.name
+        ));
+    }
+    for child in &block.children {
+        check_nesting_depth(file_label, child, depth.saturating_add(1), failures);
+    }
+}
+
+// --- Named assertion 5: properties inside a block are alphabetical --------
+
+/// `true` for a block this repository writes with its own stream order
+/// preserved rather than sorted: the generic `VB.Control` class this
+/// writer gives an external (OCX) control, since only an OCX control's own
+/// class name reaches this bare fallback (an unrecoverable control kind
+/// writes no block at all). This mirrors `write::frm::write_model_control_block`'s
+/// own `is_external` skip, read here as a written fact rather than shared
+/// as code: the independent reader has no `is_external` field of its own,
+/// only the class name the file itself carries.
+fn skips_alphabetical_order(block: &Block) -> bool {
+    block.class == "VB.Control"
+}
+
+/// Walks a written form's own parsed control tree and checks that every
+/// block's own direct properties (never a nested `BeginProperty` block,
+/// whose own key order is fixed by the format, not by this rule) are in
+/// case-insensitive ascending order by name.
+fn check_property_order(file_label: &str, block: &Block, failures: &mut Vec<String>) {
+    if !skips_alphabetical_order(block) {
+        for pair in block.properties.windows(2) {
+            let a = &pair[0];
+            let b = &pair[1];
+            if a.name.to_lowercase() > b.name.to_lowercase() {
+                failures.push(format!(
+                    "{file_label}: block {:?} writes {:?} before {:?}, out of case-insensitive \
+                     alphabetical order",
+                    block.name, a.name, b.name
+                ));
+            }
+        }
+    }
+    for child in &block.children {
+        check_property_order(file_label, child, failures);
+    }
+}
+
+// --- Named assertion 6: every menu comes after every other control --------
+
+/// Walks a written form's own parsed control tree and checks that, inside
+/// every block's own child list, once a `VB.Menu` child appears, every
+/// child after it is also a `VB.Menu`.
+fn check_menus_last(file_label: &str, block: &Block, failures: &mut Vec<String>) {
+    let mut seen_menu = false;
+    for child in &block.children {
+        let is_menu = child.class == "VB.Menu";
+        if is_menu {
+            seen_menu = true;
+        } else if seen_menu {
+            failures.push(format!(
+                "{file_label}: block {:?} writes non-menu control {:?} after a menu control",
+                block.name, child.name
+            ));
+        }
+    }
+    for child in &block.children {
+        check_menus_last(file_label, child, failures);
+    }
+}
+
+// --- Resource offset resolution: every .frx offset a .frm names lands on --
+// --- a valid record header inside the .frx that was actually written ------
+
+/// Parses every `"name.frx":OFFSET` (or `$"name.frx":OFFSET`) hex offset a
+/// written `.frm`'s own text declares for `frx_file_name`, in the order the
+/// lines give them.
+fn frx_offsets_named_in(frm_text: &str, frx_file_name: &str) -> Vec<u32> {
+    let marker = format!("\"{frx_file_name}\":");
+    let mut offsets = Vec::new();
+    for line in frm_text.lines() {
+        let Some(position) = line.find(marker.as_str()) else {
+            continue;
+        };
+        let after = &line[position.saturating_add(marker.len())..];
+        let hex: String = after.chars().take_while(char::is_ascii_hexdigit).collect();
+        if let Ok(offset) = u32::from_str_radix(&hex, 16) {
+            offsets.push(offset);
+        }
+    }
+    offsets
+}
+
+/// Seeks every offset [`frx_offsets_named_in`] found in `frx_bytes`, reads
+/// the four byte length there, and checks the record it describes ends
+/// inside the file. Separately checks that the last (highest-offset)
+/// record ends exactly at the file's own end, the property the corpus
+/// proves for every committed resource file.
+fn check_resource_offsets(
+    file_label: &str,
+    frx_file_name: &str,
+    frm_text: &str,
+    frx_bytes: &[u8],
+) -> Vec<String> {
+    let mut failures = Vec::new();
+    let mut last_end: Option<usize> = None;
+
+    for offset in frx_offsets_named_in(frm_text, frx_file_name) {
+        let at = usize::try_from(offset).unwrap_or(usize::MAX);
+        let Some(length_bytes) = frx_bytes.get(at..at.saturating_add(4)) else {
+            failures.push(format!(
+                "{file_label}: offset {offset:#06X} into {frx_file_name} has no four byte \
+                 length header inside the file"
+            ));
+            continue;
+        };
+        let declared_len = u32::from_le_bytes(
+            length_bytes
+                .try_into()
+                .unwrap_or_else(|_| panic!("exactly four bytes were sliced")),
+        );
+        let declared_len_usize = usize::try_from(declared_len).unwrap_or(usize::MAX);
+        let Some(end) = at
+            .checked_add(4)
+            .and_then(|v| v.checked_add(declared_len_usize))
+        else {
+            failures.push(format!(
+                "{file_label}: the record at offset {offset:#06X} in {frx_file_name} overflows \
+                 while computing its own end"
+            ));
+            continue;
+        };
+        if end > frx_bytes.len() {
+            failures.push(format!(
+                "{file_label}: the record at offset {offset:#06X} in {frx_file_name} declares \
+                 length {declared_len}, ending at byte {end}, past the file's own {} bytes",
+                frx_bytes.len()
+            ));
+            continue;
+        }
+        last_end = Some(last_end.map_or(end, |current| current.max(end)));
+    }
+
+    if let Some(end) = last_end
+        && end != frx_bytes.len()
+    {
+        failures.push(format!(
+            "{file_label}: the last record in {frx_file_name} ends at byte {end}, not at the \
+             file's own end, byte {}",
+            frx_bytes.len()
+        ));
+    }
+
+    failures
+}
+
+// --- The main corpus-wide run ----------------------------------------------
+
+#[test]
+fn the_structural_check_passes_for_all_forty_four_corpus_programs() {
+    let programs = executables();
+    assert_eq!(
+        programs.len(),
+        44,
+        "found {} corpus executables, wanted 44",
+        programs.len()
+    );
+
+    let root = corpus_root();
+    let mut failures: Vec<String> = Vec::new();
+    let mut programs_checked = 0_usize;
+    let mut extracted_dirs: Vec<PathBuf> = Vec::new();
+
+    for (index, exe) in programs.iter().enumerate() {
+        let extracted = extract_one(exe, &root, &index.to_string());
+        extracted_dirs.push(extracted.dir.clone());
+        programs_checked = programs_checked.saturating_add(1);
+        let key = extracted.key.as_str();
+
+        // Every written file, classified: vbp, frm/frx pairs, bas/cls.
+        let vbp_file = extracted
+            .files
+            .iter()
+            .find(|file| file.name.ends_with(".vbp"));
+        let Some(vbp_file) = vbp_file else {
+            failures.push(format!("{key}: no .vbp file was written at all"));
+            continue;
+        };
+
+        let vbp_path = extracted.dir.join(&vbp_file.name);
+        let project = vbp::Project::read(&vbp_path);
+        let declared = project.declared_objects();
+
+        failures.extend(check_components_name_existing_files(key, &declared));
+        failures.extend(check_startup_names_a_declared_form(
+            key,
+            project.get("Startup").as_deref(),
+            &declared,
+        ));
+
+        // Every recovered class or module name: a legal identifier.
+        for file in extracted
+            .files
+            .iter()
+            .filter(|file| file.name.ends_with(".bas") || file.name.ends_with(".cls"))
+        {
+            let path = extracted.dir.join(&file.name);
+            let text = read_latin1(&path);
+            match attribute_vb_name(&text) {
+                Some(name) => {
+                    let context = format!("{key}: {}: object", file.name);
+                    if let Some(message) = check_one_identifier(&context, &name) {
+                        failures.push(message);
+                    }
+                }
+                None => failures.push(format!(
+                    "{key}: {} carries no Attribute VB_Name line",
+                    file.name
+                )),
+            }
+        }
+
+        // Every written form: its own control tree and, when it names one,
+        // its own resource file.
+        for file in extracted
+            .files
+            .iter()
+            .filter(|file| file.name.ends_with(".frm"))
+        {
+            let frm_path = extracted.dir.join(&file.name);
+            let form = frm::Form::read(&frm_path);
+            let file_label = format!("{key}: {}", file.name);
+
+            let roots = form.blocks();
+            for block in &roots {
+                check_control_identifiers(&file_label, block, &mut failures);
+                check_nesting_depth(&file_label, block, 0, &mut failures);
+                check_property_order(&file_label, block, &mut failures);
+                check_menus_last(&file_label, block, &mut failures);
+            }
+
+            let frx_file_name = file.name.replace(".frm", ".frx");
+            if let Some(frx_file) = extracted
+                .files
+                .iter()
+                .find(|candidate| candidate.name == frx_file_name)
+            {
+                let frx_path = extracted.dir.join(&frx_file.name);
+                let frx_bytes = std::fs::read(&frx_path)
+                    .unwrap_or_else(|err| panic!("{key}: reading {frx_file_name}: {err}"));
+                failures.extend(check_resource_offsets(
+                    &file_label,
+                    &frx_file_name,
+                    &form.text,
+                    &frx_bytes,
+                ));
+            }
+        }
+    }
+
+    assert_eq!(
+        programs_checked,
+        programs.len(),
+        "this run checked {programs_checked} program(s), but {} executables exist under the \
+         corpus root",
+        programs.len()
+    );
+    assert!(
+        failures.is_empty(),
+        "{} structural failure(s) across {} program(s):\n{}",
+        failures.len(),
+        programs_checked,
+        failures.join("\n")
+    );
+
+    for dir in &extracted_dirs {
+        std::fs::remove_dir_all(dir).ok();
+    }
+}
+
+/// Reads `path` as Latin-1 bytes, this crate's own read and write
+/// convention: each byte maps to its own code point, never
+/// `String::from_utf8_lossy`. Copied here, not shared with any writing
+/// module: this is a plain text read, the same one `tests/support/frm.rs`
+/// already performs on its own.
+fn read_latin1(path: &Path) -> String {
+    let bytes =
+        std::fs::read(path).unwrap_or_else(|err| panic!("reading {}: {err}", path.display()));
+    bytes.iter().copied().map(char::from).collect()
+}
+
+/// Scans `text` line by line for `Attribute VB_Name = "..."` and gives the
+/// quoted name. Mirrors `tests/support/vbp.rs`'s own `find_vb_name`,
+/// deliberately duplicated rather than imported: `find_vb_name` is private
+/// to its own file, and a second, independent scan of the same line shape
+/// is exactly the discipline this whole file exists to apply.
+fn attribute_vb_name(text: &str) -> Option<String> {
+    for line in text.lines() {
+        let trimmed = line.trim();
+        let Some(rest) = trimmed.strip_prefix("Attribute VB_Name") else {
+            continue;
+        };
+        let Some(rest) = rest.trim_start().strip_prefix('=') else {
+            continue;
+        };
+        let rest = rest.trim();
+        let first = rest.find('"')?;
+        let last = rest.rfind('"')?;
+        if last > first {
+            return Some(rest[first.saturating_add(1)..last].to_owned());
+        }
+    }
+    None
+}
+
+// --- Deliberate breakages, one per named assertion, built by hand rather --
+// --- than by mutating a real corpus program, per this task's own rule ----
+// --- that a test that cannot fail is worse than no test at all -----------
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    reason = "a test builds its own literal; a wrong value must fail loudly"
+)]
+mod deliberate_breakages {
+    // `super::support`, never a second `#[path]` declaration here: a
+    // `#[path]` attribute on a module nested inside this inline `mod`
+    // would resolve against this module's own implied, nonexistent
+    // directory, never this file's own real directory (the exact pitfall
+    // plan 04-04's own `write::frm` doc comment names). `support` is
+    // declared once, at this file's own top level, and reached from here
+    // through `super`.
+    use super::support::frm::{Block, Property};
+    use super::{
+        check_control_identifiers, check_menus_last, check_nesting_depth, check_property_order,
+        check_resource_offsets,
+    };
+
+    fn leaf(class: &str, name: &str) -> Block {
+        Block {
+            class: class.to_owned(),
+            name: name.to_owned(),
+            properties: Vec::new(),
+            property_blocks: Vec::new(),
+            children: Vec::new(),
+        }
+    }
+
+    /// One of this task's own four named deliberate breakages: a `.vbp`
+    /// that declares a component line naming a file this repository never
+    /// wrote. `super::vbp::DeclaredObject` is built by hand, per
+    /// `AGENTS.md`'s "build the state a test needs inside the test": no
+    /// corpus program leaves a component line dangling, so this shape is
+    /// only ever exercised here.
+    #[test]
+    fn a_component_line_naming_a_missing_file_fails_the_component_check() {
+        let missing = super::vbp::DeclaredObject {
+            kind: super::vbp::ObjectKind::Form,
+            name: Some("frmGhost".to_owned()),
+            name_source: None,
+            prefix: None,
+            source_file: std::path::PathBuf::from(
+                "/deform6-fixture-that-never-exists/frmGhost.frm",
+            ),
+        };
+        let failures = super::check_components_name_existing_files("fixture.exe", &[missing]);
+        assert!(
+            !failures.is_empty(),
+            "a component line naming a file that does not exist must fail the check"
+        );
+        assert!(failures[0].contains("frmGhost"), "{failures:?}");
+    }
+
+    #[test]
+    fn a_control_name_holding_an_illegal_character_fails_the_identifier_check() {
+        let mut root = leaf("VB.Form", "frmOk");
+        root.children.push(leaf("VB.CommandButton", "cmd/Bad"));
+        let mut failures = Vec::new();
+        check_control_identifiers("fixture.frm", &root, &mut failures);
+        assert!(
+            !failures.is_empty(),
+            "a control name holding an illegal character must fail the check"
+        );
+        assert!(failures[0].contains("cmd/Bad"), "{failures:?}");
+    }
+
+    #[test]
+    fn a_control_nested_past_the_depth_limit_fails_the_nesting_check() {
+        let mut block = leaf("VB.Form", "frmDeep");
+        {
+            let mut current = &mut block;
+            for level in 1..=8 {
+                current
+                    .children
+                    .push(leaf("VB.Frame", &format!("Frame{level}")));
+                current = current.children.last_mut().expect("just pushed");
+            }
+        }
+        let mut failures = Vec::new();
+        check_nesting_depth("fixture.frm", &block, 0, &mut failures);
+        assert!(
+            !failures.is_empty(),
+            "a control past the depth limit must fail the check"
+        );
+        assert!(failures[0].contains("Frame8"), "{failures:?}");
+    }
+
+    #[test]
+    fn a_reversed_property_order_fails_the_alphabetical_check() {
+        let mut block = leaf("VB.Form", "frmOrder");
+        block.properties = vec![
+            Property {
+                name: "Visible".to_owned(),
+                value: "0".to_owned(),
+            },
+            Property {
+                name: "Caption".to_owned(),
+                value: "\"Hi\"".to_owned(),
+            },
+        ];
+        let mut failures = Vec::new();
+        check_property_order("fixture.frm", &block, &mut failures);
+        assert!(
+            !failures.is_empty(),
+            "reversed property order must fail the check"
+        );
+        assert!(
+            failures[0].contains("Visible") && failures[0].contains("Caption"),
+            "{failures:?}"
+        );
+    }
+
+    #[test]
+    fn a_menu_before_a_non_menu_sibling_fails_the_menus_last_check() {
+        let mut block = leaf("VB.Form", "frmMenu");
+        block.children = vec![leaf("VB.Menu", "mnuFile"), leaf("VB.CommandButton", "cmd1")];
+        let mut failures = Vec::new();
+        check_menus_last("fixture.frm", &block, &mut failures);
+        assert!(
+            !failures.is_empty(),
+            "a non-menu control after a menu control must fail the check"
+        );
+        assert!(failures[0].contains("cmd1"), "{failures:?}");
+    }
+
+    #[test]
+    fn a_resource_offset_shifted_by_one_byte_fails_the_offset_resolution_check() {
+        // A real, minimal .frx: two records, each declared length 4 with
+        // four zero payload bytes, sixteen bytes total. The second record
+        // starts at offset 8, right after the first record's own four byte
+        // header and four byte payload.
+        let frx_bytes: Vec<u8> = vec![
+            4, 0, 0, 0, 0, 0, 0, 0, // record 1 at offset 0
+            4, 0, 0, 0, 0, 0, 0, 0, // record 2 at offset 8
+        ];
+        let good_text = "   Icon            =   \"frmX.frx\":0000\r\n   Picture         =   \
+                          \"frmX.frx\":0008\r\n";
+        assert!(
+            check_resource_offsets("fixture.frm", "frmX.frx", good_text, &frx_bytes).is_empty(),
+            "the two real, unshifted offsets must resolve cleanly"
+        );
+
+        // Shifted by one byte: the second offset now reads four bytes
+        // starting one byte into the first record's own payload, landing
+        // on a length field this fixture never wrote.
+        let shifted_text = "   Icon            =   \"frmX.frx\":0000\r\n   Picture         =   \
+                             \"frmX.frx\":0009\r\n";
+        let failures = check_resource_offsets("fixture.frm", "frmX.frx", shifted_text, &frx_bytes);
+        assert!(
+            !failures.is_empty(),
+            "an offset shifted by one byte must fail the resolution check: {failures:?}"
+        );
+        assert!(
+            failures.iter().any(|f| f.contains("frmX.frx")),
+            "{failures:?}"
+        );
+    }
+}
