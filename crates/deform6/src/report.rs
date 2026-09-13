@@ -218,17 +218,179 @@ impl PathIssuer {
     }
 }
 
+// --- Plan 04-06, Task 2: the three words, the basis, the evidence and the
+// defect array ---------------------------------------------------------
+
+use crate::vb::Report;
+use crate::vb::propstream::PropertyValue;
+use crate::write::model::ProjectModel;
+
+/// Gives the path segment one property's own item takes: its own
+/// recovered name, when it has one, or `opcode<N>` for a
+/// [`PropertyValue::Undecoded`] value, which carries no name at all.
+///
+/// No wildcard arm: a variant this crate adds later fails to compile here
+/// until somebody decides its own segment word.
+fn property_word(property: &PropertyValue) -> String {
+    match property {
+        PropertyValue::Byte { name, .. }
+        | PropertyValue::Boolean { name, .. }
+        | PropertyValue::Integer { name, .. }
+        | PropertyValue::Long { name, .. }
+        | PropertyValue::Single { name, .. }
+        | PropertyValue::Text { name, .. }
+        | PropertyValue::Position { name, .. }
+        | PropertyValue::Font { name, .. }
+        | PropertyValue::Blob { name, .. }
+        | PropertyValue::BlobUnreadable { name, .. } => name.clone(),
+        PropertyValue::Undecoded { opcode, .. } => format!("opcode{opcode}"),
+    }
+}
+
+/// Builds the report item one property earns, when it earns one at all.
+///
+/// A resource blob this repository read earns [`Confidence::Proven`]: its
+/// own bytes were read at its own byte offset, by a named rule
+/// (`crate::vb::frx::extract_blob`). A resource blob this repository
+/// could not read, and an opcode this repository names no decoder for,
+/// both earn [`Confidence::Unrecoverable`], reusing the item
+/// [`crate::write::values::format_value`] already builds for them, with
+/// its own real offset unchanged: this is a field assignment, not a
+/// second decision about the same fact. Every other property value is
+/// written directly, in full, into the project this run writes; it earns
+/// no item of its own.
+///
+/// No wildcard arm: a variant this crate adds later fails to compile here
+/// until somebody decides whether it earns an item.
+///
+/// The item's own `path` is always empty; the caller fills in the real
+/// path, the same convention [`crate::write::values::format_value`]
+/// already uses.
+fn item_for_property(property: &PropertyValue) -> Option<ReportItem> {
+    match property {
+        PropertyValue::Blob { name, offset, .. } => Some(ReportItem {
+            path: String::new(),
+            confidence: Confidence::Proven,
+            basis: format!(
+                "the {name} property's own resource blob was read at its own byte \
+                 offset in the executable"
+            ),
+            evidence: vec![Evidence {
+                offset: *offset,
+                structure: "PropertyValue",
+                field: "Blob",
+                note: None,
+            }],
+        }),
+        PropertyValue::BlobUnreadable { .. } | PropertyValue::Undecoded { .. } => {
+            crate::write::values::format_value(property, false).1
+        }
+        PropertyValue::Byte { .. }
+        | PropertyValue::Boolean { .. }
+        | PropertyValue::Integer { .. }
+        | PropertyValue::Long { .. }
+        | PropertyValue::Single { .. }
+        | PropertyValue::Text { .. }
+        | PropertyValue::Position { .. }
+        | PropertyValue::Font { .. } => None,
+    }
+}
+
+/// Backfills one [`Evidence`] record, anchored at the executable's own
+/// project header, for an item that arrived with none.
+///
+/// A run level or a whole object choice this crate makes has no byte of
+/// its own to point at, and [`Report::header_offset`] is a real,
+/// already-read offset every [`Report`] carries: phase 1 measured it
+/// directly out of the file, so this function never computes a new
+/// offset, it only anchors the item to one the reading side already
+/// recorded.
+fn with_header_evidence(mut item: ReportItem, report: &Report) -> ReportItem {
+    if item.evidence.is_empty() {
+        item.evidence.push(Evidence {
+            offset: report.header_offset.get(),
+            structure: "VbHeader",
+            field: "header_offset",
+            note: Some(
+                "this choice has no byte of its own; the offset anchors to the \
+                 executable's own project header"
+                    .to_owned(),
+            ),
+        });
+    }
+    item
+}
+
+/// Builds the complete [`ProjectReport`] one run of
+/// [`crate::write::project`] produces.
+///
+/// Walks `model_items` (from [`crate::write::model::from_report`]) first,
+/// backfilling evidence for any item that arrived with none, then walks
+/// every form's own controls in [`ProjectModel::forms`] order and every
+/// control's own properties in stream order, adding one item for every
+/// property that earns one. The defect array is attached whole, from
+/// [`Report::defects`], never filtered: a run that continued past a
+/// defect still reports it, per RPT-05.
+///
+/// # Determinism
+///
+/// Every collection this function walks is already an ordered `Vec`, in
+/// [`Report`]'s or [`ProjectModel`]'s own recovered order, and every path
+/// this function issues comes from one [`PathIssuer`], so two calls over
+/// the same `report`, `model` and `model_items` give the same
+/// [`ProjectReport`], field for field.
+#[must_use]
+pub fn build(report: &Report, model: &ProjectModel, model_items: Vec<ReportItem>) -> ProjectReport {
+    let mut paths = PathIssuer::new();
+    let mut items = Vec::with_capacity(model_items.len());
+
+    for item in model_items {
+        let item = with_header_evidence(item, report);
+        let path = paths.issue(item.path.clone());
+        items.push(ReportItem { path, ..item });
+    }
+
+    for form in &model.forms {
+        for control in &form.controls {
+            for property in &control.properties {
+                if let Some(item) = item_for_property(property) {
+                    let path = paths.issue(path_for_property(
+                        &form.name,
+                        &control.name,
+                        &property_word(property),
+                    ));
+                    items.push(ReportItem { path, ..item });
+                }
+            }
+        }
+    }
+
+    ProjectReport {
+        items,
+        defects: report.defects.clone(),
+        limits: Vec::new(),
+    }
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
     clippy::expect_used,
+    clippy::indexing_slicing,
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
     use super::{
-        Confidence, Evidence, META_PATH, PathIssuer, ProjectReport, ReportItem, path_for_code,
-        path_for_control, path_for_form, path_for_property,
+        Confidence, Evidence, META_PATH, PathIssuer, ProjectReport, ReportItem, build,
+        item_for_property, path_for_code, path_for_control, path_for_form, path_for_property,
+        property_word, with_header_evidence,
     };
+    use crate::error::{Defect, DefectKind, Site};
+    use crate::read::region::Off;
+    use crate::vb::controltree::ControlKind;
+    use crate::vb::propstream::PropertyValue;
+    use crate::vb::runtime::Runtime;
+    use crate::vb::{ControlReport, FormReport, ObjectReport, Report};
     use crate::write::model::{CodeKind, NameKind, SafeName};
 
     #[test]
@@ -350,5 +512,211 @@ mod tests {
         assert_eq!(first, "/forms/frmMain");
         assert_ne!(first, second);
         assert!(second.starts_with("/forms/frmMain#"), "{second}");
+    }
+
+    // --- Plan 04-06, Task 2: the three words, the basis, the evidence and
+    // the defect array -------------------------------------------------
+
+    /// Builds a minimal, valid [`Report`], the way
+    /// `write::model::tests::minimal_report` does: every field this
+    /// module's own building never reads carries a literal, per
+    /// `AGENTS.md`'s "build the state a test needs inside the test".
+    fn minimal_report(
+        objects: Vec<ObjectReport>,
+        forms: Vec<FormReport>,
+        defects: Vec<Defect>,
+    ) -> Report {
+        Report {
+            file_len: 0,
+            section_count: 0,
+            runtime: Runtime::Vb6,
+            runtime_dll: "MSVBVM60.DLL".to_owned(),
+            signature: *b"VB5!",
+            header_offset: Off::new(0x40),
+            runtime_build: 0,
+            project_name: "TestProject".to_owned(),
+            title: String::new(),
+            exe_name: String::new(),
+            help_file: String::new(),
+            native: true,
+            object_count: u16::try_from(objects.len()).unwrap_or(0),
+            objects,
+            declarations: Vec::new(),
+            components: Vec::new(),
+            forms,
+            defects,
+        }
+    }
+
+    /// Builds a minimal [`ControlReport`] naming `name` and `kind`, with
+    /// `properties` and no other optional field.
+    fn control_with_properties(
+        name: &str,
+        kind: ControlKind,
+        parent: Option<usize>,
+        properties: Vec<PropertyValue>,
+    ) -> ControlReport {
+        ControlReport {
+            name: name.to_owned(),
+            kind,
+            array_index: None,
+            parent,
+            properties,
+            external: None,
+            external_reason: None,
+            ocx_header: None,
+            opaque_message: None,
+            events: Vec::new(),
+        }
+    }
+
+    fn a_blob(name: &str, offset: u32) -> PropertyValue {
+        PropertyValue::Blob {
+            name: name.to_owned(),
+            offset,
+            declared_len: 20,
+            image_len: 12,
+            format: crate::vb::frx::ImageFormat::Unknown(Vec::new()),
+            frx_offset: 0,
+        }
+    }
+
+    fn an_undecoded(opcode: u8, offset: u32, control_type: &str) -> PropertyValue {
+        PropertyValue::Undecoded {
+            opcode,
+            offset,
+            control_type: control_type.to_owned(),
+            bytes_not_read: 4,
+        }
+    }
+
+    #[test]
+    fn a_blob_property_earns_confidence_proven_with_its_own_offset() {
+        let property = a_blob("Icon", 0x300);
+        let item = item_for_property(&property).expect("a blob must earn an item");
+        assert_eq!(item.confidence, Confidence::Proven);
+        assert_eq!(item.evidence.len(), 1);
+        assert_eq!(item.evidence[0].offset, 0x300);
+        assert!(!item.basis.is_empty());
+    }
+
+    #[test]
+    fn an_undecoded_property_earns_confidence_unrecoverable_with_its_own_offset() {
+        let property = an_undecoded(9, 0x310, "Form");
+        let item = item_for_property(&property).expect("an undecoded property must earn an item");
+        assert_eq!(item.confidence, Confidence::Unrecoverable);
+        assert_eq!(item.evidence.len(), 1);
+        assert_eq!(item.evidence[0].offset, 0x310);
+    }
+
+    #[test]
+    fn a_decoded_scalar_property_earns_no_item_of_its_own() {
+        let property = PropertyValue::Boolean {
+            name: "Visible".to_owned(),
+            value: -1,
+        };
+        assert!(item_for_property(&property).is_none());
+    }
+
+    #[test]
+    fn property_word_gives_the_recovered_name_for_a_named_property() {
+        let property = a_blob("Icon", 0x10);
+        assert_eq!(property_word(&property), "Icon");
+    }
+
+    #[test]
+    fn property_word_uses_the_opcode_number_for_an_undecoded_property() {
+        let property = an_undecoded(7, 0x10, "Form");
+        assert_eq!(property_word(&property), "opcode7");
+    }
+
+    #[test]
+    fn with_header_evidence_backfills_only_when_the_item_arrives_with_none() {
+        let report = minimal_report(Vec::new(), Vec::new(), Vec::new());
+        let empty = ReportItem {
+            path: META_PATH.to_owned(),
+            confidence: Confidence::Inferred,
+            basis: "a run level choice with no byte of its own".to_owned(),
+            evidence: Vec::new(),
+        };
+        let filled = with_header_evidence(empty, &report);
+        assert_eq!(filled.evidence.len(), 1);
+        assert_eq!(filled.evidence[0].offset, report.header_offset.get());
+
+        let already = ReportItem {
+            evidence: vec![Evidence {
+                offset: 0x99,
+                structure: "X",
+                field: "Y",
+                note: None,
+            }],
+            ..filled.clone()
+        };
+        let unchanged = with_header_evidence(already.clone(), &report);
+        assert_eq!(unchanged.evidence, already.evidence);
+    }
+
+    #[test]
+    fn build_attaches_the_defect_array_whole_and_never_filters_it() {
+        let defect = Defect {
+            site: Site {
+                offset: 0x10,
+                rva: None,
+                structure: "GuiObjectInfo",
+                field: "lPropertiesLength",
+            },
+            kind: DefectKind::StructureUnreadable {
+                offset: 0x10,
+                reason: "synthetic, built inside the test".to_owned(),
+            },
+        };
+        let report = minimal_report(Vec::new(), Vec::new(), vec![defect.clone(), defect]);
+        let (model, items) = crate::write::model::from_report(&report, &[]);
+        let built = build(&report, &model, items);
+        assert_eq!(built.defects.len(), report.defects.len());
+        assert_eq!(built.defects, report.defects);
+    }
+
+    #[test]
+    fn every_item_in_a_built_report_has_a_non_empty_basis_and_at_least_one_evidence_record() {
+        let root = control_with_properties("frmPics", ControlKind::Form, None, Vec::new());
+        let child = control_with_properties(
+            "Picture1",
+            ControlKind::PictureBox,
+            Some(0),
+            vec![a_blob("Icon", 0x200), an_undecoded(7, 0x220, "PictureBox")],
+        );
+        let form = FormReport {
+            name: "frmPics".to_owned(),
+            controls: vec![root, child],
+            defects: Vec::new(),
+        };
+        let report = minimal_report(Vec::new(), vec![form], Vec::new());
+        let (model, items) = crate::write::model::from_report(&report, &[]);
+        let built = build(&report, &model, items);
+
+        assert!(!built.items.is_empty());
+        for item in &built.items {
+            assert!(!item.basis.is_empty(), "{item:?}");
+            assert!(!item.evidence.is_empty(), "{item:?}");
+        }
+
+        assert!(
+            built
+                .items
+                .iter()
+                .any(|item| item.confidence == Confidence::Proven),
+            "{:?}",
+            built.items
+        );
+        assert!(
+            built
+                .items
+                .iter()
+                .any(|item| item.confidence == Confidence::Unrecoverable
+                    && item.basis.contains("opcode 7")),
+            "{:?}",
+            built.items
+        );
     }
 }
