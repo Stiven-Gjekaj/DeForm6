@@ -12,9 +12,9 @@
 //! between them.
 //!
 //! No statement of Visual Basic is ever written into a procedure body:
-//! this milestone recovers metadata only. Plan 04-05 completes this file
-//! across three tasks: the two preambles (this task), the empty procedure
-//! signature, and the shared code region.
+//! this milestone recovers metadata only, and every procedure this file
+//! writes is a signature line, an empty body, and a closing line, nothing
+//! more.
 
 use super::model::{LineWriter, SafeName};
 use crate::report::{Confidence, ReportItem};
@@ -448,6 +448,99 @@ pub fn format_procedures(procedures: &ObjectProcedures) -> (Vec<String>, Vec<Rep
     (lines, items)
 }
 
+// --- Plan 04-05, Task 3: the shared code region, and determinism ----------
+
+/// Appends one [`ReportItem`] naming every character this call's own
+/// writer could not represent in Windows-1252, when there is at least one.
+/// `.planning/research/FILE-FORMATS.md` section 6.1: the emitter never
+/// falls back to UTF-8; it substitutes `?` and records the substitution.
+fn push_substitution_item(items: &mut Vec<ReportItem>, substituted: &[char]) {
+    if substituted.is_empty() {
+        return;
+    }
+    items.push(ReportItem {
+        path: String::new(),
+        confidence: Confidence::Unrecoverable,
+        basis: format!(
+            "{} character(s) in this file could not be represented in Windows-1252 and \
+             were replaced with '?': {substituted:?}",
+            substituted.len()
+        ),
+        evidence: Vec::new(),
+    });
+}
+
+/// Emits the code region every `.bas`, `.cls` and `.frm` file shares:
+/// `comments` (a caller supplied parameter; this plan writes none of its
+/// own, plan 04-07 supplies them), then one empty procedure per procedure
+/// slot `procedures` recovered, in the reader's own array order.
+///
+/// The three file writers in this phase (this file's own [`write_bas`]
+/// and [`write_cls`], and `write::frm`'s form writer, plan 04-04) all
+/// call this one function. None of them holds a code region of its own:
+/// the code region is genuinely the same in all three file kinds, unlike
+/// the line templates above it, which differ in all three.
+///
+/// Reaches no process global mutable state: everything this function needs
+/// comes in as a parameter, and everything it produces comes back as a
+/// return value. Two calls with the same input give byte identical output.
+#[must_use]
+pub fn write_code_region(
+    comments: &[String],
+    procedures: &ObjectProcedures,
+) -> (Vec<String>, Vec<ReportItem>) {
+    let mut lines: Vec<String> = comments.to_vec();
+    let (procedure_lines, items) = format_procedures(procedures);
+    lines.extend(procedure_lines);
+    (lines, items)
+}
+
+/// Writes the complete `.cls` file: the thirteen line preamble
+/// ([`cls_preamble_lines`]), then the shared code region
+/// ([`write_code_region`]) built from `comments` and `procedures`. Every
+/// line, including the last, ends with the two line ending bytes; the file
+/// carries no byte order mark. Gives the file's own bytes and every
+/// [`ReportItem`] this call produced.
+#[must_use]
+pub fn write_cls(
+    name: &SafeName,
+    procedures: &ObjectProcedures,
+    comments: &[String],
+) -> (Vec<u8>, Vec<ReportItem>) {
+    let mut writer = LineWriter::new();
+    for line in cls_preamble_lines(name) {
+        writer.push_line(&line);
+    }
+    let (region_lines, mut items) = write_code_region(comments, procedures);
+    for line in &region_lines {
+        writer.push_line(line);
+    }
+    let (bytes, substituted) = writer.finish();
+    push_substitution_item(&mut items, &substituted);
+    (bytes, items)
+}
+
+/// Writes the complete `.bas` file: the one line header
+/// ([`bas_header_line`]), then the shared code region
+/// ([`write_code_region`]). Gives the file's own bytes and every
+/// [`ReportItem`] this call produced.
+#[must_use]
+pub fn write_bas(
+    name: &SafeName,
+    procedures: &ObjectProcedures,
+    comments: &[String],
+) -> (Vec<u8>, Vec<ReportItem>) {
+    let mut writer = LineWriter::new();
+    writer.push_line(&bas_header_line(name));
+    let (region_lines, mut items) = write_code_region(comments, procedures);
+    for line in &region_lines {
+        writer.push_line(line);
+    }
+    let (bytes, substituted) = writer.finish();
+    push_substitution_item(&mut items, &substituted);
+    (bytes, items)
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -458,12 +551,17 @@ pub fn format_procedures(procedures: &ObjectProcedures) -> (Vec<String>, Vec<Rep
 mod tests {
     use super::{
         AttributeFileKind, CLS_NAME_PAD, CLS_PREAMBLE_PROPERTIES, bas_header_line,
-        cls_preamble_lines, form_attribute_block,
+        cls_preamble_lines, form_attribute_block, write_bas, write_cls, write_code_region,
     };
+    use crate::vb::{ObjectProcedures, ProcedureEntry};
     use crate::write::model::{NameKind, SafeName};
 
     fn name(raw: &str) -> SafeName {
         SafeName::new(raw, NameKind::Module).0
+    }
+
+    fn text(bytes: &[u8]) -> String {
+        bytes.iter().copied().map(char::from).collect()
     }
 
     // --- Task 1: the two preambles -----------------------------------
@@ -478,9 +576,11 @@ mod tests {
 
     #[test]
     fn a_module_file_has_no_version_line_and_no_begin_block() {
-        let header = bas_header_line(&name("Logic_Module"));
-        assert!(!header.contains("VERSION"), "{header:?}");
-        assert!(!header.contains("BEGIN"), "{header:?}");
+        let (bytes, _items) =
+            write_bas(&name("Logic_Module"), &ObjectProcedures::Slots(vec![]), &[]);
+        let content = text(&bytes);
+        assert!(!content.contains("VERSION"), "{content:?}");
+        assert!(!content.contains("BEGIN"), "{content:?}");
     }
 
     #[test]
@@ -574,7 +674,73 @@ mod tests {
     fn cls_preamble_properties_holds_exactly_five_entries() {
         assert_eq!(CLS_PREAMBLE_PROPERTIES.len(), 5);
     }
+
+    // --- Task 3: the shared code region and determinism ----------------
+
+    #[test]
+    fn write_bas_called_twice_on_one_input_gives_byte_identical_output() {
+        let procedures = ObjectProcedures::Slots(vec![ProcedureEntry::Private]);
+        let (first, first_items) = write_bas(&name("Mod1"), &procedures, &[]);
+        let (second, second_items) = write_bas(&name("Mod1"), &procedures, &[]);
+        assert_eq!(first, second);
+        assert_eq!(first_items, second_items);
+    }
+
+    #[test]
+    fn write_cls_called_twice_on_one_input_gives_byte_identical_output() {
+        let procedures = ObjectProcedures::Slots(vec![]);
+        let (first, first_items) = write_cls(&name("Cls1"), &procedures, &[]);
+        let (second, second_items) = write_cls(&name("Cls1"), &procedures, &[]);
+        assert_eq!(first, second);
+        assert_eq!(first_items, second_items);
+    }
+
+    #[test]
+    fn a_written_cls_files_last_two_bytes_are_the_line_ending_pair_and_lf_count_equals_pair_count()
+    {
+        let (bytes, _items) = write_cls(&name("Cls1"), &ObjectProcedures::Slots(vec![]), &[]);
+        assert!(bytes.ends_with(b"\r\n"));
+        let crlf_pairs = bytes.windows(2).filter(|window| *window == b"\r\n").count();
+        let lf_count = bytes.iter().filter(|byte| **byte == b'\n').count();
+        assert_eq!(crlf_pairs, lf_count);
+    }
+
+    #[test]
+    fn no_written_file_begins_with_a_byte_order_mark() {
+        let (cls_bytes, _items) = write_cls(&name("Cls1"), &ObjectProcedures::Slots(vec![]), &[]);
+        let (bas_bytes, _items) = write_bas(&name("Mod1"), &ObjectProcedures::Slots(vec![]), &[]);
+        assert!(!cls_bytes.starts_with(&[0xEF, 0xBB, 0xBF]));
+        assert!(!bas_bytes.starts_with(&[0xEF, 0xBB, 0xBF]));
+    }
+
+    #[test]
+    fn a_character_above_0xff_in_a_comment_produces_a_recorded_substitution() {
+        let comments = vec!["'caf\u{e9}\u{20ac}".to_owned()];
+        let (_bytes, items) = write_cls(&name("Cls1"), &ObjectProcedures::Slots(vec![]), &comments);
+        let item = items
+            .iter()
+            .find(|item| item.basis.contains('\u{20ac}'))
+            .expect("a substitution item must be recorded");
+        assert_eq!(item.confidence, crate::report::Confidence::Unrecoverable);
+    }
+
+    #[test]
+    fn write_code_region_emits_the_comment_lines_it_is_given_and_supplies_none_of_its_own() {
+        let comments = vec!["'a comment plan 04-07 will supply".to_owned()];
+        let (lines, _items) = write_code_region(&comments, &ObjectProcedures::Slots(vec![]));
+        assert_eq!(lines, comments);
+    }
+
+    #[test]
+    fn an_object_with_no_procedure_name_array_writes_no_lines_and_one_item_via_write_code_region() {
+        let (lines, items) =
+            write_code_region(&[], &ObjectProcedures::NoNameArray { proc_count: 7 });
+        assert!(lines.is_empty());
+        assert_eq!(items.len(), 1);
+        assert!(items[0].basis.contains('7'), "{items:?}");
+    }
 }
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
