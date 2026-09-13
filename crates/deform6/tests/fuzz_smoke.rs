@@ -20,13 +20,15 @@
 //! A mutated corpus program is never written to disk and never committed:
 //! `AGENTS.md` bars a fixture calculated from a third party file from this
 //! repository. The printed file name, seed, iteration number and byte
-//! changes are what a person uses to rebuild the input by hand.
-//! `crates/deform6/tests/support/hostile.rs` is where a hostile fixture that
-//! may be committed comes from instead.
-//!
-//! This file builds its own generator and its own mutation rule below. The
-//! sweep over the corpus that uses them is a separate, later piece of this
-//! same file.
+//! changes are what a person uses to rebuild the input by hand instead.
+//! `crates/deform6/tests/support/hostile.rs`, which a later plan in this
+//! phase adds, is where a hostile fixture that may be committed comes from.
+
+use std::path::{Path, PathBuf};
+
+use deform6::journal::Mode;
+use deform6::vb::opcodes::OpcodeTable;
+use deform6::{inspect, write};
 
 /// The seed this sweep starts from. The value is arbitrary: what matters is
 /// that it never changes. Changing it makes the sweep explore a different
@@ -36,19 +38,33 @@ const SMOKE_SEED: u64 = 0x5EED_BEEF_C0FF_EE01;
 
 /// The total number of mutated inputs the sweep runs.
 ///
-/// Measured cost: one iteration over the largest vendored corpus file
-/// (`corpus/vb6-code/Map-editor-2D/Map Editor.exe`, 245,760 bytes), through
-/// `inspect` in both modes and `write::project` on the salvage result, took
-/// about 1.25 milliseconds on the machine this was measured on. This
-/// workspace's own three gate commands (`cargo fmt --all --check`,
-/// `cargo clippy --all-targets -- -D warnings`, `cargo test --workspace`)
-/// take about 90 seconds together today.
-///
 /// `SMOKE_ITERATIONS` is 440: ten mutations of each of the 44 vendored
 /// corpus executables. Ten rounds over 44 files distributes the work evenly
 /// rather than spending it all on one file, per this sweep's own rule.
-/// At 1.25 milliseconds per iteration, 440 iterations cost about 550
-/// milliseconds, under one percent of the gate's own 90 second run.
+///
+/// Measured cost, with the sweep itself in place: `cargo test -p deform6
+/// --test fuzz_smoke` (all 440 iterations, plus the four unit tests below)
+/// took about 0.65 seconds on the machine this was measured on, roughly 1.5
+/// milliseconds per iteration on average. `cargo test --workspace` took
+/// about 2.7 seconds with this file present against about 2.1 seconds
+/// without it, so this sweep adds about 0.6 seconds. This workspace's own
+/// three gate commands (`cargo fmt --all --check`,
+/// `cargo clippy --all-targets -- -D warnings`, `cargo test --workspace`)
+/// take about 90 seconds together today, so the sweep's own share stays
+/// under one percent of the gate's own run, matching the budget this
+/// constant was chosen against.
+///
+/// One of these 440 mutations, a three byte change to
+/// `corpus/vb6-code/Curves-effect/Curves.exe`, found a real defect this
+/// measurement is the proof of: `write::project`'s two path and name
+/// issuers rebuilt their whole collision history for every item, an
+/// `O(n)` scan repeated for every one of a mutation-inflated run of
+/// colliding items, so writing that one mutated file alone took over two
+/// minutes before the fix. `PathIssuer` (`crate::report`) and
+/// `SafeNameIssuer` (`crate::write::model`) both now remember the next
+/// suffix to try per colliding path or name, and the same mutated input
+/// now writes in well under a second, which is what let this constant
+/// stay at 440 rather than drop to dodge the slow case.
 const SMOKE_ITERATIONS: u32 = 440;
 
 /// A fixed width, wrapping linear congruential generator with no source of
@@ -135,6 +151,115 @@ fn mutate(data: &[u8], rng: &mut Rng, count: usize) -> (Vec<u8>, Vec<Change>) {
         changes.push((offset, value));
     }
     (mutated, changes)
+}
+
+/// Gives the directory that holds the `corpus/` this workspace vendors.
+/// Matches `crates/deform6/tests/corpus_sweep.rs`'s own helper of the same
+/// shape, so both files walk the same tree the same way.
+fn corpus_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus")
+}
+
+/// Walks `corpus/` recursively and gives every file whose extension is
+/// `.exe`, compared case-insensitively, sorted. Matches
+/// `crates/deform6/tests/corpus_sweep.rs`'s own `executables` helper: an
+/// unsorted walk gives a different order on a different file system, and
+/// two people rerunning this sweep would not be looking at the same
+/// failure.
+fn executables() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    walk(&corpus_root(), &mut out);
+    out.sort();
+    out
+}
+
+fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+    let entries =
+        std::fs::read_dir(dir).unwrap_or_else(|err| panic!("reading {}: {err}", dir.display()));
+    for entry in entries {
+        let entry =
+            entry.unwrap_or_else(|err| panic!("reading an entry of {}: {err}", dir.display()));
+        let path = entry.path();
+        if path.is_dir() {
+            walk(&path, out);
+        } else if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
+        {
+            out.push(path);
+        }
+    }
+}
+
+/// How many single byte changes each mutated input carries. Three keeps
+/// each input close to the original file, so most mutations still reach
+/// deep into the reader instead of failing the very first structural
+/// check.
+const MUTATIONS_PER_INPUT: usize = 3;
+
+/// Walks the vendored corpus, mutates a copy of each file in turn, and
+/// runs every mutated input through both `Mode::Strict` and
+/// `Mode::Salvage`, calling the writer on the salvage result when it
+/// succeeded. Distributes `SMOKE_ITERATIONS` iterations one at a time
+/// across the files, round after round, rather than spending them all on
+/// the first file alphabetically: the reader's paths differ per program,
+/// since some corpus programs hold forms and some hold none, and a sweep
+/// that only mutates one file exercises one shape of input.
+///
+/// Asserts nothing about which result variant either call gives back. A
+/// refusal is the correct answer for a mutated input; the only thing this
+/// sweep checks is that the process is still running after every call
+/// returns.
+#[test]
+fn mutated_corpus_bytes_never_panic_the_reader_in_either_mode() {
+    let files = executables();
+    assert!(
+        !files.is_empty(),
+        "found no corpus executables to mutate; the walk or the corpus itself is broken"
+    );
+
+    let table = OpcodeTable::builtin();
+    let mut rng = Rng::new(SMOKE_SEED);
+    let mut ran: u32 = 0;
+
+    'sweep: loop {
+        for path in &files {
+            if ran >= SMOKE_ITERATIONS {
+                break 'sweep;
+            }
+            let data = std::fs::read(path)
+                .unwrap_or_else(|err| panic!("reading {}: {err}", path.display()));
+            let (mutated, changes) = mutate(&data, &mut rng, MUTATIONS_PER_INPUT);
+
+            // Printed before either mode runs, not after: the process ends
+            // on a panic and no code after the panic runs, so a message
+            // built afterwards would never print. This line is the only
+            // way a person rebuilds the exact input, because the mutated
+            // bytes themselves are never written to disk.
+            eprintln!(
+                "fuzz_smoke: file={} iteration={ran} seed={SMOKE_SEED:#x} changes={changes:?}",
+                path.display()
+            );
+
+            let _strict = inspect(&mutated, &table, Mode::Strict);
+            let salvage = inspect(&mutated, &table, Mode::Salvage);
+            if let Ok(report) = salvage {
+                let _written = write::project(&report, &mutated, Mode::Salvage);
+            }
+
+            ran += 1;
+        }
+    }
+
+    assert_eq!(
+        ran, SMOKE_ITERATIONS,
+        "the sweep ran {ran} iterations, not the {SMOKE_ITERATIONS} SMOKE_ITERATIONS names; a \
+         sweep that ran fewer could pass by mutating less than it claims"
+    );
+    assert!(
+        ran > 0,
+        "the sweep ran zero iterations; an empty corpus walk must not pass silently"
+    );
 }
 
 #[cfg(test)]
