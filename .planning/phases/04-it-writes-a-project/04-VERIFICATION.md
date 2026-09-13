@@ -1,8 +1,8 @@
 ---
 phase: 04-it-writes-a-project
-verified: 2026-09-13T00:00:00Z
-status: human_needed
-score: 5/5 must-haves verified (roadmap success criteria), 43/43 plan-level must-have truths verified across nine plans
+verified: 2026-09-13T04:00:00Z
+status: passed
+score: 5/5 roadmap success criteria verified; 1 phase-goal clause waived, not verified
 covered_files:
   - ".planning/REQUIREMENTS.md"
   - ".planning/ROADMAP.md"
@@ -27,10 +27,13 @@ covered_files:
   - ".planning/phases/04-it-writes-a-project/04-09-SUMMARY.md"
   - ".planning/phases/04-it-writes-a-project/04-REVIEW-FIX.md"
   - ".planning/phases/04-it-writes-a-project/04-REVIEW.md"
+  - ".planning/phases/04-it-writes-a-project/04-SECURITY.md"
+  - ".planning/phases/04-it-writes-a-project/04-UAT.md"
   - ".planning/phases/04-it-writes-a-project/04-VALIDATION.md"
   - "crates/deform6-cli/src/main.rs"
   - "crates/deform6-cli/tests/cli.rs"
   - "crates/deform6/src/report.rs"
+  - "crates/deform6/src/vb/privateobj.rs"
   - "crates/deform6/src/write/code.rs"
   - "crates/deform6/src/write/comment.rs"
   - "crates/deform6/src/write/frm.rs"
@@ -43,17 +46,26 @@ covered_files:
   - "crates/deform6/tests/ratios.rs"
   - "crates/xtask/src/main.rs"
   - "tests/ratios.toml"
-covered_digest: "v1:sha256:fe1fcfe72cfd327e3154a6002fd25809ba35e881254681355d8c4ede237eebfc"
+covered_digest: "v1:sha256:9e42b0972686d7d80b1efed742ae1eb0de64f0b18df3741a87ab77d96bf31179"
 behavior_unverified: 0
-overrides_applied: 0
+overrides_applied: 1
+overrides:
+  - must_have: "A Visual Basic project directory that the VB6 IDE can open (phase goal clause; WRT-01's Manual-Only Verification row in 04-VALIDATION.md; 04-09-PLAN.md's own <human-check> block)"
+    reason: "No Windows host with Visual Basic 6 is available anywhere in this project's toolchain. The human waived this check on 2026-09-13 rather than wait for that hardware. This is a waiver of the check, not evidence that the check would pass. Nobody has opened a written project in the VB6 IDE. The structural check (roadmap success criteria 1-5, all independently confirmed below) proves the files are shaped correctly by every rule this repository can state; it does not and cannot prove the IDE accepts them."
+    accepted_by: "human, recorded in 04-UAT.md test 1 (result: skipped)"
+    accepted_at: "2026-09-13"
+re_verification:
+  previous_status: human_needed
+  previous_score: 5/5 (roadmap success criteria), one human item outstanding
+  gaps_closed:
+    - "The one outstanding human-verification item (open a written project in the real VB6 IDE) is now resolved by an explicit, recorded human waiver in 04-UAT.md, not by new evidence. See overrides above."
+  gaps_remaining: []
+  regressions: []
 deferred:
-  - truth: "The README states that full recompilation did not run and that the IDE never opened the project (a Phase 4 named risk)"
+  - truth: "The README states that full recompilation did not run and that the IDE never opened the project"
     addressed_in: "Phase 6"
-    evidence: "ROADMAP.md Phase 6 success criterion 3: 'The README states three facts in plain words: ... full recompilation was not tested, because it needs VB6 on Windows.' Plan 06-01 is named 'The README - what it returns, what it does not...'. No README.md exists in the repository yet, which is correct: Phase 4 never claimed to own it, and the report's own limits list already carries the required sentence verbatim (crates/deform6/src/report.rs, asserted in extract_structural.rs)."
-human_verification:
-  - test: "Open one written project (for example the output of `deform6 extract corpus/vb6-code/Fire-effect/Fast_Flames.exe -o out/`) in the real VB6 IDE on a Windows host, per 04-VALIDATION.md's own Manual-Only Verifications row and 04-09-PLAN.md's own <human-check> block."
-    expected: "The IDE opens the .vbp with no fatal load error, or produces a .log file naming what failed to load. Recording the true result (pass, partial, or fail) is the only way to know whether the structural check's 'shaped correctly' claim also means 'loads correctly' in the actual consuming application."
-    why_human: "The CI sandbox has no Windows host and no VB6 install. This is a testing-infrastructure gap the roadmap itself accepts (\"Full recompilation cannot run in this CI\") and explicitly defers to a human with the right hardware. Nothing in the codebase can close this gap without that hardware; it is not a code defect."
+    evidence: "ROADMAP.md Phase 6 success criterion 3 requires the README to state this fact in plain words. No README.md exists yet, which is correct: Phase 4 never claimed to own it, and the shipped report's own limits array already carries the required sentence verbatim, confirmed live: 'A structural check ran in its place, and it never opened this project in the IDE.'"
+human_verification: []
 ---
 
 # Phase 4: It writes a project Verification Report
@@ -63,8 +75,51 @@ directory that the VB6 IDE can open, and one JSON report beside it that grades
 each recovered item by confidence and names the bytes it came from.
 
 **Verified:** 2026-09-13
-**Status:** human_needed
-**Re-verification:** No — initial verification (no prior `04-VERIFICATION.md` existed; `.planning/phases/01-it-reads-the-file/VERIFICATION.md` shown deleted in `git status` is Phase 1's file, unrelated to this phase)
+**Status:** passed — resting in part on a human waiver, not on evidence, for one clause of the goal. Read "The clause this phase cannot prove" below before treating this as an unconditional pass.
+**Re-verification:** Yes — this supersedes the prior `04-VERIFICATION.md` (`status: human_needed`), which is stale: it predates the six code-review fix commits, the iteration-2 re-review, the security audit, and the human's UAT waiver.
+
+## The line this report will not cross
+
+The phase goal names two outcomes. The first — "a Visual Basic project
+directory **that the VB6 IDE can open**" — is not proven anywhere in this
+repository, and this report does not claim it is proven. No test in this
+codebase can open the VB6 IDE, because the IDE runs only on Windows and no
+Windows host with VB6 exists in this project's toolchain.
+
+What actually happened: on 2026-09-13 the human closed `04-UAT.md`'s one test
+("Open a written project in the real VB6 IDE") with `result: skipped` and this
+reason, recorded verbatim: "Waived by the human on 2026-09-13. No Windows host
+with Visual Basic 6 is available. Nobody has opened a written project in the
+VB6 IDE. The human chose to close the phase without this evidence. This is a
+waiver, not a pass: no part of this repository may state that the IDE opened a
+written project."
+
+This report honors that distinction. The overall status below is `passed`
+because every truth this repository *can* test is independently confirmed
+against the current codebase (not against SUMMARY.md's word), and the one
+truth it cannot test has been explicitly waived by the person with the
+authority to accept that risk, not silently absorbed. A future reader of only
+this file should walk away knowing: the structural evidence is strong, and the
+IDE-opens clause is unproven and waived, not demonstrated.
+
+I independently re-confirmed, at current HEAD, that the codebase still makes
+no contrary claim:
+
+- `crates/deform6/src/report.rs` line 346 still states, verbatim: "Full
+  recompilation did not run. It needs the Visual Basic 6 IDE on..."
+- A live extraction run in this session (`Fast_Flames.exe` -> fresh output
+  directory) shows the shipped report's `limits` array reads: "A structural
+  check ran in its place, and it never opened this project in the IDE." —
+  an explicit negative statement, not merely an absence of a positive one.
+- `crates/deform6/src/report.rs` lines 844-845 hold a source-level assertion,
+  read directly, that a limit line must never contain the string "the ide
+  opened": `!line.to_lowercase().contains("the ide opened")`. This is the one
+  and only place that phrase appears in the phase's source and test files; it
+  appears as the negative check itself, not as a claim.
+- A grep across `extract_structural.rs`, `report.rs`, and every file under
+  `write/` and `deform6-cli/src/main.rs` for "the IDE (opened|loaded|compiled)"
+  returns zero occurrences of the claim in prose form. Unchanged from the
+  prior verification.
 
 ## Goal Achievement
 
@@ -72,98 +127,167 @@ each recovered item by confidence and names the bytes it came from.
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | `extract <exe> -o out/` on each of 44 corpus programs writes one `.vbp`, one `.frm` per form, one `.frx` per form holding a blob, one `.bas`/`.cls` per module/class, one JSON report; exits 0; writes nothing outside `out/` | VERIFIED | Orchestrator-measured directly (44/0 exit codes; `.frx` byte match). Independently confirmed: `crates/deform6-cli/tests/cli.rs#all_corpus_programs_extract_with_exit_zero_and_the_written_file_count_matches_the_report`, `#extract_changes_no_file_anywhere_in_the_repository_working_tree` (04-08-SUMMARY.md D5). 195 files across 44 programs, counted against the independently-read `Report`, not against the writer's own output. |
-| 2 | Every text file holds Windows-1252 bytes, CRLF on every line including the last, no BOM | VERIFIED | Orchestrator-measured directly (CRLF, no BOM). Independently confirmed: `crates/deform6/tests/extract_structural.rs`'s whole-tree encoding sweep (04-09-SUMMARY.md D3), which counts line-feed bytes against pair counts and asserts the last two bytes of every written text file, excluding `.frx` (binary by kind) and `.report.json`. Broken on purpose three times (BOM, bare LF, byte above range) and confirmed failing before being fixed back. |
-| 3 | Every `.frx` offset a `.frm` names resolves inside the `.frx` actually written, checked through `support/frm.rs`, for all 44 programs | VERIFIED | `crates/deform6/tests/extract_structural.rs` reads every written `.frm` back through the independent reader (`tests/support/frm.rs`), seeks every offset in the matching written `.frx`, and asserts the record ends inside the file and the last record ends exactly at file end. Deliberately broken (`a_resource_offset_shifted_by_one_byte_fails_the_offset_resolution_check`) and reverted. No type from `deform6::write::{frm,vbp,code,values,comment}` is imported by the checker (source grep = 0), so the writer and its checker cannot share a bug. |
-| 4 | The structural check passes: `Form=`/`Module=`/`Class=` lines name existing files, `Startup=` names a declared form, every control/class name is a legal identifier of 40 characters or fewer, nesting depth ≤ 7, properties alphabetical, menus last | VERIFIED | Six independently-named assertion functions in `extract_structural.rs`, each unit-tested against a hand-built fixture and run corpus-wide over all 44 programs, each broken on purpose once (component line to missing file, reversed property order, menu before non-menu sibling, plus two extra breakages — illegal name, over-depth control) and confirmed failing before being restored. |
-| 5 | `jq` query for `inferred` items returns paths; every item carries `basis` and an `evidence` record with a byte offset; `confidence` is one of three words, never a number; two runs give byte-identical reports | VERIFIED | Orchestrator-measured directly (62 items, exactly three confidence words, no null offset, byte-identical two-run diff). Independently confirmed: `crates/deform6/src/report.rs` `Confidence` enum has exactly 3 variants (source read), no wildcard match arm (grep = 0), `report::build` backfills evidence for every model-built item via `with_header_evidence` so RPT-04 holds for all sources, not only property-level items. `write::project` is wired to call `report::build` (confirmed by reading `write/mod.rs` call sites via 04-08-SUMMARY.md and by the orchestrator's own live report inspection). |
+| 1 | `extract <exe> -o out/` on each of 44 corpus programs writes one `.vbp`, one `.frm` per form, one `.frx` per form holding a blob, one `.bas`/`.cls` per module/class, one JSON report; exits 0; writes nothing outside `out/` | VERIFIED | Ran independently in this session: `cargo test --workspace` (fresh run at HEAD, not reused from a prior session) — 872 tests, 0 failures, matching the orchestrator's measured count exactly (603+4+2+26+2+22+13+1+44+9+44+2+6+38+56 = 872). `crates/deform6-cli/tests/cli.rs`'s corpus-wide exit-code and file-count tests are part of that run. Live spot-check: extracted `Fast_Flames.exe` to a fresh scratch directory in this session; exit 0; `frmFire.frx` byte-identical to the committed source (`cmp` clean); re-ran into a second fresh directory and `diff -rq` reported the two trees identical (determinism holds at the CLI level, not only in unit tests). |
+| 2 | Every text file holds Windows-1252 bytes, CRLF on every line including the last, no BOM | VERIFIED | Independently confirmed in the live extraction: `xxd` on the first bytes of the written `.frm` shows `56 45 52 53...` ("VER..."), no BOM; a CRLF count (`grep -Uc $'\r$'`) equals the file's own line count (94 of 94); `crates/deform6/tests/extract_structural.rs`'s whole-tree encoding sweep (part of the fresh 872-test run) still passes corpus-wide. |
+| 3 | Every `.frx` offset a `.frm` names resolves inside the `.frx` actually written, for all 44 programs | VERIFIED | Part of the same fresh `cargo test --workspace` run (`extract_structural.rs`, 44/44 programs). Ran the single named regression test `write::frm::tests::a_blob_whose_range_does_not_fit_leaves_the_cursor_unmoved_for_the_next_blob` directly in this session (`cargo test -p deform6 --lib ... --exact`): passed. This is the CR-01 fix's own regression test — the `BlobCursor` desync that would have drifted every later offset in a form. Source grep confirms `extract_structural.rs` imports zero types from `deform6::write::{frm,vbp,code,values,comment}`. |
+| 4 | The structural check passes (component-line existence, `Startup=`, identifier legality, nesting depth, alphabetical properties, menus last) | VERIFIED | Part of the same fresh 872-test run, 44/44 programs, unchanged from the prior verification's method (each assertion function individually broken-and-restored per its own SUMMARY). |
+| 5 | `jq` query for `inferred` items returns paths; every item carries `basis` and an `evidence` record with a byte offset; `confidence` is one of three words, never a number; two runs give byte-identical reports | VERIFIED | Independently re-measured in the live extraction, not reused from the orchestrator's numbers: `jq -r '.items[].confidence' \| sort -u` returns exactly `inferred`, `proven`, `unrecoverable` (3 values); `jq '.items \| length'` = 62; `jq` over `inferred` paths returns 11 rows; `jq '[.items[] \| select(.basis==null or .basis=="")] \| length'` = 0 (every item carries a basis); `jq '[.items[].evidence[]? \| select(.offset==null)] \| length'` = 0 (no null byte offset). Ran the three named determinism tests directly: `write::vbp::tests::two_calls_to_the_writer_on_one_model_give_byte_identical_output`, `write::code::tests::write_bas_called_twice_on_one_input_gives_byte_identical_output`, `write::code::tests::write_cls_called_twice_on_one_input_gives_byte_identical_output`, `report::tests::the_whole_write_path_run_twice_over_fast_flames_gives_byte_identical_report_files` — all four `ok`. |
 
-**Score:** 5/5 roadmap success criteria verified. All are presence-plus-behavior verified (passing tests exist and were watched failing at least once per the SUMMARY's own TDD-gate records, not merely presence-checked).
+**Score:** 5/5 roadmap success criteria independently verified against current HEAD, all with a fresh test run in this session (not reused from a prior session's numbers).
 
-### The one truth this phase cannot verify by construction
+### The clause this phase cannot prove (waived, not verified)
 
-The phase goal's own first clause — "a Visual Basic project directory **that the VB6 IDE can open**" — is not, and cannot be, verified by any test in this repository. The structural check (success criterion 4) proves the files are *shaped* correctly: legal identifiers, correct nesting, correct alphabetical order, resolvable offsets. It does not and cannot prove the IDE opens them, because that needs the VB6 IDE on a Windows host, which this environment does not have. The roadmap names this explicitly as an accepted, structural risk ("Full recompilation cannot run in this CI... Say that in the report and in the README. Do not imply that the IDE opened the project"), and the codebase honors the negative half of that promise correctly:
+The phase goal's first clause — "...that the VB6 IDE can open" — is outside
+the five roadmap success criteria's own text (none of the five names the IDE)
+but is the phase goal's own stated outcome. See "The line this report will
+not cross" above. Recorded here as `PASSED (override)` in the frontmatter,
+matched against `04-VALIDATION.md`'s "Manual-Only Verifications" row for
+WRT-01 and `04-09-PLAN.md`'s `<human-check>` block, which are the same single
+test `04-UAT.md` records as waived.
 
-- `crates/deform6/src/report.rs`'s `build_limits` states, verbatim: *"Full recompilation did not run. It needs the Visual Basic 6 IDE on..."* — confirmed present by direct read (line 346).
-- `crates/deform6/tests/extract_structural.rs` holds its own independent copy of the same sentence and asserts the shipped report's own first limit line equals it exactly (`the_reports_limits_state_the_exact_recompilation_sentence`), so the two cannot silently drift apart.
-- A source grep for `the IDE (opened|loaded|compiled) the project` across `extract_structural.rs` and `report.rs` returns zero matches (confirmed directly), so no in-repo message overstates the result.
-- The README half of the same roadmap sentence is **not** yet written, because no `README.md` exists in the repository at all. This is correct scope, not a gap: Phase 6 owns the README (`ROADMAP.md` Phase 6, plan `06-01`, and Phase 6 success criterion 3 states the identical three facts, including this one, must appear there). Recorded under `deferred` in the frontmatter, not as a gap.
+### `verification: backstop` Must-Haves (Plans 04-03, 04-05)
 
-This is why the phase cannot receive an unconditional `passed`: the phase's own stated goal names IDE-openability as the outcome, the codebase is honest that this was never tested, and the only way to actually resolve that open question is a human with a Windows host and VB6 running the one manual check `04-VALIDATION.md` and `04-09-PLAN.md`'s own `<human-check>` block both already specify and neither has yet been run. This is not a code defect — it is disclosed, tested-for-absence-of-overclaiming, and squarely a human-verification item per the phase's own design.
+Two must-have truths in this phase carry `verification: backstop`, meaning
+presence-plus-wiring is not enough by this workflow's own rule — an explicit,
+runnable, passing test is required, or the truth must be recorded as an
+abstained residual.
+
+| Backstop truth | Plan | Status | Evidence |
+|---|---|---|---|
+| "Two calls to the project file writer with the same model give byte identical output, and the writer holds no process global mutable state." | 04-03 | VERIFIED | `write::vbp::tests::two_calls_to_the_writer_on_one_model_give_byte_identical_output`, run directly in this session (`--exact`), passed. Source grep for `HashMap`/`static mut`/`OnceLock`/`LazyLock`/`thread_local` in `write/vbp.rs` returns zero. |
+| "Two calls to the code writer with the same model give byte identical output, and the writer reaches no process global mutable state." | 04-05 | VERIFIED | `write::code::tests::write_bas_called_twice_on_one_input_gives_byte_identical_output` and `write::code::tests::write_cls_called_twice_on_one_input_gives_byte_identical_output`, both run directly in this session (`--exact`), both passed. Same zero-mutable-state grep applies to `write/code.rs`. |
+
+Neither backstop truth is a residual: both have a named, currently-passing
+test that exercises exactly the claim, run independently in this
+verification session, not merely present in the file tree.
 
 ### Required Artifacts
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `crates/deform6/src/write/mod.rs` | write module set, `write::project` entry point | VERIFIED | Exists; wired to full writers + `report::build` per 04-08 (thin writers removed as dead code). |
-| `crates/deform6/src/write/model.rs` | `SafeName`, `ProjectModel`, name sanitization | VERIFIED | `SafeName` proven the only path to a file name; hostile-name tests pass; no `HashMap`. |
-| `crates/deform6/src/write/values.rs` | property value formatter | VERIFIED | Exhaustive match, no wildcard arm (grep = 0); byte-anchored against real corpus lines. |
-| `crates/deform6/src/write/vbp.rs` | `.vbp` writer | VERIFIED | 21 tests; byte-checked against `FlameTest.vbp` except the disclosed `Reference=` gap. |
-| `crates/deform6/src/write/frm.rs` | `.frm`/`.frx` writer, one `BlobCursor` | VERIFIED | One cursor per form; CR-01 desync fix confirmed by orchestrator's revert-and-observe. |
-| `crates/deform6/src/write/code.rs` | `.bas`/`.cls` writer | VERIFIED | 13-line class preamble byte-matched to corpus; empty-body procedures compile-shaped. |
-| `crates/deform6/src/write/comment.rs` | uncertainty comment emitter | VERIFIED | Corpus-wide sweep proves no comment above the boundary, at least one below it, for the real corpus. |
-| `crates/deform6/src/report.rs` | `ProjectReport`, `Confidence`, `Evidence` | VERIFIED | 3-variant enum confirmed by direct read; no wildcard arm; determinism proven twice (unit + full-pipeline). |
-| `crates/deform6/tests/extract_structural.rs` | independent-reader structural check | VERIFIED | 22 tests; imports zero writing-module types (source grep = 0); all 44 programs pass. |
-| `tests/ratios.toml` | write-side pinned ratios | VERIFIED | `property_declared`=807, `property_written`=136 sums independently recomputed via `awk` and matched exactly to the SUMMARY's claimed totals; rewrite-produces-no-diff confirmed as the file/tool agreement check. |
+| `crates/deform6/src/write/mod.rs` | write module set, `write::project` entry point | VERIFIED | Live extraction in this session produced a non-empty report (`items: 62`, `limits: 4`) through this exact entry point; `report::build` is wired in, not the earlier `items: []` stub WINDOWS.md finding 12 recorded (finding 12 status is `fixed`, confirmed by both the ledger and the live report). |
+| `crates/deform6/src/write/model.rs` | `SafeName`, `ProjectModel`, name sanitization | VERIFIED | WR-02 fix (`b020ecc`) confirmed present: `is_legal_identifier_char` source read (unchanged check re-run not repeated here; prior verification's direct read stands, file unmodified since). |
+| `crates/deform6/src/write/vbp.rs` | `.vbp` writer | VERIFIED | CR-03 fix (`7872ac6`) test `a_component_whose_file_name_holds_a_line_break_writes_no_object_line_and_an_item` is part of the fresh 872-test run. |
+| `crates/deform6/src/write/frm.rs` | `.frm`/`.frx` writer, one `BlobCursor` | VERIFIED | CR-01 fix confirmed by directly running its own named regression test in this session (see truth 3 above), not merely by reading the SUMMARY's claim of a prior revert-and-observe cycle. |
+| `crates/deform6/src/write/code.rs` | `.bas`/`.cls` writer | VERIFIED | CR-02 fix (`bd01d86`) and WR-03 fix (`c2c727f`) tests are part of the fresh 872-test run. |
+| `crates/deform6/src/report.rs` | `ProjectReport`, `Confidence`, `Evidence` | VERIFIED | Confidence vocabulary and the anti-overclaim assertion independently re-read at current HEAD (see "The line this report will not cross"). |
+| `crates/deform6/tests/extract_structural.rs` | independent-reader structural check | VERIFIED | Fresh run, 44/44 programs, zero writer-module imports (source grep). |
+| `crates/deform6-cli/src/main.rs` | `extract` subcommand, `--force` symlink guard | VERIFIED | WR-01 fix (`6c384d7`) test `a_preexisting_symlink_at_a_planned_path_refuses_the_whole_run_under_force` is part of the fresh 872-test run. |
+| `tests/ratios.toml` | write-side pinned ratios | VERIFIED | Part of the fresh 872-test run (`ratios::the_gate_passes_on_the_committed_file` and related, all `ok`). |
 
 ### Key Link Verification
 
 | From | To | Via | Status | Details |
 |------|----|----|--------|---------|
-| `deform6-cli::run_extract` | `deform6::write::project` | `write::project` call | VERIFIED | Confirmed via 04-08's wiring commit `bc3fb4a` and orchestrator's live report inspection (non-empty items/limits). |
-| `write::frm` | `vb::frx::BlobCursor` | one cursor per form | VERIFIED | Source-level: `FRX_ITEM_HEADER_LEN` referenced, `BlobCursor` referenced ≥1 non-comment time; CR-01 fix confirmed by revert-and-observe. |
-| `write::code::write_code_region` | `write::comment::uncertainty_comments` | one legal call site | VERIFIED | `grep -c uncertainty_comments` = 2 in `code.rs`, 0 in `vbp.rs` and `frm.rs` (confirmed via SUMMARY's own self-check, consistent with plan's key_links). |
-| `report::build` | `write::model::from_report` items | `with_header_evidence` backfill | VERIFIED | Confirmed via direct read of `report.rs` (`with_header_evidence`, `pub(crate)`) and 04-06/04-08 SUMMARYs. |
+| `deform6-cli::run_extract` | `deform6::write::project` | `write::project` call | VERIFIED | Live extraction in this session produced a populated report through the CLI entry point, not a stub. |
+| `write::frm` | `vb::frx::BlobCursor` | one cursor per form | VERIFIED | CR-01's own regression test run directly and confirmed passing in this session. |
+| `write::code::write_code_region` | `write::comment::uncertainty_comments` | one legal call site | VERIFIED | WR-03 fix test is part of the fresh 872-test run. |
+| `report::build` | `write::model::from_report` items | `with_header_evidence` backfill | VERIFIED | Live-extracted report shows every one of its 62 items with a non-null `basis` and a non-null evidence offset, confirmed by direct `jq` query in this session. |
 
 ### Requirements Coverage
 
 | Requirement | Status | Evidence |
 |-------------|--------|----------|
-| WRT-01 | SATISFIED | `[x]` in REQUIREMENTS.md; corpus-wide sweep, containment check, build-then-write ordering all independently confirmed. |
-| WRT-02 | SATISFIED | `[x]`; 21 `.vbp` tests, byte-checked against `FlameTest.vbp`. |
-| WRT-03 | **Correctly left open** | `[ ]` in REQUIREMENTS.md. Column-layout claims (3-space indent, 16-column pad, 3 spaces after `=`, exact trailing-space rule) are proven only by plan 04-04's targeted unit tests anchored to real corpus bytes (confirmed: `a_property_lines_equals_sign_sits_at_the_same_column_as_a_real_corpus_line` reads a real offset out of `frmFire.frm` and asserts the writer's column matches it). `tests/support/frm.rs`'s independent `Block` parser trims every line by design, so `extract_structural.rs` genuinely cannot serve as corpus-wide evidence for a byte-level column claim — the 04-09 executor's reasoning for leaving WRT-03 unchecked is technically correct, not evasive. Not a phase-4 gap; a correctly-scoped open item for a future plan that reads raw `.frm` bytes directly. |
-| WRT-04 | SATISFIED | `[x]`; `extract_structural.rs`'s alphabetical-order and menus-last checks run corpus-wide, closing this requirement more thoroughly than plan 04-04 alone did. |
-| WRT-05 | SATISFIED | `[x]`; preamble byte-matched to `FastDrawing.cls`. |
-| WRT-06 | SATISFIED | `[x]`; encoding sweep corpus-wide, no BOM, CRLF, no byte above range. |
-| WRT-07 | SATISFIED | `[x]`; four procedure-recovery shapes each produce a compilable empty-body signature and a distinct report item. |
-| RPT-01 to RPT-06 | SATISFIED | All `[x]`; report shape, confidence vocabulary, evidence, defects, determinism, and comment-emission rules all independently confirmed by direct source reads plus passing tests. |
+| WRT-01 | SATISFIED (structural half); IDE-opens half waived, not evidenced | `[x]` in REQUIREMENTS.md. `04-VALIDATION.md`'s Manual-Only Verifications table names WRT-01's IDE-open behavior specifically and that row is the one waived in `04-UAT.md`. The written half of WRT-01 (a project directory gets written) is independently confirmed by the live extraction in this session. |
+| WRT-02 | SATISFIED | `[x]`; 21 `.vbp` tests, part of the fresh run. |
+| WRT-03 | **Correctly left open — verified as accurate, not a gap** | `[ ]` in REQUIREMENTS.md, with this note: "The corpus wide structural check cannot confirm it, because `crates/deform6/tests/support/frm.rs` trims each line by design and does not read the exact indentation. To close WRT-03, a check must read the raw `.frm` bytes directly." I confirmed this reasoning is technically sound: `tests/support/frm.rs`'s `Block` parser trims lines (unchanged from the prior verification's direct read), so a corpus-wide sweep genuinely cannot serve as evidence for a byte-level column claim. Column-level correctness rests only on plan 04-04's targeted unit tests anchored to real corpus bytes (e.g. the `BackColor` column check the live extraction reproduced: `BackColor       =   &H80000005&`, matching the corpus convention). This is a correctly-scoped open item, not a phase-4 defect, and does not block this phase's pass — REQUIREMENTS.md's own status text is accurate as written. |
+| WRT-04 to WRT-07 | SATISFIED | `[x]`; corpus-wide checks in the fresh run. |
+| RPT-01 to RPT-06 | SATISFIED | `[x]`; report shape, confidence vocabulary, evidence, defects, determinism and comment rules all independently re-confirmed in this session via a live extraction plus four re-run named tests. |
 
-No orphaned requirements: every ID REQUIREMENTS.md maps to Phase 4 (WRT-01..07, RPT-01..06) appears in at least one plan's `requirements:` frontmatter field.
+No orphaned requirements: every ID REQUIREMENTS.md maps to Phase 4 (WRT-01..07,
+RPT-01..06) appears in at least one plan's `requirements:` frontmatter field.
+
+**Judgment on WRT-03 and the phase pass:** one requirement in "open, unit
+proved only" status does not block this phase's pass. REQUIREMENTS.md's own
+traceability table (line 205) already reads `WRT-03 | Phase 4 | Open, unit
+proved only` — an honest, non-blocking status, not a claim of completion. The
+gap is narrow (byte-level column indentation only, not the property values or
+structure themselves, which WRT-04 and the structural check do cover
+corpus-wide) and the documentation explaining why it cannot close without new
+test infrastructure is accurate. Treating this as a blocking gap would
+effectively demand a corpus-wide raw-byte column checker that no plan in this
+phase was scoped to build; the roadmap's own five success criteria do not
+require it (criterion 4 covers structure and ordering, not column position).
 
 ### Anti-Patterns Found
 
-No `TBD`, `FIXME`, `XXX`, `TODO`, `HACK`, or `PLACEHOLDER` marker found in any Phase-4-touched source file (`crates/deform6/src/write/*.rs`, `report.rs`, `deform6-cli/src/main.rs`, `extract_tracer.rs`, `extract_structural.rs`, `xtask/src/main.rs` — all checked directly). No `HashMap`, `static mut`, `OnceLock`, `LazyLock`, or `thread_local` in the write/report modules (checked directly, confirms the determinism prohibitions phase-wide). Code review (`04-REVIEW.md`, iteration 2) is `status: clean`, 0 Critical, 0 Warning, 1 Info (IN-01, a low-risk report-path-only sanitization gap, carried forward by design).
+No `TBD`, `FIXME`, `XXX`, `TODO`, `HACK`, or `PLACEHOLDER` marker found in any
+Phase-4-touched source file (checked directly at current HEAD:
+`crates/deform6/src/write/*.rs`, `report.rs`, `vb/privateobj.rs`,
+`deform6-cli/src/main.rs`, `extract_tracer.rs`, `extract_structural.rs`,
+`xtask/src/main.rs`). No `HashMap`, `static mut`, `OnceLock`, `LazyLock`, or
+`thread_local` in the write/report modules. `cargo fmt --all --check` and
+`cargo clippy --workspace --all-targets -- -D warnings` both run clean in this
+session, on the full workspace including the six post-plan fix commits.
 
-### Declared open items (checked against roadmap success criteria)
+Code review (`04-REVIEW.md`, iteration 2): `status: clean`, 0 Critical,
+0 Warning, 1 Info (IN-01, a report-path-only string-concatenation item the
+security auditor separately traced and confirmed never reaches a file path;
+carried forward by design, not a defect).
 
-| Finding | Source | Undercuts a success criterion? |
+Security audit (`04-SECURITY.md`): `status: verified`, 26 threats registered,
+26 closed, `threats_open: 0`, ASVS L1. Two `accept`-disposition items
+(T-4-07, T-4-23) are explicitly flagged in the register itself as "Not
+reviewed by a human" — this is the security document's own honest disclosure,
+not a phase-4 gap, and does not block this pass since both are low-severity
+and their rationale is stated inline.
+
+### Declared Open Items (WINDOWS.md, checked against roadmap success criteria)
+
+| Finding | Status | Undercuts a success criterion? |
 |---------|--------|-------------------------------|
-| No `Reference=` (type-library) line ever written | WINDOWS.md #10 | No. Not named in any of the 5 roadmap success criteria or in WRT-01..07. Honest staging: `Report` carries no field for it; would need a new reader. |
-| Generic `VB.Control` class for external (OCX) controls | 04-04-SUMMARY.md | No. The corpus holds zero forms with a real external control placed on them, so it is untested by construction, not a guessed/wrong answer against any measured case. Documented, not hidden. |
-| Generated-control-array-index report item uses literal `/forms/*/controls/<name>` path | WINDOWS.md #11 | Minor tension with RPT-02's path-shape example, but RPT-02 only requires "a path such as" the example, not that every item follow it exactly; this is a narrow, disclosed edge case (an asterisk placeholder), not a fabricated or silently wrong path. WARNING-level, not a gap against a stated success criterion. |
-| Redundant report entries: a property earns two items (control-path and property-path) from two independent derivations | WINDOWS.md #13, fixed=false | No. Both entries are individually correct and carry real evidence; redundant, not wrong. Explicitly recorded for a future unification pass. |
-| `tests/ratios.toml`'s new write-side pin (807/136) vs. REQUIREMENTS.md's stale FRM-03 prose (122/683/805, five names) | REQUIREMENTS.md, dated to Phase 3 | No. The pin is self-consistent with the code (`update-ratios` rewrite produces no diff, confirmed directly) and with 04-02's own re-measurement (124/683/807, six names) — the pin tracks the tool's current output. REQUIREMENTS.md's FRM-03 paragraph is Phase 3 prose that was never asked to be re-worded in Phase 4; a documentation staleness note, not a code defect. |
-| `ROADMAP.md`'s traceability table still reads "WRT-01 to WRT-07 \| Phase 4 \| Pending" | ROADMAP.md line 660 | No functional effect; inconsistent with the per-requirement `[x]`/`[ ]` checkboxes in REQUIREMENTS.md (6 of 7 checked). Cosmetic staleness, worth a one-line fix in a documentation-only commit, not a phase-4 code gap. |
+| #10: No `Reference=` (type-library) line ever written | open | No. Not named in any of the 5 roadmap success criteria or in WRT-01..07. `Report` carries no field for it by design; needs a new reader in a future phase. |
+| #11: Generic control-array-index report item uses literal `/forms/*/controls/<name>` path | open | No. RPT-02 requires "a path such as" the given example, not that every item follow it exactly. Narrow, disclosed edge case. |
+| #12: `write::project` shipped `items: []`/`limits: []`, never calling `report::build` | **fixed** (resolved_at 2026-09-13T03:34:21) | N/A — closed. Independently reconfirmed live: this session's own extraction produced 62 items and 4 limits through this exact path. |
+| #13: A property earns two independently-derived report items (control-path and property-path) | open | No. Both entries are individually correct with real evidence; redundant, not wrong. Recorded for a future unification pass. |
 
-None of the above undercuts a stated roadmap success criterion. All are honestly recorded, none silently absorbed.
+None of the four open/fixed findings undercuts a stated roadmap success
+criterion. This matches the prior verification's conclusion, independently
+re-checked against the current ledger state (`open_count: 9`, `fixed_count: 4`,
+`total_count: 13` — findings 1-9 predate this phase and are Phase 1/2/3's own
+open items, not Phase 4's).
 
 ## Human Verification Required
 
-### 1. Open a written project in the real VB6 IDE
-
-**Test:** Run `deform6 extract` on one corpus program (for example `Fast_Flames.exe`) into a directory, copy the directory to a Windows host with VB6 installed, and open the written `.vbp` in the IDE.
-
-**Expected:** The IDE opens the project with no fatal load error, or — if it fails — produces a `.log` file beside the form naming the line and the message, which should be recorded here.
-
-**Why human:** This CI sandbox has no Windows host and no VB6 install. `04-VALIDATION.md`'s own "Manual-Only Verifications" table and `04-09-PLAN.md`'s own `<human-check>` block both name this exact test and both state plainly that nothing in the repository may claim this step ran until it actually does. It has not yet been run. This is the one part of the phase's stated goal ("...that the VB6 IDE can open") that the structural check cannot stand in for, and the codebase is honest about that rather than overclaiming it.
+None outstanding. The one item the prior verification routed to human
+verification — "Open a written project in the real VB6 IDE" — has been
+explicitly closed by human decision, recorded as a waiver rather than a pass,
+in `04-UAT.md` (`status: complete`, test 1 `result: skipped`). See "The line
+this report will not cross" above and the `overrides` entry in this file's
+frontmatter for the full text of that waiver. This report does not treat the
+waiver as evidence that the IDE opens a written project — it treats it as the
+human's informed decision to close the phase without that evidence, which is
+a different, and weaker, thing, stated here in those words.
 
 ## Gaps Summary
 
-No coding gap blocks this phase's roadmap success criteria. All five roadmap success criteria are independently verified against the codebase, not merely asserted by the SUMMARYs: source reads confirm the `Confidence` enum, the report's exact recompilation sentence, the absence of any "IDE opened" claim, the absence of forbidden constructs (HashMap, static mutable state, debt markers), and the write-side ratio pin's internal self-consistency. The code review's Critical/Warning findings were all closed and the most consequential fix (CR-01, the `BlobCursor` desync) was independently confirmed by the orchestrator's revert-and-observe test.
+No coding gap blocks this phase's roadmap success criteria. All five are
+independently re-verified against current HEAD in this session: a fresh
+872-test `cargo test --workspace` run, a live extraction with direct `jq`
+inspection of the produced report, a byte-for-byte `.frx` comparison, a
+two-run determinism diff at the CLI level, and four individually-run named
+unit tests covering the two `backstop`-tagged determinism truths and the
+CR-01 fix. `cargo fmt --all --check` and `cargo clippy --workspace
+--all-targets -- -D warnings` both pass clean at current HEAD.
 
-The phase is withheld from an unconditional `passed` for exactly one reason: the phase goal's own text asserts an outcome ("a project directory **that the VB6 IDE can open**") that no test in this repository can exercise, and the one manual step that could resolve it has not been run. This is a pre-existing, roadmap-accepted testing-infrastructure limit (no Windows/VB6 host in CI), not a defect introduced by this phase's plans — but it is also not something the verifier can wave through as "presumably fine," since it is literally half of the stated goal. It is routed to human verification, not marked as a gap, because the codebase does everything within its power (a real structural check, honest limits language, no overclaiming) and the remaining question needs hardware this environment does not have.
+The phase receives `passed`, not `human_needed`, because the one item that
+previously routed to human verification has been explicitly resolved by the
+person with authority to accept that risk — not because new evidence closed
+it. This is recorded as an override in this file's frontmatter, not silently
+folded into the roadmap success criteria (none of which mention the IDE by
+name) and not silently absorbed into "all truths verified." A future reader
+relying on this file alone learns two separate facts: the structural evidence
+for the five roadmap success criteria is strong and independently
+re-confirmed at current HEAD, and the IDE-opens clause of the phase's own
+goal text is unproven and stands on a human waiver, not on evidence. Neither
+this report nor any file in the repository states or implies that the VB6 IDE
+has opened a written project.
 
-A secondary, much smaller item worth a human decision: `ROADMAP.md`'s Phase 4 traceability line ("WRT-01 to WRT-07 | Phase 4 | Pending") is stale against REQUIREMENTS.md's own per-item checkboxes (6 of 7 marked `[x]`, WRT-03 correctly left `[ ]`) and against the Progress table's "In Progress" row for Phase 4 — both are expected to be updated as part of closing out this verification, not treated as phase-4 code gaps.
+WRT-03 stays open by design, is narrow in scope (byte-level column
+indentation, not structure or values), is accurately self-described in
+REQUIREMENTS.md, and does not block this pass. Four WINDOWS.md findings from
+this phase remain tracked (#10, #11, #13 open; #12 fixed), none of which
+undercuts a stated roadmap success criterion.
 
 ---
 
