@@ -606,10 +606,10 @@ seed from `crates/deform6/tests/regressions/`, and plan 05-05 is what creates
 that directory and its first input.
 
 One measurement taken during planning shapes plan 05-01 and belongs here. 36 of
-the 44 vendored corpus programs raise at least one defect today, 430 defects in
+the 44 vendored corpus programs raise at least one defect today, 429 defects in
 all. A strict mode that refused on any `Recoverable` defect would therefore
 refuse 36 undamaged programs and break the phase 2, 3 and 4 gates. Every one of
-those 430 defects costs one item and puts nothing in its place. Plan 05-01 adds
+those 429 defects costs one item and puts nothing in its place. Plan 05-01 adds
 a third severity, `Tolerated`, so that strict mode refuses a file whose read had
 to assume a value and does not refuse a file whose read simply recovered less.
 
