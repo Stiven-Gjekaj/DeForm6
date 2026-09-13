@@ -871,3 +871,86 @@ fn extract_creates_the_directory_and_writes_the_expected_files_leaving_the_corpu
 
     fs::remove_dir_all(&out_dir).ok();
 }
+
+// --- Plan 04-08, Task 1: the subcommand, its three flags, and the exit
+// codes it reuses ------------------------------------------------------
+
+/// A file that is not a portable executable gives the same exit code from
+/// `extract` as it gives from `inspect`: the reading step this subcommand
+/// shares reuses `exit_for` unchanged.
+#[test]
+fn extract_on_a_file_that_is_not_a_portable_executable_gives_the_same_exit_code_as_inspect() {
+    let path = std::env::temp_dir().join(format!(
+        "deform6-cli-test-extract-not-a-program-{}.txt",
+        std::process::id()
+    ));
+    fs::write(&path, b"this is not a program\n").unwrap();
+
+    let (inspect_code, _out, _err) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "deform6-cli-test-extract-not-a-program-{}",
+        std::process::id()
+    ));
+    fs::remove_dir_all(&out_dir).ok();
+    let (extract_code, extract_stdout, extract_stderr) = run(&[
+        OsStr::new("extract"),
+        path.as_os_str(),
+        OsStr::new("-o"),
+        out_dir.as_os_str(),
+    ]);
+    fs::remove_file(&path).ok();
+    fs::remove_dir_all(&out_dir).ok();
+
+    assert_eq!(
+        inspect_code, 1,
+        "inspect's own exit code changed underneath this test"
+    );
+    assert_eq!(
+        extract_code, inspect_code,
+        "extract stderr was: {extract_stderr}"
+    );
+    assert_one_line_refusal(extract_code, &extract_stdout, &extract_stderr);
+}
+
+/// A missing required flag (`-o`) is a usage error: the internal error
+/// code, never the code reserved for a file that holds no Visual Basic
+/// runtime.
+#[test]
+fn extract_with_no_output_flag_exits_five_and_not_two() {
+    let path = fast_flames_path();
+    let (code, stdout, stderr) = run(&[OsStr::new("extract"), path.as_os_str()]);
+    assert_eq!(code, 5, "stderr was: {stderr}");
+    assert_ne!(
+        code, 2,
+        "a usage error must not be told apart as \"no Visual Basic runtime\""
+    );
+    assert!(stdout.is_empty(), "stdout was: {stdout:?}");
+}
+
+/// An output path that cannot be created (here, a path that already names
+/// a regular file, not a directory) gives the internal error code and a
+/// message naming the path.
+#[test]
+fn extract_with_an_unwritable_output_path_exits_five_and_names_the_path() {
+    let path = fast_flames_path();
+    let blocking_file = std::env::temp_dir().join(format!(
+        "deform6-cli-test-extract-blocking-file-{}",
+        std::process::id()
+    ));
+    fs::write(&blocking_file, b"not a directory").unwrap();
+
+    let (code, stdout, stderr) = run(&[
+        OsStr::new("extract"),
+        path.as_os_str(),
+        OsStr::new("-o"),
+        blocking_file.as_os_str(),
+    ]);
+    fs::remove_file(&blocking_file).ok();
+
+    assert_eq!(code, 5, "stderr was: {stderr}");
+    assert!(stdout.is_empty(), "stdout was: {stdout:?}");
+    assert!(
+        stderr.contains(&blocking_file.display().to_string()),
+        "stderr did not name the unwritable path: {stderr:?}"
+    );
+}

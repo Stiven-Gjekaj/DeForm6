@@ -20,8 +20,15 @@
 //! collide with that meaning. This crate parses through the fallible entry
 //! point and maps every error itself. Neither the infallible parse function
 //! nor the process exit function is called anywhere in this crate.
+//!
+//! `extract`'s own new failure modes — an input this run could not read, an
+//! output directory that already holds files without `--force`, a report
+//! path this run could not write, and a recovered file name that would
+//! escape the resolved output directory — all map to code 5, the same
+//! usage-error bucket a missing or malformed `--opcode-table` argument
+//! already uses. The table's own numbering does not move.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Parser as _;
@@ -72,16 +79,41 @@ enum Command {
     /// that VB6 can open.
     Extract {
         /// The executable to read.
+        ///
+        /// Taken as a path, not as a string, for the same reason
+        /// `Inspect::input` already is.
         input: PathBuf,
 
         /// The directory `extract` writes the project into.
         ///
         /// Every file this run writes is built in memory first; the
-        /// directory is created, and files land in it, only after the
-        /// whole project built without a refusal. Plan 04-08 adds
-        /// `--report` and `--force`.
+        /// directory is resolved to an absolute, canonicalized path, and
+        /// every file this run is about to write is checked to be a
+        /// direct child of it, before the directory is created and files
+        /// land in it. A short and a long form: `-o`/`--output`, locked by
+        /// plan 04-01's own research, since no earlier `deform6-cli`
+        /// convention exists for a directory-taking flag.
         #[arg(short, long)]
         output: PathBuf,
+
+        /// Moves the JSON report to this path instead of
+        /// `<output>/<name>.report.json`.
+        ///
+        /// Resolved the same way `output` is, but never checked to be a
+        /// child of it: the user named this path directly, so it is not an
+        /// escape. The resolved path is printed once the report is
+        /// written.
+        #[arg(long)]
+        report: Option<PathBuf>,
+
+        /// Overwrites a non-empty output directory.
+        ///
+        /// Absent this flag, a run into a directory that already holds at
+        /// least one entry refuses, naming the directory. Every file is
+        /// still checked to be a direct child of the resolved directory
+        /// first, whether or not this flag is given.
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -140,7 +172,12 @@ fn run(cli: &Cli) -> Exit {
             input,
             opcode_table,
         } => run_inspect(input, opcode_table.as_deref()),
-        Command::Extract { input, output } => run_extract(input, output),
+        Command::Extract {
+            input,
+            output,
+            report,
+            force,
+        } => run_extract(input, output, report.as_deref(), *force),
     }
 }
 
@@ -239,7 +276,11 @@ fn run_inspect(path: &Path, opcode_table_path: Option<&Path>) -> Exit {
 /// could not create) maps to [`Exit::Internal`], code 5, the same usage
 /// error bucket [`load_opcode_table`]'s own failures already use: the
 /// numbering must never move.
-fn run_extract(input: &Path, output: &Path) -> Exit {
+fn run_extract(input: &Path, output: &Path, report_path: Option<&Path>, force: bool) -> Exit {
+    // Kept alive for the whole call: `deform6::write::project` re-reads a
+    // resource blob's own bytes out of this same slice, so it must outlive
+    // the write step. A later refactor that drops this early would compile
+    // only if a copy of the whole executable were introduced instead.
     let data = match std::fs::read(input) {
         Ok(data) => data,
         Err(err) => {
@@ -249,15 +290,18 @@ fn run_extract(input: &Path, output: &Path) -> Exit {
     };
 
     let table = OpcodeTable::builtin();
-    let report = match deform6::inspect(&data, &table) {
-        Ok(report) => report,
+    let inspected = match deform6::inspect(&data, &table) {
+        Ok(inspected) => inspected,
         Err(refusal) => {
             eprintln!("{refusal}");
             return exit_for(refusal);
         }
     };
 
-    let written = match deform6::write::project(&report, &data) {
+    // The whole project is built in memory here, before `output` is
+    // touched at all. A refusal from this call leaves the file system
+    // exactly as it was before this run started.
+    let written = match deform6::write::project(&inspected, &data) {
         Ok(written) => written,
         Err(refusal) => {
             eprintln!("{refusal}");
@@ -265,16 +309,200 @@ fn run_extract(input: &Path, output: &Path) -> Exit {
         }
     };
 
+    let resolved_output = match resolve_output_dir(output) {
+        Ok(resolved) => resolved,
+        Err(exit) => return exit,
+    };
+
+    write_project(&written, &resolved_output, report_path, force)
+}
+
+/// Resolves `output` to an absolute, canonicalized path, following
+/// symbolic links, creating the directory first when it does not exist
+/// yet: `std::fs::canonicalize` refuses a path that is not there.
+///
+/// Creating an empty directory here is not "a byte written": the whole
+/// project already sits in memory by the time this function runs (see
+/// [`run_extract`]), so a refusal that follows (an existing directory with
+/// files and no `--force`, or a file name that would escape) still leaves
+/// the directory with zero entries, never a partial project.
+fn resolve_output_dir(output: &Path) -> Result<PathBuf, Exit> {
     if let Err(err) = std::fs::create_dir_all(output) {
         eprintln!("could not create {}: {err}", output.display());
-        return Exit::Internal;
+        return Err(Exit::Internal);
     }
-    for file in &written.files {
-        let path = output.join(&file.name);
-        if let Err(err) = std::fs::write(&path, &file.bytes) {
+    match std::fs::canonicalize(output) {
+        Ok(resolved) => Ok(resolved),
+        Err(err) => {
+            eprintln!("could not resolve {}: {err}", output.display());
+            Err(Exit::Internal)
+        }
+    }
+}
+
+/// Refuses a `resolved_dir` that already holds at least one entry, unless
+/// `force` is given. An empty existing directory, or one this run just
+/// created, is fine either way.
+fn ensure_directory_is_writable(resolved_dir: &Path, force: bool) -> Result<(), Exit> {
+    if force {
+        return Ok(());
+    }
+    match std::fs::read_dir(resolved_dir) {
+        Ok(mut entries) => {
+            if entries.next().is_some() {
+                eprintln!(
+                    "{} already holds files; pass --force to overwrite",
+                    resolved_dir.display()
+                );
+                Err(Exit::Internal)
+            } else {
+                Ok(())
+            }
+        }
+        Err(err) => {
+            eprintln!("could not read {}: {err}", resolved_dir.display());
+            Err(Exit::Internal)
+        }
+    }
+}
+
+/// Collapses `.` and `..` components lexically, without touching the file
+/// system: the one way to check a path that does not exist yet for
+/// containment, since [`std::fs::canonicalize`] refuses a path that has
+/// not been written.
+///
+/// A leading `..` past the root, or past whatever this function has
+/// already pushed, is dropped rather than made to underflow: [`PathBuf`]
+/// itself refuses to pop past its own start, so this is a no-op in that
+/// case, never a panic.
+fn lexically_normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// Builds the on-disk destination for every file `files` gives, verified
+/// to be a direct child of `resolved_dir`: [`lexically_normalize`] the
+/// joined path, then compare its own parent against `resolved_dir` by
+/// value, never by a string prefix. Touches no file system: this is the
+/// one place a recovered file name becomes a path, and it is checked here,
+/// before any byte reaches disk, so a test can drive it with names built
+/// inside the test (T-4-02).
+///
+/// # Errors
+///
+/// Gives one message naming the file and the directory it would have
+/// escaped, the first time any file's own path is not a direct child of
+/// `resolved_dir`. The whole run refuses; nothing already checked is kept.
+fn plan_writes<'a>(
+    files: impl Iterator<Item = &'a deform6::write::WrittenFile>,
+    resolved_dir: &Path,
+) -> Result<Vec<(PathBuf, &'a [u8])>, String> {
+    let mut plan = Vec::new();
+    for file in files {
+        let candidate = lexically_normalize(&resolved_dir.join(&file.name));
+        let Some(parent) = candidate.parent() else {
+            return Err(format!(
+                "{:?} names a path with no parent directory; refusing the whole run",
+                file.name
+            ));
+        };
+        if parent != resolved_dir {
+            return Err(format!(
+                "{:?} would write outside {}, at {}; refusing the whole run",
+                file.name,
+                resolved_dir.display(),
+                candidate.display()
+            ));
+        }
+        plan.push((candidate, file.bytes.as_slice()));
+    }
+    Ok(plan)
+}
+
+/// Resolves a user-named `--report` path the same way `output` is
+/// resolved: follows symbolic links on the directory that will hold it.
+/// Never checked against the output directory: the user named this path
+/// directly, so it is not an escape (T-4-23).
+fn resolve_report_path(path: &Path) -> Result<PathBuf, Exit> {
+    let parent = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let Some(file_name) = path.file_name() else {
+        eprintln!("{} names no file", path.display());
+        return Err(Exit::Internal);
+    };
+    if let Err(err) = std::fs::create_dir_all(parent) {
+        eprintln!("could not create {}: {err}", parent.display());
+        return Err(Exit::Internal);
+    }
+    match std::fs::canonicalize(parent) {
+        Ok(resolved_parent) => Ok(resolved_parent.join(file_name)),
+        Err(err) => {
+            eprintln!(
+                "could not resolve the directory holding {}: {err}",
+                path.display()
+            );
+            Err(Exit::Internal)
+        }
+    }
+}
+
+/// Writes every file `written` holds into `resolved_dir`, having already
+/// resolved it (see [`resolve_output_dir`]): refuses a non-empty directory
+/// without `--force`, plans and checks every path with [`plan_writes`]
+/// before writing a single byte, then writes. When `report_path` is
+/// given, the JSON report goes there instead of into `resolved_dir`, is
+/// never checked for containment, and its own resolved path is printed.
+fn write_project(
+    written: &deform6::write::WrittenProject,
+    resolved_dir: &Path,
+    report_path: Option<&Path>,
+    force: bool,
+) -> Exit {
+    if let Err(exit) = ensure_directory_is_writable(resolved_dir, force) {
+        return exit;
+    }
+
+    let files = written
+        .files
+        .iter()
+        .filter(|file| report_path.is_none() || !file.name.ends_with(".report.json"));
+    let plan = match plan_writes(files, resolved_dir) {
+        Ok(plan) => plan,
+        Err(message) => {
+            eprintln!("{message}");
+            return Exit::Internal;
+        }
+    };
+
+    for (path, bytes) in &plan {
+        if let Err(err) = std::fs::write(path, bytes) {
             eprintln!("could not write {}: {err}", path.display());
             return Exit::Internal;
         }
+    }
+
+    if let Some(report_path) = report_path {
+        let resolved_report = match resolve_report_path(report_path) {
+            Ok(resolved) => resolved,
+            Err(exit) => return exit,
+        };
+        let report_bytes = written.report.to_json().into_bytes();
+        if let Err(err) = std::fs::write(&resolved_report, report_bytes) {
+            eprintln!("could not write {}: {err}", resolved_report.display());
+            return Exit::Internal;
+        }
+        println!("{}", resolved_report.display());
     }
 
     Exit::Ok
