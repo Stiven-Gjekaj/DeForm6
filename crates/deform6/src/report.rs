@@ -791,8 +791,8 @@ mod tests {
     /// when the user supplies no `--opcode-table` of its own.
     fn built_report_for_fast_flames() -> ProjectReport {
         let table = OpcodeTable::builtin();
-        let report =
-            crate::vb::inspect(FAST_FLAMES, &table).expect("Fast_Flames.exe must inspect cleanly");
+        let report = crate::vb::inspect(FAST_FLAMES, &table, crate::journal::Mode::Strict)
+            .expect("Fast_Flames.exe must inspect cleanly");
         let (model, items) = crate::write::model::from_report(&report, FAST_FLAMES);
         let summary = format!("Opcode table: builtin subset, {} entries", table.len());
         build(&report, &model, items, &summary)

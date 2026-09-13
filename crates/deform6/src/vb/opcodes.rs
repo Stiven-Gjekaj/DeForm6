@@ -622,7 +622,9 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../corpus/vb6-code/Fire-effect/Fast_Flames.exe"
         ));
-        let report = crate::vb::inspect(data, &OpcodeTable::builtin()).unwrap();
+        let report =
+            crate::vb::inspect(data, &OpcodeTable::builtin(), crate::journal::Mode::Strict)
+                .unwrap();
         let form = report
             .forms
             .iter()
@@ -657,7 +659,9 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../corpus/public-domain/SK-Winsock-Sample__VB6/demo/SubReality_WinsockSample.exe"
         ));
-        let report = crate::vb::inspect(data, &OpcodeTable::builtin()).unwrap();
+        let report =
+            crate::vb::inspect(data, &OpcodeTable::builtin(), crate::journal::Mode::Strict)
+                .unwrap();
         let form = report
             .forms
             .iter()
@@ -703,7 +707,9 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../corpus/vb6-code/Fire-effect/Fast_Flames.exe"
         ));
-        let report = crate::vb::inspect(data, &OpcodeTable::builtin()).unwrap();
+        let report =
+            crate::vb::inspect(data, &OpcodeTable::builtin(), crate::journal::Mode::Strict)
+                .unwrap();
         let form = report
             .forms
             .iter()
@@ -739,7 +745,9 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../corpus/vb6-code/Brightness-effect/Part 1 - Pure VB6/vbBrightness.exe"
         ));
-        let report = crate::vb::inspect(data, &OpcodeTable::builtin()).unwrap();
+        let report =
+            crate::vb::inspect(data, &OpcodeTable::builtin(), crate::journal::Mode::Strict)
+                .unwrap();
         let form = report
             .forms
             .iter()
@@ -806,7 +814,9 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../corpus/vb6-code/Fire-effect/Fast_Flames.exe"
         ));
-        let report = crate::vb::inspect(data, &OpcodeTable::builtin()).unwrap();
+        let report =
+            crate::vb::inspect(data, &OpcodeTable::builtin(), crate::journal::Mode::Strict)
+                .unwrap();
         let form = report
             .forms
             .iter()
@@ -833,7 +843,9 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../corpus/public-domain/SK-Winsock-Sample__VB6/demo/SubReality_WinsockSample.exe"
         ));
-        let report = crate::vb::inspect(data, &OpcodeTable::builtin()).unwrap();
+        let report =
+            crate::vb::inspect(data, &OpcodeTable::builtin(), crate::journal::Mode::Strict)
+                .unwrap();
         let form = report
             .forms
             .iter()

@@ -1221,9 +1221,10 @@ fn all_corpus_programs_extract_with_exit_zero_and_the_written_file_count_matches
     for (index, exe_path) in executables.iter().enumerate() {
         let data = fs::read(exe_path)
             .unwrap_or_else(|err| panic!("reading {}: {err}", exe_path.display()));
-        let report = deform6::inspect(&data, &table).unwrap_or_else(|refusal| {
-            panic!("{} did not inspect cleanly: {refusal}", exe_path.display())
-        });
+        let report = deform6::inspect(&data, &table, deform6::journal::Mode::Strict)
+            .unwrap_or_else(|refusal| {
+                panic!("{} did not inspect cleanly: {refusal}", exe_path.display())
+            });
 
         let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
             .join(format!("deform6-cli-sweep-{}-{index}", std::process::id()));
@@ -1370,7 +1371,8 @@ fn map_editor_writes_a_form_file_for_its_refused_form_and_the_report_marks_it_un
 
     let data = fs::read(&path).unwrap();
     let table = deform6::vb::opcodes::OpcodeTable::builtin();
-    let report = deform6::inspect(&data, &table).expect("Map Editor.exe must inspect cleanly");
+    let report = deform6::inspect(&data, &table, deform6::journal::Mode::Strict)
+        .expect("Map Editor.exe must inspect cleanly");
     let written = deform6::write::project(&report, &data).expect("write::project must not refuse");
     let main_form_path = deform6::report::path_for_form(
         &deform6::write::model::SafeName::new("Main", deform6::write::model::NameKind::Form).0,

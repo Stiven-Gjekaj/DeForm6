@@ -251,7 +251,7 @@ fn run_inspect(path: &Path, opcode_table_path: Option<&Path>) -> Exit {
         }
     };
 
-    match deform6::inspect(&data, &table) {
+    match deform6::inspect(&data, &table, deform6::journal::Mode::Strict) {
         Ok(report) => {
             print_report(path, &report, &table_summary);
             Exit::Ok
@@ -290,7 +290,7 @@ fn run_extract(input: &Path, output: &Path, report_path: Option<&Path>, force: b
     };
 
     let table = OpcodeTable::builtin();
-    let inspected = match deform6::inspect(&data, &table) {
+    let inspected = match deform6::inspect(&data, &table, deform6::journal::Mode::Strict) {
         Ok(inspected) => inspected,
         Err(refusal) => {
             eprintln!("{refusal}");

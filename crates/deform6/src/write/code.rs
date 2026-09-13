@@ -1252,7 +1252,7 @@ mod sweep {
         for exe_path in executables() {
             let data = std::fs::read(&exe_path)
                 .unwrap_or_else(|err| panic!("reading {}: {err}", exe_path.display()));
-            let Ok(report) = crate::vb::inspect(&data, &table) else {
+            let Ok(report) = crate::vb::inspect(&data, &table, crate::journal::Mode::Strict) else {
                 continue;
             };
             let (model, _model_items) = from_report(&report, &data);

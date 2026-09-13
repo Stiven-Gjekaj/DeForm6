@@ -568,7 +568,7 @@ fn forms_controls_counts_for(
     projects: &[PathBuf],
     table: &OpcodeTable,
 ) -> differential::FormsControlsCounts {
-    let report = deform6::inspect(&program.image_bytes, table)
+    let report = deform6::inspect(&program.image_bytes, table, deform6::journal::Mode::Strict)
         .unwrap_or_else(|err| panic!("{}: inspect: {err}", program.key));
 
     let exe_path = corpus_root().join(&program.key);
@@ -655,8 +655,8 @@ fn property_lines_written(
 /// private to this module and unreachable from `crates/xtask`'s own
 /// `main.rs`, which reads its own bytes independently.
 pub(crate) fn property_counts(key: &str, data: &[u8], table: &OpcodeTable) -> PropertyCounts {
-    let report =
-        deform6::inspect(data, table).unwrap_or_else(|err| panic!("{key}: inspect: {err}"));
+    let report = deform6::inspect(data, table, deform6::journal::Mode::Strict)
+        .unwrap_or_else(|err| panic!("{key}: inspect: {err}"));
     let (model, _items) = deform6::write::model::from_report(&report, data);
 
     let mut declared = 0_u32;

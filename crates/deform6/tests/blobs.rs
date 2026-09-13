@@ -131,8 +131,12 @@ fn committed_frx_carries_the_ico_signature(frx_bytes: &[u8]) -> bool {
 /// its declared length, its header bytes and its image bytes reconstruct
 /// the committed `.frx` at `frx_relative` exactly.
 fn assert_blob_matches_committed_frx(exe_bytes: &[u8], form_name: &str, frx_relative: &str) {
-    let report = deform6::inspect(exe_bytes, &OpcodeTable::builtin())
-        .expect("a corpus program in this repository's own vendored set must inspect cleanly");
+    let report = deform6::inspect(
+        exe_bytes,
+        &OpcodeTable::builtin(),
+        deform6::journal::Mode::Strict,
+    )
+    .expect("a corpus program in this repository's own vendored set must inspect cleanly");
     let form = report
         .forms
         .iter()
@@ -231,7 +235,12 @@ fn winsock_sample_frm_main_recovers_a_blob_matching_the_committed_frx() {
 /// image bytes) without re-deriving them from the byte comparison above.
 #[test]
 fn fast_flames_blob_declared_length_and_image_length_match_this_sessions_own_measurement() {
-    let report = deform6::inspect(FAST_FLAMES, &OpcodeTable::builtin()).unwrap();
+    let report = deform6::inspect(
+        FAST_FLAMES,
+        &OpcodeTable::builtin(),
+        deform6::journal::Mode::Strict,
+    )
+    .unwrap();
     let form = report
         .forms
         .iter()
@@ -250,7 +259,12 @@ fn fast_flames_blob_declared_length_and_image_length_match_this_sessions_own_mea
 /// The same pin for the second corpus program's own blob.
 #[test]
 fn winsock_sample_blob_declared_length_and_image_length_match_this_sessions_own_measurement() {
-    let report = deform6::inspect(WINSOCK_SAMPLE, &OpcodeTable::builtin()).unwrap();
+    let report = deform6::inspect(
+        WINSOCK_SAMPLE,
+        &OpcodeTable::builtin(),
+        deform6::journal::Mode::Strict,
+    )
+    .unwrap();
     let form = report
         .forms
         .iter()

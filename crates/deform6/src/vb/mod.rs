@@ -341,7 +341,11 @@ pub struct Report {
 /// [`Refusal::NoVbRuntime`], [`Refusal::IsVb5`] or [`Refusal::IsVb4`] when the
 /// image names no Visual Basic 6 runtime, and [`Refusal::Damaged`] when a
 /// Visual Basic 6 structure does not resolve.
-pub fn inspect(data: &[u8], opcode_table: &OpcodeTable) -> Result<Report, Refusal> {
+pub fn inspect(
+    data: &[u8],
+    opcode_table: &OpcodeTable,
+    _mode: crate::journal::Mode,
+) -> Result<Report, Refusal> {
     let pe = PeImage::parse(data)?;
     let (runtime, runtime_dll) = runtime_of(&pe)?;
 
@@ -952,7 +956,7 @@ mod tests {
     }
 
     fn mandelbrot_report() -> Report {
-        inspect(MANDELBROT, &builtin_table()).unwrap()
+        inspect(MANDELBROT, &builtin_table(), crate::journal::Mode::Strict).unwrap()
     }
 
     /// The `.vbp` beside the executable declares these four values.
@@ -1002,7 +1006,10 @@ mod tests {
 
     #[test]
     fn an_empty_slice_is_not_a_portable_executable() {
-        assert_eq!(inspect(&[], &builtin_table()), Err(Refusal::NotPe));
+        assert_eq!(
+            inspect(&[], &builtin_table(), crate::journal::Mode::Strict),
+            Err(Refusal::NotPe)
+        );
     }
 
     /// The runtime is decided before any Visual Basic structure is read.
@@ -1019,7 +1026,10 @@ mod tests {
         // The signature really is gone, so the ordering is what decides.
         let head = header_offset_the_hard_way(&bytes);
         assert_ne!(&bytes[head..head + 4], b"VB5!");
-        assert_eq!(inspect(&bytes, &builtin_table()), Err(Refusal::IsVb5));
+        assert_eq!(
+            inspect(&bytes, &builtin_table(), crate::journal::Mode::Strict),
+            Err(Refusal::IsVb5)
+        );
     }
 
     /// The report describes the slice the caller handed in.
@@ -1091,7 +1101,7 @@ mod tests {
         let at = object_table_field_offset(GRAYSCALE, 0x2C);
         let bytes = with_u16_at(GRAYSCALE, at, 1);
 
-        let report = inspect(&bytes, &builtin_table()).unwrap();
+        let report = inspect(&bytes, &builtin_table(), crate::journal::Mode::Strict).unwrap();
         let defect = report
             .defects
             .iter()
@@ -1191,7 +1201,7 @@ mod tests {
         let mut bytes = GRAYSCALE.to_vec();
         bytes[at..at + 4].copy_from_slice(&nowhere.to_le_bytes());
 
-        let report = inspect(&bytes, &builtin_table()).unwrap();
+        let report = inspect(&bytes, &builtin_table(), crate::journal::Mode::Strict).unwrap();
         let object = report
             .objects
             .iter()
@@ -1244,7 +1254,7 @@ mod tests {
     /// imports, per this task's fourth behaviour.
     #[test]
     fn grayscale_gives_three_objects_twelve_public_names_and_eight_imports() {
-        let report = inspect(GRAYSCALE, &builtin_table()).unwrap();
+        let report = inspect(GRAYSCALE, &builtin_table(), crate::journal::Mode::Strict).unwrap();
 
         assert_eq!(report.objects.len(), 3);
         let kinds: Vec<ObjectKind> = report.objects.iter().map(|o| o.kind).collect();
@@ -1275,7 +1285,7 @@ mod tests {
     /// `Sub_Module` (`proc_count` 7), both standard modules, per D-13.
     #[test]
     fn map_editor_reports_its_two_modules_as_unreachable_and_not_as_empty() {
-        let report = inspect(MAP_EDITOR, &builtin_table()).unwrap();
+        let report = inspect(MAP_EDITOR, &builtin_table(), crate::journal::Mode::Strict).unwrap();
 
         let modules: Vec<(&str, &ObjectProcedures)> = report
             .objects
@@ -1296,14 +1306,19 @@ mod tests {
         }
     }
 
-    /// `inspect` still takes only a byte slice and an opcode table and
-    /// returns a value, per this task's sixth behaviour. The grep the
+    /// `inspect` still takes only a byte slice, an opcode table and a mode,
+    /// and returns a value, per this task's sixth behaviour. The grep the
     /// plan's own `<verify>` runs is the acceptance instrument for "no file
     /// system type anywhere under `src/`"; this test is the type-level half
-    /// of the same claim.
+    /// of the same claim. Plan 05-01 task 2 adds the mode parameter: it is
+    /// a disposition applied to the finished read, not a file system type,
+    /// so it does not disturb this test's own claim.
     #[test]
-    fn inspect_still_takes_a_byte_slice_and_an_opcode_table_and_returns_a_value() {
-        fn assert_signature(_f: fn(&[u8], &OpcodeTable) -> Result<Report, Refusal>) {}
+    fn inspect_still_takes_a_byte_slice_an_opcode_table_and_a_mode_and_returns_a_value() {
+        fn assert_signature(
+            _f: fn(&[u8], &OpcodeTable, crate::journal::Mode) -> Result<Report, Refusal>,
+        ) {
+        }
         assert_signature(inspect);
     }
 
@@ -1329,7 +1344,7 @@ mod tests {
         let mut bytes = MANDELBROT.to_vec();
         bytes[at..at + 2].copy_from_slice(&0_u16.to_le_bytes());
 
-        let report = inspect(&bytes, &builtin_table()).unwrap();
+        let report = inspect(&bytes, &builtin_table(), crate::journal::Mode::Strict).unwrap();
         assert!(
             report.forms.is_empty(),
             "a zero form count must give an empty forms list: {:?}",
@@ -1343,8 +1358,8 @@ mod tests {
     #[test]
     fn two_runs_over_the_same_bytes_give_equal_reports() {
         let table = builtin_table();
-        let first = inspect(MANDELBROT, &table).unwrap();
-        let second = inspect(MANDELBROT, &table).unwrap();
+        let first = inspect(MANDELBROT, &table, crate::journal::Mode::Strict).unwrap();
+        let second = inspect(MANDELBROT, &table, crate::journal::Mode::Strict).unwrap();
         assert_eq!(first, second);
     }
 
@@ -1384,7 +1399,7 @@ mod tests {
         let corrupted: u32 = 8;
         bytes[at..at + 4].copy_from_slice(&corrupted.to_le_bytes());
 
-        let report = inspect(&bytes, &builtin_table()).unwrap();
+        let report = inspect(&bytes, &builtin_table(), crate::journal::Mode::Strict).unwrap();
         assert_eq!(
             report.forms.len(),
             2,

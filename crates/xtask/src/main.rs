@@ -152,7 +152,7 @@ fn measure_all() -> Result<Vec<Measured>, String> {
 
         let counts = program_counts(&image, &declared, &recovered_objects);
 
-        let report = deform6::inspect(&bytes, &table)
+        let report = deform6::inspect(&bytes, &table, deform6::journal::Mode::Strict)
             .map_err(|err| format!("{}: inspect: {err}", exe.display()))?;
         let forms_controls = forms_controls_counts(&declared, &report);
         let property_counts = ratios::property_counts(&key, &bytes, &table);

@@ -835,7 +835,8 @@ mod tests {
     fn first_form(exe_relative: &str) -> (FormModel, Vec<u8>) {
         let data = std::fs::read(corpus_path(exe_relative)).expect("reading the corpus exe");
         let table = OpcodeTable::builtin();
-        let report = crate::vb::inspect(&data, &table).expect("inspect must succeed");
+        let report = crate::vb::inspect(&data, &table, crate::journal::Mode::Strict)
+            .expect("inspect must succeed");
         let (model, _items) = crate::write::model::from_report(&report, &data);
         let form = model
             .forms
@@ -1707,7 +1708,8 @@ mod tests {
         ))
         .expect("reading LockWorkStation.exe");
         let table = OpcodeTable::builtin();
-        let report = crate::vb::inspect(&data, &table).expect("inspect must succeed");
+        let report = crate::vb::inspect(&data, &table, crate::journal::Mode::Strict)
+            .expect("inspect must succeed");
         let (model, _items) = crate::write::model::from_report(&report, &data);
         let form = model
             .forms
@@ -1736,7 +1738,8 @@ mod tests {
         let data = std::fs::read(corpus_path("vb6-code/Map-editor-2D/Map Editor.exe"))
             .expect("reading Map Editor.exe");
         let table = OpcodeTable::builtin();
-        let report = crate::vb::inspect(&data, &table).expect("inspect must succeed");
+        let report = crate::vb::inspect(&data, &table, crate::journal::Mode::Strict)
+            .expect("inspect must succeed");
         let (model, _items) = crate::write::model::from_report(&report, &data);
         let main_index = report
             .forms
@@ -1776,7 +1779,8 @@ mod tests {
         ))
         .expect("reading LockWorkStation.exe");
         let table = OpcodeTable::builtin();
-        let lock_report = crate::vb::inspect(&lock_data, &table).expect("inspect must succeed");
+        let lock_report = crate::vb::inspect(&lock_data, &table, crate::journal::Mode::Strict)
+            .expect("inspect must succeed");
         let (lock_model, _items) = crate::write::model::from_report(&lock_report, &lock_data);
         let lock_form = lock_model
             .forms
@@ -1794,7 +1798,8 @@ mod tests {
 
         let map_data = std::fs::read(corpus_path("vb6-code/Map-editor-2D/Map Editor.exe"))
             .expect("reading Map Editor.exe");
-        let map_report = crate::vb::inspect(&map_data, &table).expect("inspect must succeed");
+        let map_report = crate::vb::inspect(&map_data, &table, crate::journal::Mode::Strict)
+            .expect("inspect must succeed");
         let (map_model, _items) = crate::write::model::from_report(&map_report, &map_data);
         let main_index = map_report
             .forms

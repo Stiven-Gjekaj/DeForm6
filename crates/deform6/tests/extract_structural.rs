@@ -143,7 +143,7 @@ fn extract_one(exe: &Path, root: &Path, label: &str) -> ExtractedProgram {
     let data =
         std::fs::read(exe).unwrap_or_else(|err| panic!("{key}: reading the executable: {err}"));
     let table = OpcodeTable::builtin();
-    let report = deform6::inspect(&data, &table)
+    let report = deform6::inspect(&data, &table, deform6::journal::Mode::Strict)
         .unwrap_or_else(|err| panic!("{key}: inspect refused this program: {err}"));
 
     let forms_declared = report.forms.len();
@@ -708,7 +708,8 @@ fn the_reports_limits_state_the_exact_recompilation_sentence() {
     let exe = corpus_root().join("vb6-code/Fire-effect/Fast_Flames.exe");
     let data = std::fs::read(&exe).expect("reading Fast_Flames.exe");
     let table = OpcodeTable::builtin();
-    let report = deform6::inspect(&data, &table).expect("inspect must succeed");
+    let report = deform6::inspect(&data, &table, deform6::journal::Mode::Strict)
+        .expect("inspect must succeed");
     let written = deform6::write::project(&report, &data).expect("write::project must succeed");
 
     assert_eq!(

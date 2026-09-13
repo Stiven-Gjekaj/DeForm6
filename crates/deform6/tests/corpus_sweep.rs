@@ -100,8 +100,12 @@ fn check_one(path: &Path) -> Result<(), String> {
     let data =
         std::fs::read(path).unwrap_or_else(|err| panic!("reading {}: {err}", path.display()));
 
-    let report = inspect(&data, &OpcodeTable::builtin())
-        .map_err(|refusal| format!("inspect refused it: {refusal}"))?;
+    let report = inspect(
+        &data,
+        &OpcodeTable::builtin(),
+        deform6::journal::Mode::Strict,
+    )
+    .map_err(|refusal| format!("inspect refused it: {refusal}"))?;
 
     if report.signature != SIGNATURE {
         return Err(format!(
@@ -200,7 +204,7 @@ fn every_form_across_the_corpus_gives_a_tree_or_a_named_defect() {
     for path in &files {
         let data =
             std::fs::read(path).unwrap_or_else(|err| panic!("reading {}: {err}", path.display()));
-        let report = match inspect(&data, &table) {
+        let report = match inspect(&data, &table, deform6::journal::Mode::Strict) {
             Ok(report) => report,
             Err(refusal) => {
                 failures.push(format!(

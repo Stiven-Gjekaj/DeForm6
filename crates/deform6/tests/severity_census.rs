@@ -119,8 +119,12 @@ fn every_defect_the_corpus_raises_is_tolerated() {
     for path in &files {
         let data =
             std::fs::read(path).unwrap_or_else(|err| panic!("reading {}: {err}", path.display()));
-        let report = inspect(&data, &OpcodeTable::builtin())
-            .unwrap_or_else(|refusal| panic!("{}: inspect refused it: {refusal}", path.display()));
+        let report = inspect(
+            &data,
+            &OpcodeTable::builtin(),
+            deform6::journal::Mode::Strict,
+        )
+        .unwrap_or_else(|refusal| panic!("{}: inspect refused it: {refusal}", path.display()));
 
         // Every form-level defect must already be one of the report-level
         // defects, proven here rather than assumed, per `compose_form`'s own

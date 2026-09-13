@@ -171,8 +171,12 @@ fn hand_decoded_bound_events(data: &[u8]) -> Vec<(String, u16, u32)> {
 /// carries no address; this assertion is the structural half, that the two
 /// index sets stay disjoint.
 fn assert_handler_addresses_match(data: &[u8], form_name: &str, exact_bound_count: usize) {
-    let report = deform6::inspect(data, &OpcodeTable::builtin())
-        .expect("a corpus program in this repository's own vendored set must inspect cleanly");
+    let report = deform6::inspect(
+        data,
+        &OpcodeTable::builtin(),
+        deform6::journal::Mode::Strict,
+    )
+    .expect("a corpus program in this repository's own vendored set must inspect cleanly");
     let form = report
         .forms
         .iter()

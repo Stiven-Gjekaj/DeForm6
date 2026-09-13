@@ -41,8 +41,8 @@ fn corpus_path(relative: &str) -> PathBuf {
 /// user supplies no `--opcode-table` of their own.
 fn written_project() -> WrittenProject {
     let table = OpcodeTable::builtin();
-    let report =
-        deform6::inspect(FAST_FLAMES, &table).expect("Fast_Flames.exe must inspect cleanly");
+    let report = deform6::inspect(FAST_FLAMES, &table, deform6::journal::Mode::Strict)
+        .expect("Fast_Flames.exe must inspect cleanly");
     write::project(&report, FAST_FLAMES).expect("write::project must not refuse a clean report")
 }
 
@@ -286,7 +286,7 @@ fn every_written_text_file_ends_with_crlf_and_holds_no_byte_order_mark() {
 #[test]
 fn two_calls_to_write_project_give_byte_identical_output_for_every_file() {
     let table = OpcodeTable::builtin();
-    let report = deform6::inspect(FAST_FLAMES, &table).unwrap();
+    let report = deform6::inspect(FAST_FLAMES, &table, deform6::journal::Mode::Strict).unwrap();
     let first = write::project(&report, FAST_FLAMES).unwrap();
     let second = write::project(&report, FAST_FLAMES).unwrap();
     assert_eq!(first.files, second.files);
@@ -377,7 +377,7 @@ fn the_written_reports_limits_state_that_full_recompilation_did_not_run() {
 #[test]
 fn from_report_on_fast_flames_gives_one_form_one_class_and_a_matching_startup() {
     let table = OpcodeTable::builtin();
-    let report = deform6::inspect(FAST_FLAMES, &table).unwrap();
+    let report = deform6::inspect(FAST_FLAMES, &table, deform6::journal::Mode::Strict).unwrap();
     let (model, items) = deform6::write::model::from_report(&report, FAST_FLAMES);
 
     // One form, frmFire, whose control tree walk did not refuse.

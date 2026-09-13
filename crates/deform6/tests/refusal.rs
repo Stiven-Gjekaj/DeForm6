@@ -110,14 +110,17 @@ fn with_a_clr_directory(data: &[u8]) -> Vec<u8> {
 
 #[test]
 fn an_empty_file_is_not_a_portable_executable() {
-    assert_eq!(deform6::inspect(&[], &builtin_table()), Err(Refusal::NotPe));
+    assert_eq!(
+        deform6::inspect(&[], &builtin_table(), deform6::journal::Mode::Strict),
+        Err(Refusal::NotPe)
+    );
 }
 
 #[test]
 fn a_short_text_file_is_not_a_portable_executable() {
     let data = b"this is not a program\n";
     assert_eq!(
-        deform6::inspect(data, &builtin_table()),
+        deform6::inspect(data, &builtin_table(), deform6::journal::Mode::Strict),
         Err(Refusal::NotPe)
     );
 }
@@ -126,7 +129,7 @@ fn a_short_text_file_is_not_a_portable_executable() {
 fn a_pe_file_importing_no_recognised_visual_basic_runtime_is_refused() {
     let bytes = with_the_runtime_named(&mandelbrot(), b"KERNEL32.DLL");
     assert_eq!(
-        deform6::inspect(&bytes, &builtin_table()),
+        deform6::inspect(&bytes, &builtin_table(), deform6::journal::Mode::Strict),
         Err(Refusal::NoVbRuntime { dot_net: false })
     );
 }
@@ -139,7 +142,7 @@ fn a_pe_file_importing_no_recognised_visual_basic_runtime_is_refused() {
 fn an_unrecognised_import_name_is_refused_as_holding_no_visual_basic_runtime() {
     let bytes = with_the_runtime_named(&mandelbrot(), b"mscoree.dll\0");
     assert_eq!(
-        deform6::inspect(&bytes, &builtin_table()),
+        deform6::inspect(&bytes, &builtin_table(), deform6::journal::Mode::Strict),
         Err(Refusal::NoVbRuntime { dot_net: false })
     );
 }
@@ -152,7 +155,7 @@ fn a_common_language_runtime_header_makes_the_refusal_name_a_dot_net_assembly() 
     let named = with_the_runtime_named(&mandelbrot(), b"mscoree.dll\0");
     let bytes = with_a_clr_directory(&named);
     assert_eq!(
-        deform6::inspect(&bytes, &builtin_table()),
+        deform6::inspect(&bytes, &builtin_table(), deform6::journal::Mode::Strict),
         Err(Refusal::NoVbRuntime { dot_net: true })
     );
 }
@@ -161,7 +164,7 @@ fn a_common_language_runtime_header_makes_the_refusal_name_a_dot_net_assembly() 
 fn a_visual_basic_5_runtime_name_is_refused_by_name() {
     let bytes = with_the_runtime_named(&mandelbrot(), b"MSVBVM50.DLL");
     assert_eq!(
-        deform6::inspect(&bytes, &builtin_table()),
+        deform6::inspect(&bytes, &builtin_table(), deform6::journal::Mode::Strict),
         Err(Refusal::IsVb5)
     );
 }
@@ -170,7 +173,7 @@ fn a_visual_basic_5_runtime_name_is_refused_by_name() {
 fn a_visual_basic_4_runtime_name_is_refused_by_name() {
     let bytes = with_the_runtime_named(&mandelbrot(), b"VB40032.DLL\0");
     assert_eq!(
-        deform6::inspect(&bytes, &builtin_table()),
+        deform6::inspect(&bytes, &builtin_table(), deform6::journal::Mode::Strict),
         Err(Refusal::IsVb4)
     );
 }
@@ -179,7 +182,8 @@ fn a_visual_basic_4_runtime_name_is_refused_by_name() {
 fn a_truncated_visual_basic_6_executable_is_damaged_and_not_refused_as_a_non_pe() {
     let data = mandelbrot();
     let half = &data[..data.len() / 2];
-    let refusal = deform6::inspect(half, &builtin_table()).unwrap_err();
+    let refusal =
+        deform6::inspect(half, &builtin_table(), deform6::journal::Mode::Strict).unwrap_err();
     assert!(
         matches!(refusal, Refusal::Damaged(_)),
         "a truncated Visual Basic 6 file must be damaged, exit code 4, and not \
@@ -193,7 +197,7 @@ fn a_truncated_visual_basic_6_executable_is_damaged_and_not_refused_as_a_non_pe(
 #[test]
 fn the_unmodified_corpus_file_is_accepted() {
     let data = mandelbrot();
-    let report = deform6::inspect(&data, &builtin_table());
+    let report = deform6::inspect(&data, &builtin_table(), deform6::journal::Mode::Strict);
     assert!(
         report.is_ok(),
         "the unpatched corpus file was refused: {report:?}"

@@ -1235,7 +1235,7 @@ fn a_doctored_back_color_one_greater_than_the_declared_value_fails_the_full_comp
     let exe = corpus_root().join("vb6-code/Fire-effect/Fast_Flames.exe");
     let data = std::fs::read(&exe).unwrap_or_else(|err| panic!("reading {}: {err}", exe.display()));
     let table = OpcodeTable::builtin();
-    let report = deform6::inspect(&data, &table).unwrap();
+    let report = deform6::inspect(&data, &table, deform6::journal::Mode::Strict).unwrap();
 
     let mut doctored_report = report;
     let form = doctored_report
@@ -1285,7 +1285,7 @@ fn every_declared_form_and_control_is_recovered_and_every_recovered_one_is_decla
     for exe in &exes {
         let data =
             std::fs::read(exe).unwrap_or_else(|err| panic!("reading {}: {err}", exe.display()));
-        let report = deform6::inspect(&data, &table)
+        let report = deform6::inspect(&data, &table, deform6::journal::Mode::Strict)
             .unwrap_or_else(|err| panic!("{}: inspect refused the file: {err}", exe.display()));
 
         let project_path = vbp::select_project_file(exe, &projects)
@@ -1354,7 +1354,7 @@ fn a_fabricated_form_fails_the_two_directional_check_and_names_it() {
     let exe = corpus_root().join("vb6-code/Mandelbrot/Mandelbrot.exe");
     let data = std::fs::read(&exe).unwrap_or_else(|err| panic!("reading {}: {err}", exe.display()));
     let table = OpcodeTable::builtin();
-    let report = deform6::inspect(&data, &table).unwrap();
+    let report = deform6::inspect(&data, &table, deform6::journal::Mode::Strict).unwrap();
 
     let mut doctored = report.forms.clone();
     doctored.push(FormReport {
@@ -1386,7 +1386,7 @@ fn removing_a_recovered_form_fails_the_two_directional_check_in_the_other_direct
     let exe = corpus_root().join("vb6-code/Mandelbrot/Mandelbrot.exe");
     let data = std::fs::read(&exe).unwrap_or_else(|err| panic!("reading {}: {err}", exe.display()));
     let table = OpcodeTable::builtin();
-    let report = deform6::inspect(&data, &table).unwrap();
+    let report = deform6::inspect(&data, &table, deform6::journal::Mode::Strict).unwrap();
     assert_eq!(
         report.forms.len(),
         1,
