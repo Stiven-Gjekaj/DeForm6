@@ -1441,7 +1441,8 @@ fn map_editor_writes_a_form_file_for_its_refused_form_and_the_report_marks_it_un
     let table = deform6::vb::opcodes::OpcodeTable::builtin();
     let report = deform6::inspect(&data, &table, deform6::journal::Mode::Strict)
         .expect("Map Editor.exe must inspect cleanly");
-    let written = deform6::write::project(&report, &data).expect("write::project must not refuse");
+    let written = deform6::write::project(&report, &data, deform6::journal::Mode::Strict)
+        .expect("write::project must not refuse");
     let main_form_path = deform6::report::path_for_form(
         &deform6::write::model::SafeName::new("Main", deform6::write::model::NameKind::Form).0,
     );

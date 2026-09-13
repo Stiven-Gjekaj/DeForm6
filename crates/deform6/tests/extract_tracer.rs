@@ -43,7 +43,8 @@ fn written_project() -> WrittenProject {
     let table = OpcodeTable::builtin();
     let report = deform6::inspect(FAST_FLAMES, &table, deform6::journal::Mode::Strict)
         .expect("Fast_Flames.exe must inspect cleanly");
-    write::project(&report, FAST_FLAMES).expect("write::project must not refuse a clean report")
+    write::project(&report, FAST_FLAMES, deform6::journal::Mode::Strict)
+        .expect("write::project must not refuse a clean report")
 }
 
 /// Gives the one written file named `name`, or fails loudly naming every
@@ -287,8 +288,8 @@ fn every_written_text_file_ends_with_crlf_and_holds_no_byte_order_mark() {
 fn two_calls_to_write_project_give_byte_identical_output_for_every_file() {
     let table = OpcodeTable::builtin();
     let report = deform6::inspect(FAST_FLAMES, &table, deform6::journal::Mode::Strict).unwrap();
-    let first = write::project(&report, FAST_FLAMES).unwrap();
-    let second = write::project(&report, FAST_FLAMES).unwrap();
+    let first = write::project(&report, FAST_FLAMES, deform6::journal::Mode::Strict).unwrap();
+    let second = write::project(&report, FAST_FLAMES, deform6::journal::Mode::Strict).unwrap();
     assert_eq!(first.files, second.files);
 }
 

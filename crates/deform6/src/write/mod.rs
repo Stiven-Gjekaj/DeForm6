@@ -96,7 +96,11 @@ pub struct WrittenProject {
 ///
 /// Returns [`Refusal::Damaged`] when a form's own `.frx` offset cursor
 /// would overflow a `u32`; see [`crate::vb::frx::BlobCursor::take`].
-pub fn project(report: &Report, data: &[u8]) -> Result<WrittenProject, Refusal> {
+pub fn project(
+    report: &Report,
+    data: &[u8],
+    _mode: crate::journal::Mode,
+) -> Result<WrittenProject, Refusal> {
     let (model, model_items) = model::from_report(report, data);
 
     let mut files: Vec<WrittenFile> = Vec::new();

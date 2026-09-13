@@ -153,7 +153,7 @@ fn extract_one(exe: &Path, root: &Path, label: &str) -> ExtractedProgram {
         .filter(|object| object.kind != ObjectKind::Form)
         .count();
 
-    let written = deform6::write::project(&report, &data)
+    let written = deform6::write::project(&report, &data, deform6::journal::Mode::Strict)
         .unwrap_or_else(|err| panic!("{key}: write::project refused this program: {err}"));
 
     let dir = fresh_dir(label);
@@ -710,7 +710,8 @@ fn the_reports_limits_state_the_exact_recompilation_sentence() {
     let table = OpcodeTable::builtin();
     let report = deform6::inspect(&data, &table, deform6::journal::Mode::Strict)
         .expect("inspect must succeed");
-    let written = deform6::write::project(&report, &data).expect("write::project must succeed");
+    let written = deform6::write::project(&report, &data, deform6::journal::Mode::Strict)
+        .expect("write::project must succeed");
 
     assert_eq!(
         written.report.limits.first().map(String::as_str),

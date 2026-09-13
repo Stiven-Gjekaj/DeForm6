@@ -339,7 +339,7 @@ fn run_extract(input: &Path, output: &Path, report_path: Option<&Path>, force: b
     // The whole project is built in memory here, before `output` is
     // touched at all. A refusal from this call leaves the file system
     // exactly as it was before this run started.
-    let written = match deform6::write::project(&inspected, &data) {
+    let written = match deform6::write::project(&inspected, &data, deform6::journal::Mode::Strict) {
         Ok(written) => written,
         Err(refusal) => {
             eprintln!("{refusal}");
