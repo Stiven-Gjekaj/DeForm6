@@ -471,53 +471,58 @@ fn push_substitution_item(items: &mut Vec<ReportItem>, substituted: &[char]) {
 }
 
 /// Emits the code region every `.bas`, `.cls` and `.frm` file shares:
-/// `comments` (a caller supplied parameter; this plan writes none of its
-/// own, plan 04-07 supplies them), then one empty procedure per procedure
-/// slot `procedures` recovered, in the reader's own array order.
+/// [`crate::write::comment::uncertainty_comments`]'s own lines for every
+/// `items` entry at or under `path_prefix`, then one empty procedure per
+/// procedure slot `procedures` recovered, in the reader's own array order.
 ///
-/// The three file writers in this phase (this file's own [`write_bas`]
-/// and [`write_cls`], and `write::frm`'s form writer, plan 04-04) all
-/// call this one function. None of them holds a code region of its own:
-/// the code region is genuinely the same in all three file kinds, unlike
-/// the line templates above it, which differ in all three.
+/// This is the one call site [`crate::write::comment::uncertainty_comments`]
+/// has in the whole phase. The three file writers in this phase (this
+/// file's own [`write_bas`] and [`write_cls`], and `write::frm`'s form
+/// writer) all call this one function, and none of them calls the comment
+/// emitter itself: a comment can enter the written output only through
+/// this one place. None of the three writers holds a code region of its
+/// own: the code region is genuinely the same in all three file kinds,
+/// unlike the line templates above it, which differ in all three.
 ///
 /// Reaches no process global mutable state: everything this function needs
 /// comes in as a parameter, and everything it produces comes back as a
 /// return value. Two calls with the same input give byte identical output.
 #[must_use]
 pub fn write_code_region(
-    comments: &[String],
+    items: &[ReportItem],
+    path_prefix: &str,
     procedures: &ObjectProcedures,
 ) -> (Vec<String>, Vec<ReportItem>) {
-    let mut lines: Vec<String> = comments.to_vec();
-    let (procedure_lines, items) = format_procedures(procedures);
+    let mut lines: Vec<String> = crate::write::comment::uncertainty_comments(items, path_prefix);
+    let (procedure_lines, procedure_items) = format_procedures(procedures);
     lines.extend(procedure_lines);
-    (lines, items)
+    (lines, procedure_items)
 }
 
 /// Writes the complete `.cls` file: the thirteen line preamble
 /// ([`cls_preamble_lines`]), then the shared code region
-/// ([`write_code_region`]) built from `comments` and `procedures`. Every
-/// line, including the last, ends with the two line ending bytes; the file
-/// carries no byte order mark. Gives the file's own bytes and every
-/// [`ReportItem`] this call produced.
+/// ([`write_code_region`]) built from `items`, `path_prefix` and
+/// `procedures`. Every line, including the last, ends with the two line
+/// ending bytes; the file carries no byte order mark. Gives the file's own
+/// bytes and every [`ReportItem`] this call produced.
 #[must_use]
 pub fn write_cls(
     name: &SafeName,
     procedures: &ObjectProcedures,
-    comments: &[String],
+    items: &[ReportItem],
+    path_prefix: &str,
 ) -> (Vec<u8>, Vec<ReportItem>) {
     let mut writer = LineWriter::new();
     for line in cls_preamble_lines(name) {
         writer.push_line(&line);
     }
-    let (region_lines, mut items) = write_code_region(comments, procedures);
+    let (region_lines, mut result_items) = write_code_region(items, path_prefix, procedures);
     for line in &region_lines {
         writer.push_line(line);
     }
     let (bytes, substituted) = writer.finish();
-    push_substitution_item(&mut items, &substituted);
-    (bytes, items)
+    push_substitution_item(&mut result_items, &substituted);
+    (bytes, result_items)
 }
 
 /// Writes the complete `.bas` file: the one line header
@@ -528,17 +533,18 @@ pub fn write_cls(
 pub fn write_bas(
     name: &SafeName,
     procedures: &ObjectProcedures,
-    comments: &[String],
+    items: &[ReportItem],
+    path_prefix: &str,
 ) -> (Vec<u8>, Vec<ReportItem>) {
     let mut writer = LineWriter::new();
     writer.push_line(&bas_header_line(name));
-    let (region_lines, mut items) = write_code_region(comments, procedures);
+    let (region_lines, mut result_items) = write_code_region(items, path_prefix, procedures);
     for line in &region_lines {
         writer.push_line(line);
     }
     let (bytes, substituted) = writer.finish();
-    push_substitution_item(&mut items, &substituted);
-    (bytes, items)
+    push_substitution_item(&mut result_items, &substituted);
+    (bytes, result_items)
 }
 
 #[cfg(test)]
@@ -553,8 +559,23 @@ mod tests {
         AttributeFileKind, CLS_NAME_PAD, CLS_PREAMBLE_PROPERTIES, bas_header_line,
         cls_preamble_lines, form_attribute_block, write_bas, write_cls, write_code_region,
     };
+    use crate::report::{Confidence, Evidence, ReportItem};
     use crate::vb::{ObjectProcedures, ProcedureEntry};
     use crate::write::model::{NameKind, SafeName};
+
+    fn item(path: &str, confidence: Confidence, basis: &str) -> ReportItem {
+        ReportItem {
+            path: path.to_owned(),
+            confidence,
+            basis: basis.to_owned(),
+            evidence: vec![Evidence {
+                offset: 0x10,
+                structure: "Test",
+                field: "fixture",
+                note: None,
+            }],
+        }
+    }
 
     fn name(raw: &str) -> SafeName {
         SafeName::new(raw, NameKind::Module).0
@@ -576,8 +597,12 @@ mod tests {
 
     #[test]
     fn a_module_file_has_no_version_line_and_no_begin_block() {
-        let (bytes, _items) =
-            write_bas(&name("Logic_Module"), &ObjectProcedures::Slots(vec![]), &[]);
+        let (bytes, _items) = write_bas(
+            &name("Logic_Module"),
+            &ObjectProcedures::Slots(vec![]),
+            &[],
+            "/modules/Logic_Module",
+        );
         let content = text(&bytes);
         assert!(!content.contains("VERSION"), "{content:?}");
         assert!(!content.contains("BEGIN"), "{content:?}");
@@ -680,8 +705,8 @@ mod tests {
     #[test]
     fn write_bas_called_twice_on_one_input_gives_byte_identical_output() {
         let procedures = ObjectProcedures::Slots(vec![ProcedureEntry::Private]);
-        let (first, first_items) = write_bas(&name("Mod1"), &procedures, &[]);
-        let (second, second_items) = write_bas(&name("Mod1"), &procedures, &[]);
+        let (first, first_items) = write_bas(&name("Mod1"), &procedures, &[], "/modules/Mod1");
+        let (second, second_items) = write_bas(&name("Mod1"), &procedures, &[], "/modules/Mod1");
         assert_eq!(first, second);
         assert_eq!(first_items, second_items);
     }
@@ -689,8 +714,8 @@ mod tests {
     #[test]
     fn write_cls_called_twice_on_one_input_gives_byte_identical_output() {
         let procedures = ObjectProcedures::Slots(vec![]);
-        let (first, first_items) = write_cls(&name("Cls1"), &procedures, &[]);
-        let (second, second_items) = write_cls(&name("Cls1"), &procedures, &[]);
+        let (first, first_items) = write_cls(&name("Cls1"), &procedures, &[], "/classes/Cls1");
+        let (second, second_items) = write_cls(&name("Cls1"), &procedures, &[], "/classes/Cls1");
         assert_eq!(first, second);
         assert_eq!(first_items, second_items);
     }
@@ -698,7 +723,12 @@ mod tests {
     #[test]
     fn a_written_cls_files_last_two_bytes_are_the_line_ending_pair_and_lf_count_equals_pair_count()
     {
-        let (bytes, _items) = write_cls(&name("Cls1"), &ObjectProcedures::Slots(vec![]), &[]);
+        let (bytes, _items) = write_cls(
+            &name("Cls1"),
+            &ObjectProcedures::Slots(vec![]),
+            &[],
+            "/classes/Cls1",
+        );
         assert!(bytes.ends_with(b"\r\n"));
         let crlf_pairs = bytes.windows(2).filter(|window| *window == b"\r\n").count();
         let lf_count = bytes.iter().filter(|byte| **byte == b'\n').count();
@@ -707,37 +737,105 @@ mod tests {
 
     #[test]
     fn no_written_file_begins_with_a_byte_order_mark() {
-        let (cls_bytes, _items) = write_cls(&name("Cls1"), &ObjectProcedures::Slots(vec![]), &[]);
-        let (bas_bytes, _items) = write_bas(&name("Mod1"), &ObjectProcedures::Slots(vec![]), &[]);
+        let (cls_bytes, _items) = write_cls(
+            &name("Cls1"),
+            &ObjectProcedures::Slots(vec![]),
+            &[],
+            "/classes/Cls1",
+        );
+        let (bas_bytes, _items) = write_bas(
+            &name("Mod1"),
+            &ObjectProcedures::Slots(vec![]),
+            &[],
+            "/modules/Mod1",
+        );
         assert!(!cls_bytes.starts_with(&[0xEF, 0xBB, 0xBF]));
         assert!(!bas_bytes.starts_with(&[0xEF, 0xBB, 0xBF]));
     }
 
     #[test]
-    fn a_character_above_0xff_in_a_comment_produces_a_recorded_substitution() {
-        let comments = vec!["'caf\u{e9}\u{20ac}".to_owned()];
-        let (_bytes, items) = write_cls(&name("Cls1"), &ObjectProcedures::Slots(vec![]), &comments);
-        let item = items
+    fn a_character_above_0xff_in_a_comments_own_basis_produces_a_recorded_substitution() {
+        let items = vec![item(
+            "/classes/Cls1",
+            Confidence::Unrecoverable,
+            "caf\u{e9}\u{20ac}",
+        )];
+        let (_bytes, result_items) = write_cls(
+            &name("Cls1"),
+            &ObjectProcedures::Slots(vec![]),
+            &items,
+            "/classes/Cls1",
+        );
+        let substitution = result_items
             .iter()
-            .find(|item| item.basis.contains('\u{20ac}'))
+            .find(|result_item| result_item.basis.contains('\u{20ac}'))
             .expect("a substitution item must be recorded");
-        assert_eq!(item.confidence, crate::report::Confidence::Unrecoverable);
+        assert_eq!(substitution.confidence, Confidence::Unrecoverable);
     }
 
     #[test]
-    fn write_code_region_emits_the_comment_lines_it_is_given_and_supplies_none_of_its_own() {
-        let comments = vec!["'a comment plan 04-07 will supply".to_owned()];
-        let (lines, _items) = write_code_region(&comments, &ObjectProcedures::Slots(vec![]));
-        assert_eq!(lines, comments);
+    fn write_code_region_reaches_the_comment_emitter_and_supplies_no_comment_of_its_own() {
+        let items = vec![item(
+            "/modules/Mod1",
+            Confidence::Unrecoverable,
+            "a fact plan 04-07's own emitter names",
+        )];
+        let expected = crate::write::comment::uncertainty_comments(&items, "/modules/Mod1");
+        assert!(!expected.is_empty(), "the fixture must produce a comment");
+
+        let (lines, _items) =
+            write_code_region(&items, "/modules/Mod1", &ObjectProcedures::Slots(vec![]));
+        assert_eq!(lines, expected);
+    }
+
+    #[test]
+    fn write_code_region_supplies_no_line_of_its_own_when_no_item_matches_the_prefix() {
+        let (lines, _items) =
+            write_code_region(&[], "/modules/Mod1", &ObjectProcedures::Slots(vec![]));
+        assert!(lines.is_empty(), "{lines:?}");
     }
 
     #[test]
     fn an_object_with_no_procedure_name_array_writes_no_lines_and_one_item_via_write_code_region() {
-        let (lines, items) =
-            write_code_region(&[], &ObjectProcedures::NoNameArray { proc_count: 7 });
+        let (lines, items) = write_code_region(
+            &[],
+            "/modules/Mod1",
+            &ObjectProcedures::NoNameArray { proc_count: 7 },
+        );
         assert!(lines.is_empty());
         assert_eq!(items.len(), 1);
         assert!(items[0].basis.contains('7'), "{items:?}");
+    }
+
+    // --- Task 2: the one call site, and the comment's own position -----
+
+    #[test]
+    fn a_written_module_files_first_comment_line_comes_after_its_one_header_line() {
+        let items = vec![item(
+            "/modules/Mod1",
+            Confidence::Unrecoverable,
+            "a fact about this module the reading side could not resolve",
+        )];
+        let (bytes, _items) = write_bas(
+            &name("Mod1"),
+            &ObjectProcedures::Slots(vec![]),
+            &items,
+            "/modules/Mod1",
+        );
+        let content = text(&bytes);
+        let lines: Vec<&str> = content.split("\r\n").collect();
+        let header_index = lines
+            .iter()
+            .position(|line| line.starts_with("Attribute VB_Name"))
+            .expect("the one header line must exist");
+        let comment_index = lines
+            .iter()
+            .position(|line| line.starts_with('\''))
+            .expect("a comment line must exist");
+        assert!(
+            comment_index > header_index,
+            "header at {header_index}, comment at {comment_index}: {lines:?}"
+        );
     }
 }
 
@@ -990,5 +1088,210 @@ mod signatures {
         assert_eq!(items.len(), 1);
         let item = items.first().expect("one report item must exist");
         assert!(item.basis.contains('7'), "{item:?}");
+    }
+}
+
+// --- Plan 04-07, Task 2: the corpus wide sweep, proving the one call site
+// reaches no other file kind and reached at least one real one ------------
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    reason = "a test builds the state it needs and must fail loudly when that state is wrong"
+)]
+mod sweep {
+    use crate::vb::opcodes::OpcodeTable;
+    use crate::vb::{ObjectProcedures, ProcedureEntry};
+    use crate::write::model::{CodeKind, ProcedureModel, from_report};
+    use std::path::{Path, PathBuf};
+
+    fn corpus_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus")
+    }
+
+    fn executables() -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        walk(&corpus_root(), &mut out);
+        out.sort();
+        out
+    }
+
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries {
+            let entry = entry.unwrap_or_else(|err| panic!("reading {}: {err}", dir.display()));
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
+            {
+                out.push(path);
+            }
+        }
+    }
+
+    /// Turns this crate's own Windows-1252/Latin-1-as-codepoint bytes back
+    /// into a `String`, the same convention every reader and writer in
+    /// this crate already uses.
+    fn text(bytes: &[u8]) -> String {
+        bytes.iter().copied().map(char::from).collect()
+    }
+
+    /// Splits `text` on the CRLF pair every line writer in this crate
+    /// terminates a line with.
+    fn lines(text: &str) -> Vec<&str> {
+        text.split("\r\n").collect()
+    }
+
+    /// True when `line`'s first non space character is an apostrophe: a
+    /// real comment. A boolean or an enumeration property line also
+    /// carries a trailing apostrophe partway through itself (the value
+    /// decoration the IDE itself writes), which this check does not match,
+    /// because it looks only at the first non space character, never at
+    /// whether the line holds an apostrophe anywhere.
+    fn is_a_comment_line(line: &str) -> bool {
+        line.trim_start().starts_with('\'')
+    }
+
+    /// Mirrors `write::frm`'s own private `model_procedures_to_object_procedures`:
+    /// a named procedure becomes a public slot, an unnamed one a private
+    /// slot. Kept local to this test rather than shared, since that
+    /// function is private to its own file, and this test needs it only to
+    /// drive [`crate::write::code::write_cls`]/[`crate::write::code::write_bas`]
+    /// with a real corpus object's own procedure count.
+    fn object_procedures(procedures: &[ProcedureModel]) -> ObjectProcedures {
+        let slots = procedures
+            .iter()
+            .map(|procedure| match &procedure.name {
+                Some(name) => ProcedureEntry::Public {
+                    name: name.clone(),
+                    prototype: procedure.prototype.clone(),
+                },
+                None => ProcedureEntry::Private,
+            })
+            .collect();
+        ObjectProcedures::Slots(slots)
+    }
+
+    #[test]
+    fn no_written_text_file_carries_a_comment_above_its_own_boundary_and_at_least_one_program_carries_one_below_it()
+     {
+        let table = OpcodeTable::builtin();
+        let mut comment_lines_below_boundary = 0_usize;
+        let mut program_naming_one: Option<String> = None;
+
+        for exe_path in executables() {
+            let data = std::fs::read(&exe_path)
+                .unwrap_or_else(|err| panic!("reading {}: {err}", exe_path.display()));
+            let Ok(report) = crate::vb::inspect(&data, &table) else {
+                continue;
+            };
+            let (model, _model_items) = from_report(&report, &data);
+
+            // The `.vbp` has no code region and no comment syntax at all:
+            // every line must fail the comment check, with no boundary to
+            // split above from below.
+            let (vbp_bytes, _vbp_items) = crate::write::vbp::write_vbp(&report, &model);
+            for line in lines(&text(&vbp_bytes)) {
+                assert!(
+                    !is_a_comment_line(line),
+                    "a comment reached the .vbp file of {}: {line:?}",
+                    exe_path.display()
+                );
+            }
+
+            for form in &model.forms {
+                let (files, _items) = crate::write::frm::write_form(form, &report.defects, &data)
+                    .unwrap_or_else(|err| {
+                        panic!(
+                            "writing form {} of {} must succeed: {err}",
+                            form.name.as_str(),
+                            exe_path.display()
+                        )
+                    });
+                let frm_text = text(&files.frm);
+                let frm_lines = lines(&frm_text);
+                let first_attribute = frm_lines.iter().position(|line| {
+                    line.starts_with("Attribute VB_Name")
+                        || line.starts_with("Attribute VB_GlobalNameSpace")
+                        || line.starts_with("Attribute VB_Creatable")
+                        || line.starts_with("Attribute VB_PredeclaredId")
+                        || line.starts_with("Attribute VB_Exposed")
+                });
+                let Some(first_attribute) = first_attribute else {
+                    panic!(
+                        "form {} of {} must carry its five Attribute lines",
+                        form.name.as_str(),
+                        exe_path.display()
+                    );
+                };
+                for line in &frm_lines[..first_attribute] {
+                    assert!(
+                        !is_a_comment_line(line),
+                        "a comment reached above the first Attribute line in form {} of {}: {line:?}",
+                        form.name.as_str(),
+                        exe_path.display()
+                    );
+                }
+                let last_attribute = frm_lines
+                    .iter()
+                    .rposition(|line| line.starts_with("Attribute VB_Exposed"))
+                    .unwrap_or(first_attribute);
+                let below = frm_lines
+                    .get(last_attribute.saturating_add(1)..)
+                    .unwrap_or(&[]);
+                let below_comments = below.iter().filter(|line| is_a_comment_line(line)).count();
+                if below_comments > 0 {
+                    comment_lines_below_boundary =
+                        comment_lines_below_boundary.saturating_add(below_comments);
+                    program_naming_one.get_or_insert_with(|| {
+                        format!("{} (form {})", exe_path.display(), form.name.as_str())
+                    });
+                }
+            }
+
+            for code in &model.code {
+                let prefix = crate::report::path_for_code(code.kind, &code.name);
+                let procedures = object_procedures(&code.procedures);
+                let bytes = match code.kind {
+                    CodeKind::Class => {
+                        crate::write::code::write_cls(&code.name, &procedures, &[], &prefix).0
+                    }
+                    CodeKind::Module => {
+                        crate::write::code::write_bas(&code.name, &procedures, &[], &prefix).0
+                    }
+                };
+                let code_text = text(&bytes);
+                let code_lines = lines(&code_text);
+                let header = code_lines
+                    .iter()
+                    .position(|line| line.starts_with("Attribute VB_Name"))
+                    .unwrap_or(0);
+                for line in &code_lines[..=header] {
+                    assert!(
+                        !is_a_comment_line(line),
+                        "a comment reached at or above the header line of a code object in {}: {line:?}",
+                        exe_path.display()
+                    );
+                }
+            }
+        }
+
+        assert!(
+            comment_lines_below_boundary > 0,
+            "no corpus program produced even one comment line below the boundary of any \
+             written form; the emitter may not be wired at all"
+        );
+        assert!(
+            program_naming_one.is_some(),
+            "a positive count with no named program is a contradiction in this test's own logic"
+        );
     }
 }

@@ -1062,7 +1062,15 @@ pub fn write_form(
     }
 
     let procedures = model_procedures_to_object_procedures(&form.procedures);
-    let (region_lines, mut code_items) = crate::write::code::write_code_region(&[], &procedures);
+    // The one call site `crate::write::comment::uncertainty_comments` has
+    // for a form: `items` already holds every fact this call collected
+    // about this form and its own controls, each with its own real path
+    // (`control_report_path`, above), so `write_code_region` can filter
+    // them by this form's own path prefix without this file ever naming
+    // the comment emitter itself.
+    let form_prefix = crate::report::path_for_form(&form.name);
+    let (region_lines, mut code_items) =
+        crate::write::code::write_code_region(&items, &form_prefix, &procedures);
     for line in &region_lines {
         writer.push_line(line);
     }
@@ -1302,6 +1310,52 @@ mod tests {
             write_empty_picture_record(&mut cursor, &mut frx).expect("must not overflow a u32");
         assert_eq!(offset, 0);
         assert_eq!(frx, EMPTY_PICTURE_RECORD.to_vec());
+    }
+
+    #[test]
+    fn a_written_forms_first_comment_line_comes_after_the_last_attribute_line() {
+        let (name, _faults) = SafeName::new("frmComment", NameKind::Form);
+        let control = ControlModel {
+            name: name.clone(),
+            kind: ControlKind::Form,
+            array_index: None,
+            parent: None,
+            depth: 0,
+            is_menu: false,
+            is_external: false,
+            properties: vec![PropertyValue::BlobUnreadable {
+                name: "Icon".to_owned(),
+                offset: 0x10,
+            }],
+        };
+        let form = FormModel {
+            name,
+            tree_refused: false,
+            controls: vec![control],
+            procedures: Vec::new(),
+            blobs: Vec::new(),
+        };
+        let (files, items) = write_form(&form, &[], &[]).expect("write_form must succeed");
+        assert!(
+            items
+                .iter()
+                .any(|item| item.confidence == crate::report::Confidence::Unrecoverable),
+            "the fixture must produce a comment worthy item: {items:?}"
+        );
+        let text = frm_text(&files);
+        let lines: Vec<&str> = text.split("\r\n").collect();
+        let last_attribute = lines
+            .iter()
+            .rposition(|line| line.starts_with("Attribute VB_Exposed"))
+            .expect("the five Attribute lines must exist");
+        let first_comment = lines
+            .iter()
+            .position(|line| line.trim_start().starts_with('\''))
+            .expect("a comment line must exist");
+        assert!(
+            first_comment > last_attribute,
+            "attribute at {last_attribute}, comment at {first_comment}: {lines:?}"
+        );
     }
 
     #[test]
@@ -1665,8 +1719,18 @@ mod tests {
         };
         let (files, items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
-        assert!(text.contains("Frame7"), "{text}");
-        assert!(!text.contains("Frame8"), "{text}");
+        // Scoped to the header region (everything above the first
+        // `Attribute` line, where a `Begin` block can legally sit): the
+        // omitted control's own block must not be there. Plan 04-07 gives
+        // this same control's own path, which names `Frame8`, a legal
+        // comment line below that boundary, so a whole file substring
+        // check would fail on the comment, not on a real regression.
+        let boundary = text
+            .find("Attribute VB_Name")
+            .expect("the Attribute block must exist");
+        let header_region = &text[..boundary];
+        assert!(header_region.contains("Frame7"), "{header_region}");
+        assert!(!header_region.contains("Frame8"), "{header_region}");
         let depth_items: Vec<_> = items
             .iter()
             .filter(|item| {
@@ -1773,7 +1837,15 @@ mod tests {
         };
         let (files, items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
-        assert!(!text.contains("Weird1"), "{text}");
+        // Scoped to the header region for the same reason the depth test
+        // above is: the omitted control's own name legally reaches the
+        // comment block plan 04-07 adds below the Attribute lines, and
+        // this assertion is about the `Begin` block, not the comment.
+        let boundary = text
+            .find("Attribute VB_Name")
+            .expect("the Attribute block must exist");
+        let header_region = &text[..boundary];
+        assert!(!header_region.contains("Weird1"), "{header_region}");
         assert!(
             items.iter().any(
                 |item| item.confidence == crate::report::Confidence::Unrecoverable
