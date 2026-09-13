@@ -565,7 +565,7 @@ and every crash it finds becomes a committed test that replays on stable Rust.
     code is the least exercised in the crate, so the fuzz target must call both
     modes, not one.
 
-**Plans**: 7/8 plans executed
+**Plans**: 8/8 plans executed
 
 Plans:
 **Wave 1**
@@ -586,7 +586,7 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 
 - [x] 05-04-PLAN.md - The CI fuzz jobs, the bounded pull request run, the longer cron run, and seeding from `corpus/` and the regression inputs
-- [ ] 05-08-PLAN.md - The no-panic proof run over the vendored corpus, the fetched set, and every regression input
+- [x] 05-08-PLAN.md - The no-panic proof run over the vendored corpus, the fetched set, and every regression input
 
 **Waves**: [05-01, 05-07] then [05-02, 05-03, 05-06] then [05-05] then [05-04, 05-08]
 
@@ -719,5 +719,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 2. The object graph | 10/10 | Complete    | 2026-09-11 |
 | 3. Forms | 18/18 | Complete    | 2026-09-11 |
 | 4. It writes a project | 9/9 | Complete    | 2026-09-13 |
-| 5. Hostility | 7/8 | In Progress|  |
+| 5. Hostility | 8/8 | In Progress|  |
 | 6. Version 1.0 | 0/5 | Not started | - |

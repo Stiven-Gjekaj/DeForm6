@@ -124,7 +124,7 @@ Version 1 recovers metadata. It does not recover statements.
 
 ### Hostile input
 
-- [ ] **SAF-01**: The tool does not panic on any input.
+- [x] **SAF-01**: The tool does not panic on any input.
 - [x] **SAF-02**: The tool refuses a damaged file by default, and names the
       byte offset and what it expected to find there.
 - [x] **SAF-03**: `--salvage` recovers what it can from a damaged file and
@@ -209,7 +209,7 @@ Deferred. Tracked, not in this roadmap.
 | WRT-06 | Phase 4 | Complete |
 | WRT-07 | Phase 4 | Complete |
 | RPT-01 to RPT-06 | Phase 4 | Complete |
-| SAF-01 | Phase 5 | Pending |
+| SAF-01 | Phase 5 | Complete |
 | SAF-02 | Phase 5 | Complete |
 | SAF-03 | Phase 5 | Complete |
 | SAF-04 | Phase 5 | Complete |

@@ -3,18 +3,18 @@ gsd_state_version: "1.0"
 current_phase: 5
 current_phase_name: Hostility
 current_plan: 8
-status: executing
-stopped_at: Completed 05-04-PLAN.md
-last_updated: "2026-09-13T20:41:41.035Z"
+status: verifying
+stopped_at: Completed 05-08-PLAN.md
+last_updated: "2026-09-13T20:58:21.026Z"
 last_activity: 2026-09-13
-last_activity_desc: Plan 05-04 executed - the bounded pull request fuzz job and the scheduled iteration bounded fuzz job, both in .github/workflows/fuzz.yml
-state_head: 152c76721db35edcf92f40febac74789e4768ee1
+last_activity_desc: Plan 05-08 executed - the no-panic proof sweeping the vendored corpus, the fetched robustness set and the regression directory through both modes and the writer, in one process
+state_head: 7e42f13a3452189aee04feb201c7ebe72bb821d2
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 53
-  completed_plans: 52
-  percent: 98
+  completed_plans: 53
+  percent: 100
 ---
 
 ## Continue
@@ -67,14 +67,14 @@ inferred.
 
 ## Current Position
 
-Phase: 5 (Hostility) - EXECUTING
+Phase: 5 (Hostility) - VERIFYING
 Current Plan: 8
 Total Plans in Phase: 8
-Plan: 05-01, 05-02, 05-03, 05-04, 05-05, 05-06 and 05-07 complete (waves 1 through 4 done for 05-04); 05-08 remaining
-Status: Ready to execute
-Last activity: 2026-09-13 - Plan 05-04 executed - the bounded pull request fuzz job and the scheduled iteration bounded fuzz job, both in .github/workflows/fuzz.yml
+Plan: 05-01 through 05-08 all complete. Phase 5 is fully executed.
+Status: Phase complete - ready for verification
+Last activity: 2026-09-13 - Plan 05-08 executed - the no-panic proof sweeping the vendored corpus, the fetched robustness set and the regression directory through both modes and the writer, in one process
 
-Progress: [█████████░] 98% of the 53 written plans, which is 52 of 53
+Progress: [██████████] 100% of the 53 written plans, which is 53 of 53
 
 ## Performance Metrics
 
@@ -139,6 +139,7 @@ Progress: [█████████░] 98% of the 53 written plans, which is
 | Phase 05-hostility P06 | 45min | 2 tasks | 3 files |
 | Phase 05 P05 | ~30min | 2 tasks | 4 files |
 | Phase 05-hostility P04 | ~1h10min | 2 tasks | 1 files |
+| Phase 05 P08 | 1 session | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -242,6 +243,9 @@ Recent decisions affecting current work:
 - [Phase 5]: PathIssuer and SafeNameIssuer now use a HashSet plus a per-key next-suffix cache instead of a linearly scanned Vec, closing an O(n^2) DoS the fuzz_smoke sweep found (one mutated input took over two minutes before the fix, well under a second after).
 - [Phase 5]: Checkpoint: chose seed-with-an-owned-binary for crates/deform6/tests/regressions/, after measuring that the seed refuses at NoVbRuntime rather than reaching GuiTable::walk
 - [Phase 5]: SAF-05 marked complete: fuzz-pr and fuzz-cron both exist in .github/workflows/fuzz.yml, seeded from corpus/ and tests/regressions/, calling the xtask subcommands with no fuzzer flag of their own
+- [Phase 5]: 05-08: MINIMUM_REGRESSION_INPUTS is restated as a literal (1) in no_panic_proof.rs rather than read from regressions.rs's own constant, because the two files compile as separate test binaries and cannot share a private item.
+- [Phase 5]: 05-08: cargo test --release does not compile the test binary with panic=abort; Cargo forces panic=unwind on --test targets so libtest can catch each test's own panic. The proof shows no panic occurs on 48 inputs in both modes and both profiles; it does not exercise real abort-on-panic process behavior, which only a non-test release binary gets.
+- [Phase 5]: 05-08: Measured peak resident set for the whole no-panic-proof run (48 inputs, both modes, plus writer): 5,406,720 bytes maximum resident set size via /usr/bin/time -l. WINDOWS.md finding 14 updated with this measurement; the damaged() leak is not the number driving peak resident set at this input-set size and finding 14 stays open since the leak itself is unfixed.
 
 ### Pending Todos
 
@@ -270,8 +274,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-13T20:41:40.987Z
-Stopped at: Completed 05-04-PLAN.md
+Last session: 2026-09-13T20:58:20.987Z
+Stopped at: Completed 05-08-PLAN.md
 
 Plan 05-01 is done: 5 commits, cargo test --workspace at 887 passed, 0 failed,
 up from the 872 baseline this plan started at.
@@ -287,6 +291,20 @@ party controls, packed, or a different service pack).
 
 Wave 1 (05-01, 05-07) is now complete.
 
-Next: `/gsd-execute-phase 5` to continue with wave 2 (05-02, 05-03, 05-06),
-per ROADMAP.md's own wave order.
+Plan 05-08 is done: 2 commits (the three-source counting functions, then the
+sweep over both modes and the writer), cargo test --workspace at 970 passed,
+0 failed, up from the 969 baseline this plan started at. All 48 inputs this
+session finds (44 vendored, 3 fetched, 1 regression) read clean in both
+Mode::Strict and Mode::Salvage, in both the test profile and the release
+profile. Peak resident set measured at 5,406,720 bytes maximum resident set
+size, resolving WINDOWS.md finding 14's own open question (the finding stays
+open; the leak itself is unfixed, only measured). cargo test --release does
+not actually compile with panic=abort (Cargo forces panic=unwind on every
+--test target); this caveat is recorded in 05-08-SUMMARY.md rather than
+concealed.
+
+Phase 5 is now fully executed: all eight plans (05-01 through 05-08) have
+summaries.
+
+Next: `/gsd-verify-work 5` to verify the phase, then `/gsd-plan-phase 6`.
 Resume file: None
