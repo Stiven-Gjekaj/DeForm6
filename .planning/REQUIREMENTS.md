@@ -118,7 +118,7 @@ Version 1 recovers metadata. It does not recover statements.
       from and the structure it was read out of.
 - [x] **RPT-05**: The report records every defect the run met, whether or not
       the run continued past it.
-- [ ] **RPT-06**: An uncertain region of recovered code carries an apostrophe
+- [x] **RPT-06**: An uncertain region of recovered code carries an apostrophe
       comment, in code regions only, never inside a `Begin` block or the
       `.vbp`, because the IDE refuses those.
 
@@ -202,7 +202,7 @@ Deferred. Tracked, not in this roadmap.
 | FRM-06 | Phase 3 | Complete |
 | VER-06 | Phase 3 | Complete |
 | WRT-01 to WRT-07 | Phase 4 | Pending |
-| RPT-01 to RPT-06 | Phase 4 | Pending |
+| RPT-01 to RPT-06 | Phase 4 | Complete |
 | SAF-01 to SAF-05 | Phase 5 | Pending |
 
 Phase 6 owns no new requirement. It measures the whole set end to end and turns

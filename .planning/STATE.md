@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: It writes a project
 status: executing
-stopped_at: Completed 04-04-PLAN.md
-last_updated: "2026-09-13T02:36:58.931Z"
+stopped_at: Completed 04-07-PLAN.md
+last_updated: "2026-09-13T02:59:53.571Z"
 last_activity: 2026-09-12
 last_activity_desc: Phase 04 execution started
-state_head: adafe1d3f9c17e566e4e0e7acde2d41cad056c93
+state_head: 27cb754e2bb5134fcd6cf85550e316183a3cdbb0
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 45
-  completed_plans: 42
+  completed_plans: 43
   percent: 0
 ---
 
@@ -67,7 +67,7 @@ inferred.
 ## Current Position
 
 Phase: 04 (It writes a project) — EXECUTING
-Plan: 7 of 9
+Plan: 8 of 9
 Status: Ready to execute
 searches, six encodings across three corpus programs, never find the
 identifier a project file declares anywhere in the component table
@@ -145,6 +145,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 | Phase 04 P05 | 1 session | 3 tasks | 1 files |
 | Phase 04 P06 | 1 session | 3 tasks | 1 files |
 | Phase 04 P04 | 1 session | 3 tasks | 1 files |
+| Phase 04 P07 | 1 session | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -230,6 +231,7 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-04: A #[path] attribute on a module nested inside an inline mod (mod tests { mod support_frm; }) resolves against that inline module's own implied, nonexistent directory, never the file's own real directory; the independent .frm reader is spliced in at frm.rs's own top level instead.
 - [Phase 04]: 04-04: write_form reads FormModel::tree_refused (already decided by write::model) rather than re-reading a defect list itself; tree_refused_item reads only Defect::site.offset, never DefectKind, so the report and the written file can never disagree about which forms refused.
 - [Phase 04]: 04-04: The builtin opcode table decodes a resource blob end to end for exactly two corpus programs (Fast_Flames.exe, SubReality_WinsockSample.exe); the multi-blob corpus fixtures (FormPhysics, frmTransparency) are proved at the BlobCursor level directly, not through the full write_form pipeline.
+- [Phase 04]: 04-07: write_code_region's own signature changed to call uncertainty_comments itself (items + a path prefix), rather than taking a pre-built comment line list, so the comment emitter has exactly one call site; this necessarily touched write_form's own call in frm.rs, one file outside this plan's own files_modified list, since a caller of a changed shared function signature must be updated for the crate to compile.
 
 ### Pending Todos
 
@@ -258,8 +260,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-13T02:36:58.903Z
-Stopped at: Completed 04-04-PLAN.md
+Last session: 2026-09-13T02:59:53.543Z
+Stopped at: Completed 04-07-PLAN.md
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and
