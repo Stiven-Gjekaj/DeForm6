@@ -40,6 +40,7 @@ mod support;
 
 use std::path::{Path, PathBuf};
 
+use deform6::vb::classify::ObjectKind;
 use deform6::vb::opcodes::OpcodeTable;
 use support::frm::{self, Block};
 use support::vbp;
@@ -54,6 +55,18 @@ const MAX_LEGAL_NAME_LEN: usize = 40;
 
 /// The deepest a control tree may nest, per the roadmap: 7.
 const MAX_LEGAL_NESTING_DEPTH: usize = 7;
+
+/// The exact sentence `crate::report::build_limits` states as this run's
+/// first limit line. Held here as this check's own independent copy, so an
+/// assertion that the two agree can never silently become an assertion that
+/// this file agrees with itself: the two literals are written in two
+/// different sessions of reading the same roadmap requirement, and a future
+/// edit to either one that drifts from the other fails this test, naming
+/// both.
+const RECOMPILATION_LIMIT_STATEMENT: &str = "Full recompilation did not run. It needs the \
+                                              Visual Basic 6 IDE on Windows, and this run had \
+                                              neither. A structural check ran in its place, and \
+                                              it never opened this project in the IDE.";
 
 // --- Task 1: the corpus walk and the write path, driven once per program --
 
@@ -111,6 +124,14 @@ struct ExtractedProgram {
     dir: PathBuf,
     /// Every file [`deform6::write::project`] returned for this program.
     files: Vec<deform6::write::WrittenFile>,
+    /// The read side's own recovered counts, kept only for the independent
+    /// text file count this file cross-checks the write side against: a
+    /// fact the write side never computed, from a call that ran before the
+    /// write side ever saw the data.
+    forms_declared: usize,
+    code_objects_declared: usize,
+    /// The JSON confidence report the same write path run produced.
+    limits: Vec<String>,
 }
 
 /// Runs the whole write path once over `exe`, then writes every file it
@@ -125,6 +146,13 @@ fn extract_one(exe: &Path, root: &Path, label: &str) -> ExtractedProgram {
     let report = deform6::inspect(&data, &table)
         .unwrap_or_else(|err| panic!("{key}: inspect refused this program: {err}"));
 
+    let forms_declared = report.forms.len();
+    let code_objects_declared = report
+        .objects
+        .iter()
+        .filter(|object| object.kind != ObjectKind::Form)
+        .count();
+
     let written = deform6::write::project(&report, &data)
         .unwrap_or_else(|err| panic!("{key}: write::project refused this program: {err}"));
 
@@ -138,7 +166,22 @@ fn extract_one(exe: &Path, root: &Path, label: &str) -> ExtractedProgram {
         key,
         dir,
         files: written.files,
+        forms_declared,
+        code_objects_declared,
+        limits: written.report.limits,
     }
+}
+
+fn is_resource_file(name: &str) -> bool {
+    name.ends_with(".frx")
+}
+
+fn is_report_file(name: &str) -> bool {
+    name.ends_with(".report.json")
+}
+
+fn is_text_file(name: &str) -> bool {
+    !is_resource_file(name) && !is_report_file(name)
 }
 
 // --- Named assertion 1: every component line names a file that exists -----
@@ -403,6 +446,53 @@ fn check_resource_offsets(
     failures
 }
 
+// --- Task 2: the whole tree encoding sweep ---------------------------------
+
+/// Checks one written text file: no byte order mark, every line feed byte
+/// paired into a CRLF (so no bare line feed exists anywhere), the file's
+/// own last two bytes are that pair, and no byte in the file, if it happens
+/// to validate as UTF-8 at all, decodes to anything above plain ASCII. A
+/// Windows-1252 encoder writes one byte per character; a genuine non-ASCII
+/// character it wrote would almost never also validate as UTF-8 (a lone
+/// byte such as `0xA9` is not a legal UTF-8 lead byte on its own), so a file
+/// that does validate as UTF-8 and holds a non-ASCII character is the loud
+/// sign that the encoder was bypassed somewhere and raw UTF-8 bytes leaked
+/// into a Windows-1252 file.
+fn check_text_file_encoding(name: &str, bytes: &[u8]) -> Vec<String> {
+    let mut failures = Vec::new();
+
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        failures.push(format!("{name}: begins with a byte order mark"));
+    }
+
+    let line_feed_count = bytes.iter().filter(|&&byte| byte == b'\n').count();
+    let crlf_pair_count = bytes.windows(2).filter(|pair| *pair == b"\r\n").count();
+    if line_feed_count != crlf_pair_count {
+        failures.push(format!(
+            "{name}: holds {line_feed_count} line feed byte(s) but only {crlf_pair_count} CRLF \
+             pair(s); a bare line feed exists"
+        ));
+    }
+
+    if !bytes.is_empty() && !bytes.ends_with(b"\r\n") {
+        failures.push(format!(
+            "{name}: the file's own last two bytes are not the CRLF pair"
+        ));
+    }
+
+    if let Ok(text) = std::str::from_utf8(bytes)
+        && !text.is_ascii()
+    {
+        failures.push(format!(
+            "{name}: the bytes validate as UTF-8 and hold a character above plain ASCII; a \
+             Windows-1252 encoder writes one byte per character and never a UTF-8 multi-byte \
+             sequence"
+        ));
+    }
+
+    failures
+}
+
 // --- The main corpus-wide run ----------------------------------------------
 
 #[test]
@@ -418,6 +508,7 @@ fn the_structural_check_passes_for_all_forty_four_corpus_programs() {
     let root = corpus_root();
     let mut failures: Vec<String> = Vec::new();
     let mut programs_checked = 0_usize;
+    let mut text_files_checked = 0_usize;
     let mut extracted_dirs: Vec<PathBuf> = Vec::new();
 
     for (index, exe) in programs.iter().enumerate() {
@@ -446,6 +537,25 @@ fn the_structural_check_passes_for_all_forty_four_corpus_programs() {
             project.get("Startup").as_deref(),
             &declared,
         ));
+
+        // Cross-check the text file count against the read side's own
+        // independent counts: the vbp plus one file per declared form plus
+        // one file per non-form object, computed from `Report` before the
+        // write side ever ran.
+        let expected_text_files = 1_usize
+            .saturating_add(extracted.forms_declared)
+            .saturating_add(extracted.code_objects_declared);
+        let actual_text_files = extracted
+            .files
+            .iter()
+            .filter(|file| is_text_file(&file.name))
+            .count();
+        if actual_text_files != expected_text_files {
+            failures.push(format!(
+                "{key}: wrote {actual_text_files} text file(s), the read side's own object \
+                 graph names {expected_text_files}"
+            ));
+        }
 
         // Every recovered class or module name: a legal identifier.
         for file in extracted
@@ -505,6 +615,30 @@ fn the_structural_check_passes_for_all_forty_four_corpus_programs() {
                 ));
             }
         }
+
+        // Every written text file: the encoding sweep. Excludes .frx (a
+        // resource file, binary by kind, never by a guess from content) and
+        // .report.json (this phase's own JSON output, UTF-8 by design, not
+        // a Visual Basic project file).
+        for file in extracted
+            .files
+            .iter()
+            .filter(|file| is_text_file(&file.name))
+        {
+            failures.extend(check_text_file_encoding(&file.name, &file.bytes));
+            text_files_checked = text_files_checked.saturating_add(1);
+        }
+
+        if !extracted
+            .limits
+            .iter()
+            .any(|line| line.contains("did not run"))
+        {
+            failures.push(format!(
+                "{key}: the report's own limits list states nowhere that full recompilation did \
+                 not run"
+            ));
+        }
     }
 
     assert_eq!(
@@ -513,6 +647,10 @@ fn the_structural_check_passes_for_all_forty_four_corpus_programs() {
         "this run checked {programs_checked} program(s), but {} executables exist under the \
          corpus root",
         programs.len()
+    );
+    assert!(
+        text_files_checked > 0,
+        "the sweep read zero text files across every program; it passed nothing"
     );
     assert!(
         failures.is_empty(),
@@ -560,6 +698,25 @@ fn attribute_vb_name(text: &str) -> Option<String> {
         }
     }
     None
+}
+
+// --- A dedicated test for the exact recompilation statement, run over one -
+// --- program rather than all 44: the sentence itself is not per-program ---
+
+#[test]
+fn the_reports_limits_state_the_exact_recompilation_sentence() {
+    let exe = corpus_root().join("vb6-code/Fire-effect/Fast_Flames.exe");
+    let data = std::fs::read(&exe).expect("reading Fast_Flames.exe");
+    let table = OpcodeTable::builtin();
+    let report = deform6::inspect(&data, &table).expect("inspect must succeed");
+    let written = deform6::write::project(&report, &data).expect("write::project must succeed");
+
+    assert_eq!(
+        written.report.limits.first().map(String::as_str),
+        Some(RECOMPILATION_LIMIT_STATEMENT),
+        "the report's own first limit line must be exactly this check's own copy of the \
+         recompilation sentence: {RECOMPILATION_LIMIT_STATEMENT:?}"
+    );
 }
 
 // --- Deliberate breakages, one per named assertion, built by hand rather --
@@ -726,5 +883,56 @@ mod deliberate_breakages {
             failures.iter().any(|f| f.contains("frmX.frx")),
             "{failures:?}"
         );
+    }
+
+    // --- Task 2: the three encoding sweep breakages -----------------------
+
+    #[test]
+    fn a_file_beginning_with_a_byte_order_mark_fails_the_encoding_sweep() {
+        let clean = b"VERSION 5.00\r\n".to_vec();
+        assert!(
+            super::check_text_file_encoding("clean.frm", &clean).is_empty(),
+            "a clean file must pass the sweep"
+        );
+
+        let mut with_bom = vec![0xEF, 0xBB, 0xBF];
+        with_bom.extend_from_slice(b"VERSION 5.00\r\n");
+        let failures = super::check_text_file_encoding("bom.frm", &with_bom);
+        assert!(
+            !failures.is_empty(),
+            "a file beginning with a byte order mark must fail the sweep"
+        );
+        assert!(failures[0].contains("byte order mark"), "{failures:?}");
+    }
+
+    #[test]
+    fn a_bare_line_feed_fails_the_encoding_sweep() {
+        let bare_lf = b"VERSION 5.00\r\nBegin VB.Form\nEnd\r\n".to_vec();
+        let failures = super::check_text_file_encoding("bare_lf.frm", &bare_lf);
+        assert!(
+            !failures.is_empty(),
+            "a bare line feed with no matching carriage return must fail the sweep"
+        );
+        assert!(failures[0].contains("bare line feed"), "{failures:?}");
+    }
+
+    #[test]
+    fn a_byte_above_the_windows_1252_range_fails_the_encoding_sweep() {
+        // The Windows-1252 encoder writes one byte per character; a raw
+        // UTF-8 encoding of a character above U+00FF (here, U+20AC, the
+        // Euro sign) leaking into the file is the shape this check exists
+        // to catch: `€` encodes to the three bytes 0xE2 0x82 0xAC, which
+        // together validate as UTF-8 and decode to a character above plain
+        // ASCII, the one thing a genuine Windows-1252 byte almost never
+        // does on its own.
+        let mut leaked_utf8 = b"Caption =   \"".to_vec();
+        leaked_utf8.extend_from_slice("€".as_bytes());
+        leaked_utf8.extend_from_slice(b"\"\r\n");
+        let failures = super::check_text_file_encoding("leaked_utf8.frm", &leaked_utf8);
+        assert!(
+            !failures.is_empty(),
+            "a leaked UTF-8 encoded character must fail the sweep"
+        );
+        assert!(failures[0].contains("UTF-8"), "{failures:?}");
     }
 }
