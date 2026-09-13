@@ -13,3 +13,17 @@
 # This file holds no licence field. corpus/NOTICES records the licence
 # and the origin for the vendored corpus. Its own stated scope is
 # corpus/ proper, not this manifest. Do not add a licence field here.
+
+
+
+["map-editor-2d"]
+url = "https://raw.githubusercontent.com/tannerhelland/vb6-code/f2703861b9e6a7ed4acdc6eedb2632ca8903f895/Map-editor-2D/Map%20Editor.exe"
+sha256 = "bb53823bcd195e021516b78efa8d10928f081aac041055de0cb486c704d11762"
+
+["passgen"]
+url = "https://raw.githubusercontent.com/Jigsy1/PassGen/92602de/PassGen.exe"
+sha256 = "5faa2bbe530bd851c80186cf28b2985514a0167635411e8cae7014461f16a1a5"
+
+["transparency-2d"]
+url = "https://raw.githubusercontent.com/tannerhelland/vb6-code/f2703861b9e6a7ed4acdc6eedb2632ca8903f895/Transparency-2D/Transparency.exe"
+sha256 = "ace0818b15e72ff118d66d314f22bd08bde41347b6c5db86827e3c919918e945"
