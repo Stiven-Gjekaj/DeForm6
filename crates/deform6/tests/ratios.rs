@@ -205,6 +205,25 @@ pub(crate) const HEADER: &str = r#"# The pinned procedure recovery ratio, one en
 # one form still refusing is named in `WINDOWS.md`, with its own byte
 # offset. `xtask update-ratios` writes these four keys along with the two
 # procedure counts, from the same `Report` `deform6::inspect` builds.
+#
+# Plan 04-09 adds two more keys per program: `property_declared` and
+# `property_written`. These measure something different from every other
+# pair in this file. `recovered`/`declared`, `form_recovered`/`form_declared`
+# and `control_recovered`/`control_declared` each compare this tool's own
+# output against the original source the executable was built from, per
+# AGENTS.md's own measurement rule. `property_declared` and
+# `property_written` compare this tool against itself: `property_declared`
+# is the count of property records the write path's own read side recovered
+# for a program, and `property_written` is the count of property lines the
+# writer actually emitted from those same records, in the same run. This is
+# a coverage number for this tool's own writer, not a recovery number
+# against source, and it is stated here so a reader never mistakes one for
+# the other. `property_written` can exceed `property_declared`: a single
+# recovered `Position` record becomes four written lines, and a single
+# `Font` record becomes seven, so the ratio is not bounded at 1.00 the way
+# every other pair in this file is. `xtask update-ratios` writes these two
+# keys from the same write path run that already produces the four keys
+# above.
 
 "#;
 
