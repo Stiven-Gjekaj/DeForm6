@@ -97,7 +97,7 @@ Version 1 recovers metadata. It does not recover statements.
       produces: three space indent per level, name padded to sixteen columns,
       an equals sign followed by exactly three spaces, one trailing space on
       `Begin` and `BeginProperty`, none on `End` and `EndProperty`.
-- [ ] **WRT-04**: Properties are written in alphabetical order within a block,
+- [x] **WRT-04**: Properties are written in alphabetical order within a block,
       and menus are written last, because the IDE refuses a file otherwise.
 - [x] **WRT-05**: The tool writes `.bas` and `.cls` files with the attribute
       preamble the IDE requires.
