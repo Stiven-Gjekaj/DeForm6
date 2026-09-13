@@ -954,3 +954,160 @@ fn extract_with_an_unwritable_output_path_exits_five_and_names_the_path() {
         "stderr did not name the unwritable path: {stderr:?}"
     );
 }
+
+// --- Plan 04-08, Task 2: resolve the directory, check every path against
+// it, and build before you write ----------------------------------------
+
+/// A second run into a directory that already holds files refuses without
+/// `--force`, naming the directory, and the same run with `--force`
+/// succeeds and overwrites.
+#[test]
+fn a_second_run_into_a_populated_directory_refuses_without_force_and_succeeds_with_it() {
+    let path = fast_flames_path();
+    let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "deform6-cli-test-extract-force-{}",
+        std::process::id()
+    ));
+    fs::remove_dir_all(&out_dir).ok();
+
+    let (first_code, _out, first_err) = run(&[
+        OsStr::new("extract"),
+        path.as_os_str(),
+        OsStr::new("-o"),
+        out_dir.as_os_str(),
+    ]);
+    assert_eq!(first_code, 0, "stderr was: {first_err}");
+
+    let (second_code, second_stdout, second_stderr) = run(&[
+        OsStr::new("extract"),
+        path.as_os_str(),
+        OsStr::new("-o"),
+        out_dir.as_os_str(),
+    ]);
+    assert_eq!(second_code, 5, "stderr was: {second_stderr}");
+    assert!(second_stdout.is_empty(), "stdout was: {second_stdout:?}");
+    assert!(
+        second_stderr.contains(&out_dir.canonicalize().unwrap().display().to_string()),
+        "the refusal must name the directory: {second_stderr:?}"
+    );
+
+    let (force_code, _out, force_err) = run(&[
+        OsStr::new("extract"),
+        path.as_os_str(),
+        OsStr::new("-o"),
+        out_dir.as_os_str(),
+        OsStr::new("--force"),
+    ]);
+    assert_eq!(force_code, 0, "stderr was: {force_err}");
+    let entries: Vec<String> = fs::read_dir(&out_dir)
+        .expect("the output directory must still exist")
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(entries.len(), 5, "entries: {entries:?}");
+
+    fs::remove_dir_all(&out_dir).ok();
+}
+
+/// A run writes nothing outside the resolved output directory: a listing
+/// of the whole repository working tree, taken before and after the run,
+/// is identical. The output directory lives under `CARGO_TARGET_TMPDIR`,
+/// outside the repository, so this is a strict "zero new entries" check,
+/// which is the strongest form of "the only new entries are inside the
+/// resolved output directory."
+#[test]
+fn extract_changes_no_file_anywhere_in_the_repository_working_tree() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("the repository root must resolve");
+    let before = dir_snapshot(&repo_root);
+
+    let path = fast_flames_path();
+    let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "deform6-cli-test-extract-repo-untouched-{}",
+        std::process::id()
+    ));
+    fs::remove_dir_all(&out_dir).ok();
+    let (code, _stdout, stderr) = run(&[
+        OsStr::new("extract"),
+        path.as_os_str(),
+        OsStr::new("-o"),
+        out_dir.as_os_str(),
+    ]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+    fs::remove_dir_all(&out_dir).ok();
+
+    let after = dir_snapshot(&repo_root);
+    assert_eq!(
+        before, after,
+        "extract must change no file anywhere in the repository working tree"
+    );
+}
+
+/// The files land in the directory a symbolic link really points at, and
+/// the run's own printed `--report` path names the real directory, never
+/// the link. Unix-only: `std::os::unix::fs::symlink`.
+#[test]
+fn extract_into_a_symlinked_directory_writes_at_the_real_directory() {
+    let path = fast_flames_path();
+    let real_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "deform6-cli-test-extract-symlink-real-{}",
+        std::process::id()
+    ));
+    let link_path = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "deform6-cli-test-extract-symlink-link-{}",
+        std::process::id()
+    ));
+    fs::remove_dir_all(&real_dir).ok();
+    fs::remove_file(&link_path).ok();
+    fs::create_dir_all(&real_dir).unwrap();
+    std::os::unix::fs::symlink(&real_dir, &link_path).expect("creating the symlink must succeed");
+
+    let report_path = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "deform6-cli-test-extract-symlink-report-{}.json",
+        std::process::id()
+    ));
+    fs::remove_file(&report_path).ok();
+
+    let (code, stdout, stderr) = run(&[
+        OsStr::new("extract"),
+        path.as_os_str(),
+        OsStr::new("-o"),
+        link_path.as_os_str(),
+        OsStr::new("--report"),
+        report_path.as_os_str(),
+    ]);
+    assert_eq!(code, 0, "stderr was: {stderr}");
+
+    let entries: Vec<String> = fs::read_dir(&real_dir)
+        .expect("the real directory must hold the written files")
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        entries.iter().any(|entry| entry == "frmFire.frm"),
+        "entries in the real directory: {entries:?}"
+    );
+    assert!(
+        !entries.iter().any(|entry| entry.ends_with(".report.json")),
+        "the report must not also land in the output directory once --report is given: \
+         {entries:?}"
+    );
+
+    assert!(
+        report_path.exists(),
+        "the report must exist at the user-named path"
+    );
+    let printed = stdout.trim();
+    let resolved_report = report_path
+        .canonicalize()
+        .expect("the report now exists and must canonicalize");
+    assert_eq!(
+        Path::new(printed),
+        resolved_report,
+        "the run must print the resolved report path: {stdout:?}"
+    );
+
+    fs::remove_dir_all(&real_dir).ok();
+    fs::remove_file(&link_path).ok();
+    fs::remove_file(&report_path).ok();
+}

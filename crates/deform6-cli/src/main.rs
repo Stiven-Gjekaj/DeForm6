@@ -1125,3 +1125,154 @@ fn print_event(indent: &str, event: &EventReport) {
         ),
     }
 }
+
+// --- Plan 04-08, Task 2: the containment check, driven with names built
+// inside the test, because the corpus holds no hostile name -------------
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    reason = "a test builds the state it needs and must fail loudly when that state is wrong"
+)]
+mod tests {
+    use super::*;
+    use deform6::report::ProjectReport;
+    use deform6::write::model::{NameKind, SafeName};
+    use deform6::write::{WrittenFile, WrittenProject};
+
+    /// A [`WrittenProject`] whose one file carries `name` verbatim: the
+    /// hostile name a real [`SafeName`] can never produce, built directly
+    /// here because the corpus holds none.
+    fn project_named(name: &str) -> WrittenProject {
+        WrittenProject {
+            files: vec![WrittenFile {
+                name: name.to_owned(),
+                bytes: b"hostile".to_vec(),
+            }],
+            report: ProjectReport {
+                items: Vec::new(),
+                defects: Vec::new(),
+                limits: Vec::new(),
+            },
+        }
+    }
+
+    /// A fresh, empty, resolved (canonicalized) temporary directory this
+    /// test owns; the caller removes it.
+    fn fresh_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "deform6-cli-test-containment-{label}-{}-{}",
+            std::process::id(),
+            label.len()
+        ));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).expect("creating a fresh temp directory must succeed");
+        std::fs::canonicalize(&dir).expect("canonicalizing a directory that exists must succeed")
+    }
+
+    /// Asserts `dir` holds no entry at all.
+    fn assert_empty(dir: &Path) {
+        let entries: Vec<_> = std::fs::read_dir(dir)
+            .expect("reading the directory must succeed")
+            .collect();
+        assert!(
+            entries.is_empty(),
+            "the run must write nothing when it refuses: {entries:?}"
+        );
+    }
+
+    #[test]
+    fn a_file_name_holding_a_path_separator_refuses_the_whole_run_and_writes_nothing() {
+        let resolved = fresh_dir("separator");
+        let project = project_named("sub/escape.frm");
+
+        let exit = write_project(&project, &resolved, None, false);
+
+        assert_eq!(exit, Exit::Internal);
+        assert_empty(&resolved);
+        std::fs::remove_dir_all(&resolved).ok();
+    }
+
+    #[test]
+    fn a_file_name_holding_a_parent_directory_sequence_refuses_the_whole_run_and_writes_nothing() {
+        let resolved = fresh_dir("parent-dir");
+        let project = project_named("../escape.frm");
+
+        let exit = write_project(&project, &resolved, None, false);
+
+        assert_eq!(exit, Exit::Internal);
+        assert_empty(&resolved);
+        std::fs::remove_dir_all(&resolved).ok();
+    }
+
+    #[test]
+    fn an_absolute_file_name_refuses_the_whole_run_and_writes_nothing() {
+        let resolved = fresh_dir("absolute");
+        let project = project_named("/etc/escape.frm");
+
+        let exit = write_project(&project, &resolved, None, false);
+
+        assert_eq!(exit, Exit::Internal);
+        assert_empty(&resolved);
+        std::fs::remove_dir_all(&resolved).ok();
+    }
+
+    /// A run that refuses one file refuses the whole run: a project whose
+    /// first file is legitimate and second file is hostile still writes
+    /// zero files, not the one legitimate file.
+    #[test]
+    fn a_hostile_name_after_a_legitimate_one_still_writes_nothing_at_all() {
+        let resolved = fresh_dir("partial");
+        let project = WrittenProject {
+            files: vec![
+                WrittenFile {
+                    name: "Project1.vbp".to_owned(),
+                    bytes: b"Type=Exe\r\n".to_vec(),
+                },
+                WrittenFile {
+                    name: "../escape.frm".to_owned(),
+                    bytes: b"hostile".to_vec(),
+                },
+            ],
+            report: ProjectReport {
+                items: Vec::new(),
+                defects: Vec::new(),
+                limits: Vec::new(),
+            },
+        };
+
+        let exit = write_project(&project, &resolved, None, false);
+
+        assert_eq!(exit, Exit::Internal);
+        assert_empty(&resolved);
+        std::fs::remove_dir_all(&resolved).ok();
+    }
+
+    /// The containment check is a second line of defence, not the only
+    /// one: [`SafeName`] itself already refuses to produce any of the
+    /// three hostile shapes above, for any raw name at all.
+    #[test]
+    fn the_sanitized_name_type_cannot_produce_a_separator_a_parent_sequence_or_an_absolute_path() {
+        for raw in [
+            "a/b",
+            "a\\b",
+            "..",
+            "../c",
+            "/etc/passwd",
+            "C:\\Windows\\System32",
+        ] {
+            let (name, _faults) = SafeName::new(raw, NameKind::Form);
+            let file_name = name.file_name("frm");
+            assert!(!file_name.contains('/'), "{file_name:?} from {raw:?}");
+            assert!(!file_name.contains('\\'), "{file_name:?} from {raw:?}");
+            assert!(!file_name.contains(".."), "{file_name:?} from {raw:?}");
+            assert!(
+                !Path::new(&file_name).is_absolute(),
+                "{file_name:?} from {raw:?}"
+            );
+        }
+    }
+}
