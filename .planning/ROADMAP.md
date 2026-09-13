@@ -450,7 +450,7 @@ RPT-01, RPT-02, RPT-03, RPT-04, RPT-05, RPT-06
   - **STRUCTURES gap 1 lands here.** The `.vbp` `Title=` and `ExeName32=` keys
     depend on the disputed `VBHeader` 0x58 and 0x5C reading from Phase 1.
 
-**Plans**: 5/9 plans executed
+**Plans**: 6/9 plans executed
 
 Plans:
 
@@ -467,7 +467,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 04-04-PLAN.md - `write/frm.rs`: the `.frm` and the `.frx` as one component driven by one cursor. Not splittable
+- [x] 04-04-PLAN.md - `write/frm.rs`: the `.frm` and the `.frx` as one component driven by one cursor. Not splittable
 - [ ] 04-07-PLAN.md - The uncertainty comment emitter, in code regions only, never in a `Begin` block and never in the `.vbp`
 
 **Wave 4** *(blocked on Wave 3 completion)*
@@ -685,6 +685,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 1. It reads the file | 8/8 | Complete    | 2026-09-07 |
 | 2. The object graph | 10/10 | Complete    | 2026-09-11 |
 | 3. Forms | 18/18 | Complete    | 2026-09-11 |
-| 4. It writes a project | 5/9 | In Progress|  |
+| 4. It writes a project | 6/9 | In Progress|  |
 | 5. Hostility | 0/8 | Not started | - |
 | 6. Version 1.0 | 0/5 | Not started | - |

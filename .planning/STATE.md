@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: It writes a project
 status: executing
-stopped_at: Completed 04-06-PLAN.md
-last_updated: "2026-09-13T01:47:11.930Z"
+stopped_at: Completed 04-04-PLAN.md
+last_updated: "2026-09-13T02:36:58.931Z"
 last_activity: 2026-09-12
 last_activity_desc: Phase 04 execution started
-state_head: 78b1ed68414a1bea5c304d8299f9d17855d28e4b
+state_head: adafe1d3f9c17e566e4e0e7acde2d41cad056c93
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 45
-  completed_plans: 41
+  completed_plans: 42
   percent: 0
 ---
 
@@ -67,7 +67,7 @@ inferred.
 ## Current Position
 
 Phase: 04 (It writes a project) — EXECUTING
-Plan: 6 of 9
+Plan: 7 of 9
 Status: Ready to execute
 searches, six encodings across three corpus programs, never find the
 identifier a project file declares anywhere in the component table
@@ -144,6 +144,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 | Phase 04 P03 | 1 session | 3 tasks | 1 files |
 | Phase 04 P05 | 1 session | 3 tasks | 1 files |
 | Phase 04 P06 | 1 session | 3 tasks | 1 files |
+| Phase 04 P04 | 1 session | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -225,6 +226,10 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-06: A property earns a report item only when the reading side gave it a real byte offset (Blob, BlobUnreadable, Undecoded); the eight fully-decoded scalar PropertyValue variants carry no offset field at all, so they earn no item rather than an invented one.
 - [Phase 04]: 04-06: with_header_evidence backfills one evidence record, anchored at Report::header_offset, for a model-built item that arrives with none, since write/model.rs (which builds those items) is off-limits to this plan.
 - [Phase 04]: 04-06: write::project is not wired to call report::build in this plan (files_modified is report.rs alone); the shipped extract command still writes items: [] and limits: [], matching the staged pattern every prior 04-* plan left for its own full writer. Plan 04-08 wires it.
+- [Phase 04]: 04-04: Sort a control's own properties into final case insensitive order BEFORE any PendingBlob is resolved against BlobCursor::take, since the .frx offset a form line names must match the order the .frx writer actually packs bytes in, which is the sorted order, not the raw property-stream order the reader gave.
+- [Phase 04]: 04-04: A #[path] attribute on a module nested inside an inline mod (mod tests { mod support_frm; }) resolves against that inline module's own implied, nonexistent directory, never the file's own real directory; the independent .frm reader is spliced in at frm.rs's own top level instead.
+- [Phase 04]: 04-04: write_form reads FormModel::tree_refused (already decided by write::model) rather than re-reading a defect list itself; tree_refused_item reads only Defect::site.offset, never DefectKind, so the report and the written file can never disagree about which forms refused.
+- [Phase 04]: 04-04: The builtin opcode table decodes a resource blob end to end for exactly two corpus programs (Fast_Flames.exe, SubReality_WinsockSample.exe); the multi-blob corpus fixtures (FormPhysics, frmTransparency) are proved at the BlobCursor level directly, not through the full write_form pipeline.
 
 ### Pending Todos
 
@@ -253,8 +258,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-13T01:47:11.902Z
-Stopped at: Completed 04-06-PLAN.md
+Last session: 2026-09-13T02:36:58.903Z
+Stopped at: Completed 04-04-PLAN.md
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and
