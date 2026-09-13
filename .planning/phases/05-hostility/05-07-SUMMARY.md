@@ -37,7 +37,7 @@ key-decisions:
   - "ureq and sha2 are pinned to the exact versions 05-RESEARCH.md audited (=3.4.1, =0.11.0), as plain, non-workspace dependencies in crates/xtask/Cargo.toml, since no other crate in this workspace needs either one."
   - "The fetch loop propagates every failure with the ? operator and never uses the continue keyword, proved by a source-level grep assertion in the verify block, so a failed entry cannot be skipped and reported as a success."
   - "pin-corpus regenerates the whole manifest from parsed data (a BTreeMap<String, Entry>) rather than appending text, preserving whatever text sits above the first table header byte for byte, and re-parses the rendered result before writing it."
-  - "The task 3 checkpoint (gate=\"blocking-human\") was cleared by the human, who chose map-editor-2d, passgen and transparency-2d. All three are already vendored under corpus/, so this pinned set proves the fetch, hash and verify machinery end to end but adds no parser shape the gate does not already exercise. This is stated here rather than left implicit; see Next Phase Readiness."
+  - "The task 3 checkpoint (gate=\"blocking-human\") was cleared by the human, who directed that the programs come from the corpus and left the selection open. map-editor-2d, passgen and transparency-2d were selected on that instruction. All three are already vendored under corpus/, so this pinned set proves the fetch, hash and verify machinery end to end but adds no parser shape the gate does not already exercise. This is stated here rather than left implicit; see Next Phase Readiness."
   - "MINIMUM_MANIFEST_ENTRIES stays at 1 for this plan. It is a candidate to raise once the set gains at least one shape the vendored 44 do not already cover."
 
 patterns-established:
@@ -110,7 +110,7 @@ Each task was committed atomically:
 
 ## Decisions Made
 
-See `key-decisions` in the frontmatter. The one decision worth restating here: task 3's own instructions asked for at least one program that adds a shape the vendored 44 do not already hold (a p-code build, an ActiveX control project, third party OCX controls, a packed executable, a different service pack). The human instead chose three programs that are already vendored under `corpus/vb6-code` and `corpus/public-domain`. This is a legitimate, honestly reported choice for this plan's own goal (proving the mechanism), not a mistake to paper over; it is recorded plainly here and in Next Phase Readiness so a later reader does not mistake three entries for real shape coverage.
+See `key-decisions` in the frontmatter. The one decision worth restating here: task 3's own instructions asked for at least one program that adds a shape the vendored 44 do not already hold (a p-code build, an ActiveX control project, third party OCX controls, a packed executable, a different service pack). The human directed that the programs come from the corpus, so the three selected are already vendored under `corpus/vb6-code` and `corpus/public-domain`. This is a legitimate, honestly reported choice for this plan's own goal (proving the mechanism), not a mistake to paper over; it is recorded plainly here and in Next Phase Readiness so a later reader does not mistake three entries for real shape coverage.
 
 ## Deviations from Plan
 
