@@ -197,10 +197,10 @@ impl SafeName {
     /// 3. A name that does not start with a letter has its own leading
     ///    underscore (when it has one) removed, then takes a leading `A`,
     ///    and records [`NameFault::LeadingNonLetter`].
-    /// 4. The result is clamped to [`MAX_NAME_LEN`] encoded bytes — a byte
+    /// 4. The result is clamped to [`MAX_NAME_LEN`] encoded bytes, a byte
     ///    count under this crate's own Latin-1-as-code-point convention,
     ///    never a count of Unicode scalar values and never a count of
-    ///    grapheme clusters — and records [`NameFault::Clamped`] with the
+    ///    grapheme clusters, and records [`NameFault::Clamped`] with the
     ///    byte count before clamping.
     ///
     /// This order matters: clamping before the leading-letter fix would

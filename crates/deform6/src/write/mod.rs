@@ -85,8 +85,8 @@ pub struct WrittenProject {
 /// [`crate::report::with_header_evidence`] for any item that still carries
 /// none, so a path a writer chose cannot collide, unnoticed, with a path
 /// [`crate::report::build`] chose independently. A control's property may
-/// therefore earn two items — one from the writer that omitted its line,
-/// one from `build`'s own confidence grading of the same property — at two
+/// therefore earn two items, one from the writer that omitted its line,
+/// one from `build`'s own confidence grading of the same property, at two
 /// different paths (a control path and a more specific property path).
 /// This is redundant, not wrong: RPT-02 asks for a flat array keyed by
 /// path, not for exactly one item per fact, and every item this run

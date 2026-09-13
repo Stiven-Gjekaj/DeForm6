@@ -21,10 +21,10 @@
 //! point and maps every error itself. Neither the infallible parse function
 //! nor the process exit function is called anywhere in this crate.
 //!
-//! `extract`'s own new failure modes — an input this run could not read, an
+//! `extract`'s own new failure modes, an input this run could not read, an
 //! output directory that already holds files without `--force`, a report
 //! path this run could not write, and a recovered file name that would
-//! escape the resolved output directory — all map to code 5, the same
+//! escape the resolved output directory, all map to code 5, the same
 //! usage-error bucket a missing or malformed `--opcode-table` argument
 //! already uses. The table's own numbering does not move.
 

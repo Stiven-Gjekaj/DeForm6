@@ -318,7 +318,7 @@ fn write_quoted_setting(
 ///
 /// `Title`, `ExeName32` and `HelpFile` take the values Phase 1 resolved at
 /// the disputed header offsets `0x58` (`oProjectExeName`) and `0x5C`
-/// (`oProjectTitle`) — settled in `01-05-SUMMARY.md` — and the help file
+/// (`oProjectTitle`), settled in `01-05-SUMMARY.md`, and the help file
 /// field beside them: these are proven, not chosen, and this function
 /// writes them verbatim rather than a default.
 ///
