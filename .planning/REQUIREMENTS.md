@@ -91,7 +91,7 @@ Version 1 recovers metadata. It does not recover statements.
 ### Written output
 
 - [x] **WRT-01**: `deform6 extract <exe> -o <dir>` writes a project directory.
-- [ ] **WRT-02**: The written `.vbp` lists every object and every control
+- [x] **WRT-02**: The written `.vbp` lists every object and every control
       dependency the binary declares.
 - [ ] **WRT-03**: The written `.frm` follows the byte level layout the IDE
       produces: three space indent per level, name padded to sixteen columns,

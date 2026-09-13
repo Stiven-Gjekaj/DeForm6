@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: It writes a project
 status: executing
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-09-13T00:20:46.765Z"
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-09-13T00:48:04.283Z"
 last_activity: 2026-09-12
 last_activity_desc: Phase 04 execution started
-state_head: b6864c50e7811408b60ce1d8b67fdc993f26f8f3
+state_head: ec73c6a89d84abee11ea9f16f616d9dfdb43dcc9
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 45
-  completed_plans: 38
+  completed_plans: 39
   percent: 0
 ---
 
@@ -67,7 +67,7 @@ inferred.
 ## Current Position
 
 Phase: 04 (It writes a project) — EXECUTING
-Plan: 3 of 9
+Plan: 4 of 9
 Status: Ready to execute
 searches, six encodings across three corpus programs, never find the
 identifier a project file declares anywhere in the component table
@@ -141,6 +141,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 | Phase 03 P18 | single session | 3 tasks | 5 files |
 | Phase 04 P01 | 1 session | 3 tasks | 14 files |
 | Phase 04 P02 | 1 session | 3 tasks | 1 files |
+| Phase 04 P03 | 1 session | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -215,6 +216,9 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-02: FormattedValue carries four states (Line, Multi, Resource, Omit), not the two the plan's own opening line names, because a Position or a Font payload decomposes into several real named lines with no single .frm key of its own; collapsing them into the two-state design would have forced an incorrect Omit for fully recoverable control geometry and font data.
 - [Phase 04]: 04-02: The colour and enumeration formatting tables (COLOUR_PROPERTIES, ENUM_MEMBERS) are name-keyed and sit beside the reader's own payload type without widening it; the sixteen enumeration member names FILE-FORMATS.md section 3.5 lists were matched to their owning property this session by grepping every corpus .frm file for the exact line shape.
 - [Phase 04]: 04-02: Re-measured FRM-03's own corpus counts this session: 124 property records now decode to a name and a value, 683 report present and not decoded, over 807 total across six distinct names (BackColor, BorderStyle, Caption, Icon, Position, WindowState), not the 122/683/805/5 REQUIREMENTS.md states; the undecoded count is unchanged.
+- [Phase 04]: 04-03: Form/Module/Class lines are matched between Report::objects (recovery order) and ProjectModel::forms/code (sanitized names) by SafeName::raw() equality, never by array position, since the two model lists come from two different source tables (the GUI table and the object table).
+- [Phase 04]: 04-03: A blank line always separates the .vbp setting block from [MS Transaction Server]; missing on this plan's first pass, found by the plan's own manual verification step, confirmed on every corpus .vbp carrying the section, and fixed.
+- [Phase 04]: 04-03: write_vbp never writes a Reference= line (type library dependency); Report carries no field for it and no Phase 1-3 reader recovers it. Recorded as WINDOWS.md finding 10, out of this plan's own scope.
 
 ### Pending Todos
 
@@ -243,8 +247,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-13T00:20:33.097Z
-Stopped at: Completed 04-02-PLAN.md
+Last session: 2026-09-13T00:48:04.256Z
+Stopped at: Completed 04-03-PLAN.md
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and

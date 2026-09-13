@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 6
+open_count: 7
 waived_count: 0
 fixed_count: 3
-total_count: 9
-last_updated: 2026-09-10T22:25:56.340Z
+total_count: 10
+last_updated: 2026-09-13T00:45:18.740Z
 ---
 
 # Broken Windows Ledger
@@ -24,6 +24,7 @@ last_updated: 2026-09-10T22:25:56.340Z
 | 7 | 03 | deviation | crates/deform6/src/vb/controltree.rs |  | The scope-byte grammar for closing out of a menu control nested two levels deep, back to a sibling menu at the form's own top level, is unresolved. A defensive trailing-span bound (MAX_UNEXPLAINED_TAIL) converts the silent wrong tree into an honest refusal for the affected form, but the real grammar rule (HexScroll.exe, PassGen.exe, UUID2.exe, and Map Editor.exe's own separate gap) is not yet found. Needs the same byte-level corpus research 03-04 did for the single-level menu case. | fixed |  | 2026-09-10T14:30:20.446Z | 2026-09-10T22:25:34.660Z |
 | 8 | 03 | deviation | crates/deform6/src/vb/controltree.rs |  | Map Editor.exe's Main form fails for a reason distinct from the two-level-deep menu close finding 7 named (now fixed): the walk expects a scope separator (0xFF) at file offset 0x170e and finds 0x37 instead. Not a tail-bound refusal; the scope-byte read itself fails at a position finding 7's own fix does not reach. Measured but not explained this session; needs its own byte-level research. | open |  | 2026-09-10T22:25:47.439Z |  |
 | 9 | 03 | deviation | crates/deform6/src/vb/controltree.rs |  | frmPassGen.frm's own menuHelp section (corpus/public-domain/PassGen/PassGen.exe) exposes a third scope-byte shape the two-level-deep-close rule (finding 7, fixed) does not settle: menuAbout, itself a sibling within an already-open menu, genuinely opens its own child. Its own trailing separator at file offset 0x21d0 is a bare 0xFF 0x02 with the parent stack top a menu and zero pops, byte for byte identical to the confirmed sibling case (frmUUID2, HexScroll.exe), but needs the opposite role. No byte in the header or property stream distinguishes the two. The walk still succeeds for frmPassGen (every control is present, the byte count tiles exactly), but menuAboutForm, menuSeparatorC and menuWebsite recover with menuHelp as their parent instead of menuAbout. Documented in crates/deform6/src/vb/controltree.rs's own read_scope_run doc comment; needs research beyond scope-byte measurement (a property-opcode-aware signal or a different source) to settle. | open |  | 2026-09-10T22:25:56.340Z |  |
+| 10 | 04 | deviation | crates/deform6/src/write/vbp.rs |  | write_vbp never writes a Reference= line (a type library dependency, e.g. stdole2.tlb). Report carries no field for the header's type-library reference table; nothing in Phase 1-3 reads it. Every corpus .vbp that declares one (32 of 32 read this session) loses that one line against the committed source. Out of this plan's own scope (files_modified is vbp.rs alone, and no read_first names a reference-reading source); a future plan needs a new Report field and a new reader before this line can be written. | open |  | 2026-09-13T00:45:18.740Z |  |
 
 ````json
 [
@@ -133,6 +134,18 @@ last_updated: 2026-09-10T22:25:56.340Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-10T22:25:56.340Z",
+    "resolved_at": null
+  },
+  {
+    "id": 10,
+    "kind": "deviation",
+    "phase": "04",
+    "file": "crates/deform6/src/write/vbp.rs",
+    "line": null,
+    "description": "write_vbp never writes a Reference= line (a type library dependency, e.g. stdole2.tlb). Report carries no field for the header's type-library reference table; nothing in Phase 1-3 reads it. Every corpus .vbp that declares one (32 of 32 read this session) loses that one line against the committed source. Out of this plan's own scope (files_modified is vbp.rs alone, and no read_first names a reference-reading source); a future plan needs a new Report field and a new reader before this line can be written.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-13T00:45:18.740Z",
     "resolved_at": null
   }
 ]
