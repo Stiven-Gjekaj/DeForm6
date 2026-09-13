@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 current_phase: 5
 current_phase_name: Hostility
 status: executing
-stopped_at: Phase 5 plan 05-01 complete, 1 of 8 plans done, wave 1 continues with 05-07
-last_updated: "2026-09-13T14:22:28Z"
+stopped_at: Completed 05-07-PLAN.md
+last_updated: "2026-09-13T15:08:29.787Z"
 last_activity: 2026-09-13
-last_activity_desc: Plan 05-01 executed - third severity, strict/salvage policy wired, --salvage on both subcommands
-state_head: ff80249
+last_activity_desc: Plan 05-07 executed - corpus manifest, fetch-corpus and pin-corpus, three programs pinned
+state_head: e69c15768bce8295912b77e4ac81358db3156f25
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 53
-  completed_plans: 46
-  percent: 87
+  completed_plans: 47
+  percent: 89
 ---
 
 ## Continue
@@ -67,7 +67,7 @@ inferred.
 ## Current Position
 
 Phase: 5 (Hostility) - EXECUTING
-Plan: 05-01 complete, 05-07 next (wave 1)
+Plan: 05-01 and 05-07 complete (wave 1 done), wave 2 (05-02, 05-03, 05-06) next
 Status: Executing
 searches, six encodings across three corpus programs, never find the
 identifier a project file declares anywhere in the component table
@@ -91,7 +91,7 @@ re-measures the scope-separator grammar directly against Grayscale.exe,
 since the research document's own prose does not reconcile byte-for-byte,
 and closes STRUCTURES.md gap 11.
 
-Progress: [█████████░] 87% of the 53 written plans, which is 46 of 53
+Progress: [█████████░] 89% of the 53 written plans, which is 47 of 53
 
 ## Performance Metrics
 
@@ -150,6 +150,7 @@ Progress: [█████████░] 87% of the 53 written plans, which is
 | Phase 04 P08 | 1 session | 3 tasks | 8 files |
 | Phase 04 P09 | 1 session | 3 tasks | 3 files |
 | Phase 05 P01 | 1 session | 3 tasks | 24 files |
+| Phase 05 P07 | 1 session | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -242,6 +243,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-01: Journal::record is wired into deform6::inspect as a post-hoc policy loop over the whole finished defect list, never a branch inside a read function, so the strict defect list and the salvage defect list are the same list.
 - [Phase 05]: 05-01: Assumption lines from a salvage run go into the existing free text ProjectReport.limits array via a new report::assumption_lines helper, not a new field and not a new Confidence value, per research assumption A2.
 - [Phase 05]: 05-01: The corpus's real defect count is 429, not the 430 05-RESEARCH.md estimated (428 UnreadablePointer, 1 StructureUnreadable, not 2); the census test's own first draft double counted a form-scoped defect already folded into Report::defects by compose_form. 05-01-PLAN.md and ROADMAP.md are corrected to 429.
+- [Phase 05]: 05-07: ureq and sha2 are pinned to the exact versions 05-RESEARCH.md audited (=3.4.1, =0.11.0) as plain, non-workspace xtask dependencies.
+- [Phase 05]: 05-07: pin-corpus regenerates the whole manifest from parsed data and re-parses the rendered result before writing, preserving the header comment above the first table byte for byte, rather than appending text to the end.
+- [Phase 05]: 05-07: the human cleared the task 3 checkpoint by pinning map-editor-2d, passgen and transparency-2d. All three are already vendored under corpus/, so the set proves the fetch/hash/verify path end to end but adds no parser shape the gate does not already exercise; a later plan should add a real new shape (p-code, ActiveX/OCX, third party controls, packed, or a different service pack).
 
 ### Pending Todos
 
@@ -270,13 +274,23 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-13T14:22:28Z
-Stopped at: Phase 5 plan 05-01 complete (third severity, strict/salvage policy, --salvage on inspect and extract)
+Last session: 2026-09-13T15:08:29.755Z
+Stopped at: Completed 05-07-PLAN.md
 
 Plan 05-01 is done: 5 commits, cargo test --workspace at 887 passed, 0 failed,
-up from the 872 baseline this plan started at. Wave 1 also holds 05-07
-(the run-time corpus manifest and fetch tooling), independent of 05-01.
+up from the 872 baseline this plan started at.
 
-Next: `/gsd-execute-phase 5` to continue with 05-07, or straight to wave 2
-(05-02, 05-03, 05-06) once 05-07 lands, per ROADMAP.md's own wave order.
+Plan 05-07 is done: 4 commits (fetch-corpus, pin-corpus, three pinned
+programs, plan metadata), cargo test --workspace at 909 passed, 0 failed,
+up from the 887 baseline this plan started at. The task 3 checkpoint
+(gate="blocking-human") was cleared by the human, who pinned map-editor-2d,
+passgen and transparency-2d. All three are already vendored under corpus/,
+so the set proves the fetch/hash/verify path end to end but adds no new
+parser shape; a later plan should add one (p-code, ActiveX/OCX, third
+party controls, packed, or a different service pack).
+
+Wave 1 (05-01, 05-07) is now complete.
+
+Next: `/gsd-execute-phase 5` to continue with wave 2 (05-02, 05-03, 05-06),
+per ROADMAP.md's own wave order.
 Resume file: None
