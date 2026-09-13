@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: It writes a project
 status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-09-12T23:49:36.570Z"
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-09-13T00:20:46.765Z"
 last_activity: 2026-09-12
 last_activity_desc: Phase 04 execution started
-state_head: 7e69bde35a9f0485508a9e162f7e7d40cd64281e
+state_head: b6864c50e7811408b60ce1d8b67fdc993f26f8f3
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 45
-  completed_plans: 37
+  completed_plans: 38
   percent: 0
 ---
 
@@ -67,7 +67,7 @@ inferred.
 ## Current Position
 
 Phase: 04 (It writes a project) — EXECUTING
-Plan: 2 of 9
+Plan: 3 of 9
 Status: Ready to execute
 searches, six encodings across three corpus programs, never find the
 identifier a project file declares anywhere in the component table
@@ -140,6 +140,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 | Phase 03-forms P17 | single session | 3 tasks | 5 files |
 | Phase 03 P18 | single session | 3 tasks | 5 files |
 | Phase 04 P01 | 1 session | 3 tasks | 14 files |
+| Phase 04 P02 | 1 session | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -211,6 +212,9 @@ Recent decisions affecting current work:
 - [Phase 04]: Control names never go through the collision-resolving SafeNameIssuer; only the root control and every project-level (project/form/module/class) name share it, since a repeated control name inside one form is a legitimate VB6 control array told apart by Index, not a filename collision.
 - [Phase 04]: BlobRef.frx_offset copies the read-time PropertyValue::Blob.frx_offset rather than recomputing via a second BlobCursor pass in model.rs, since ProjectModel does not reorder anything relative to the read pass.
 - [Phase 04]: TDD RED for tasks 2 and 3 was run and observed but never committed as a separate failing commit: AGENTS.md requires the full gate (including cargo test --workspace) to pass before every commit and requires code and its tests in the same commit.
+- [Phase 04]: 04-02: FormattedValue carries four states (Line, Multi, Resource, Omit), not the two the plan's own opening line names, because a Position or a Font payload decomposes into several real named lines with no single .frm key of its own; collapsing them into the two-state design would have forced an incorrect Omit for fully recoverable control geometry and font data.
+- [Phase 04]: 04-02: The colour and enumeration formatting tables (COLOUR_PROPERTIES, ENUM_MEMBERS) are name-keyed and sit beside the reader's own payload type without widening it; the sixteen enumeration member names FILE-FORMATS.md section 3.5 lists were matched to their owning property this session by grepping every corpus .frm file for the exact line shape.
+- [Phase 04]: 04-02: Re-measured FRM-03's own corpus counts this session: 124 property records now decode to a name and a value, 683 report present and not decoded, over 807 total across six distinct names (BackColor, BorderStyle, Caption, Icon, Position, WindowState), not the 122/683/805/5 REQUIREMENTS.md states; the undecoded count is unchanged.
 
 ### Pending Todos
 
@@ -239,8 +243,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-12T23:49:36.543Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-09-13T00:20:33.097Z
+Stopped at: Completed 04-02-PLAN.md
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and
