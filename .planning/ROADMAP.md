@@ -565,7 +565,7 @@ and every crash it finds becomes a committed test that replays on stable Rust.
     code is the least exercised in the crate, so the fuzz target must call both
     modes, not one.
 
-**Plans**: 5/8 plans executed
+**Plans**: 6/8 plans executed
 
 Plans:
 **Wave 1**
@@ -581,7 +581,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 05-05-PLAN.md - `regressions.rs`, the stable replay, the count assertion, the owned seed, and the written crash-to-test procedure
+- [x] 05-05-PLAN.md - `regressions.rs`, the stable replay, the count assertion, the owned seed, and the written crash-to-test procedure
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -719,5 +719,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 2. The object graph | 10/10 | Complete    | 2026-09-11 |
 | 3. Forms | 18/18 | Complete    | 2026-09-11 |
 | 4. It writes a project | 9/9 | Complete    | 2026-09-13 |
-| 5. Hostility | 5/8 | In Progress|  |
+| 5. Hostility | 6/8 | In Progress|  |
 | 6. Version 1.0 | 0/5 | Not started | - |
