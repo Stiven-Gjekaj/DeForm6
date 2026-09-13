@@ -1,5 +1,5 @@
 ---
-status: partial
+status: complete
 phase: 04-it-writes-a-project
 source: [04-VERIFICATION.md]
 started: 2026-09-13
@@ -8,16 +8,15 @@ updated: 2026-09-13
 
 ## Current Test
 
-[testing paused - 1 item outstanding]
+[testing complete]
 
 ## Tests
 
 ### 1. Open a written project in the real VB6 IDE
 
 expected: The IDE opens the written `.vbp` with no fatal load error, or it writes a `.log` file beside the form that names the line and the message.
-result: blocked
-blocked_by: physical-device
-reason: "No Windows host with Visual Basic 6 is available. The human accepted this without running the test. Nobody has opened a written project in the IDE."
+result: skipped
+reason: "Waived by the human on 2026-09-13. No Windows host with Visual Basic 6 is available. Nobody has opened a written project in the VB6 IDE. The human chose to close the phase without this evidence. This is a waiver, not a pass: no part of this repository may state that the IDE opened a written project."
 
 Steps:
 
@@ -40,7 +39,7 @@ total: 1
 passed: 0
 issues: 0
 pending: 0
-skipped: 0
-blocked: 1
+skipped: 1
+blocked: 0
 
 ## Gaps
