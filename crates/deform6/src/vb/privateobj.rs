@@ -1041,6 +1041,35 @@ mod tests {
         );
     }
 
+    /// Plan 05-02, Task 2's audit of `ProcedureList::read`'s own
+    /// `Vec::with_capacity(object.proc_count)`: this test gives it a
+    /// `proc_count` no real `Object` this reader hands out could ever
+    /// carry, since `object.rs::bound_proc_count` already clamps it against
+    /// `lpProcNamesArray`'s own region before this file ever sees it. This
+    /// proves the site's own preceding `array.subregion` check is what
+    /// actually stops the over-large allocation, independent of that
+    /// upstream clamp: the site is bounded twice over, not bounded only
+    /// because nothing this crate builds could ever reach it with a large
+    /// value.
+    #[test]
+    fn a_proc_count_the_array_cannot_back_gives_the_no_name_array_state_and_no_allocation() {
+        let objs = objects(GRAYSCALE);
+        let mut fast_drawing = objs[2].clone();
+        assert_eq!(fast_drawing.name, "FastDrawing");
+        assert_eq!(fast_drawing.proc_count, 8);
+        fast_drawing.proc_count = 10_000_000;
+
+        let image = PeImage::parse(GRAYSCALE).unwrap();
+        let list = ProcedureList::read(&image, &fast_drawing);
+        assert_eq!(
+            list.procs,
+            ProcNames::NoNameArray {
+                proc_count: 10_000_000
+            }
+        );
+        assert!(list.defects().is_empty());
+    }
+
     /// `pdOpenSaveDialog` gives six slots and every one is `Private`: its
     /// source declares four `Private Declare Function` lines and two
     /// `Friend Function` members, and only `Public` survives here.
@@ -1432,6 +1461,30 @@ mod tests {
             cnt_events: 3,
             lp_func_type_info: Va::new(0),
             lp_events_type_info: Va::new(0),
+            lp_public_vars: Va::new(0),
+        };
+
+        assert_eq!(event_descriptor_addresses(&image, &private), Vec::new());
+    }
+
+    /// Plan 05-02, Task 2's audit of `event_descriptor_addresses`'s own
+    /// `Vec::with_capacity(usize::from(*cnt_events))`. `cnt_events` is a
+    /// `u16` read raw, with no upstream clamp anywhere in this codebase
+    /// (the module doc comment already records that the corpus never
+    /// carries a non-zero value): this site's own preceding
+    /// `array.subregion` check is the only thing that bounds it, and this
+    /// test proves it directly, with a mapped region far too small for the
+    /// declared count.
+    #[test]
+    fn a_cnt_events_the_array_cannot_back_gives_an_empty_list_and_no_allocation() {
+        let pointers = [0x0040_1000_u32];
+        let bytes = synthetic_image_with_event_pointers(&pointers);
+        let image = PeImage::parse(&bytes).unwrap();
+        let private = PrivateObj::Present {
+            cnt_public_vars: 0,
+            cnt_events: 0xFFFF,
+            lp_func_type_info: Va::new(0),
+            lp_events_type_info: Va::new(0x0040_1000),
             lp_public_vars: Va::new(0),
         };
 
