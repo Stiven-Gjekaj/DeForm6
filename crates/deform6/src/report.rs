@@ -305,7 +305,13 @@ fn item_for_property(property: &PropertyValue) -> Option<ReportItem> {
 /// directly out of the file, so this function never computes a new
 /// offset, it only anchors the item to one the reading side already
 /// recorded.
-fn with_header_evidence(mut item: ReportItem, report: &Report) -> ReportItem {
+///
+/// `pub(crate)`, not private: plan 04-08's `write::project` calls this
+/// directly on every item the individual writers (`write_vbp`,
+/// `write_form`, `write_cls`, `write_bas`) collect on their own, not only
+/// on the `model_items` this file's own [`build`] walks, so that every
+/// item in the shipped report carries evidence, per RPT-04.
+pub(crate) fn with_header_evidence(mut item: ReportItem, report: &Report) -> ReportItem {
     if item.evidence.is_empty() {
         item.evidence.push(Evidence {
             offset: report.header_offset.get(),

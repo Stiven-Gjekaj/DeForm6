@@ -292,6 +292,83 @@ fn two_calls_to_write_project_give_byte_identical_output_for_every_file() {
     assert_eq!(first.files, second.files);
 }
 
+// --- Plan 04-08: `write::project` wired to the full writers and to
+// `report::build`, so the shipped report carries real items and real
+// limits instead of the `items: []`/`limits: []` every prior plan in this
+// phase left in place. ---
+
+/// Roadmap success criterion 5: `report.json`'s own `items` array holds at
+/// least one item of confidence `inferred`, and every item carries a
+/// non-empty basis and at least one evidence record with a byte offset.
+#[test]
+fn the_written_reports_items_hold_a_real_inferred_path_and_every_item_carries_evidence() {
+    let project = written_project();
+
+    assert!(
+        !project.report.items.is_empty(),
+        "write::project must no longer ship items: []"
+    );
+
+    let inferred_paths: Vec<&str> = project
+        .report
+        .items
+        .iter()
+        .filter(|item| item.confidence == deform6::report::Confidence::Inferred)
+        .map(|item| item.path.as_str())
+        .collect();
+    assert!(
+        !inferred_paths.is_empty(),
+        "at least one item must be graded inferred, with a real path: {:?}",
+        project.report.items
+    );
+    for path in &inferred_paths {
+        assert!(
+            !path.is_empty(),
+            "an inferred item's own path must not be empty"
+        );
+    }
+
+    for item in &project.report.items {
+        assert!(
+            !item.basis.is_empty(),
+            "every item must carry a non-empty basis: {item:?}"
+        );
+        assert!(
+            !item.evidence.is_empty(),
+            "every item must carry at least one evidence record: {item:?}"
+        );
+    }
+}
+
+/// Roadmap named risk: the report must state that full recompilation did
+/// not run, and it must never imply the IDE opened this project.
+#[test]
+fn the_written_reports_limits_state_that_full_recompilation_did_not_run() {
+    let project = written_project();
+    assert!(
+        !project.report.limits.is_empty(),
+        "write::project must no longer ship limits: []"
+    );
+    assert!(
+        project
+            .report
+            .limits
+            .iter()
+            .any(|limit| limit.contains("recompilation did not run")),
+        "{:?}",
+        project.report.limits
+    );
+    assert!(
+        project
+            .report
+            .limits
+            .iter()
+            .any(|limit| limit.contains("never opened this project in the IDE")),
+        "a limit line must state, in plain words, that the IDE never opened this project: {:?}",
+        project.report.limits
+    );
+}
+
 // --- Plan 04-01, Task 3: `ProjectModel` observed on the tracer's own file --
 
 /// One assertion per new model fact plan 04-01 task 3 adds, all observed on
