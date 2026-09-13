@@ -1,0 +1,44 @@
+#!/bin/sh
+# Refuse a commit message that names a tool as its author.
+#
+# AGENTS.md and the user's global CLAUDE.md both say the same thing: a human is
+# the writer of each commit. Do not add a session link, a co-author line, or a
+# footer that says a tool made the text.
+#
+# A rule that a human must apply by hand is not a rule. This hook applies it.
+#
+# Installed 2026-09-13, after 18 commits reached the remote with a
+# "Claude-Session:" footer and needed a history rewrite to remove.
+
+msg_file="$1"
+
+# Strip comment lines before the check, so git's own commit template cannot
+# trip the hook.
+body=$(grep -v '^#' "$msg_file")
+
+found=""
+
+printf '%s' "$body" | grep -qiE '^[[:space:]]*Claude-Session:' && \
+  found="${found}  Claude-Session: footer\n"
+
+printf '%s' "$body" | grep -qiE '^[[:space:]]*Co-Authored-By:' && \
+  found="${found}  Co-Authored-By: line\n"
+
+printf '%s' "$body" | grep -qiE 'claude\.ai/code|chatgpt\.com/(c|share)/' && \
+  found="${found}  a link to an assistant session\n"
+
+printf '%s' "$body" | grep -qiE 'generated with [[:alnum:]]|written by (claude|an? (ai|assistant|agent|llm))|authored by (claude|an? (ai|assistant|agent))' && \
+  found="${found}  a statement that a tool wrote the text\n"
+
+if [ -n "$found" ]; then
+  printf 'COMMIT REFUSED: the message names a tool as its author.\n\n' >&2
+  printf 'Found:\n' >&2
+  printf "$found" >&2
+  printf '\nA commit shows that a human read the code. That human answers\n' >&2
+  printf 'questions about the code six months later. Remove the line and\n' >&2
+  printf 'commit again.\n\n' >&2
+  printf 'See AGENTS.md and the global CLAUDE.md.\n' >&2
+  exit 1
+fi
+
+exit 0
