@@ -355,8 +355,21 @@ fn suffixed(base: &str, suffix: u32) -> String {
 /// applies once the name reaches [`encode_windows_1252`]: `é` (`U+00E9`)
 /// encodes to the single byte `0xE9`, never to the two UTF-8 bytes Rust's
 /// own `str::len` would count.
+///
+/// The `<= 0xFF` bound makes this legality guarantee hold on its own,
+/// unconditionally: without it, a character above `U+00FF` that
+/// `is_alphanumeric` still accepts survives this check unchanged, and only
+/// [`encode_windows_1252`], called afterward inside [`SafeName::new`],
+/// replaces it with `?`. That `?` is neither a legal VB6 identifier
+/// character nor a legal Windows file-name character, so the guarantee this
+/// function exists to give would depend on an invariant enforced several
+/// modules away (every string `crate::vb::Report` carries is itself decoded
+/// with `char::from(byte)`, so it can never hold a character above `U+00FF`
+/// in practice) rather than on this function itself. [`SafeName::new`] is a
+/// `pub fn` any future caller, including a fuzz harness, can call with an
+/// arbitrary `&str`.
 fn is_legal_identifier_char(ch: char) -> bool {
-    ch.is_alphanumeric() || ch == '_'
+    (ch.is_alphanumeric() && (ch as u32) <= 0xFF) || ch == '_'
 }
 
 // --- Plan 04-01, Task 3: the complete `ProjectModel` -----------------------
@@ -1096,6 +1109,33 @@ mod tests {
             40,
             "the encoded byte count must be 40, matching the character count, never the 41 byte \
              UTF-8 length Rust's own str::len would give"
+        );
+    }
+
+    #[test]
+    fn safe_name_rejects_a_character_above_u_00ff_and_never_produces_a_question_mark() {
+        // WR-02: `char::is_alphanumeric` alone accepts any Unicode letter
+        // or digit, not only this crate's own Latin-1-as-code-point range
+        // (0x00 to 0xFF). Before this fix, such a character survived the
+        // legality pass unchanged, and only `encode_windows_1252`, called
+        // afterward inside `SafeName::new`, replaced it with '?' -- a
+        // character that is neither a legal VB6 identifier character nor a
+        // legal Windows file-name character.
+        let (name, faults) = SafeName::new("\u{100}bc", NameKind::Control);
+        assert!(
+            !name.as_str().contains('?'),
+            "a SafeName must never contain '?': {:?}",
+            name.as_str()
+        );
+        assert!(
+            faults.iter().any(|fault| matches!(
+                fault,
+                NameFault::IllegalCharacter {
+                    position: 0,
+                    character: '\u{100}'
+                }
+            )),
+            "{faults:?}"
         );
     }
 
