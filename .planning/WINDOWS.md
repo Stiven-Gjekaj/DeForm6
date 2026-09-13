@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 9
 waived_count: 0
-fixed_count: 3
-total_count: 12
-last_updated: 2026-09-13T01:44:46.257Z
+fixed_count: 4
+total_count: 13
+last_updated: 2026-09-13T03:34:36.370Z
 ---
 
 # Broken Windows Ledger
@@ -26,7 +26,8 @@ last_updated: 2026-09-13T01:44:46.257Z
 | 9 | 03 | deviation | crates/deform6/src/vb/controltree.rs |  | frmPassGen.frm's own menuHelp section (corpus/public-domain/PassGen/PassGen.exe) exposes a third scope-byte shape the two-level-deep-close rule (finding 7, fixed) does not settle: menuAbout, itself a sibling within an already-open menu, genuinely opens its own child. Its own trailing separator at file offset 0x21d0 is a bare 0xFF 0x02 with the parent stack top a menu and zero pops, byte for byte identical to the confirmed sibling case (frmUUID2, HexScroll.exe), but needs the opposite role. No byte in the header or property stream distinguishes the two. The walk still succeeds for frmPassGen (every control is present, the byte count tiles exactly), but menuAboutForm, menuSeparatorC and menuWebsite recover with menuHelp as their parent instead of menuAbout. Documented in crates/deform6/src/vb/controltree.rs's own read_scope_run doc comment; needs research beyond scope-byte measurement (a property-opcode-aware signal or a different source) to settle. | open |  | 2026-09-10T22:25:56.340Z |  |
 | 10 | 04 | deviation | crates/deform6/src/write/vbp.rs |  | write_vbp never writes a Reference= line (a type library dependency, e.g. stdole2.tlb). Report carries no field for the header's type-library reference table; nothing in Phase 1-3 reads it. Every corpus .vbp that declares one (32 of 32 read this session) loses that one line against the committed source. Out of this plan's own scope (files_modified is vbp.rs alone, and no read_first names a reference-reading source); a future plan needs a new Report field and a new reader before this line can be written. | open |  | 2026-09-13T00:45:18.740Z |  |
 | 11 | 04 | deviation | crates/deform6/src/write/model.rs |  | from_report's generated-control-array-index report item uses the literal path /forms/*/controls/<name> (a literal asterisk, not the real form name), a pre-existing shape from plan 04-01 that does not match RPT-02's own per-object path contract. Plan 04-06 merges this item unchanged: model.rs is explicitly off-limits to this plan (files_modified is report.rs alone), so the fix belongs to whichever future plan next touches write::model::from_report. | open |  | 2026-09-13T01:44:46.195Z |  |
-| 12 | 04 | deviation | crates/deform6/src/write/mod.rs |  | write::project (run by deform6-cli's run_extract today) still ships items: [] and limits: [] in the shipped report.json: it never calls report::build, matching the staged pattern plans 04-01/04-02/04-03/04-05 already established for their own full writers (write_vbp vs write_vbp_thin, and so on). report::build is complete and tested directly (crate::vb::inspect + write::model::from_report + report::build, exercised over Fast_Flames.exe), but wiring it into write::project is out of this plan's own files_modified (report.rs alone); plan 04-08, which already owns Command::Extract's full wiring, is the natural place to switch write::project over to the complete writers and report::build together. | open |  | 2026-09-13T01:44:46.257Z |  |
+| 12 | 04 | deviation | crates/deform6/src/write/mod.rs |  | write::project (run by deform6-cli's run_extract today) still ships items: [] and limits: [] in the shipped report.json: it never calls report::build, matching the staged pattern plans 04-01/04-02/04-03/04-05 already established for their own full writers (write_vbp vs write_vbp_thin, and so on). report::build is complete and tested directly (crate::vb::inspect + write::model::from_report + report::build, exercised over Fast_Flames.exe), but wiring it into write::project is out of this plan's own files_modified (report.rs alone); plan 04-08, which already owns Command::Extract's full wiring, is the natural place to switch write::project over to the complete writers and report::build together. | fixed |  | 2026-09-13T01:44:46.257Z | 2026-09-13T03:34:21.792Z |
+| 13 | 04 | deviation | crates/deform6/src/write/mod.rs |  | write::project merges four independently-built ReportItem sources (write_vbp, write_form per form, write_cls/write_bas per code object, and report::build's own model_items plus its separate per-property confidence grading) through one shared PathIssuer, so a colliding path is caught, but the two property-level derivations are not unified: a control whose stream carries an Undecoded or unreadable Blob property earns one item from the writer that omitted its own line (at the control's own path) and a second, independent item from report::build's own item_for_property walk (at the more specific property path). Both are correct and both carry evidence; this is redundant, not wrong, and is documented on write::project's own doc comment. A future plan should have report::build consume the items the writers already collected instead of re-deriving property confidence a second time. | open |  | 2026-09-13T03:34:36.370Z |  |
 
 ````json
 [
@@ -169,9 +170,21 @@ last_updated: 2026-09-13T01:44:46.257Z
     "file": "crates/deform6/src/write/mod.rs",
     "line": null,
     "description": "write::project (run by deform6-cli's run_extract today) still ships items: [] and limits: [] in the shipped report.json: it never calls report::build, matching the staged pattern plans 04-01/04-02/04-03/04-05 already established for their own full writers (write_vbp vs write_vbp_thin, and so on). report::build is complete and tested directly (crate::vb::inspect + write::model::from_report + report::build, exercised over Fast_Flames.exe), but wiring it into write::project is out of this plan's own files_modified (report.rs alone); plan 04-08, which already owns Command::Extract's full wiring, is the natural place to switch write::project over to the complete writers and report::build together.",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-13T01:44:46.257Z",
+    "resolved_at": "2026-09-13T03:34:21.792Z"
+  },
+  {
+    "id": 13,
+    "kind": "deviation",
+    "phase": "04",
+    "file": "crates/deform6/src/write/mod.rs",
+    "line": null,
+    "description": "write::project merges four independently-built ReportItem sources (write_vbp, write_form per form, write_cls/write_bas per code object, and report::build's own model_items plus its separate per-property confidence grading) through one shared PathIssuer, so a colliding path is caught, but the two property-level derivations are not unified: a control whose stream carries an Undecoded or unreadable Blob property earns one item from the writer that omitted its own line (at the control's own path) and a second, independent item from report::build's own item_for_property walk (at the more specific property path). Both are correct and both carry evidence; this is redundant, not wrong, and is documented on write::project's own doc comment. A future plan should have report::build consume the items the writers already collected instead of re-deriving property confidence a second time.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-13T03:34:36.370Z",
     "resolved_at": null
   }
 ]

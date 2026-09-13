@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: It writes a project
 status: executing
-stopped_at: Completed 04-07-PLAN.md
-last_updated: "2026-09-13T02:59:53.571Z"
+stopped_at: Completed 04-08-PLAN.md
+last_updated: "2026-09-13T03:39:42.117Z"
 last_activity: 2026-09-12
 last_activity_desc: Phase 04 execution started
-state_head: 27cb754e2bb5134fcd6cf85550e316183a3cdbb0
+state_head: 757dd1f8abe35ababb8606dc342400dd8fa5dcf6
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 45
-  completed_plans: 43
+  completed_plans: 44
   percent: 0
 ---
 
@@ -67,7 +67,7 @@ inferred.
 ## Current Position
 
 Phase: 04 (It writes a project) — EXECUTING
-Plan: 8 of 9
+Plan: 9 of 9
 Status: Ready to execute
 searches, six encodings across three corpus programs, never find the
 identifier a project file declares anywhere in the component table
@@ -146,6 +146,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 | Phase 04 P06 | 1 session | 3 tasks | 1 files |
 | Phase 04 P04 | 1 session | 3 tasks | 1 files |
 | Phase 04 P07 | 1 session | 2 tasks | 3 files |
+| Phase 04 P08 | 1 session | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -232,6 +233,8 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-04: write_form reads FormModel::tree_refused (already decided by write::model) rather than re-reading a defect list itself; tree_refused_item reads only Defect::site.offset, never DefectKind, so the report and the written file can never disagree about which forms refused.
 - [Phase 04]: 04-04: The builtin opcode table decodes a resource blob end to end for exactly two corpus programs (Fast_Flames.exe, SubReality_WinsockSample.exe); the multi-blob corpus fixtures (FormPhysics, frmTransparency) are proved at the BlobCursor level directly, not through the full write_form pipeline.
 - [Phase 04]: 04-07: write_code_region's own signature changed to call uncertainty_comments itself (items + a path prefix), rather than taking a pre-built comment line list, so the comment emitter has exactly one call site; this necessarily touched write_form's own call in frm.rs, one file outside this plan's own files_modified list, since a caller of a changed shared function signature must be updated for the crate to compile.
+- [Phase 04]: 04-08: write::project wired to the full writers (write_vbp, write_form, write_cls, write_bas) and report::build, closing the thin-vs-full gap every prior 04-* plan left staged; the four thin writers and their own helpers removed as dead code.
+- [Phase 04]: 04-08: extract's containment check (plan_writes) lexically normalises the joined candidate path with no syscall, since the file does not exist yet to canonicalize, and compares its own resolved parent against the resolved output directory by value, never a string prefix.
 
 ### Pending Todos
 
@@ -260,8 +263,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-13T02:59:53.543Z
-Stopped at: Completed 04-07-PLAN.md
+Last session: 2026-09-13T03:39:42.089Z
+Stopped at: Completed 04-08-PLAN.md
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and
