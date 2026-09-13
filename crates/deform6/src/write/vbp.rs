@@ -12,7 +12,10 @@ use crate::vb::Report;
 use crate::vb::classify::ObjectKind;
 use crate::vb::project::Component;
 
-use super::model::{CodeKind, CodeModel, FormModel, LineWriter, NameKind, ProjectModel, SafeName};
+use super::model::{
+    CodeKind, CodeModel, FormModel, LineWriter, NameKind, ProjectModel, SafeName, Startup,
+};
+use super::values::escape_inline_string;
 
 /// Writes the thin `.vbp` plan 04-01's tracer needs.
 ///
@@ -77,17 +80,85 @@ pub(crate) fn write_vbp_thin(report: &Report) -> Vec<u8> {
 // Plan 04-03, Task 1: the component lines, in recovered order.
 // ---------------------------------------------------------------------
 
-/// Writes the complete `.vbp`. Task 1 gives the project type key and the
-/// component lines; a later task in this same plan adds the 34 key setting
-/// block between them and the transaction server section, per section 1.7's
-/// own rule for the file's overall shape.
+/// The 34 setting keys `.planning/research/FILE-FORMATS.md` section 1.4
+/// gives, in the corpus order. Held as an ordered constant, not as a
+/// sequence of statements, so a reader can compare this list against the
+/// document line by line, and so a test can assert the whole order in one
+/// line.
+///
+/// This list never names `ResFile32`: the resource script key names a
+/// `.res` file this phase never writes, and a build task is documented to
+/// fail when that key is present and the file is not.
+pub const SETTING_ORDER: [&str; 34] = [
+    "IconForm",
+    "Startup",
+    "HelpFile",
+    "Title",
+    "ExeName32",
+    "Command32",
+    "Name",
+    "HelpContextID",
+    "CompatibleMode",
+    "MajorVer",
+    "MinorVer",
+    "RevisionVer",
+    "AutoIncrementVer",
+    "ServerSupportFiles",
+    "VersionComments",
+    "VersionCompanyName",
+    "VersionProductName",
+    "VersionLegalCopyright",
+    "VersionFileDescription",
+    "CompilationType",
+    "OptimizationType",
+    "FavorPentiumPro(tm)",
+    "CodeViewDebugInfo",
+    "NoAliasing",
+    "BoundsCheck",
+    "OverflowCheck",
+    "FlPointCheck",
+    "FDIVCheck",
+    "UnroundedFP",
+    "StartMode",
+    "Unattended",
+    "Retained",
+    "ThreadPerObject",
+    "MaxNumberOfThreads",
+];
+
+/// The ten compiler flags this phase can never recover from a native
+/// executable, and the IDE default this writer gives each one.
+///
+/// `FavorPentiumPro(tm)` is the one flag whose IDE default is not zero:
+/// Visual Basic 6 favors the Pentium Pro instruction path in a new,
+/// unmodified project. Every other flag defaults to the safe, checks-on
+/// state `corpus/public-domain/LockWorkStation/LockWorkStation.vbp` itself
+/// carries, an unmodified project this repository can read directly rather
+/// than a guess.
+const DEFAULT_COMPILER_FLAGS: [(&str, i32); 10] = [
+    ("CompilationType", 0),
+    ("OptimizationType", 0),
+    ("FavorPentiumPro(tm)", -1),
+    ("CodeViewDebugInfo", 0),
+    ("NoAliasing", 0),
+    ("BoundsCheck", 0),
+    ("OverflowCheck", 0),
+    ("FlPointCheck", 0),
+    ("FDIVCheck", 0),
+    ("UnroundedFP", 0),
+];
+
+/// Writes the complete `.vbp`: the component lines in recovered order, the
+/// 34 key setting block, and the transaction server section, plus every
+/// report item a default value this function chose produced.
 ///
 /// `report` supplies the facts no [`ProjectModel`] carries: the recovered
 /// object table order (interleaving forms, modules and classes exactly as
-/// the executable declared them, per [`Report::objects`]) and the external
-/// component table. `model` supplies every [`SafeName`] this function
-/// writes: no line here builds a file name itself, and every one comes
-/// from [`SafeName::as_str`] or [`SafeName::file_name`].
+/// the executable declared them, per [`Report::objects`]), the title, the
+/// executable name and the help file `01-05-SUMMARY.md` settled, and the
+/// external component table. `model` supplies every [`SafeName`] this
+/// function writes: no line here builds a file name itself, and every one
+/// comes from [`SafeName::as_str`] or [`SafeName::file_name`].
 ///
 /// # Determinism
 ///
@@ -112,6 +183,8 @@ pub fn write_vbp(report: &Report, model: &ProjectModel) -> (Vec<u8>, Vec<ReportI
             evidence: Vec::new(),
         });
     }
+
+    write_settings(&mut writer, report, model, &mut items);
 
     writer.push_line("[MS Transaction Server]");
     writer.push_line("AutoRefresh=1");
@@ -238,6 +311,114 @@ fn object_line(component: &Component) -> Option<(String, ReportItem)> {
     Some((line, item))
 }
 
+// ---------------------------------------------------------------------
+// Plan 04-03, Task 2: the setting block, the startup key, and every
+// default named as a default.
+// ---------------------------------------------------------------------
+
+/// Writes a quoted setting line, refusing a value that holds a line break
+/// rather than writing one.
+///
+/// T-4-05: a raw carriage return or line feed inside a quoted value would
+/// end the line early, and the bytes after it would parse as the start of
+/// a new key. A value that holds one is refused: an empty value is written
+/// instead, and the refusal is recorded as a report item, never silently
+/// dropped.
+fn write_quoted_setting(
+    writer: &mut LineWriter,
+    items: &mut Vec<ReportItem>,
+    key: &str,
+    value: &str,
+) {
+    if value.contains('\r') || value.contains('\n') {
+        writer.push_line(&format!("{key}=\"\""));
+        items.push(ReportItem {
+            path: crate::report::META_PATH.to_owned(),
+            confidence: Confidence::Unrecoverable,
+            basis: format!(
+                "the recovered {key} value holds a line break; writing it inline would end \
+                 the line early, so an empty value was written instead"
+            ),
+            evidence: Vec::new(),
+        });
+    } else {
+        writer.push_line(&format!("{key}={}", escape_inline_string(value)));
+    }
+}
+
+/// Writes the 34 key setting block, in [`SETTING_ORDER`]'s own order.
+///
+/// `IconForm` and `Startup` both take the model's own [`Startup`] decision:
+/// the executable does not declare which form's icon becomes the EXE icon
+/// any more than it declares a startup form, and [`super::model::from_report`]
+/// already recorded the one inferred choice this repository makes for
+/// both. `IconForm` is omitted, along with `Startup`'s own form name, when
+/// the model holds no form at all: there is no form left to name.
+///
+/// `Title`, `ExeName32` and `HelpFile` take the values Phase 1 resolved at
+/// the disputed header offsets `0x58` (`oProjectExeName`) and `0x5C`
+/// (`oProjectTitle`) — settled in `01-05-SUMMARY.md` — and the help file
+/// field beside them: these are proven, not chosen, and this function
+/// writes them verbatim rather than a default.
+///
+/// The five version string keys (`VersionComments` and the four optional
+/// ones) are never written: this repository recovers none of the five from
+/// a native executable, and the corpus itself omits an empty version
+/// string rather than writing an empty pair of quotes.
+fn write_settings(
+    writer: &mut LineWriter,
+    report: &Report,
+    model: &ProjectModel,
+    items: &mut Vec<ReportItem>,
+) {
+    match &model.startup {
+        Startup::Form(name) => {
+            writer.push_line(&format!("IconForm=\"{}\"", name.as_str()));
+            writer.push_line(&format!("Startup=\"{}\"", name.as_str()));
+        }
+        Startup::SubMain => {
+            writer.push_line("Startup=\"Sub Main\"");
+        }
+    }
+
+    write_quoted_setting(writer, items, "HelpFile", &report.help_file);
+    write_quoted_setting(writer, items, "Title", &report.title);
+    write_quoted_setting(
+        writer,
+        items,
+        "ExeName32",
+        &format!("{}.exe", report.exe_name),
+    );
+    writer.push_line("Command32=\"\"");
+    write_quoted_setting(writer, items, "Name", model.name.as_str());
+    writer.push_line("HelpContextID=\"0\"");
+    writer.push_line("CompatibleMode=\"0\"");
+    writer.push_line("MajorVer=1");
+    writer.push_line("MinorVer=0");
+    writer.push_line("RevisionVer=0");
+    writer.push_line("AutoIncrementVer=0");
+    writer.push_line("ServerSupportFiles=0");
+
+    for (key, value) in DEFAULT_COMPILER_FLAGS {
+        writer.push_line(&format!("{key}={value}"));
+        items.push(ReportItem {
+            path: crate::report::META_PATH.to_owned(),
+            confidence: Confidence::Inferred,
+            basis: format!(
+                "a native executable does not carry the {key} compiler flag; the IDE default \
+                 is written"
+            ),
+            evidence: Vec::new(),
+        });
+    }
+
+    writer.push_line("StartMode=0");
+    writer.push_line("Unattended=0");
+    writer.push_line("Retained=0");
+    writer.push_line("ThreadPerObject=0");
+    writer.push_line("MaxNumberOfThreads=1");
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -248,7 +429,7 @@ fn object_line(component: &Component) -> Option<(String, ReportItem)> {
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::write_vbp;
+    use super::{SETTING_ORDER, write_vbp};
     use crate::read::region::Off;
     use crate::vb::classify::ObjectKind;
     use crate::vb::controltree::ControlKind;
@@ -460,5 +641,94 @@ mod tests {
                 .any(|item| item.basis.contains("no component line")),
             "{items:?}"
         );
+    }
+
+    // --- Task 2: the setting block, the startup key, and every default -----
+
+    #[test]
+    fn setting_order_names_the_thirty_four_keys_in_section_1_4s_own_order() {
+        assert_eq!(SETTING_ORDER.len(), 34);
+        assert_eq!(SETTING_ORDER[0], "IconForm");
+        assert_eq!(SETTING_ORDER[33], "MaxNumberOfThreads");
+        assert_eq!(SETTING_ORDER[19], "CompilationType");
+    }
+
+    #[test]
+    fn a_quoted_keys_value_is_wrapped_in_double_quotes_and_a_bare_keys_value_is_not() {
+        let objects = vec![minimal_object("frmMain", ObjectKind::Form)];
+        let forms = vec![minimal_form("frmMain")];
+        let report = minimal_report(objects, forms, Vec::new());
+        let (model, _items) = from_report(&report, &[]);
+        let (bytes, _items) = write_vbp(&report, &model);
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.contains("HelpFile=\"\""));
+        assert!(text.contains("CompilationType=0"));
+        assert!(!text.contains("CompilationType=\"0\""));
+    }
+
+    #[test]
+    fn the_startup_keys_value_is_a_name_one_of_the_written_form_lines_brings_in() {
+        let objects = vec![minimal_object("frmMain", ObjectKind::Form)];
+        let forms = vec![minimal_form("frmMain")];
+        let report = minimal_report(objects, forms, Vec::new());
+        let (model, _items) = from_report(&report, &[]);
+        let (bytes, _items) = write_vbp(&report, &model);
+        assert!(lines(&bytes).contains(&"Startup=\"frmMain\"".to_owned()));
+        assert!(lines(&bytes).contains(&"Form=frmMain.frm".to_owned()));
+    }
+
+    #[test]
+    fn a_model_with_zero_forms_writes_the_main_procedure_literal_for_startup() {
+        let report = minimal_report(Vec::new(), Vec::new(), Vec::new());
+        let (model, _items) = from_report(&report, &[]);
+        let (bytes, _items) = write_vbp(&report, &model);
+        assert!(lines(&bytes).contains(&"Startup=\"Sub Main\"".to_owned()));
+        assert!(
+            !lines(&bytes)
+                .iter()
+                .any(|line| line.starts_with("IconForm="))
+        );
+    }
+
+    #[test]
+    fn every_compiler_flag_produces_one_report_item_of_confidence_inferred() {
+        let report = minimal_report(Vec::new(), Vec::new(), Vec::new());
+        let (model, _items) = from_report(&report, &[]);
+        let (_bytes, items) = write_vbp(&report, &model);
+        let inferred_flag_items = items
+            .iter()
+            .filter(|item| item.basis.contains("compiler flag"))
+            .count();
+        assert_eq!(inferred_flag_items, 10, "{items:?}");
+    }
+
+    #[test]
+    fn the_last_two_lines_are_the_section_header_and_its_one_key() {
+        let report = minimal_report(Vec::new(), Vec::new(), Vec::new());
+        let (model, _items) = from_report(&report, &[]);
+        let (bytes, _items) = write_vbp(&report, &model);
+        let all = lines(&bytes);
+        let len = all.len();
+        assert_eq!(
+            all.get(len.saturating_sub(2)),
+            Some(&"[MS Transaction Server]".to_owned())
+        );
+        assert_eq!(
+            all.get(len.saturating_sub(1)),
+            Some(&"AutoRefresh=1".to_owned())
+        );
+    }
+
+    #[test]
+    fn title_exe_name_and_help_file_come_from_the_report_verbatim() {
+        let mut report = minimal_report(Vec::new(), Vec::new(), Vec::new());
+        report.title = "FlameTest".to_owned();
+        report.exe_name = "Fast_Flames".to_owned();
+        report.help_file = "help.hlp".to_owned();
+        let (model, _items) = from_report(&report, &[]);
+        let (bytes, _items) = write_vbp(&report, &model);
+        assert!(lines(&bytes).contains(&"Title=\"FlameTest\"".to_owned()));
+        assert!(lines(&bytes).contains(&"ExeName32=\"Fast_Flames.exe\"".to_owned()));
+        assert!(lines(&bytes).contains(&"HelpFile=\"help.hlp\"".to_owned()));
     }
 }
