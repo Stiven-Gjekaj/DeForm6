@@ -201,7 +201,9 @@ Deferred. Tracked, not in this roadmap.
 | FRM-05 | Phase 3 | Deferred to Phase 4 |
 | FRM-06 | Phase 3 | Complete |
 | VER-06 | Phase 3 | Complete |
-| WRT-01 to WRT-07 | Phase 4 | Pending |
+| WRT-01, WRT-02 | Phase 4 | Complete |
+| WRT-03 | Phase 4 | Open, unit proved only |
+| WRT-04 to WRT-07 | Phase 4 | Complete |
 | RPT-01 to RPT-06 | Phase 4 | Complete |
 | SAF-01 to SAF-05 | Phase 5 | Pending |
 
@@ -210,6 +212,13 @@ the result into the released documentation.
 
 VER-05 pins the recovery ratio. Phase 2 introduces the file and the two failure
 messages. Phase 3 and Phase 4 each raise the pinned numbers.
+
+WRT-03 stays open on purpose. Phase 4 writes the byte level column layout and
+proves it with targeted unit tests against real corpus samples in
+`crates/deform6/src/write/frm.rs`. The corpus wide structural check cannot
+confirm it, because `crates/deform6/tests/support/frm.rs` trims each line by
+design and does not read the exact indentation. To close WRT-03, a check must
+read the raw `.frm` bytes directly.
 
 SAF-01 and SAF-04 are proved in Phase 5. The mechanism that makes them possible
 is built in Phase 1: the lint wall, `#![forbid(unsafe_code)]`, and the `Region`
