@@ -75,7 +75,38 @@ pub const CRON_RUNS: u32 = 500_000;
 /// reasoned choice, recorded as an open finding in `.planning/WINDOWS.md`,
 /// not a silent flag: `CRON_RUNS` is the number that keeps the leak this
 /// flag stops reporting below `RSS_LIMIT_MB` on its own.
+///
+/// This number reaches the run twice, and both are needed. It goes on the
+/// libFuzzer command line as `-detect_leaks`, which stops libFuzzer
+/// checking during a run. It also goes into `ASAN_OPTIONS`, which is what
+/// LeakSanitizer reads when the process exits. See `asan_options`.
 pub const DETECT_LEAKS: u32 = 0;
+
+/// The `ASAN_OPTIONS` value both campaigns run under.
+///
+/// `-detect_leaks=0` is a libFuzzer flag and it is not enough on its own.
+/// That flag stops libFuzzer checking for leaks during a run.
+/// AddressSanitizer runs LeakSanitizer again when the process exits, and
+/// that second check reads `ASAN_OPTIONS`, never the libFuzzer command
+/// line. A run that passes only the flag still fails at exit on the
+/// deliberate `crate::error::damaged` leak, and libFuzzer writes the last
+/// input as a crash artifact. That is how an empty input became a
+/// `crash-` file naming no real defect.
+///
+/// This is a platform difference, and it is why no local run showed it.
+/// LeakSanitizer does not run on macOS. It runs on Linux, so the first
+/// real CI run found it and no run on the author's own machine could.
+///
+/// An existing value is kept and this option is appended, because
+/// `ASAN_OPTIONS` is colon separated and the last value for a key wins.
+fn asan_options(existing: Option<&str>) -> String {
+    match existing {
+        Some(value) if !value.is_empty() => {
+            format!("{value}:detect_leaks={DETECT_LEAKS}")
+        }
+        _ => format!("detect_leaks={DETECT_LEAKS}"),
+    }
+}
 
 /// Runs `cargo` with `args`, giving a loud, named failure when the process
 /// exits non-zero.
@@ -88,6 +119,10 @@ pub const DETECT_LEAKS: u32 = 0;
 fn run_cargo(args: &[String]) -> Result<(), String> {
     let status = Command::new("cargo")
         .args(args)
+        .env(
+            "ASAN_OPTIONS",
+            asan_options(std::env::var("ASAN_OPTIONS").ok().as_deref()),
+        )
         .status()
         .map_err(|err| format!("running cargo {args:?}: {err}"))?;
     if status.success() {
@@ -170,7 +205,7 @@ mod tests {
         reason = "a test builds the state it needs and must fail loudly when that state is wrong"
     )]
 
-    use super::{CRON_RUNS, DETECT_LEAKS, FUZZ_DIR, PR_MAX_TOTAL_TIME, RSS_LIMIT_MB};
+    use super::{CRON_RUNS, DETECT_LEAKS, FUZZ_DIR, PR_MAX_TOTAL_TIME, RSS_LIMIT_MB, asan_options};
 
     /// `CRON_RUNS` must keep the leak `DETECT_LEAKS` stops reporting below
     /// `RSS_LIMIT_MB` on its own, using the same 237 byte measured
@@ -192,6 +227,37 @@ mod tests {
     #[test]
     fn detect_leaks_is_off() {
         assert_eq!(DETECT_LEAKS, 0);
+    }
+
+    /// The libFuzzer flag alone leaves LeakSanitizer running at process
+    /// exit. The first real CI run failed this way on Linux, where
+    /// LeakSanitizer runs and where a local macOS run cannot show it.
+    #[test]
+    fn asan_options_turns_the_exit_leak_check_off_when_nothing_is_set() {
+        assert_eq!(asan_options(None), "detect_leaks=0");
+    }
+
+    #[test]
+    fn asan_options_turns_the_exit_leak_check_off_when_the_variable_is_empty() {
+        assert_eq!(asan_options(Some("")), "detect_leaks=0");
+    }
+
+    /// `ASAN_OPTIONS` is colon separated and the last value for a key
+    /// wins, so a caller's own options survive and this one still applies.
+    #[test]
+    fn asan_options_keeps_what_the_caller_already_set() {
+        assert_eq!(
+            asan_options(Some("abort_on_error=1")),
+            "abort_on_error=1:detect_leaks=0"
+        );
+    }
+
+    #[test]
+    fn asan_options_wins_over_a_caller_that_asked_for_leak_detection() {
+        assert_eq!(
+            asan_options(Some("detect_leaks=1")),
+            "detect_leaks=1:detect_leaks=0"
+        );
     }
 
     #[test]
