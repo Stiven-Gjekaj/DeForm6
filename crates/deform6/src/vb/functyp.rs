@@ -1303,6 +1303,34 @@ mod tests {
         }
     }
 
+    /// Plan 05-02, Task 2's audit of `FuncTypeWalk::read`'s own
+    /// `Vec::with_capacity(usize::try_from(object.proc_count).unwrap_or(0))`.
+    /// `object.proc_count` is already clamped upstream by
+    /// `object.rs::bound_proc_count` against `lpProcNamesArray`'s own
+    /// region, but this file reads a different array,
+    /// `lpFuncTypeInfo`, and never re-derives its own bound from that
+    /// clamp; this test proves the site's own preceding
+    /// `array.subregion` check against `lpFuncTypeInfo`'s region is what
+    /// actually stops the over-large allocation, with a `proc_count` no
+    /// real `Object` this reader hands out could ever carry.
+    #[test]
+    fn a_proc_count_the_array_cannot_back_gives_the_no_func_type_array_state() {
+        let image = PeImage::parse(GRAYSCALE).unwrap();
+        let mut object = find_object(GRAYSCALE, "FastDrawing");
+        let private = private_obj_of(&image, &object);
+        assert_eq!(object.proc_count, 8);
+        object.proc_count = 10_000_000;
+
+        let walk = FuncTypeWalk::read(&image, &object, &private);
+        assert_eq!(
+            walk.signatures,
+            PrototypeList::NoFuncTypeArray {
+                proc_count: 10_000_000
+            }
+        );
+        assert!(walk.defects().is_empty());
+    }
+
     /// `GetImageWidth`'s descriptor gives the measured `arg_size` (`0x08`,
     /// not the plan's inherited `4`: see the module doc comment),
     /// `b_flags` bit 0 set, `const_ffff` `0xFFFF`, `nul1` `0`, and a
