@@ -290,8 +290,23 @@ pub enum DefectKind {
 pub enum Severity {
     /// The file is not what it claims. Nothing downstream is meaningful.
     Fatal,
-    /// One item is unreadable. The rest of the graph still stands.
+    /// The reader continued the read by using a value the file does not
+    /// state.
+    ///
+    /// A fact in the report rests on an assumption this run made. Strict
+    /// mode refuses a defect at this severity, because the run cannot name
+    /// the value without inventing it.
     Recoverable,
+    /// A defect that costs one item and puts nothing in its place.
+    ///
+    /// The report holds one fewer fact, and every fact it does hold came
+    /// from the file. `Tolerated` is what lets strict mode refuse a
+    /// damaged file without refusing an undamaged one: every defect the 44
+    /// vendored corpus programs raise carries this severity, never
+    /// `Recoverable`, so a strict run that refuses on `Recoverable` and
+    /// continues past `Tolerated` refuses exactly the files that assumed a
+    /// value, and none that only lost one.
+    Tolerated,
 }
 
 impl DefectKind {
@@ -314,49 +329,45 @@ impl DefectKind {
             Self::PastEndOfFile { .. } => Severity::Fatal,
             // A spine pointer that maps nowhere stops the walk.
             Self::UnmappedAddress { .. } => Severity::Fatal,
-            // A count is a leaf. The parser reads the items it reaches and
-            // the rest of the graph still stands.
+            // The reader clamps the count to a value the file does not
+            // state, so a fact downstream rests on that assumption.
             Self::ImplausibleCount { .. } => Severity::Recoverable,
-            // An overlap makes one address ambiguous. DeForm6 owns one
-            // predicate and picks one section, so the walk continues.
+            // The reader picks one of two sections that claim the same
+            // bytes, a choice the file does not state.
             Self::SectionOverlap { .. } => Severity::Recoverable,
-            // One string is unreadable. The item that holds it keeps its
-            // other fields.
+            // The reader ends the string at a bound the file does not
+            // state, so the text is not what the file says.
             Self::NoNulTerminator { .. } => Severity::Recoverable,
-            // Two counts disagree. The parser takes the smaller one and
-            // reports the disagreement.
+            // The reader takes the smaller of two disagreeing counts, a
+            // choice the file does not state.
             Self::CountMismatch { .. } => Severity::Recoverable,
-            // A leaf pointer inside an item, not the one spine pointer that
-            // reaches the item. The item that holds it keeps its other
-            // fields, so the walk that found it continues.
-            Self::UnreadablePointer { .. } => Severity::Recoverable,
-            // A control with no name still carries its type. The tree keeps
-            // the control.
-            Self::EmptyName { .. } => Severity::Recoverable,
-            // The corpus has never proven a non-zero high byte meaningful,
-            // but the value is still used. The control keeps every field.
-            Self::IndexHighByteSet { .. } => Severity::Recoverable,
-            // One string property is unreadable under either encoding. The
-            // cursor still advances to the declared end, so the rest of the
-            // block is not lost to it.
-            Self::UnrecoverableString { .. } => Severity::Recoverable,
-            // A class name with no dot keeps its whole text as the library
-            // part. The control is not lost; only the join key is degraded.
+            // The item keeps its other fields, and the pointer's target is
+            // simply absent: nothing is invented in its place.
+            Self::UnreadablePointer { .. } => Severity::Tolerated,
+            // The control keeps its type, and no name is invented in its
+            // place.
+            Self::EmptyName { .. } => Severity::Tolerated,
+            // The control keeps every field; the high byte costs nothing
+            // and invents nothing.
+            Self::IndexHighByteSet { .. } => Severity::Tolerated,
+            // The cursor still advances to the declared end, and no text
+            // is guessed in its place.
+            Self::UnrecoverableString { .. } => Severity::Tolerated,
+            // The reader treats the whole text as the library part, a
+            // split the file does not state.
             Self::ClassNameNoDot { .. } => Severity::Recoverable,
-            // A GUIDlength outside the two documented values loses only the
-            // textual GUID. The component keeps every other field.
-            Self::GuidLengthUnexpected { .. } => Severity::Recoverable,
-            // An unexpected reserved value does not stop the header's other
-            // three fields from reading.
-            Self::OcxReservedFieldUnexpected { .. } => Severity::Recoverable,
-            // A blob too small to hold its own header is one unreadable
-            // property. The control block around it keeps every other
-            // field.
-            Self::BlobLenTooSmall { .. } => Severity::Recoverable,
-            // A form, a control's property stream, or a control's own event
-            // table that refuses costs that one item. Every other form and
-            // every other control in the same report still stands.
-            Self::StructureUnreadable { .. } => Severity::Recoverable,
+            // The component loses only its textual identifier; every other
+            // field still reads.
+            Self::GuidLengthUnexpected { .. } => Severity::Tolerated,
+            // The other three header fields still read; nothing replaces
+            // the reserved value.
+            Self::OcxReservedFieldUnexpected { .. } => Severity::Tolerated,
+            // The one property is reported unreadable, and nothing is
+            // written in its place.
+            Self::BlobLenTooSmall { .. } => Severity::Tolerated,
+            // The one form, control or table is reported refused, and
+            // nothing is written in its place.
+            Self::StructureUnreadable { .. } => Severity::Tolerated,
         }
     }
 }
@@ -612,7 +623,7 @@ mod tests {
     }
 
     #[test]
-    fn a_fatal_kind_is_fatal_and_a_recoverable_kind_is_recoverable() {
+    fn a_fatal_kind_is_fatal_a_recoverable_kind_is_recoverable_and_a_tolerated_kind_is_tolerated() {
         let fatal = [
             DefectKind::BadMagic {
                 offset: 0,
@@ -654,13 +665,50 @@ mod tests {
                 expected: 0,
                 other_field: "wTotalObjects",
             },
-            DefectKind::UnreadablePointer { offset: 0, va: 0 },
+            DefectKind::ClassNameNoDot { offset: 0 },
         ];
         for kind in recoverable {
             assert_eq!(
                 kind.severity(),
                 Severity::Recoverable,
-                "{kind:?} must be recoverable, because the rest of the graph still stands"
+                "{kind:?} must be recoverable, because a fact downstream rests on a value \
+                 the reader assumed"
+            );
+        }
+
+        let tolerated = [
+            DefectKind::UnreadablePointer { offset: 0, va: 0 },
+            DefectKind::EmptyName { offset: 0 },
+            DefectKind::IndexHighByteSet { offset: 0, high: 0 },
+            DefectKind::UnrecoverableString {
+                offset: 0,
+                declared_len: 0,
+                first_encoding: "utf-16",
+                second_encoding: "ansi",
+            },
+            DefectKind::GuidLengthUnexpected {
+                offset: 0,
+                value: 0,
+            },
+            DefectKind::OcxReservedFieldUnexpected {
+                offset: 0,
+                value: 0,
+            },
+            DefectKind::BlobLenTooSmall {
+                offset: 0,
+                blob_len: 0,
+            },
+            DefectKind::StructureUnreadable {
+                offset: 0,
+                reason: String::new(),
+            },
+        ];
+        for kind in tolerated {
+            assert_eq!(
+                kind.severity(),
+                Severity::Tolerated,
+                "{kind:?} must be tolerated, because it costs one item and invents nothing \
+                 in its place"
             );
         }
     }

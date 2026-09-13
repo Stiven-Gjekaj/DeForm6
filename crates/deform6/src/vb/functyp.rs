@@ -1331,11 +1331,11 @@ mod tests {
         assert_eq!((prototype.member_id >> 16) & 0xFFFF, 0x6003);
     }
 
-    /// A record whose `const_ffff` is not `0xFFFF` produces a recoverable
+    /// A record whose `const_ffff` is not `0xFFFF` produces a tolerated
     /// defect naming the offset, and the record is reported unrecoverable
     /// rather than parsed. Behaviour 4.
     #[test]
-    fn a_record_whose_const_ffff_is_wrong_is_unrecoverable_with_a_recoverable_defect() {
+    fn a_record_whose_const_ffff_is_wrong_is_unrecoverable_with_a_tolerated_defect() {
         let image = PeImage::parse(GRAYSCALE).unwrap();
         let object = find_object(GRAYSCALE, "FastDrawing");
         let private = private_obj_of(&image, &object);
@@ -1368,12 +1368,12 @@ mod tests {
 
         assert_eq!(walk.defects().len(), 1);
         let defect = &walk.defects()[0];
-        assert_eq!(defect.kind.severity(), Severity::Recoverable);
+        assert_eq!(defect.kind.severity(), Severity::Tolerated);
         assert_eq!(defect.site.offset, u32::try_from(at).unwrap());
     }
 
     /// With the descriptor pointer patched to an address in no section, the
-    /// procedure keeps its name and reports no prototype, and a recoverable
+    /// procedure keeps its name and reports no prototype, and a tolerated
     /// defect names the address. Behaviour 5.
     #[test]
     fn a_descriptor_pointer_in_no_section_keeps_the_name_and_reports_no_prototype() {
@@ -1415,7 +1415,7 @@ mod tests {
 
         assert_eq!(walk.defects().len(), 1);
         let defect = &walk.defects()[0];
-        assert_eq!(defect.kind.severity(), Severity::Recoverable);
+        assert_eq!(defect.kind.severity(), Severity::Tolerated);
         assert!(matches!(
             defect.kind,
             crate::error::DefectKind::UnreadablePointer { va, .. } if va == nowhere

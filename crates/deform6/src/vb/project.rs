@@ -1857,7 +1857,7 @@ mod tests {
         assert_eq!(table.components[0].guid_text, None);
         assert_eq!(table.defects().len(), 1);
         let defect = &table.defects()[0];
-        assert_eq!(defect.kind.severity(), Severity::Recoverable);
+        assert_eq!(defect.kind.severity(), Severity::Tolerated);
         assert!(matches!(
             defect.kind,
             DefectKind::GuidLengthUnexpected { value: 40, .. }

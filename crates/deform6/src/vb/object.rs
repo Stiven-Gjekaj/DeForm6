@@ -596,7 +596,7 @@ mod tests {
 
         assert_eq!(table.defects().len(), 1);
         let defect = &table.defects()[0];
-        assert_eq!(defect.kind.severity(), Severity::Recoverable);
+        assert_eq!(defect.kind.severity(), Severity::Tolerated);
         assert!(matches!(
             defect.kind,
             DefectKind::UnreadablePointer { va, .. } if va == nowhere

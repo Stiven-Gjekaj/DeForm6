@@ -11,8 +11,12 @@
 //! refuses still holds the evidence of what it saw. The failure message and
 //! the Phase 4 report read the same value.
 //!
-//! A hostile file cannot reach a salvage path in a strict run, because no
-//! parse site holds a branch on the mode to reach it with.
+//! Both modes read the same bytes. The mode decides the disposition of the
+//! finished read, never its route, so only the disposition differs between a
+//! strict run and a salvage run over the same file. This is why the defect
+//! list the two modes collect must be the same: a run records every defect
+//! it meets before the policy in `record` decides whether that defect
+//! refuses or continues.
 //!
 //! [`Mode::Salvage`] has no command line route in Phase 1. The `--salvage`
 //! flag arrives in Phase 5. The arm is written and tested now, because
@@ -24,9 +28,12 @@ use crate::error::{Defect, Error, Severity};
 /// How much damage a run accepts before it refuses.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
-    /// Any defect refuses the file. This is the default in Phase 1.
+    /// A `Recoverable` defect refuses the file. A `Tolerated` defect does
+    /// not, because it costs one item and invents nothing. This is the
+    /// default.
     Strict,
-    /// A recoverable defect gives a fallback and the run continues.
+    /// A `Recoverable` defect gives a fallback and the run continues. A
+    /// `Tolerated` defect always did, in both modes.
     Salvage,
 }
 
@@ -57,6 +64,13 @@ impl Journal {
     ///
     /// `Fatal` refuses in both modes. `Recoverable` refuses in
     /// [`Mode::Strict`] and gives back `fallback` in [`Mode::Salvage`].
+    /// `Tolerated` gives back `fallback` in both modes, because a
+    /// `Tolerated` defect costs one item and asks nothing of the reader in
+    /// its place.
+    ///
+    /// The match holds one arm per pair of severity and mode, six in all,
+    /// and no wildcard arm: a fourth severity would fail to compile here
+    /// until somebody decides its policy in both modes.
     ///
     /// The push happens before the match. That is what makes the defect
     /// present on the path that refuses as well as on the path that
@@ -64,9 +78,12 @@ impl Journal {
     pub fn record<T>(&mut self, defect: Defect, fallback: T) -> Result<T, Error> {
         self.defects.push(defect.clone());
         match (defect.kind.severity(), self.mode) {
-            (Severity::Fatal, _) => Err(Error::Refused(defect)),
+            (Severity::Fatal, Mode::Strict) => Err(Error::Refused(defect)),
+            (Severity::Fatal, Mode::Salvage) => Err(Error::Refused(defect)),
             (Severity::Recoverable, Mode::Strict) => Err(Error::Refused(defect)),
             (Severity::Recoverable, Mode::Salvage) => Ok(fallback),
+            (Severity::Tolerated, Mode::Strict) => Ok(fallback),
+            (Severity::Tolerated, Mode::Salvage) => Ok(fallback),
         }
     }
 }
@@ -120,6 +137,18 @@ mod tests {
         a_recoverable_defect_at(0x0600)
     }
 
+    /// A defect whose kind is tolerated, at the offset the caller names.
+    fn a_tolerated_defect_at(offset: u32) -> Defect {
+        Defect {
+            site: a_site(),
+            kind: DefectKind::UnreadablePointer { offset, va: 0x2000 },
+        }
+    }
+
+    fn a_tolerated_defect() -> Defect {
+        a_tolerated_defect_at(0x0700)
+    }
+
     #[test]
     fn a_fatal_defect_refuses_in_strict_mode() {
         let mut journal = Journal::new(Mode::Strict);
@@ -166,9 +195,43 @@ mod tests {
     }
 
     #[test]
-    fn a_defect_is_recorded_in_all_four_cases() {
+    fn a_tolerated_defect_gives_back_the_fallback_in_strict_mode() {
+        let mut journal = Journal::new(Mode::Strict);
+        let outcome = journal.record(a_tolerated_defect(), FALLBACK);
+        assert!(
+            outcome.is_ok(),
+            "a tolerated defect never refuses, not even in strict mode: {outcome:?}"
+        );
+        assert_eq!(
+            outcome.ok(),
+            Some(FALLBACK),
+            "the value that comes back must be the fallback that went in"
+        );
+    }
+
+    #[test]
+    fn a_tolerated_defect_gives_back_the_fallback_in_salvage_mode() {
+        let mut journal = Journal::new(Mode::Salvage);
+        let outcome = journal.record(a_tolerated_defect(), FALLBACK);
+        assert!(
+            outcome.is_ok(),
+            "a tolerated defect never refuses: {outcome:?}"
+        );
+        assert_eq!(
+            outcome.ok(),
+            Some(FALLBACK),
+            "the value that comes back must be the fallback that went in"
+        );
+    }
+
+    #[test]
+    fn a_defect_is_recorded_in_every_pair_of_severity_and_mode() {
         for mode in [Mode::Strict, Mode::Salvage] {
-            for defect in [a_fatal_defect(), a_recoverable_defect()] {
+            for defect in [
+                a_fatal_defect(),
+                a_recoverable_defect(),
+                a_tolerated_defect(),
+            ] {
                 let wanted = format!("{}", defect.kind);
                 let mut journal = Journal::new(mode);
                 let _ = journal.record(defect, FALLBACK);
