@@ -321,6 +321,38 @@ fn with_header_evidence(mut item: ReportItem, report: &Report) -> ReportItem {
     item
 }
 
+/// Builds the limits list every run states in plain words.
+///
+/// `opcode_table_summary` is the one line naming which opcode table this
+/// run used and how many entries it holds, the same summary
+/// `deform6-cli`'s own `load_opcode_table` already builds. This function
+/// does not choose that wording a second time; it takes the caller's own
+/// summary of the table this run actually used, so the report never
+/// disagrees with the line the command line already printed.
+///
+/// The first line states, in plain words, that full recompilation did not
+/// run: it needs the Visual Basic 6 IDE on Windows, this run had neither,
+/// and a structural check ran in its place. It never claims the IDE
+/// opened this project, the one claim the roadmap's own named risk
+/// forbids.
+fn build_limits(opcode_table_summary: &str) -> Vec<String> {
+    vec![
+        "Full recompilation did not run. It needs the Visual Basic 6 IDE on \
+         Windows, and this run had neither. A structural check ran in its \
+         place, and it never opened this project in the IDE."
+            .to_owned(),
+        opcode_table_summary.to_owned(),
+        "Every inline string this run wrote inline holds 97 encoded bytes \
+         or fewer, the proven floor of an open threshold. A longer string \
+         became a resource reference instead of a guessed cutoff."
+            .to_owned(),
+        "This run assumes a Western code page. Every character above \
+         U+00FF was replaced with a question mark and reported, never \
+         guessed at a different code page."
+            .to_owned(),
+    ]
+}
+
 /// Builds the complete [`ProjectReport`] one run of
 /// [`crate::write::project`] produces.
 ///
@@ -330,17 +362,23 @@ fn with_header_evidence(mut item: ReportItem, report: &Report) -> ReportItem {
 /// control's own properties in stream order, adding one item for every
 /// property that earns one. The defect array is attached whole, from
 /// [`Report::defects`], never filtered: a run that continued past a
-/// defect still reports it, per RPT-05.
+/// defect still reports it, per RPT-05. `opcode_table_summary` flows
+/// straight into [`build_limits`].
 ///
 /// # Determinism
 ///
 /// Every collection this function walks is already an ordered `Vec`, in
 /// [`Report`]'s or [`ProjectModel`]'s own recovered order, and every path
 /// this function issues comes from one [`PathIssuer`], so two calls over
-/// the same `report`, `model` and `model_items` give the same
-/// [`ProjectReport`], field for field.
+/// the same `report`, `model`, `model_items` and `opcode_table_summary`
+/// give the same [`ProjectReport`], field for field.
 #[must_use]
-pub fn build(report: &Report, model: &ProjectModel, model_items: Vec<ReportItem>) -> ProjectReport {
+pub fn build(
+    report: &Report,
+    model: &ProjectModel,
+    model_items: Vec<ReportItem>,
+    opcode_table_summary: &str,
+) -> ProjectReport {
     let mut paths = PathIssuer::new();
     let mut items = Vec::with_capacity(model_items.len());
 
@@ -368,7 +406,7 @@ pub fn build(report: &Report, model: &ProjectModel, model_items: Vec<ReportItem>
     ProjectReport {
         items,
         defects: report.defects.clone(),
-        limits: Vec::new(),
+        limits: build_limits(opcode_table_summary),
     }
 }
 
@@ -382,16 +420,25 @@ pub fn build(report: &Report, model: &ProjectModel, model_items: Vec<ReportItem>
 mod tests {
     use super::{
         Confidence, Evidence, META_PATH, PathIssuer, ProjectReport, ReportItem, build,
-        item_for_property, path_for_code, path_for_control, path_for_form, path_for_property,
-        property_word, with_header_evidence,
+        build_limits, item_for_property, path_for_code, path_for_control, path_for_form,
+        path_for_property, property_word, with_header_evidence,
     };
     use crate::error::{Defect, DefectKind, Site};
     use crate::read::region::Off;
     use crate::vb::controltree::ControlKind;
+    use crate::vb::opcodes::OpcodeTable;
     use crate::vb::propstream::PropertyValue;
     use crate::vb::runtime::Runtime;
     use crate::vb::{ControlReport, FormReport, ObjectReport, Report};
     use crate::write::model::{CodeKind, NameKind, SafeName};
+
+    /// `corpus/vb6-code/Fire-effect/Fast_Flames.exe`, this task's own
+    /// query and determinism program: the same corpus program
+    /// `extract_tracer.rs` already exercises end to end.
+    const FAST_FLAMES: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/vb6-code/Fire-effect/Fast_Flames.exe"
+    ));
 
     #[test]
     fn confidence_serialises_to_the_three_lower_case_words() {
@@ -672,7 +719,12 @@ mod tests {
         };
         let report = minimal_report(Vec::new(), Vec::new(), vec![defect.clone(), defect]);
         let (model, items) = crate::write::model::from_report(&report, &[]);
-        let built = build(&report, &model, items);
+        let built = build(
+            &report,
+            &model,
+            items,
+            "Opcode table: test fixture, 0 entries",
+        );
         assert_eq!(built.defects.len(), report.defects.len());
         assert_eq!(built.defects, report.defects);
     }
@@ -693,7 +745,12 @@ mod tests {
         };
         let report = minimal_report(Vec::new(), vec![form], Vec::new());
         let (model, items) = crate::write::model::from_report(&report, &[]);
-        let built = build(&report, &model, items);
+        let built = build(
+            &report,
+            &model,
+            items,
+            "Opcode table: test fixture, 0 entries",
+        );
 
         assert!(!built.items.is_empty());
         for item in &built.items {
@@ -716,6 +773,91 @@ mod tests {
                 .any(|item| item.confidence == Confidence::Unrecoverable
                     && item.basis.contains("opcode 7")),
             "{:?}",
+            built.items
+        );
+    }
+
+    // --- Plan 04-06, Task 3: byte identical across two runs, and the
+    // limits stated in the file ------------------------------------------
+
+    /// Runs `inspect`, builds the model and the report over `Fast_Flames.exe`
+    /// with the builtin opcode table, the same table `deform6-cli` uses
+    /// when the user supplies no `--opcode-table` of its own.
+    fn built_report_for_fast_flames() -> ProjectReport {
+        let table = OpcodeTable::builtin();
+        let report =
+            crate::vb::inspect(FAST_FLAMES, &table).expect("Fast_Flames.exe must inspect cleanly");
+        let (model, items) = crate::write::model::from_report(&report, FAST_FLAMES);
+        let summary = format!("Opcode table: builtin subset, {} entries", table.len());
+        build(&report, &model, items, &summary)
+    }
+
+    #[test]
+    fn serialising_a_built_report_twice_gives_two_byte_identical_strings() {
+        let built = built_report_for_fast_flames();
+        let first = built.to_json();
+        let second = built.to_json();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn the_whole_write_path_run_twice_over_fast_flames_gives_byte_identical_report_files() {
+        let first_bytes = built_report_for_fast_flames().to_json().into_bytes();
+        let second_bytes = built_report_for_fast_flames().to_json().into_bytes();
+        assert_eq!(first_bytes, second_bytes);
+    }
+
+    #[test]
+    fn two_runs_over_fast_flames_give_an_equal_project_report() {
+        let first = built_report_for_fast_flames();
+        let second = built_report_for_fast_flames();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn the_limits_list_states_that_full_recompilation_did_not_run() {
+        let limits = build_limits("Opcode table: test fixture, 0 entries");
+        assert!(
+            limits.iter().any(|line| line.contains("did not run")),
+            "{limits:?}"
+        );
+    }
+
+    #[test]
+    fn the_limits_list_names_the_opcode_table_the_run_used() {
+        let summary = "Opcode table: builtin subset, 74 entries";
+        let limits = build_limits(summary);
+        assert!(limits.iter().any(|line| line == summary), "{limits:?}");
+    }
+
+    #[test]
+    fn the_limits_list_never_implies_the_ide_opened_the_project() {
+        let limits = build_limits("Opcode table: test fixture, 0 entries");
+        for line in &limits {
+            assert!(
+                !line.to_lowercase().contains("the ide opened"),
+                "a limit line must never claim the IDE opened this project: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn build_limits_is_never_empty() {
+        assert!(!build_limits("Opcode table: test fixture, 0 entries").is_empty());
+    }
+
+    #[test]
+    fn a_query_for_inferred_items_returns_paths_for_fast_flames_exe() {
+        let built = built_report_for_fast_flames();
+        let inferred_paths: Vec<&str> = built
+            .items
+            .iter()
+            .filter(|item| item.confidence == Confidence::Inferred)
+            .map(|item| item.path.as_str())
+            .collect();
+        assert!(
+            !inferred_paths.is_empty(),
+            "Fast_Flames.exe must produce at least one inferred item: {:?}",
             built.items
         );
     }
