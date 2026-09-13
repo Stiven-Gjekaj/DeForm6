@@ -49,6 +49,7 @@
 mod ratios;
 
 mod fetch_corpus;
+mod fuzz;
 mod opcode_table;
 
 use std::path::Path;
@@ -74,6 +75,8 @@ fn run(args: Vec<String>) -> i32 {
         }
         Some("fetch-corpus") => fetch_corpus::run(args.get(1..).unwrap_or(&[])),
         Some("pin-corpus") => fetch_corpus::run_pin(args.get(1..).unwrap_or(&[])),
+        Some("fuzz-pr") => fuzz::run_pr(args.get(1..).unwrap_or(&[])),
+        Some("fuzz-cron") => fuzz::run_cron(args.get(1..).unwrap_or(&[])),
         Some("--help" | "-h") => {
             println!("{USAGE}");
             0
@@ -89,7 +92,7 @@ fn run(args: Vec<String>) -> i32 {
     }
 }
 
-const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | derive-opcode-table | fetch-corpus | pin-corpus <name> <url>";
+const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | derive-opcode-table | fetch-corpus | pin-corpus <name> <url> | fuzz-pr | fuzz-cron";
 
 /// The number of corpus programs `update-ratios` refuses to write fewer
 /// than. Matches `EXPECTED_PROGRAM_COUNT` in `crates/deform6/tests/ratios.rs`
