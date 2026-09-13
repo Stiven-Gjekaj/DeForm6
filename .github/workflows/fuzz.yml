@@ -1,0 +1,129 @@
+# The fuzz jobs.
+#
+# AGENTS.md states that fuzzing is part of the gate and not an extra. This
+# file is that gate: a bounded campaign on every pull request, seeded from
+# real Visual Basic 6 executables and from every already fixed crash.
+#
+# Neither job names a fuzzer flag of its own. `crates/xtask/src/fuzz.rs`
+# owns every flag (the fuzz directory, the resident set limit, the leak
+# detection setting), so a person editing this file cannot forget one.
+#
+# Neither job runs the three gate commands. `gate.yml` owns those, and a
+# second copy of them here would drift from that one.
+name: fuzz
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz-pr:
+    name: bounded fuzz run on every pull request
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      # `rust-toolchain.toml` names the channel and the two components. The
+      # version is not repeated here, because two pins drift apart.
+      - name: Install the toolchain that rust-toolchain.toml names
+        run: rustup show
+
+      - name: Install the nightly toolchain beside the pinned one
+        run: rustup toolchain install nightly --profile minimal
+
+      - name: Install the fuzz subcommand
+        run: cargo install cargo-fuzz --version 0.13.2
+
+      - name: Report the versions
+        run: |
+          rustc --version
+          rustc +nightly --version
+          cargo fuzz --version
+
+      - name: Cache the cargo registry and the target directories
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+            crates/deform6/fuzz/target
+          key: ${{ runner.os }}-cargo-fuzz-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'crates/deform6/fuzz/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-fuzz-
+
+      # Two sources, copied in, never moved and never edited: both are
+      # committed source, and the fuzz corpus directory is not tracked.
+      #
+      # The first source is every vendored executable under corpus/. A
+      # coverage guided fuzzer that starts from an empty corpus spends most
+      # of its budget learning that a file begins with the two letters MZ.
+      # Starting from a real Visual Basic 6 executable spends the budget on
+      # the parts of the reader a real file actually reaches.
+      #
+      # The second source is every file under
+      # crates/deform6/tests/regressions/. A crash that was found once and
+      # fixed is the exact input a later change is most likely to break
+      # again. Seeding from it puts the fix at the front of the campaign,
+      # so a regression is caught by the fuzzer and not only by the stable
+      # replay in crates/deform6/tests/regressions.rs.
+      #
+      # Each copied file gets a unique name: the corpus holds several files
+      # with the same base name in different directories, and a flat copy
+      # without one would overwrite them. The step fails when either count
+      # is zero, because a seed step that silently copies nothing turns a
+      # seeded campaign into an unseeded one, and a single combined count
+      # would hide a zero on either side.
+      - name: Seed the fuzz corpus from the corpus and the regressions
+        run: |
+          set -euo pipefail
+          mkdir -p crates/deform6/fuzz/corpus/parse
+
+          corpus_count=0
+          while IFS= read -r -d '' file; do
+            corpus_count=$((corpus_count + 1))
+            cp "$file" "crates/deform6/fuzz/corpus/parse/corpus-${corpus_count}-$(basename "$file")"
+          done < <(find corpus -iname '*.exe' -print0)
+          echo "seeded ${corpus_count} files from corpus/"
+          if [ "${corpus_count}" -eq 0 ]; then
+            echo "refusing an unseeded campaign: found 0 files under corpus/"
+            exit 1
+          fi
+
+          regression_count=0
+          while IFS= read -r -d '' file; do
+            regression_count=$((regression_count + 1))
+            cp "$file" "crates/deform6/fuzz/corpus/parse/regression-${regression_count}-$(basename "$file")"
+          done < <(find crates/deform6/tests/regressions -type f -print0)
+          echo "seeded ${regression_count} files from crates/deform6/tests/regressions/"
+          if [ "${regression_count}" -eq 0 ]; then
+            echo "refusing an unseeded campaign: found 0 files under crates/deform6/tests/regressions/"
+            exit 1
+          fi
+
+      # No fuzzer flag of its own. Every flag lives in the xtask
+      # subcommand: a call typed by hand can forget the fuzz directory
+      # flag and create a second fuzz directory, which is the named risk
+      # this subcommand exists to close.
+      - name: Run the bounded fuzz campaign
+        run: cargo run -p xtask -- fuzz-pr
+
+      # Runs only on failure. A crash reaches a human as an uploaded
+      # artifact and never as a commit from CI: the manual verification
+      # this phase records is a human reading the input before it enters
+      # crates/deform6/tests/regressions/.
+      - name: Upload the crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-pr-artifacts
+          path: crates/deform6/fuzz/artifacts/parse/
+          if-no-files-found: ignore
