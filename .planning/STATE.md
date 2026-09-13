@@ -2,19 +2,19 @@
 gsd_state_version: "1.0"
 current_phase: 5
 current_phase_name: Hostility
-current_plan: 5
+current_plan: 6
 status: executing
-stopped_at: Completed 05-03-PLAN.md
-last_updated: "2026-09-13T16:44:46.783Z"
+stopped_at: Completed 05-06-PLAN.md
+last_updated: "2026-09-13T17:27:55.123Z"
 last_activity: 2026-09-13
-last_activity_desc: "Plan 05-03 executed - the fuzz crate, the target driving both modes, and the bounded xtask fuzz-pr/fuzz-cron campaigns"
-state_head: f9ee26bc8fa61318914bcdcfafabe7146c9f2118
+last_activity_desc: Plan 05-03 executed - the fuzz crate, the target driving both modes, and the bounded xtask fuzz-pr/fuzz-cron campaigns
+state_head: 42132d54e8c06f3bf88179ad059906182946c67e
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 53
-  completed_plans: 49
-  percent: 92
+  completed_plans: 50
+  percent: 94
 ---
 
 ## Continue
@@ -68,13 +68,13 @@ inferred.
 ## Current Position
 
 Phase: 5 (Hostility) - EXECUTING
-Current Plan: 5
+Current Plan: 6
 Total Plans in Phase: 8
-Plan: 05-01, 05-02, 05-03 and 05-07 complete; wave 2 continues (05-06 next)
+Plan: 05-01, 05-02, 05-03, 05-06 and 05-07 complete (waves 1 and 2 done); wave 3 next (05-05)
 Status: Ready to execute
-Last activity: 2026-09-13 - Plan 05-03 executed - the fuzz crate, the target driving deform6::inspect/write::project in both Mode::Strict and Mode::Salvage, and the bounded xtask fuzz-pr/fuzz-cron campaigns
+Last activity: 2026-09-13 - Plan 05-06 executed - the deterministic fuzz_smoke mutation sweep, and the PathIssuer/SafeNameIssuer O(n^2) collision-handling fix it found
 
-Progress: [█████████░] 92% of the 53 written plans, which is 49 of 53
+Progress: [█████████░] 94% of the 53 written plans, which is 50 of 53
 
 ## Performance Metrics
 
@@ -136,6 +136,7 @@ Progress: [█████████░] 92% of the 53 written plans, which is
 | Phase 05 P07 | 1 session | 3 tasks | 5 files |
 | Phase 05 P02 | 1 session | 3 tasks | 6 files |
 | Phase 05 P03 | 1 session | 3 tasks | 7 files |
+| Phase 05-hostility P06 | 45min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -236,6 +237,7 @@ Recent decisions affecting current work:
 - [Phase 5]: The success-criterion-4 end to end assertion runs at GuiTable::walk, not through inspect(): a synthetic image refuses earlier (no runtime import), and a patched real corpus file refuses on lStructSize before the ImplausibleCount defect reaches Journal::record, in both modes.
 - [Phase 5]: Task 1 (nightly toolchain, cargo-fuzz) was already satisfied before this executor started; the fuzz crate was generated with cargo fuzz init --fuzzing-workspace true rather than hand written
 - [Phase 5]: CRON_RUNS set to 500000, measured against the 237 byte worst case crate::error::damaged message, a safety factor of roughly 18 below the resident set limit
+- [Phase 5]: PathIssuer and SafeNameIssuer now use a HashSet plus a per-key next-suffix cache instead of a linearly scanned Vec, closing an O(n^2) DoS the fuzz_smoke sweep found (one mutated input took over two minutes before the fix, well under a second after).
 
 ### Pending Todos
 
@@ -264,8 +266,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-13T16:44:46.751Z
-Stopped at: Completed 05-03-PLAN.md
+Last session: 2026-09-13T17:27:55.092Z
+Stopped at: Completed 05-06-PLAN.md
 
 Plan 05-01 is done: 5 commits, cargo test --workspace at 887 passed, 0 failed,
 up from the 872 baseline this plan started at.
