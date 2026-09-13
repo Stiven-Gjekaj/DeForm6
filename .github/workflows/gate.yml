@@ -85,3 +85,15 @@ jobs:
       # audited list the script holds.
       - name: Prove the capacity wall
         run: sh scripts/prove-capacity-wall.sh
+
+      # The three walls above all catch a shape a person writes by hand.
+      # None catches a hash keyed container, because a HashMap is ordinary
+      # Rust and every lint accepts it. What it breaks is the one thing the
+      # gate cannot see: RPT-01 and RPT-05 ask for a byte identical report,
+      # and a hash table iterated once puts its own order into the output.
+      # The determinism tests pass until the day that order differs. Phase 4
+      # wrote this rule as a source assertion in two plan files, which runs
+      # once, on the day that plan runs; plan 05-06 then broke it for four
+      # commits. This step is that rule where it runs every time.
+      - name: Prove the ordered output wall
+        run: sh scripts/prove-ordered-output-wall.sh
