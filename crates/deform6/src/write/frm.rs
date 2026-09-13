@@ -9,7 +9,7 @@
 //! [`BlobCursor`]'s own doc comment for why an independent computation
 //! drifts.
 
-use crate::error::Refusal;
+use crate::error::{Defect, Refusal};
 use crate::report::{Confidence, Evidence, ReportItem};
 use crate::vb::controltree::ControlKind;
 use crate::vb::frx::{self, BlobCursor};
@@ -517,6 +517,42 @@ fn control_report_path(form: &FormModel, control: &ControlModel, index: usize) -
     }
 }
 
+/// Builds the report item a form whose own control tree walk refused
+/// earns: `unrecoverable`, at the form's own path key (a reader of a
+/// refused form does not know what its controls would have been called,
+/// so a path keyed on a control would be unreachable), with the byte
+/// offset the reading side's own [`DefectKind::StructureUnreadable`]
+/// defect named. Gives offset `0` when `defects` names no such defect at
+/// all: this should never happen for a form whose own
+/// [`FormModel::tree_refused`] is `true`, since that flag is itself
+/// decided from the presence of exactly this defect, but a fallback is
+/// still cheaper than a panic on a fact this file did not itself decide.
+fn tree_refused_item(form: &FormModel, defects: &[Defect]) -> ReportItem {
+    // `site.offset` carries the same byte offset every defect kind names,
+    // so the byte offset comes from `Defect::site` alone: this file never
+    // matches on `DefectKind`'s own variants to decide anything, the same
+    // discipline `form.tree_refused` (decided once, by `write::model`)
+    // already applies to the refusal itself.
+    let offset = defects
+        .iter()
+        .find(|defect| defect.site.structure == "ControlTree")
+        .map_or(0, |defect| defect.site.offset);
+
+    ReportItem {
+        path: crate::report::path_for_form(&form.name),
+        confidence: Confidence::Unrecoverable,
+        basis: "this form's own control tree walk refused; every control fact for it is \
+                unrecoverable rather than silently absent"
+            .to_owned(),
+        evidence: vec![Evidence {
+            offset,
+            structure: "FormReport",
+            field: "defects",
+            note: None,
+        }],
+    }
+}
+
 /// Gives the path segment one property's own item takes: its own recovered
 /// name, or `opcode<N>` for a [`PropertyValue::Undecoded`] value, which
 /// carries no name at all. Mirrors `crate::report::property_word` exactly;
@@ -962,7 +998,11 @@ fn push_substitution_item(items: &mut Vec<ReportItem>, substituted: &[char]) {
 ///
 /// Returns [`Refusal::Damaged`] when this form's own blobs would overflow
 /// a `u32` `.frx` offset; see [`BlobCursor::take`].
-pub fn write_form(form: &FormModel, data: &[u8]) -> Result<(FormFiles, Vec<ReportItem>), Refusal> {
+pub fn write_form(
+    form: &FormModel,
+    defects: &[Defect],
+    data: &[u8],
+) -> Result<(FormFiles, Vec<ReportItem>), Refusal> {
     let mut writer = LineWriter::new();
     let mut items = Vec::new();
     let mut blob_cursor = BlobCursor::new();
@@ -971,9 +1011,33 @@ pub fn write_form(form: &FormModel, data: &[u8]) -> Result<(FormFiles, Vec<Repor
 
     writer.push_line("VERSION 5.00");
 
+    if form.name.raw().is_empty() {
+        items.push(ReportItem {
+            path: crate::report::path_for_form(&form.name),
+            confidence: Confidence::Inferred,
+            basis: format!(
+                "this form's own name did not resolve at all; {} is a generated name, never \
+                 recovered from the file",
+                form.name.as_str()
+            ),
+            evidence: Vec::new(),
+        });
+    }
+
     if form.controls.is_empty() {
+        // Both a genuinely empty form (a real control tree with just its
+        // own root node and zero children) and a form whose control tree
+        // walk refused outright arrive here with an empty controls list;
+        // `form.tree_refused` is the only thing that tells them apart, per
+        // `04-RESEARCH.md` Pitfall 2. FILE-FORMATS.md section 2.6 proves a
+        // `Begin` block accepts no comment, so the difference cannot live
+        // in these two lines: it goes into the report instead.
         writer.push_line(&format!("Begin VB.Form {} ", form.name.as_str()));
         writer.push_line("End");
+
+        if form.tree_refused {
+            items.push(tree_refused_item(form, defects));
+        }
     } else {
         let children = children_of_model(&form.controls);
         write_model_control_block(
@@ -1191,7 +1255,7 @@ mod tests {
     #[test]
     fn the_written_frx_matches_fast_flames_byte_for_byte_through_the_full_write_path() {
         let (form, data) = first_form("vb6-code/Fire-effect/Fast_Flames.exe");
-        let (files, _items) = write_form(&form, &data).expect("write_form must succeed");
+        let (files, _items) = write_form(&form, &[], &data).expect("write_form must succeed");
         let committed = std::fs::read(corpus_path("vb6-code/Fire-effect/frmFire.frx"))
             .expect("reading the committed .frx");
         assert_eq!(
@@ -1204,7 +1268,7 @@ mod tests {
     #[test]
     fn the_last_record_of_a_written_frx_ends_exactly_at_the_end_of_the_file() {
         let (form, data) = first_form("vb6-code/Fire-effect/Fast_Flames.exe");
-        let (files, _items) = write_form(&form, &data).expect("write_form must succeed");
+        let (files, _items) = write_form(&form, &[], &data).expect("write_form must succeed");
         let frx = files.frx.expect("this form names at least one blob");
         let committed = std::fs::read(corpus_path("vb6-code/Fire-effect/frmFire.frx"))
             .expect("reading the committed .frx");
@@ -1214,11 +1278,12 @@ mod tests {
     #[test]
     fn a_second_forms_own_first_blob_still_starts_at_offset_zero() {
         let (form_a, data_a) = first_form("vb6-code/Fire-effect/Fast_Flames.exe");
-        write_form(&form_a, &data_a).expect("write_form must succeed");
+        write_form(&form_a, &[], &data_a).expect("write_form must succeed");
 
         let (form_b, data_b) =
             first_form("public-domain/SK-Winsock-Sample__VB6/demo/SubReality_WinsockSample.exe");
-        let (files_b, _items_b) = write_form(&form_b, &data_b).expect("write_form must succeed");
+        let (files_b, _items_b) =
+            write_form(&form_b, &[], &data_b).expect("write_form must succeed");
         let frm_text = String::from_utf8_lossy(&files_b.frm);
         assert!(
             frm_text.contains(":0000"),
@@ -1262,7 +1327,7 @@ mod tests {
             procedures: Vec::new(),
             blobs: Vec::new(),
         };
-        let (files, _items) = write_form(&form, &[]).expect("write_form must succeed");
+        let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         assert!(files.frx.is_none());
     }
 
@@ -1302,7 +1367,7 @@ mod tests {
         let mut data = 8_u32.to_le_bytes().to_vec();
         data.extend_from_slice(&[0u8; 8]);
 
-        let (files, items) = write_form(&form, &data).expect("write_form must succeed");
+        let (files, items) = write_form(&form, &[], &data).expect("write_form must succeed");
         assert!(
             items
                 .iter()
@@ -1363,7 +1428,7 @@ mod tests {
             blobs: Vec::new(),
         };
 
-        let (files, _items) = write_form(&form, &data).expect("write_form must succeed");
+        let (files, _items) = write_form(&form, &[], &data).expect("write_form must succeed");
         let frx = files.frx.expect("this form names at least one blob");
 
         // Alphabetically, "Apple" precedes "Zebra", so Apple's own header
@@ -1432,7 +1497,7 @@ mod tests {
             procedures: Vec::new(),
             blobs: Vec::new(),
         };
-        let (files, _items) = write_form(&form, &[]).expect("write_form must succeed");
+        let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
         let begin_line = text
             .lines()
@@ -1476,7 +1541,7 @@ mod tests {
             procedures: Vec::new(),
             blobs: Vec::new(),
         };
-        let (files, _items) = write_form(&form, &[]).expect("write_form must succeed");
+        let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
         let written_line = text
             .lines()
@@ -1535,7 +1600,7 @@ mod tests {
             procedures: Vec::new(),
             blobs: Vec::new(),
         };
-        let (files, _items) = write_form(&form, &[]).expect("write_form must succeed");
+        let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
         let begin_form = text
             .lines()
@@ -1587,7 +1652,7 @@ mod tests {
             procedures: Vec::new(),
             blobs: Vec::new(),
         };
-        let (files, items) = write_form(&form, &[]).expect("write_form must succeed");
+        let (files, items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
         assert!(text.contains("Frame7"), "{text}");
         assert!(!text.contains("Frame8"), "{text}");
@@ -1621,7 +1686,7 @@ mod tests {
             procedures: Vec::new(),
             blobs: Vec::new(),
         };
-        let (files, items) = write_form(&form, &[]).expect("write_form must succeed");
+        let (files, items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
         assert!(text.contains("Begin VB.MDIForm MDIMain"), "{text}");
         assert!(
@@ -1653,7 +1718,7 @@ mod tests {
             procedures: Vec::new(),
             blobs: Vec::new(),
         };
-        let (_files, items) = write_form(&form, &[]).expect("write_form must succeed");
+        let (_files, items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         assert!(
             !items
                 .iter()
@@ -1695,7 +1760,7 @@ mod tests {
             procedures: Vec::new(),
             blobs: Vec::new(),
         };
-        let (files, items) = write_form(&form, &[]).expect("write_form must succeed");
+        let (files, items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
         assert!(!text.contains("Weird1"), "{text}");
         assert!(
@@ -1750,7 +1815,7 @@ mod tests {
             procedures: Vec::new(),
             blobs: Vec::new(),
         };
-        let (files, _items) = write_form(&form, &[]).expect("write_form must succeed");
+        let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
         assert_eq!(text.matches("Index").count(), 2, "{text}");
     }
@@ -1794,7 +1859,7 @@ mod tests {
             procedures: Vec::new(),
             blobs: Vec::new(),
         };
-        let (files, _items) = write_form(&form, &[]).expect("write_form must succeed");
+        let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
         let roots = super::support_frm::parse_blocks(&text);
         assert_eq!(roots.len(), 1, "{roots:?}");
@@ -1804,6 +1869,209 @@ mod tests {
         assert_eq!(root.children.len(), 1, "{root:?}");
         assert_eq!(root.children[0].class, "VB.CommandButton");
         assert_eq!(root.children[0].name, "Command1");
+    }
+
+    // --- Plan 04-04, Task 3: the empty form and the refused form are two
+    // different answers ------------------------------------------------
+
+    #[test]
+    fn lock_work_station_writes_a_file_and_produces_no_unrecoverable_tree_item() {
+        let data = std::fs::read(corpus_path(
+            "public-domain/LockWorkStation/LockWorkStation.exe",
+        ))
+        .expect("reading LockWorkStation.exe");
+        let table = OpcodeTable::builtin();
+        let report = crate::vb::inspect(&data, &table).expect("inspect must succeed");
+        let (model, _items) = crate::write::model::from_report(&report, &data);
+        let form = model
+            .forms
+            .into_iter()
+            .next()
+            .expect("LockWorkStation.exe recovers one form");
+        let defects = report
+            .forms
+            .into_iter()
+            .next()
+            .expect("one form report")
+            .defects;
+        let (files, items) = write_form(&form, &defects, &data).expect("write_form must succeed");
+        assert!(!files.frm.is_empty());
+        assert!(
+            !items.iter().any(
+                |item| item.confidence == crate::report::Confidence::Unrecoverable
+                    && item.basis.contains("control tree")
+            ),
+            "a genuinely empty form must carry no tree-refusal item: {items:?}"
+        );
+    }
+
+    #[test]
+    fn map_editors_main_form_writes_a_file_and_reports_the_refusal_with_a_byte_offset() {
+        let data = std::fs::read(corpus_path("vb6-code/Map-editor-2D/Map Editor.exe"))
+            .expect("reading Map Editor.exe");
+        let table = OpcodeTable::builtin();
+        let report = crate::vb::inspect(&data, &table).expect("inspect must succeed");
+        let (model, _items) = crate::write::model::from_report(&report, &data);
+        let main_index = report
+            .forms
+            .iter()
+            .position(|form| form.name == "Main")
+            .expect("Map Editor.exe declares a form named Main");
+        let form = model
+            .forms
+            .get(main_index)
+            .expect("the model holds the same number of forms as the report");
+        let defects = &report
+            .forms
+            .get(main_index)
+            .expect("the same index into the report's own forms")
+            .defects;
+        let (files, items) = write_form(form, defects, &data).expect("write_form must succeed");
+        assert!(
+            !files.frm.is_empty(),
+            "a refused form must still get a file"
+        );
+        let refusal_item = items.iter().find(|item| {
+            item.confidence == crate::report::Confidence::Unrecoverable
+                && item.evidence.iter().any(|evidence| evidence.offset != 0)
+        });
+        assert!(
+            refusal_item.is_some(),
+            "an unrecoverable item carrying a real byte offset must exist: {items:?}"
+        );
+    }
+
+    #[test]
+    fn the_empty_and_the_refused_form_produce_the_same_shape_of_bytes_but_different_reports() {
+        // The written bytes alone cannot tell these two forms apart: both
+        // arrive with an empty controls list, and only the report does.
+        let lock_data = std::fs::read(corpus_path(
+            "public-domain/LockWorkStation/LockWorkStation.exe",
+        ))
+        .expect("reading LockWorkStation.exe");
+        let table = OpcodeTable::builtin();
+        let lock_report = crate::vb::inspect(&lock_data, &table).expect("inspect must succeed");
+        let (lock_model, _items) = crate::write::model::from_report(&lock_report, &lock_data);
+        let lock_form = lock_model
+            .forms
+            .into_iter()
+            .next()
+            .expect("LockWorkStation.exe recovers one form");
+        let lock_defects = lock_report
+            .forms
+            .into_iter()
+            .next()
+            .expect("one form report")
+            .defects;
+        let (_lock_files, lock_items) =
+            write_form(&lock_form, &lock_defects, &lock_data).expect("write_form must succeed");
+
+        let map_data = std::fs::read(corpus_path("vb6-code/Map-editor-2D/Map Editor.exe"))
+            .expect("reading Map Editor.exe");
+        let map_report = crate::vb::inspect(&map_data, &table).expect("inspect must succeed");
+        let (map_model, _items) = crate::write::model::from_report(&map_report, &map_data);
+        let main_index = map_report
+            .forms
+            .iter()
+            .position(|form| form.name == "Main")
+            .expect("Map Editor.exe declares a form named Main");
+        let map_form = map_model
+            .forms
+            .get(main_index)
+            .expect("the model holds the same number of forms as the report");
+        let map_defects = &map_report
+            .forms
+            .get(main_index)
+            .expect("the same index into the report's own forms")
+            .defects;
+        let (_map_files, map_items) =
+            write_form(map_form, map_defects, &map_data).expect("write_form must succeed");
+
+        let lock_refused = lock_items
+            .iter()
+            .any(|item| item.basis.contains("control tree"));
+        let map_refused = map_items
+            .iter()
+            .any(|item| item.basis.contains("control tree"));
+        assert!(!lock_refused, "{lock_items:?}");
+        assert!(map_refused, "{map_items:?}");
+    }
+
+    #[test]
+    fn a_form_with_zero_controls_and_a_control_tree_defect_produces_the_unrecoverable_item() {
+        // Built inside the test, per this task's own action text, so the
+        // rule survives a change to the corpus rather than depending only
+        // on Map Editor.exe still refusing at the same byte forever.
+        let (name, _faults) = SafeName::new("frmBroken", NameKind::Form);
+        let form = FormModel {
+            name,
+            tree_refused: true,
+            controls: Vec::new(),
+            procedures: Vec::new(),
+            blobs: Vec::new(),
+        };
+        // This file's own tree_refused_item reads Defect::site.offset
+        // alone, never DefectKind: any defect kind carrying the right
+        // site.structure tag proves the point, so this test picks a
+        // different, arbitrary one on purpose.
+        let defect = crate::error::Defect {
+            site: crate::error::Site {
+                offset: 0x1561,
+                rva: None,
+                structure: "ControlTree",
+                field: "read",
+            },
+            kind: crate::error::DefectKind::PastEndOfFile {
+                offset: 0x1561,
+                file_len: 0x2000,
+            },
+        };
+        let (files, items) = write_form(&form, &[defect], &[]).expect("write_form must succeed");
+        assert!(!files.frm.is_empty());
+        let item = items
+            .iter()
+            .find(|item| {
+                item.confidence == crate::report::Confidence::Unrecoverable
+                    && item.basis.contains("control tree")
+            })
+            .expect("an unrecoverable item naming the tree refusal must exist");
+        assert_eq!(
+            item.evidence.first().map(|evidence| evidence.offset),
+            Some(0x1561)
+        );
+    }
+
+    #[test]
+    fn a_form_whose_name_did_not_resolve_still_writes_a_file_and_names_the_fault() {
+        let (name, faults) = SafeName::new("", NameKind::Form);
+        assert!(!faults.is_empty(), "an empty raw name must record a fault");
+        let control = ControlModel {
+            name: name.clone(),
+            kind: ControlKind::Form,
+            array_index: None,
+            parent: None,
+            depth: 0,
+            is_menu: false,
+            is_external: false,
+            properties: Vec::new(),
+        };
+        let form = FormModel {
+            name,
+            tree_refused: false,
+            controls: vec![control],
+            procedures: Vec::new(),
+            blobs: Vec::new(),
+        };
+        let (files, items) = write_form(&form, &[], &[]).expect("write_form must succeed");
+        let text = frm_text(&files);
+        assert!(text.contains("UnnamedForm"), "{text}");
+        assert!(
+            items.iter().any(
+                |item| item.confidence == crate::report::Confidence::Inferred
+                    && item.basis.contains("UnnamedForm")
+            ),
+            "{items:?}"
+        );
     }
 }
 
@@ -1871,7 +2139,7 @@ mod ordering {
             procedures: Vec::new(),
             blobs: Vec::new(),
         };
-        let (files, _items) = write_form(&form, &[]).expect("write_form must succeed");
+        let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
         let menu_pos = text
             .find("Begin VB.Menu")
@@ -1928,7 +2196,7 @@ mod ordering {
             procedures: Vec::new(),
             blobs: Vec::new(),
         };
-        let (files, _items) = write_form(&form, &[]).expect("write_form must succeed");
+        let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
         let apple_pos = text.find("apple").expect("apple must be written");
         let font_pos = text
@@ -1977,7 +2245,7 @@ mod ordering {
             procedures: Vec::new(),
             blobs: Vec::new(),
         };
-        let (files, _items) = write_form(&form, &[]).expect("write_form must succeed");
+        let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
         let caption_pos = text.find("Caption").expect("Caption must be written");
         let begin_cmd_pos = text
@@ -2031,7 +2299,7 @@ mod ordering {
             procedures: Vec::new(),
             blobs: Vec::new(),
         };
-        let (files, _items) = write_form(&form, &[]).expect("write_form must succeed");
+        let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
         let zeta_pos = text.find("Zeta").expect("Zeta must be written");
         let alpha_pos = text.find("Alpha").expect("Alpha must be written");
