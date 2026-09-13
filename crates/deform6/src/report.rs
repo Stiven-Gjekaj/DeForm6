@@ -178,15 +178,26 @@ pub fn path_for_code(kind: CodeKind, name: &SafeName) -> String {
 /// Issues a report item's own path, extending, never overwriting, a path
 /// that collides with one already issued.
 ///
-/// Holds every path issued so far in an ordered `Vec`, never a hash keyed
-/// map, for the reason [`crate::write::model::SafeNameIssuer`] already
-/// states for names: the suffix a collision gets depends on issue order,
-/// and a process dependent iteration order would make the written report
-/// vary run to run, which is exactly what RPT-05's determinism
-/// requirement forbids.
+/// Holds every path issued so far in a `HashSet`, for `issue`'s own
+/// existence check, and never iterates it: the suffix a collision gets
+/// depends only on the order a caller calls `issue`, never on this set's
+/// own internal layout, so a process dependent hash seed cannot change the
+/// written report, and RPT-05's determinism requirement still holds.
+///
+/// Also remembers, per colliding base path, the next suffix to try in
+/// `next_suffix`. A hostile file that drives thousands of items to the same
+/// base path once made every one of those items retry every suffix from 2
+/// up to its own turn number, an `O(n)` search for the `n`-th collision and
+/// an `O(n^2)` total across all of them, even with an `O(1)` set lookup.
+/// Picking up from the last suffix this exact base path used keeps the
+/// common case `O(1)` amortised per call; the set lookup below still guards
+/// the rare case where an unrelated item's own literal path already holds
+/// the guessed candidate, so the guess is a fast path, never a shortcut
+/// that skips the check.
 #[derive(Default)]
 pub struct PathIssuer {
-    issued: Vec<String>,
+    issued: std::collections::HashSet<String>,
+    next_suffix: std::collections::HashMap<String, u32>,
 }
 
 impl PathIssuer {
@@ -204,14 +215,15 @@ impl PathIssuer {
     #[must_use]
     pub fn issue(&mut self, path: String) -> String {
         if !self.issued.contains(&path) {
-            self.issued.push(path.clone());
+            self.issued.insert(path.clone());
             return path;
         }
-        let mut suffix: u32 = 2;
+        let mut suffix: u32 = *self.next_suffix.get(&path).unwrap_or(&2);
         loop {
             let candidate = format!("{path}#{suffix}");
             if !self.issued.contains(&candidate) {
-                self.issued.push(candidate.clone());
+                self.issued.insert(candidate.clone());
+                self.next_suffix.insert(path, suffix.saturating_add(1));
                 return candidate;
             }
             suffix = suffix.saturating_add(1);
@@ -617,6 +629,48 @@ mod tests {
         assert_eq!(first, "/forms/frmMain");
         assert_ne!(first, second);
         assert!(second.starts_with("/forms/frmMain#"), "{second}");
+    }
+
+    /// A hostile file can drive thousands of items to the exact same base
+    /// path. Before `PathIssuer` remembered the next suffix to try per base
+    /// path, the `n`-th of these items retried every suffix from 2 up to
+    /// its own turn number, an `O(n)` search that made the whole batch
+    /// `O(n^2)`; one such file took over two minutes to write. This test
+    /// asserts only correctness (every path stays distinct), not speed, but
+    /// it runs a batch large enough that a return of the old behaviour
+    /// would make `cargo test` itself take a very long time to pass.
+    #[test]
+    fn a_thousand_items_with_the_same_base_path_each_get_a_distinct_path() {
+        let mut issuer = PathIssuer::new();
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..1000 {
+            let path = issuer.issue("/objects/collision".to_owned());
+            assert!(
+                seen.insert(path.clone()),
+                "issue gave back a path already given out: {path}"
+            );
+        }
+    }
+
+    /// Two issuers fed the exact same calls in the exact same order give
+    /// the exact same sequence of paths back. The suffix a collision gets
+    /// depends only on call order, never on this issuer's own internal
+    /// storage, so a process dependent hash seed cannot change the
+    /// written report (RPT-05).
+    #[test]
+    fn two_issuers_fed_the_same_calls_in_the_same_order_give_the_same_paths() {
+        let inputs = ["/a", "/a", "/b", "/a", "/b", "/a"];
+        let mut first_issuer = PathIssuer::new();
+        let mut second_issuer = PathIssuer::new();
+        let first: Vec<String> = inputs
+            .iter()
+            .map(|path| first_issuer.issue((*path).to_owned()))
+            .collect();
+        let second: Vec<String> = inputs
+            .iter()
+            .map(|path| second_issuer.issue((*path).to_owned()))
+            .collect();
+        assert_eq!(first, second);
     }
 
     // --- Plan 04-06, Task 2: the three words, the basis, the evidence and
