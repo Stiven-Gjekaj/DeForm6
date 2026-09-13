@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 9
+open_count: 10
 waived_count: 0
 fixed_count: 4
-total_count: 13
-last_updated: 2026-09-13T03:34:36.370Z
+total_count: 14
+last_updated: 2026-09-13T16:42:15.452Z
 ---
 
 # Broken Windows Ledger
@@ -28,6 +28,7 @@ last_updated: 2026-09-13T03:34:36.370Z
 | 11 | 04 | deviation | crates/deform6/src/write/model.rs |  | from_report's generated-control-array-index report item uses the literal path /forms/*/controls/<name> (a literal asterisk, not the real form name), a pre-existing shape from plan 04-01 that does not match RPT-02's own per-object path contract. Plan 04-06 merges this item unchanged: model.rs is explicitly off-limits to this plan (files_modified is report.rs alone), so the fix belongs to whichever future plan next touches write::model::from_report. | open |  | 2026-09-13T01:44:46.195Z |  |
 | 12 | 04 | deviation | crates/deform6/src/write/mod.rs |  | write::project (run by deform6-cli's run_extract today) still ships items: [] and limits: [] in the shipped report.json: it never calls report::build, matching the staged pattern plans 04-01/04-02/04-03/04-05 already established for their own full writers (write_vbp vs write_vbp_thin, and so on). report::build is complete and tested directly (crate::vb::inspect + write::model::from_report + report::build, exercised over Fast_Flames.exe), but wiring it into write::project is out of this plan's own files_modified (report.rs alone); plan 04-08, which already owns Command::Extract's full wiring, is the natural place to switch write::project over to the complete writers and report::build together. | fixed |  | 2026-09-13T01:44:46.257Z | 2026-09-13T03:34:21.792Z |
 | 13 | 04 | deviation | crates/deform6/src/write/mod.rs |  | write::project merges four independently-built ReportItem sources (write_vbp, write_form per form, write_cls/write_bas per code object, and report::build's own model_items plus its separate per-property confidence grading) through one shared PathIssuer, so a colliding path is caught, but the two property-level derivations are not unified: a control whose stream carries an Undecoded or unreadable Blob property earns one item from the writer that omitted its own line (at the control's own path) and a second, independent item from report::build's own item_for_property walk (at the more specific property path). Both are correct and both carry evidence; this is redundant, not wrong, and is documented on write::project's own doc comment. A future plan should have report::build consume the items the writers already collected instead of re-deriving property confidence a second time. | open |  | 2026-09-13T03:34:36.370Z |  |
+| 14 | 05 | deviation | crates/deform6/src/error.rs |  | crate::error::damaged (Box::leak) leaks one short string per call, by design, and every strict refusal on a Recoverable defect now reaches it through refusal_for_defect (plan 05-01), not only the rarer direct damaged() call sites in gui.rs, frx.rs and controltree.rs it served before. Plan 05-03 measured the longest message any damaged() call site in this crate can produce at 237 bytes (crates/deform6/src/vb/controltree.rs, the control tree walk's own unexplained tail message, every numeric field at its widest) and named the leak detection flag that works around it: -detect_leaks=0 (DETECT_LEAKS in crates/xtask/src/fuzz.rs), paired with an iteration bound (CRON_RUNS) chosen at least ten times below the point the leak alone would reach the fuzz run's own resident set limit. The cost is three places: a single command line run leaks once and exits, so a person running the tool never sees it; a caller that embeds the library and reads many files in one process grows without bound; the fuzzer reaches it once per iteration, which is why leak detection is off in both fuzz commands. The fix is widening Refusal::Damaged to carry an owned String instead of a leaked &'static str; Phase 3 decision 03-17 measured that change at 108 construction and pattern sites and chose to centralise the leak in damaged() instead of removing it, and that decision stands. What would reopen it: a caller that reads many files in one process inside this repository. Plan 05-08's own no panic proof run is the first such caller; its measured peak resident set is the number to watch. | open |  | 2026-09-13T16:42:15.452Z |  |
 
 ````json
 [
@@ -185,6 +186,18 @@ last_updated: 2026-09-13T03:34:36.370Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-13T03:34:36.370Z",
+    "resolved_at": null
+  },
+  {
+    "id": 14,
+    "kind": "deviation",
+    "phase": "05",
+    "file": "crates/deform6/src/error.rs",
+    "line": null,
+    "description": "crate::error::damaged (Box::leak) leaks one short string per call, by design, and every strict refusal on a Recoverable defect now reaches it through refusal_for_defect (plan 05-01), not only the rarer direct damaged() call sites in gui.rs, frx.rs and controltree.rs it served before. Plan 05-03 measured the longest message any damaged() call site in this crate can produce at 237 bytes (crates/deform6/src/vb/controltree.rs, the control tree walk's own unexplained tail message, every numeric field at its widest) and named the leak detection flag that works around it: -detect_leaks=0 (DETECT_LEAKS in crates/xtask/src/fuzz.rs), paired with an iteration bound (CRON_RUNS) chosen at least ten times below the point the leak alone would reach the fuzz run's own resident set limit. The cost is three places: a single command line run leaks once and exits, so a person running the tool never sees it; a caller that embeds the library and reads many files in one process grows without bound; the fuzzer reaches it once per iteration, which is why leak detection is off in both fuzz commands. The fix is widening Refusal::Damaged to carry an owned String instead of a leaked &'static str; Phase 3 decision 03-17 measured that change at 108 construction and pattern sites and chose to centralise the leak in damaged() instead of removing it, and that decision stands. What would reopen it: a caller that reads many files in one process inside this repository. Plan 05-08's own no panic proof run is the first such caller; its measured peak resident set is the number to watch.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-13T16:42:15.452Z",
     "resolved_at": null
   }
 ]
