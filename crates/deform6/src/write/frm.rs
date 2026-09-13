@@ -1453,7 +1453,18 @@ mod tests {
             "Apple must be written before Zebra: {frm_text}"
         );
         assert!(frm_text.contains("\"frmOrder.frx\":0000"), "{frm_text}");
-        assert!(frm_text.contains("\"frmOrder.frx\":000C"), "{frm_text}");
+        // Zebra's own offset (0x0C = 12) is Apple's own declared length (8)
+        // plus FRX_ITEM_HEADER_LEN (4), the one advance this whole file
+        // reuses rather than re-derives; the hex literal above is not
+        // enough on its own to prove that, so this line names the
+        // constant directly.
+        let expected_zebra_offset = 8_u32
+            .checked_add(frx::FRX_ITEM_HEADER_LEN)
+            .expect("8 + 4 never overflows a u32");
+        assert!(
+            frm_text.contains(&format!("\"frmOrder.frx\":{expected_zebra_offset:04X}")),
+            "{frm_text}"
+        );
     }
 
     // --- Plan 04-04, Task 2: the block layout ------------------------------
