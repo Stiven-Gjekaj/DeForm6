@@ -109,14 +109,14 @@ Version 1 recovers metadata. It does not recover statements.
 
 ### The report
 
-- [ ] **RPT-01**: The tool writes one JSON report beside the project.
-- [ ] **RPT-02**: The report is a flat array of items, each keyed by a path
+- [x] **RPT-01**: The tool writes one JSON report beside the project.
+- [x] **RPT-02**: The report is a flat array of items, each keyed by a path
       such as `/forms/frmMain/controls/cmdOk`.
-- [ ] **RPT-03**: Each item carries a confidence of one of three named values,
+- [x] **RPT-03**: Each item carries a confidence of one of three named values,
       never a number that implies a precision the tool does not have.
-- [ ] **RPT-04**: Each item names the evidence for it: the byte offset it came
+- [x] **RPT-04**: Each item names the evidence for it: the byte offset it came
       from and the structure it was read out of.
-- [ ] **RPT-05**: The report records every defect the run met, whether or not
+- [x] **RPT-05**: The report records every defect the run met, whether or not
       the run continued past it.
 - [ ] **RPT-06**: An uncertain region of recovered code carries an apostrophe
       comment, in code regions only, never inside a `Begin` block or the

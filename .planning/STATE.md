@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: It writes a project
 status: executing
-stopped_at: Completed 04-05-PLAN.md
-last_updated: "2026-09-13T01:20:13.173Z"
+stopped_at: Completed 04-06-PLAN.md
+last_updated: "2026-09-13T01:47:11.930Z"
 last_activity: 2026-09-12
 last_activity_desc: Phase 04 execution started
-state_head: 6060e705706f87569c3cf1f47bd5e6894efb5eb9
+state_head: 78b1ed68414a1bea5c304d8299f9d17855d28e4b
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 45
-  completed_plans: 40
+  completed_plans: 41
   percent: 0
 ---
 
@@ -67,7 +67,7 @@ inferred.
 ## Current Position
 
 Phase: 04 (It writes a project) — EXECUTING
-Plan: 5 of 9
+Plan: 6 of 9
 Status: Ready to execute
 searches, six encodings across three corpus programs, never find the
 identifier a project file declares anywhere in the component table
@@ -143,6 +143,7 @@ Progress: [░░░░░░░░░░] 0% of the 50 plans in the roadmap, wh
 | Phase 04 P02 | 1 session | 3 tasks | 1 files |
 | Phase 04 P03 | 1 session | 3 tasks | 1 files |
 | Phase 04 P05 | 1 session | 3 tasks | 1 files |
+| Phase 04 P06 | 1 session | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -221,6 +222,9 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-03: A blank line always separates the .vbp setting block from [MS Transaction Server]; missing on this plan's first pass, found by the plan's own manual verification step, confirmed on every corpus .vbp carrying the section, and fixed.
 - [Phase 04]: 04-03: write_vbp never writes a Reference= line (type library dependency); Report carries no field for it and no Phase 1-3 reader recovers it. Recorded as WINDOWS.md finding 10, out of this plan's own scope.
 - [Phase 04]: 04-05: cls property line space counts stored as measured data, not derived from a single pad-to-20 formula; only the three longest of five names actually reach that width
+- [Phase 04]: 04-06: A property earns a report item only when the reading side gave it a real byte offset (Blob, BlobUnreadable, Undecoded); the eight fully-decoded scalar PropertyValue variants carry no offset field at all, so they earn no item rather than an invented one.
+- [Phase 04]: 04-06: with_header_evidence backfills one evidence record, anchored at Report::header_offset, for a model-built item that arrives with none, since write/model.rs (which builds those items) is off-limits to this plan.
+- [Phase 04]: 04-06: write::project is not wired to call report::build in this plan (files_modified is report.rs alone); the shipped extract command still writes items: [] and limits: [], matching the staged pattern every prior 04-* plan left for its own full writer. Plan 04-08 wires it.
 
 ### Pending Todos
 
@@ -249,8 +253,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-13T01:20:13.146Z
-Stopped at: Completed 04-05-PLAN.md
+Last session: 2026-09-13T01:47:11.902Z
+Stopped at: Completed 04-06-PLAN.md
 
 Phase 1 is complete: all eight plans executed, 134 tests pass across the
 workspace, and every ROADMAP success criterion for the phase was run and
