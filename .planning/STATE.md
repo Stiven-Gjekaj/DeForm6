@@ -74,7 +74,7 @@ Plan: 05-01, 05-02 and 05-07 complete; wave 2 continues (05-03, 05-06 next)
 Status: Executing
 Last activity: 2026-09-13 - Plan 05-02 executed - GuiTable::walk bounds wFormCount before the loop, and scripts/prove-capacity-wall.sh audits every other capacity sized allocation the library builds
 
-Progress: [██████████████████░░] 91% of the 53 written plans, which is 48 of 53
+Progress: [█████████░] 91% of the 53 written plans, which is 48 of 53
 
 ## Performance Metrics
 
