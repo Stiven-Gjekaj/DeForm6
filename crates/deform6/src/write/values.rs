@@ -22,6 +22,7 @@
 
 use crate::report::{Confidence, Evidence, ReportItem};
 use crate::vb::propstream::{FontBlock, PositionBlock, PropertyValue};
+use crate::write::model::{MAX_INLINE_STRING_LEN, encode_windows_1252};
 
 /// The three property names this corpus proves carry a colour.
 /// `FILE-FORMATS.md` section 3.6: `BackColor` (240 lines), `ForeColor`
@@ -152,6 +153,68 @@ pub fn escape_inline_string(text: &str) -> String {
     }
     out.push('"');
     out
+}
+
+/// What a recovered string's own length and content decide: whether it
+/// goes inline, or needs a resource reference instead.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InlineDecision {
+    /// The string fits inline: the exact quoted, escaped text, ready to
+    /// follow the `= ` on a property line.
+    Inline(String),
+    /// The string does not fit inline: the caller must write a resource
+    /// reference instead, using the file name and the offset it supplies.
+    Resource,
+}
+
+/// Decides whether `text` goes inline or needs a resource reference.
+///
+/// `FILE-FORMATS.md` gap 1: the real threshold is between 98 and 153
+/// encoded bytes, and the corpus does not fix it. [`MAX_INLINE_STRING_LEN`]
+/// (97) is the safe default: the longest inline string the corpus proves,
+/// so every string this tool writes inline sits inside the proved range,
+/// never inside the unresolved gap.
+///
+/// A string holding a line break never goes inline, whatever its length.
+/// `FILE-FORMATS.md` section 3.3: a raw line break inside the quotes would
+/// end the `.frm` line, and the next recovered byte would be parsed as a
+/// property name (threat T-4-05).
+///
+/// Counts encoded bytes, never Unicode scalar values: the encoder maps
+/// each character below `0x100` to one byte, the same convention
+/// [`crate::write::model::SafeName`] already counts a name's own length
+/// by.
+#[must_use]
+pub fn inline_decision(text: &str) -> InlineDecision {
+    if text.contains('\r') || text.contains('\n') {
+        return InlineDecision::Resource;
+    }
+    let (encoded, _substituted) = encode_windows_1252(text);
+    if encoded.len() > MAX_INLINE_STRING_LEN {
+        InlineDecision::Resource
+    } else {
+        InlineDecision::Inline(escape_inline_string(text))
+    }
+}
+
+/// Builds a resource reference: the quoted file name, a colon, and the
+/// offset in upper case hex, padded to at least four digits. `long`
+/// selects the leading dollar sign the long string form takes.
+///
+/// `FILE-FORMATS.md` gap 2: this tool always writes the long string form
+/// with a four byte count for a string that must leave the form file, the
+/// one shape a corpus resource file proves exactly (`Gradient.frx`); it
+/// never writes the one byte count form section 4.5 reconstructs by
+/// arithmetic from a damaged file, since that reconstruction is not a
+/// second observation.
+///
+/// This function takes `offset` as a parameter and computes no offset of
+/// its own: the one place an offset is computed in this repository is
+/// [`crate::vb::frx::BlobCursor`].
+#[must_use]
+pub fn format_resource_reference(file_name: &str, offset: u32, long: bool) -> String {
+    let prefix = if long { "$" } else { "" };
+    format!("{prefix}\"{file_name}\":{offset:04X}")
 }
 
 /// Gives the four `Left`, `Top`, `Width` and `Height` lines a `Position`
@@ -296,9 +359,10 @@ pub fn format_value(
             (FormattedValue::Line(text), None)
         }
         PropertyValue::Single { value, .. } => (FormattedValue::Line(value.to_string()), None),
-        PropertyValue::Text { value, .. } => {
-            (FormattedValue::Line(escape_inline_string(value)), None)
-        }
+        PropertyValue::Text { value, .. } => match inline_decision(value) {
+            InlineDecision::Inline(text) => (FormattedValue::Line(text), None),
+            InlineDecision::Resource => (FormattedValue::Resource, None),
+        },
         PropertyValue::Position { value, .. } => (
             FormattedValue::Multi(position_coordinates(value).into_iter().collect()),
             None,
@@ -359,8 +423,8 @@ pub fn format_value(
 )]
 mod tests {
     use super::{
-        COLOUR_PROPERTIES, FormattedValue, font_lines, format_colour, format_value,
-        position_coordinates,
+        COLOUR_PROPERTIES, FormattedValue, InlineDecision, font_lines, format_colour,
+        format_resource_reference, format_value, inline_decision, position_coordinates,
     };
     use crate::report::Confidence;
     use crate::vb::propstream::{FontBlock, PositionBlock, PropertyValue};
@@ -742,5 +806,69 @@ mod tests {
             value: 1,
         };
         assert_eq!(assert_line(&value), "1  'Fixed Single");
+    }
+
+    // --- Task 3: the inline string rule and the resource reference forms --
+
+    #[test]
+    fn a_97_byte_string_goes_inline_and_a_98_byte_string_does_not() {
+        let ninety_seven = "a".repeat(97);
+        let ninety_eight = "a".repeat(98);
+        assert!(matches!(
+            inline_decision(&ninety_seven),
+            InlineDecision::Inline(_)
+        ));
+        assert!(matches!(
+            inline_decision(&ninety_eight),
+            InlineDecision::Resource
+        ));
+    }
+
+    #[test]
+    fn a_string_holding_a_carriage_return_and_line_feed_never_goes_inline() {
+        assert_eq!(inline_decision("a\r\nb"), InlineDecision::Resource);
+        assert_eq!(inline_decision("short\n"), InlineDecision::Resource);
+        assert_eq!(inline_decision("short\r"), InlineDecision::Resource);
+    }
+
+    #[test]
+    fn a_text_property_over_the_threshold_gives_the_resource_decision_through_format_value() {
+        let value = PropertyValue::Text {
+            name: "Caption".to_owned(),
+            value: "a".repeat(98),
+        };
+        assert_eq!(format_value(&value, false).0, FormattedValue::Resource);
+    }
+
+    #[test]
+    fn an_offset_of_116_formats_to_four_upper_case_hex_digits_with_a_leading_zero() {
+        assert_eq!(
+            format_resource_reference("frmFire.frx", 116, false),
+            "\"frmFire.frx\":0074"
+        );
+    }
+
+    #[test]
+    fn an_offset_needing_five_digits_formats_to_five() {
+        assert_eq!(
+            format_resource_reference("Big.frx", 0x1_2345, false),
+            "\"Big.frx\":12345"
+        );
+    }
+
+    #[test]
+    fn the_long_string_reference_form_differs_from_the_binary_form_by_one_leading_character() {
+        let binary = format_resource_reference("Gradient.frx", 0, false);
+        let long = format_resource_reference("Gradient.frx", 0, true);
+        assert_eq!(binary, "\"Gradient.frx\":0000");
+        assert_eq!(long, "$\"Gradient.frx\":0000");
+        assert_eq!(long.len(), binary.len().saturating_add(1));
+        assert_eq!(format!("${binary}"), long);
+    }
+
+    #[test]
+    fn a_resource_file_name_holding_a_space_is_still_quoted() {
+        let text = format_resource_reference("Main Editor.frx", 0, false);
+        assert_eq!(text, "\"Main Editor.frx\":0000");
     }
 }
