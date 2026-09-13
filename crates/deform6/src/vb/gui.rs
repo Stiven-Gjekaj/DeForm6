@@ -26,7 +26,7 @@
 //! special handling; it is called out here because it is easy to suspect a
 //! missing byte if the first read from a new sample produces garbage.
 
-use crate::error::{Refusal, damaged};
+use crate::error::{Defect, DefectKind, Refusal, Site, damaged};
 use crate::read::pe::PeImage;
 use crate::read::region::{Off, Region, Va};
 use crate::vb::header::VbHeader;
@@ -57,15 +57,30 @@ pub struct GuiTableEntry {
 pub struct GuiTable {
     /// Every entry the walk recovered, in array order.
     pub entries: Vec<GuiTableEntry>,
+    defects: Vec<Defect>,
 }
 
 impl GuiTable {
+    /// Gives the defects the walk found: today, only a `wFormCount` too
+    /// large for the GUI table's own mapped region to hold.
+    ///
+    /// This is a defect, not a refusal: the count is a leaf value that
+    /// bounds a loop, not a spine pointer another read depends on. The
+    /// entries the region does hold are still readable, and a salvage run
+    /// keeps them. Matches [`crate::vb::controlinfo::ControlInfoTable::defects`]
+    /// exactly.
+    #[must_use]
+    pub fn defects(&self) -> &[Defect] {
+        &self.defects
+    }
+
     /// Walks the GUI table.
     ///
     /// Each element is narrowed to its own [`GUI_ENTRY_SIZE`]-byte window
     /// before any field inside it is read, the loop bound is
-    /// `header.w_form_count`, and the element offset is computed with
-    /// `checked_mul` on a bare `u32`, then `subregion`: the same shape
+    /// `header.w_form_count` clamped by [`bound_form_count`] against the
+    /// GUI table's own mapped region, and the element offset is computed
+    /// with `checked_mul` on a bare `u32`, then `subregion`: the same shape
     /// `vb::object::ObjectTable::walk` uses for its own array.
     ///
     /// # Errors
@@ -81,8 +96,14 @@ impl GuiTable {
             .region_at_va(header.lp_gui_table)
             .ok_or(Refusal::Damaged("the GUI table pointer is in no section"))?;
 
+        let (form_count, count_defect) = bound_form_count(&array, u32::from(header.w_form_count));
+        let mut defects = Vec::new();
+        if let Some(defect) = count_defect {
+            defects.push(defect);
+        }
+
         let mut entries = Vec::new();
-        for i in 0_u32..u32::from(header.w_form_count) {
+        for i in 0_u32..form_count {
             let at = i
                 .checked_mul(GUI_ENTRY_SIZE)
                 .ok_or(Refusal::Damaged("the GUI table index overflows a u32"))?;
@@ -107,8 +128,47 @@ impl GuiTable {
             entries.push(GuiTableEntry { a_form_pointer });
         }
 
-        Ok(Self { entries })
+        Ok(Self { entries, defects })
     }
+}
+
+/// Bounds `wFormCount` against the real length of the GUI table's own mapped
+/// region, and clamps it when it does not fit.
+///
+/// `wFormCount` is a `u16` straight out of the header, widened to a `u32`
+/// and used as a loop bound over an array of [`GUI_ENTRY_SIZE`]-byte
+/// entries. Copies the four steps `vb::object::bound_proc_count` already
+/// proves: the division, the comparison, and the defect construction. There
+/// is no null region early return here the way `bound_proc_count` has one,
+/// because `array` is already a resolved region by the time this is called;
+/// [`GuiTable::walk`] returns [`Refusal::Damaged`] before this runs when the
+/// GUI table pointer resolves nowhere at all.
+///
+/// A mapped region of zero bytes gives a maximum of zero entries, so any
+/// declared count above zero raises the defect with a maximum of `0`. A
+/// declared count of zero always gives no defect, matching the plan's own
+/// stated behaviour for a count field of zero: no allocation, no defect.
+fn bound_form_count(array: &Region<'_>, raw_form_count: u32) -> (u32, Option<Defect>) {
+    let max_entries = array.len().checked_div(GUI_ENTRY_SIZE).unwrap_or(0);
+    if raw_form_count <= max_entries {
+        return (raw_form_count, None);
+    }
+
+    let offset = array.file_offset(Off::new(0x00)).map_or(0, Off::get);
+    let defect = Defect {
+        site: Site {
+            offset,
+            rva: None,
+            structure: "GuiTable",
+            field: "wFormCount",
+        },
+        kind: DefectKind::ImplausibleCount {
+            offset,
+            count: raw_form_count,
+            max: max_entries,
+        },
+    };
+    (max_entries, Some(defect))
 }
 
 /// The fixed header at a form's `aFormPointer`, and the gateway to the
@@ -355,7 +415,7 @@ impl Tiling {
 )]
 mod tests {
     use super::{GUI_ENTRY_SIZE, GuiObjectInfo, GuiTable, Tiling};
-    use crate::error::Refusal;
+    use crate::error::{DefectKind, Refusal};
     use crate::read::pe::PeImage;
     use crate::read::region::Va;
     use crate::vb::header::{VbHeader, header_region};
@@ -439,6 +499,28 @@ mod tests {
         out
     }
 
+    /// Like [`synthetic_image`], but pads the file to `total_len` bytes
+    /// without growing the mapped GUI table section beyond what `extra`
+    /// needs.
+    ///
+    /// The mapped section is what [`bound_form_count`](super) bounds a
+    /// declared count against; the file's own total length is a separate
+    /// fact a hostile file controls on its own. A helper that sized the
+    /// file from the section could never build the fixture success
+    /// criterion 4 names: a small mapped section inside a much larger file,
+    /// with a declared count far past what the section holds.
+    fn synthetic_image_of_len(extra: &[u8], total_len: usize) -> Vec<u8> {
+        let mut out = synthetic_image(extra);
+        assert!(
+            total_len >= out.len(),
+            "the requested total length {total_len} is shorter than the {} bytes the \
+             mapped section alone already needs",
+            out.len()
+        );
+        out.resize(total_len, 0);
+        out
+    }
+
     /// Gives the GUI table walked out of the real corpus file.
     fn lock_work_station_gui_table() -> GuiTable {
         let image = PeImage::parse(LOCK_WORK_STATION).unwrap();
@@ -498,6 +580,116 @@ mod tests {
             GuiTable::walk(&image, &header),
             Err(Refusal::Damaged("the GUI table pointer is in no section"))
         );
+    }
+
+    /// Roadmap success criterion 4, built the way `AGENTS.md` requires: a
+    /// hand made fixture, from literals, never a value calculated from a
+    /// corpus program. The mapped GUI table section holds exactly one
+    /// `GUI_ENTRY_SIZE`-byte entry; the file around it is padded to 4096
+    /// bytes with `synthetic_image_of_len`, so the declared count of
+    /// `0xFFFF` is checked against the section's own one-entry capacity,
+    /// never against the file's total length.
+    #[test]
+    fn gui_table_refuses_an_implausible_form_count() {
+        let mut entry = vec![0_u8; GUI_ENTRY_SIZE.try_into().unwrap()];
+        entry[0x00..0x04].copy_from_slice(&GUI_ENTRY_SIZE.to_le_bytes());
+        entry[0x48..0x4c].copy_from_slice(&0x0040_2000_u32.to_le_bytes());
+        let bytes = synthetic_image_of_len(&entry, 4096);
+        assert_eq!(bytes.len(), 4096);
+        let image = PeImage::parse(&bytes).unwrap();
+        let header = header_with_gui_table(Va::new(0x0040_1000), 0xFFFF);
+
+        let table = GuiTable::walk(&image, &header).unwrap();
+        assert_eq!(table.entries.len(), 1);
+        assert_eq!(table.entries[0].a_form_pointer, Va::new(0x0040_2000));
+
+        assert_eq!(table.defects().len(), 1);
+        let defect = &table.defects()[0];
+        assert!(matches!(
+            defect.kind,
+            DefectKind::ImplausibleCount {
+                count: 0xFFFF,
+                max: 1,
+                ..
+            }
+        ));
+        let message = defect.kind.to_string();
+        assert!(message.contains("65535"), "{message}");
+        assert!(message.contains('1'), "{message}");
+    }
+
+    /// A declared count of zero allocates nothing and raises no defect,
+    /// whatever the region's own capacity is.
+    #[test]
+    fn a_declared_form_count_of_zero_gives_no_entry_and_no_defect() {
+        let bytes = synthetic_image(&[]);
+        let image = PeImage::parse(&bytes).unwrap();
+        let header = header_with_gui_table(Va::new(0x0040_1000), 0);
+
+        let table = GuiTable::walk(&image, &header).unwrap();
+        assert!(table.entries.is_empty());
+        assert!(table.defects().is_empty());
+    }
+
+    /// Builds the same minimal PE `synthetic_image` builds, but the physical
+    /// file stops exactly at the section's own start: the section header
+    /// still declares `mapped_len` bytes there, so the address still
+    /// resolves to a real section, but the file holds none of the bytes it
+    /// claims. `Region::len` is then `0`, per `PeImage::region_at`'s own
+    /// documented rule that a section which declares more than the file
+    /// holds gives back the bytes that are there, which here is none.
+    fn synthetic_image_with_no_bytes_in_its_section(mapped_len: u32) -> Vec<u8> {
+        const LFANEW: usize = 0x40;
+        const OPTIONAL: usize = LFANEW + 24;
+        const SECTION: usize = OPTIONAL + 224;
+        const SECTION_START: usize = 0x400;
+
+        let mut out = vec![0_u8; SECTION_START];
+        out[0] = b'M';
+        out[1] = b'Z';
+        out[0x3c..0x40].copy_from_slice(&u32::try_from(LFANEW).unwrap().to_le_bytes());
+        out[LFANEW..LFANEW + 4].copy_from_slice(b"PE\0\0");
+
+        out[LFANEW + 4..LFANEW + 6].copy_from_slice(&0x014c_u16.to_le_bytes());
+        out[LFANEW + 6..LFANEW + 8].copy_from_slice(&1_u16.to_le_bytes());
+        out[LFANEW + 20..LFANEW + 22].copy_from_slice(&224_u16.to_le_bytes());
+        out[LFANEW + 22..LFANEW + 24].copy_from_slice(&0x0102_u16.to_le_bytes());
+
+        out[OPTIONAL..OPTIONAL + 2].copy_from_slice(&0x010b_u16.to_le_bytes());
+        out[OPTIONAL + 0x1c..OPTIONAL + 0x20].copy_from_slice(&0x0040_0000_u32.to_le_bytes());
+
+        out[SECTION..SECTION + 8].copy_from_slice(b".text\0\0\0");
+        out[SECTION + 8..SECTION + 12].copy_from_slice(&mapped_len.to_le_bytes());
+        out[SECTION + 12..SECTION + 16].copy_from_slice(&0x1000_u32.to_le_bytes());
+        out[SECTION + 16..SECTION + 20].copy_from_slice(&mapped_len.to_le_bytes());
+        out[SECTION + 20..SECTION + 24]
+            .copy_from_slice(&u32::try_from(SECTION_START).unwrap().to_le_bytes());
+        out[SECTION + 36..SECTION + 40].copy_from_slice(&0x6000_0020_u32.to_le_bytes());
+
+        out
+    }
+
+    /// A GUI table region of zero usable bytes gives a maximum of zero
+    /// entries, so any declared count above zero raises the defect with a
+    /// maximum of `0`.
+    #[test]
+    fn a_gui_table_region_of_zero_usable_bytes_gives_a_maximum_of_zero() {
+        let bytes = synthetic_image_with_no_bytes_in_its_section(0x10);
+        let image = PeImage::parse(&bytes).unwrap();
+        let header = header_with_gui_table(Va::new(0x0040_1000), 1);
+
+        let table = GuiTable::walk(&image, &header).unwrap();
+        assert!(table.entries.is_empty());
+        assert_eq!(table.defects().len(), 1);
+        let defect = &table.defects()[0];
+        assert!(matches!(
+            defect.kind,
+            DefectKind::ImplausibleCount {
+                count: 1,
+                max: 0,
+                ..
+            }
+        ));
     }
 
     #[test]

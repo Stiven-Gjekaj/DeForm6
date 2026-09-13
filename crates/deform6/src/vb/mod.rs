@@ -409,6 +409,7 @@ pub fn inspect(data: &[u8], opcode_table: &OpcodeTable, mode: Mode) -> Result<Re
     // property stream, its control tree, its `ControlInfoTable`) is
     // per-form recoverable instead; see `compose_form`.
     let gui_table = GuiTable::walk(&pe, &header)?;
+    defects.extend(gui_table.defects().iter().cloned());
     let tables = ComposeTables {
         opcode_table,
         components: &component_table,
@@ -1384,6 +1385,56 @@ mod tests {
             report.forms.is_empty(),
             "a zero form count must give an empty forms list: {:?}",
             report.forms
+        );
+    }
+
+    /// Plan 05-02, Task 1's end to end attempt, against a real corpus file
+    /// rather than the fully synthetic image
+    /// `gui::tests::gui_table_refuses_an_implausible_form_count` builds.
+    ///
+    /// Patching `MANDELBROT`'s own `wFormCount` to `0xFFFF` does reach
+    /// `bound_form_count`, which clamps the loop bound and builds one
+    /// `ImplausibleCount` defect, but that defect never reaches
+    /// `Journal::record` in either mode: the mapped GUI table region past
+    /// the file's own one real entry holds unrelated program bytes, and the
+    /// clamped loop's second iteration reads a garbage `lStructSize` there,
+    /// which `GuiTable::walk` refuses on its own account, with `?`, before
+    /// `inspect` ever sees the defect list. Both modes therefore refuse
+    /// identically, for a different, named reason than `ImplausibleCount`.
+    /// This is the plan's own documented fallback: the direct proof that a
+    /// declared count of `0xFFFF` gives `ImplausibleCount` with no
+    /// allocation lives at the `GuiTable::walk` level, in
+    /// `gui::tests::gui_table_refuses_an_implausible_form_count`, which
+    /// builds a GUI table region sized to hold exactly one entry so the
+    /// walk never reaches a second, un-real one.
+    ///
+    /// What this test proves instead: on a full, real program, an
+    /// implausible `wFormCount` still never panics and never reads past the
+    /// file, in either mode, because `checked_mul` and `subregion` bound
+    /// every step the clamp itself does not reach.
+    #[test]
+    fn an_implausible_form_count_against_a_real_program_still_refuses_and_never_panics() {
+        let head = header_offset_the_hard_way(MANDELBROT);
+        let at = head + 0x44; // VbHeader.w_form_count, STRUCTURES.md's own offset
+        let mut bytes = MANDELBROT.to_vec();
+        bytes[at..at + 2].copy_from_slice(&0xFFFF_u16.to_le_bytes());
+
+        let strict = inspect(&bytes, &builtin_table(), Mode::Strict);
+        let salvage = inspect(&bytes, &builtin_table(), Mode::Salvage);
+
+        let Err(Refusal::Damaged(strict_message)) = strict else {
+            panic!("expected a Damaged refusal in strict mode");
+        };
+        let Err(Refusal::Damaged(salvage_message)) = salvage else {
+            panic!("expected a Damaged refusal in salvage mode");
+        };
+        assert_eq!(
+            strict_message, salvage_message,
+            "the walk's own internal refusal does not depend on the mode"
+        );
+        assert!(
+            strict_message.contains("lStructSize"),
+            "expected the walk's own lStructSize refusal, not a different one: {strict_message}"
         );
     }
 
