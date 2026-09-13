@@ -2,16 +2,16 @@
 gsd_state_version: "1.0"
 current_phase: 5
 current_phase_name: Hostility
-status: planning
-stopped_at: Phase 04 complete, ready to plan Phase 5
-last_updated: "2026-09-13T10:11:04.331Z"
+status: executing
+stopped_at: Phase 5 planned, 8 plans written, ready to execute
+last_updated: "2026-09-13T12:27:29.582Z"
 last_activity: 2026-09-13
-last_activity_desc: Phase 04 complete, transitioned to Phase 5
-state_head: 69d13050d20601a67244bcf618c1a6badf78975f
+last_activity_desc: Phase 5 planned, 8 plans in 4 waves
+state_head: 7b2f1805ac03a09905344407d8ebfb1c05d06df7
 progress:
   total_phases: 6
   completed_phases: 1
-  total_plans: 45
+  total_plans: 53
   completed_plans: 45
   percent: 17
 ---
@@ -62,13 +62,13 @@ See: .planning/PROJECT.md (updated 2026-09-07)
 Visual Basic project that opens in the VB6 IDE, with the forms and the names
 intact, and a report that says how much of it is proved and how much is
 inferred.
-**Current focus:** Phase 04 — It writes a project
+**Current focus:** Phase 5 — Hostility
 
 ## Current Position
 
-Phase: 5 — Hostility
+Phase: 5 (Hostility) — READY TO EXECUTE
 Plan: Not started
-Status: Ready to plan
+Status: Ready to execute
 searches, six encodings across three corpus programs, never find the
 identifier a project file declares anywhere in the component table
 entry. `oUuid` (`248DD896-...`, one byte from the declared value) is
@@ -83,7 +83,7 @@ stated rather than hidden. The section overlap rule has no test because no
 corpus file overlaps. The P-code branch has no real sample because every
 vendored project is native. `inspect` drops the defects it collects, because
 `Report` derives `PartialEq` and `Defect` does not.
-Last activity: 2026-09-13 — Phase 04 complete, transitioned to Phase 5
+Last activity: 2026-09-13 — Phase 5 planned, 8 plans in 4 waves
 Plan 03-01 leads with an end to end tracer. Plan 03-02 withdraws the ROADMAP
 instruction to commit an opcode table built from a type library dump, because
 `AGENTS.md` bars a fixture calculated from a third party file. Plan 03-04
