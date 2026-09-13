@@ -21,6 +21,7 @@ pub mod values;
 pub mod vbp;
 
 use crate::error::Refusal;
+use crate::journal::Mode;
 use crate::report::{PathIssuer, ProjectReport, ReportItem};
 use crate::vb::Report;
 use crate::vb::classify::ObjectKind;
@@ -92,15 +93,19 @@ pub struct WrittenProject {
 /// produces still carries a real path, a basis and at least one evidence
 /// record. Unifying the two derivations into one pass is future work.
 ///
+/// `mode` names the run's own policy, and this function does one thing
+/// with it: hands it to [`crate::report::build`], which states it in the
+/// report's own limits list and lists an assumption line per `Recoverable`
+/// defect when it is [`Mode::Salvage`]. `mode` must be the
+/// same value the caller's own [`crate::vb::inspect`] call used to produce
+/// `report`: a report that graded its items from a salvage read while
+/// naming a strict run would misstate its own provenance.
+///
 /// # Errors
 ///
 /// Returns [`Refusal::Damaged`] when a form's own `.frx` offset cursor
 /// would overflow a `u32`; see [`crate::vb::frx::BlobCursor::take`].
-pub fn project(
-    report: &Report,
-    data: &[u8],
-    _mode: crate::journal::Mode,
-) -> Result<WrittenProject, Refusal> {
+pub fn project(report: &Report, data: &[u8], mode: Mode) -> Result<WrittenProject, Refusal> {
     let (model, model_items) = model::from_report(report, data);
 
     let mut files: Vec<WrittenFile> = Vec::new();
@@ -175,7 +180,7 @@ pub fn project(
         "Opcode table  builtin subset, {} entries",
         OpcodeTable::builtin().len()
     );
-    let built = crate::report::build(report, &model, model_items, &opcode_table_summary);
+    let built = crate::report::build(report, &model, model_items, &opcode_table_summary, mode);
     for item in built.items {
         let path = paths.issue(item.path);
         items.push(ReportItem { path, ..item });

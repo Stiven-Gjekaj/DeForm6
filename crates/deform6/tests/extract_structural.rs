@@ -713,11 +713,19 @@ fn the_reports_limits_state_the_exact_recompilation_sentence() {
     let written = deform6::write::project(&report, &data, deform6::journal::Mode::Strict)
         .expect("write::project must succeed");
 
-    assert_eq!(
-        written.report.limits.first().map(String::as_str),
-        Some(RECOMPILATION_LIMIT_STATEMENT),
-        "the report's own first limit line must be exactly this check's own copy of the \
-         recompilation sentence: {RECOMPILATION_LIMIT_STATEMENT:?}"
+    // Plan 05-01 task 3 adds a mode line before the four lines every run
+    // already stated, so the recompilation sentence is no longer the first
+    // entry; it must still appear, verbatim, somewhere in the list.
+    assert!(
+        written
+            .report
+            .limits
+            .iter()
+            .any(|line| line == RECOMPILATION_LIMIT_STATEMENT),
+        "the report's own limits must hold this check's own copy of the recompilation \
+         sentence, verbatim: {RECOMPILATION_LIMIT_STATEMENT:?}, limits were: \
+         {:?}",
+        written.report.limits
     );
 }
 

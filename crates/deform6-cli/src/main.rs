@@ -126,6 +126,17 @@ enum Command {
         /// first, whether or not this flag is given.
         #[arg(long)]
         force: bool,
+
+        /// Continues past a defect this run had to assume a value for,
+        /// instead of refusing.
+        ///
+        /// The same flag `inspect` carries. The one mode this flag selects
+        /// is passed to both the read and the write side of this run,
+        /// never a different value to each: a report that graded its
+        /// items from a salvage read while naming a strict run would
+        /// misstate its own provenance.
+        #[arg(long)]
+        salvage: bool,
     },
 }
 
@@ -193,7 +204,8 @@ fn run(cli: &Cli) -> Exit {
             output,
             report,
             force,
-        } => run_extract(input, output, report.as_deref(), *force),
+            salvage,
+        } => run_extract(input, output, report.as_deref(), *force, mode_for(*salvage)),
     }
 }
 
@@ -314,7 +326,19 @@ fn run_inspect(
 /// could not create) maps to [`Exit::Internal`], code 5, the same usage
 /// error bucket [`load_opcode_table`]'s own failures already use: the
 /// numbering must never move.
-fn run_extract(input: &Path, output: &Path, report_path: Option<&Path>, force: bool) -> Exit {
+///
+/// `mode` comes from `--salvage`, per [`mode_for`], and this function
+/// passes the same value to both the `inspect` call and the `project`
+/// call below. Never a different value to each: a report that graded its
+/// items from a salvage read while naming a strict run would misstate its
+/// own provenance.
+fn run_extract(
+    input: &Path,
+    output: &Path,
+    report_path: Option<&Path>,
+    force: bool,
+    mode: deform6::journal::Mode,
+) -> Exit {
     // Kept alive for the whole call: `deform6::write::project` re-reads a
     // resource blob's own bytes out of this same slice, so it must outlive
     // the write step. A later refactor that drops this early would compile
@@ -328,7 +352,7 @@ fn run_extract(input: &Path, output: &Path, report_path: Option<&Path>, force: b
     };
 
     let table = OpcodeTable::builtin();
-    let inspected = match deform6::inspect(&data, &table, deform6::journal::Mode::Strict) {
+    let inspected = match deform6::inspect(&data, &table, mode) {
         Ok(inspected) => inspected,
         Err(refusal) => {
             eprintln!("{refusal}");
@@ -338,8 +362,10 @@ fn run_extract(input: &Path, output: &Path, report_path: Option<&Path>, force: b
 
     // The whole project is built in memory here, before `output` is
     // touched at all. A refusal from this call leaves the file system
-    // exactly as it was before this run started.
-    let written = match deform6::write::project(&inspected, &data, deform6::journal::Mode::Strict) {
+    // exactly as it was before this run started. `mode` is the same value
+    // the `inspect` call above used: see this function's own doc comment
+    // for why the two calls must never take different modes.
+    let written = match deform6::write::project(&inspected, &data, mode) {
         Ok(written) => written,
         Err(refusal) => {
             eprintln!("{refusal}");

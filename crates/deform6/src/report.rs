@@ -10,7 +10,8 @@
 //! "Don't Hand-Roll" table names manual JSON string building as exactly
 //! the deceptively complex text problem a real library exists to own.
 
-use crate::error::Defect;
+use crate::error::{Defect, Severity};
+use crate::journal::Mode;
 
 /// The reserved path a run level report item takes: a fact that belongs to
 /// no object, no form and no control, such as which opcode table subset
@@ -336,13 +337,32 @@ pub(crate) fn with_header_evidence(mut item: ReportItem, report: &Report) -> Rep
 /// summary of the table this run actually used, so the report never
 /// disagrees with the line the command line already printed.
 ///
-/// The first line states, in plain words, that full recompilation did not
+/// `mode` names the run's own policy first, before the four lines every
+/// run already stated: a strict run says it assumed nothing, because
+/// [`crate::journal::Journal::record`] already refused before this
+/// function could ever see a `Recoverable` defect in `defects`; a salvage
+/// run says it continued past one, and every assumption line
+/// [`assumption_lines`] builds follows immediately after. Neither run's
+/// line claims more than [`Mode`] itself decided.
+///
+/// The second line states, in plain words, that full recompilation did not
 /// run: it needs the Visual Basic 6 IDE on Windows, this run had neither,
 /// and a structural check ran in its place. It never claims the IDE
 /// opened this project, the one claim the roadmap's own named risk
 /// forbids.
-fn build_limits(opcode_table_summary: &str) -> Vec<String> {
-    vec![
+fn build_limits(mode: Mode, defects: &[Defect], opcode_table_summary: &str) -> Vec<String> {
+    let mode_line = match mode {
+        Mode::Strict => "This is a strict run. It refused any file whose read had to \
+             assume a value, so this run assumed none."
+            .to_owned(),
+        Mode::Salvage => "This is a salvage run. It continued past a defect the read had \
+             to assume a value for, and every assumption it made is listed \
+             below."
+            .to_owned(),
+    };
+
+    let mut limits = vec![
+        mode_line,
         "Full recompilation did not run. It needs the Visual Basic 6 IDE on \
          Windows, and this run had neither. A structural check ran in its \
          place, and it never opened this project in the IDE."
@@ -356,7 +376,37 @@ fn build_limits(opcode_table_summary: &str) -> Vec<String> {
          U+00FF was replaced with a question mark and reported, never \
          guessed at a different code page."
             .to_owned(),
-    ]
+    ];
+    limits.extend(assumption_lines(defects));
+    limits
+}
+
+/// One line per `Recoverable` defect, naming the assumption a salvage run
+/// made in its place.
+///
+/// Walks `defects` in the order they were recorded (the same order
+/// [`crate::journal::Journal::record`] pushed them in, before it ever
+/// applied a policy, per that function's own doc comment), and keeps only
+/// the ones whose severity is [`Severity::Recoverable`]: a `Tolerated`
+/// defect costs one item and the run assumed nothing in its place, so it
+/// earns no line here. A `Fatal` defect never reaches this function at
+/// all, because [`crate::vb::inspect`] already refused before `defects`
+/// was ever assembled.
+///
+/// This never filters [`ProjectReport::defects`] itself: RPT-05 requires
+/// every defect the run met, `Tolerated` included, and this function only
+/// adds lines to [`ProjectReport::limits`].
+fn assumption_lines(defects: &[Defect]) -> Vec<String> {
+    defects
+        .iter()
+        .filter(|defect| defect.kind.severity() == Severity::Recoverable)
+        .map(|defect| {
+            format!(
+                "Assumed at offset {:#x} ({}.{}): {}",
+                defect.site.offset, defect.site.structure, defect.site.field, defect.kind
+            )
+        })
+        .collect()
 }
 
 /// Builds the complete [`ProjectReport`] one run of
@@ -368,22 +418,24 @@ fn build_limits(opcode_table_summary: &str) -> Vec<String> {
 /// control's own properties in stream order, adding one item for every
 /// property that earns one. The defect array is attached whole, from
 /// [`Report::defects`], never filtered: a run that continued past a
-/// defect still reports it, per RPT-05. `opcode_table_summary` flows
-/// straight into [`build_limits`].
+/// defect still reports it, per RPT-05. `opcode_table_summary` and `mode`
+/// flow straight into [`build_limits`], which is also where `mode` earns
+/// its one assumption line per `Recoverable` defect.
 ///
 /// # Determinism
 ///
 /// Every collection this function walks is already an ordered `Vec`, in
 /// [`Report`]'s or [`ProjectModel`]'s own recovered order, and every path
 /// this function issues comes from one [`PathIssuer`], so two calls over
-/// the same `report`, `model`, `model_items` and `opcode_table_summary`
-/// give the same [`ProjectReport`], field for field.
+/// the same `report`, `model`, `model_items`, `opcode_table_summary` and
+/// `mode` give the same [`ProjectReport`], field for field.
 #[must_use]
 pub fn build(
     report: &Report,
     model: &ProjectModel,
     model_items: Vec<ReportItem>,
     opcode_table_summary: &str,
+    mode: Mode,
 ) -> ProjectReport {
     let mut paths = PathIssuer::new();
     let mut items = Vec::with_capacity(model_items.len());
@@ -412,7 +464,7 @@ pub fn build(
     ProjectReport {
         items,
         defects: report.defects.clone(),
-        limits: build_limits(opcode_table_summary),
+        limits: build_limits(mode, &report.defects, opcode_table_summary),
     }
 }
 
@@ -425,7 +477,7 @@ pub fn build(
 )]
 mod tests {
     use super::{
-        Confidence, Evidence, META_PATH, PathIssuer, ProjectReport, ReportItem, build,
+        Confidence, Evidence, META_PATH, Mode, PathIssuer, ProjectReport, ReportItem, build,
         build_limits, item_for_property, path_for_code, path_for_control, path_for_form,
         path_for_property, property_word, with_header_evidence,
     };
@@ -730,6 +782,7 @@ mod tests {
             &model,
             items,
             "Opcode table: test fixture, 0 entries",
+            Mode::Strict,
         );
         assert_eq!(built.defects.len(), report.defects.len());
         assert_eq!(built.defects, report.defects);
@@ -756,6 +809,7 @@ mod tests {
             &model,
             items,
             "Opcode table: test fixture, 0 entries",
+            Mode::Strict,
         );
 
         assert!(!built.items.is_empty());
@@ -795,7 +849,7 @@ mod tests {
             .expect("Fast_Flames.exe must inspect cleanly");
         let (model, items) = crate::write::model::from_report(&report, FAST_FLAMES);
         let summary = format!("Opcode table: builtin subset, {} entries", table.len());
-        build(&report, &model, items, &summary)
+        build(&report, &model, items, &summary, Mode::Strict)
     }
 
     #[test]
@@ -822,7 +876,7 @@ mod tests {
 
     #[test]
     fn the_limits_list_states_that_full_recompilation_did_not_run() {
-        let limits = build_limits("Opcode table: test fixture, 0 entries");
+        let limits = build_limits(Mode::Strict, &[], "Opcode table: test fixture, 0 entries");
         assert!(
             limits.iter().any(|line| line.contains("did not run")),
             "{limits:?}"
@@ -832,13 +886,13 @@ mod tests {
     #[test]
     fn the_limits_list_names_the_opcode_table_the_run_used() {
         let summary = "Opcode table: builtin subset, 74 entries";
-        let limits = build_limits(summary);
+        let limits = build_limits(Mode::Strict, &[], summary);
         assert!(limits.iter().any(|line| line == summary), "{limits:?}");
     }
 
     #[test]
     fn the_limits_list_never_implies_the_ide_opened_the_project() {
-        let limits = build_limits("Opcode table: test fixture, 0 entries");
+        let limits = build_limits(Mode::Strict, &[], "Opcode table: test fixture, 0 entries");
         for line in &limits {
             assert!(
                 !line.to_lowercase().contains("the ide opened"),
@@ -849,7 +903,9 @@ mod tests {
 
     #[test]
     fn build_limits_is_never_empty() {
-        assert!(!build_limits("Opcode table: test fixture, 0 entries").is_empty());
+        assert!(
+            !build_limits(Mode::Strict, &[], "Opcode table: test fixture, 0 entries").is_empty()
+        );
     }
 
     #[test]

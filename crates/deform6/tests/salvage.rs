@@ -8,8 +8,10 @@
     reason = "a test builds the state it needs and must fail loudly when that state is wrong"
 )]
 
-//! Task 2's own end to end proof: one patched field refuses in strict and
-//! produces the report under salvage, and the two runs read the same bytes.
+//! Tasks 2 and 3's own end to end proof: one patched field refuses in
+//! strict and produces the report under salvage, both `inspect` and
+//! `write::project` read the same bytes in both modes, and a salvage
+//! report's own JSON names every assumption it made.
 //!
 //! The patched bytes never reach disk. `AGENTS.md` bars a fixture
 //! calculated from a third party file from entering this repository; a byte
@@ -22,6 +24,7 @@
 use deform6::Refusal;
 use deform6::inspect;
 use deform6::journal::Mode;
+use deform6::report::ProjectReport;
 use deform6::vb::opcodes::OpcodeTable;
 
 /// `corpus/vb6-code/Fire-effect/Fast_Flames.exe`, read once at compile time.
@@ -56,6 +59,23 @@ fn with_external_count(data: &[u8], table: &OpcodeTable, value: u16) -> Vec<u8> 
     patched[at..at + 2].copy_from_slice(&value.to_le_bytes());
     patched
 }
+
+/// Runs `inspect` then `write::project` over `data`, both in `mode`, and
+/// gives back the `ProjectReport` the write side built. Never lets the two
+/// calls take different modes, the same rule `run_extract` follows.
+fn built_project_report(data: &[u8], table: &OpcodeTable, mode: Mode) -> ProjectReport {
+    let inspected = inspect(data, table, mode).expect("this call must inspect cleanly");
+    deform6::write::project(&inspected, data, mode)
+        .expect("write::project must not refuse a clean report")
+        .report
+}
+
+/// The prefix every assumption line `report::assumption_lines` builds
+/// starts with. A test that greps for this exact prefix cannot mistake one
+/// of the four fixed limits lines (the recompilation notice, the opcode
+/// table summary, the inline string notice, the code page notice) for an
+/// assumption line, because none of those four starts with it.
+const ASSUMPTION_LINE_PREFIX: &str = "Assumed at offset";
 
 #[test]
 fn the_unpatched_file_succeeds_in_both_modes_with_equal_defect_lists() {
@@ -130,4 +150,88 @@ fn an_empty_input_and_a_one_byte_input_refuse_as_not_pe_in_both_modes() {
             "a one byte input must refuse as NotPe in {mode:?}"
         );
     }
+}
+
+#[test]
+fn a_strict_report_holds_the_mode_line_and_no_assumption_line() {
+    let table = OpcodeTable::builtin();
+    let report = built_project_report(FAST_FLAMES, &table, Mode::Strict);
+
+    assert!(
+        report
+            .limits
+            .iter()
+            .any(|line| line.contains("strict run") && line.contains("assumed none")),
+        "a strict report must state that it assumed nothing: {:?}",
+        report.limits
+    );
+    assert!(
+        report
+            .limits
+            .iter()
+            .all(|line| !line.starts_with(ASSUMPTION_LINE_PREFIX)),
+        "a strict run raised only Tolerated defects, so it must hold no assumption line: {:?}",
+        report.limits
+    );
+}
+
+#[test]
+fn a_salvage_report_over_the_patched_bytes_holds_the_mode_line_and_one_assumption_line() {
+    let table = OpcodeTable::builtin();
+    let patched = with_external_count(FAST_FLAMES, &table, 1);
+    let report = built_project_report(&patched, &table, Mode::Salvage);
+
+    assert!(
+        report
+            .limits
+            .iter()
+            .any(|line| line.contains("salvage run") && line.contains("continued past")),
+        "a salvage report must state that it continued past a defect: {:?}",
+        report.limits
+    );
+
+    let assumption_lines: Vec<&String> = report
+        .limits
+        .iter()
+        .filter(|line| line.starts_with(ASSUMPTION_LINE_PREFIX))
+        .collect();
+    assert_eq!(
+        assumption_lines.len(),
+        1,
+        "exactly one Recoverable defect was patched in: {:?}",
+        report.limits
+    );
+    assert!(
+        assumption_lines[0].contains("0x1da4"),
+        "the one assumption line must name the byte offset 0x1da4: {}",
+        assumption_lines[0]
+    );
+}
+
+#[test]
+fn the_defect_array_holds_more_entries_than_the_assumption_line_count() {
+    let table = OpcodeTable::builtin();
+    let patched = with_external_count(FAST_FLAMES, &table, 1);
+    let report = built_project_report(&patched, &table, Mode::Salvage);
+
+    let assumption_count = report
+        .limits
+        .iter()
+        .filter(|line| line.starts_with(ASSUMPTION_LINE_PREFIX))
+        .count();
+    assert!(
+        report.defects.len() > assumption_count,
+        "the Tolerated defects must be reported and not counted as assumptions: \
+         {} defects, {assumption_count} assumption line(s)",
+        report.defects.len()
+    );
+}
+
+#[test]
+fn two_salvage_runs_over_the_same_bytes_give_byte_identical_json() {
+    let table = OpcodeTable::builtin();
+    let patched = with_external_count(FAST_FLAMES, &table, 1);
+    let first = built_project_report(&patched, &table, Mode::Salvage).to_json();
+    let second = built_project_report(&patched, &table, Mode::Salvage).to_json();
+    assert_eq!(first, second);
 }

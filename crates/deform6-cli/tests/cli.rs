@@ -877,6 +877,73 @@ fn inspect_with_salvage_on_the_same_patched_file_exits_zero_and_prints_the_repor
     );
 }
 
+/// Absent `--salvage`, `extract` on a patched file exits 4 and writes
+/// nothing: the output directory this test names is never created, since
+/// `run_extract` refuses before `resolve_output_dir` ever runs.
+#[test]
+fn extract_on_a_patched_file_without_salvage_exits_four_and_writes_nothing() {
+    let patched = patched_fast_flames_missing_a_nul_terminator();
+    let path = std::env::temp_dir().join(format!(
+        "deform6-cli-test-extract-patched-fast-flames-{}.exe",
+        std::process::id()
+    ));
+    fs::write(&path, &patched).unwrap();
+    let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "deform6-cli-test-extract-salvage-refused-{}",
+        std::process::id()
+    ));
+    fs::remove_dir_all(&out_dir).ok();
+
+    let (code, stdout, stderr) = run(&[
+        OsStr::new("extract"),
+        path.as_os_str(),
+        OsStr::new("-o"),
+        out_dir.as_os_str(),
+    ]);
+    fs::remove_file(&path).ok();
+
+    assert_eq!(code, 4, "stdout was: {stdout:?}, stderr was: {stderr:?}");
+    assert!(
+        !out_dir.exists(),
+        "a refused run must not create the output directory"
+    );
+}
+
+/// With `--salvage`, the same patched file writes the project and a report
+/// whose limits array names the one assumption the run made.
+#[test]
+fn extract_with_salvage_on_a_patched_file_writes_the_project_and_the_assumption() {
+    let patched = patched_fast_flames_missing_a_nul_terminator();
+    let path = std::env::temp_dir().join(format!(
+        "deform6-cli-test-extract-patched-fast-flames-salvage-{}.exe",
+        std::process::id()
+    ));
+    fs::write(&path, &patched).unwrap();
+    let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "deform6-cli-test-extract-salvage-ok-{}",
+        std::process::id()
+    ));
+    fs::remove_dir_all(&out_dir).ok();
+
+    let (code, _stdout, stderr) = run(&[
+        OsStr::new("extract"),
+        OsStr::new("--salvage"),
+        path.as_os_str(),
+        OsStr::new("-o"),
+        out_dir.as_os_str(),
+    ]);
+    fs::remove_file(&path).ok();
+    assert_eq!(code, 0, "stderr was: {stderr}");
+
+    let report_path = out_dir.join("VBFire2.report.json");
+    let report_bytes = fs::read_to_string(&report_path)
+        .unwrap_or_else(|err| panic!("reading {}: {err}", report_path.display()));
+    assert!(
+        report_bytes.contains("0x1da4"),
+        "the written report must name the assumed byte offset 0x1da4: {report_bytes}"
+    );
+}
+
 // --- Plan 04-01, Task 1: `extract` writes a project directory -------------
 
 /// `corpus/vb6-code/Fire-effect/Fast_Flames.exe`, this task's one tracer
