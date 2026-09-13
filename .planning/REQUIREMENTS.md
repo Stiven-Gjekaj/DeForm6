@@ -131,7 +131,7 @@ Version 1 recovers metadata. It does not recover statements.
       marks in the report everything it had to assume.
 - [x] **SAF-04**: The tool never sizes an allocation from a length field in the
       file without checking that length against the real size of the file.
-- [ ] **SAF-05**: A fuzzer runs in the gate, and every crash it finds becomes a
+- [x] **SAF-05**: A fuzzer runs in the gate, and every crash it finds becomes a
       committed regression test that replays on stable Rust.
 
 ### Verification
@@ -213,7 +213,7 @@ Deferred. Tracked, not in this roadmap.
 | SAF-02 | Phase 5 | Complete |
 | SAF-03 | Phase 5 | Complete |
 | SAF-04 | Phase 5 | Complete |
-| SAF-05 | Phase 5 | Pending |
+| SAF-05 | Phase 5 | Complete |
 
 Phase 6 owns no new requirement. It measures the whole set end to end and turns
 the result into the released documentation.

@@ -2,19 +2,19 @@
 gsd_state_version: "1.0"
 current_phase: 5
 current_phase_name: Hostility
-current_plan: 7
+current_plan: 8
 status: executing
-stopped_at: Completed 05-05-PLAN.md
-last_updated: "2026-09-13T19:32:04.558Z"
+stopped_at: Completed 05-04-PLAN.md
+last_updated: "2026-09-13T20:41:41.035Z"
 last_activity: 2026-09-13
-last_activity_desc: Plan 05-05 executed - the hostile GUI table image builder, the sorted regression replay in both modes, and the first committed seed
-state_head: 93f68acd2cfed5456955062e42cd86028a74d8ee
+last_activity_desc: Plan 05-04 executed - the bounded pull request fuzz job and the scheduled iteration bounded fuzz job, both in .github/workflows/fuzz.yml
+state_head: 152c76721db35edcf92f40febac74789e4768ee1
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 53
-  completed_plans: 51
-  percent: 96
+  completed_plans: 52
+  percent: 98
 ---
 
 ## Continue
@@ -68,13 +68,13 @@ inferred.
 ## Current Position
 
 Phase: 5 (Hostility) - EXECUTING
-Current Plan: 7
+Current Plan: 8
 Total Plans in Phase: 8
-Plan: 05-01, 05-02, 05-03, 05-05, 05-06 and 05-07 complete (waves 1, 2 and 3 done); wave 4 next (05-04, 05-08)
+Plan: 05-01, 05-02, 05-03, 05-04, 05-05, 05-06 and 05-07 complete (waves 1 through 4 done for 05-04); 05-08 remaining
 Status: Ready to execute
-Last activity: 2026-09-13 - Plan 05-05 executed - the hostile GUI table image builder, the sorted regression replay in both modes, and the first committed seed
+Last activity: 2026-09-13 - Plan 05-04 executed - the bounded pull request fuzz job and the scheduled iteration bounded fuzz job, both in .github/workflows/fuzz.yml
 
-Progress: [█████████░] 96% of the 53 written plans, which is 51 of 53
+Progress: [█████████░] 98% of the 53 written plans, which is 52 of 53
 
 ## Performance Metrics
 
@@ -138,6 +138,7 @@ Progress: [█████████░] 96% of the 53 written plans, which is
 | Phase 05 P03 | 1 session | 3 tasks | 7 files |
 | Phase 05-hostility P06 | 45min | 2 tasks | 3 files |
 | Phase 05 P05 | ~30min | 2 tasks | 4 files |
+| Phase 05-hostility P04 | ~1h10min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -240,6 +241,7 @@ Recent decisions affecting current work:
 - [Phase 5]: CRON_RUNS set to 500000, measured against the 237 byte worst case crate::error::damaged message, a safety factor of roughly 18 below the resident set limit
 - [Phase 5]: PathIssuer and SafeNameIssuer now use a HashSet plus a per-key next-suffix cache instead of a linearly scanned Vec, closing an O(n^2) DoS the fuzz_smoke sweep found (one mutated input took over two minutes before the fix, well under a second after).
 - [Phase 5]: Checkpoint: chose seed-with-an-owned-binary for crates/deform6/tests/regressions/, after measuring that the seed refuses at NoVbRuntime rather than reaching GuiTable::walk
+- [Phase 5]: SAF-05 marked complete: fuzz-pr and fuzz-cron both exist in .github/workflows/fuzz.yml, seeded from corpus/ and tests/regressions/, calling the xtask subcommands with no fuzzer flag of their own
 
 ### Pending Todos
 
@@ -268,8 +270,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-13T19:32:04.526Z
-Stopped at: Completed 05-05-PLAN.md
+Last session: 2026-09-13T20:41:40.987Z
+Stopped at: Completed 05-04-PLAN.md
 
 Plan 05-01 is done: 5 commits, cargo test --workspace at 887 passed, 0 failed,
 up from the 872 baseline this plan started at.
