@@ -428,6 +428,37 @@ fn plan_writes<'a>(
     Ok(plan)
 }
 
+/// Refuses the whole run if a symbolic link already sits at any planned
+/// path.
+///
+/// `ensure_directory_is_writable` bypasses its own non-empty-directory
+/// refusal entirely when `--force` is given, and `std::fs::write` follows
+/// an existing symbolic link rather than replacing it. A party with write
+/// access to `resolved_dir` (a shared directory) could pre-plant a symlink
+/// at one of this tool's predictable output file names (`Project1.vbp`, a
+/// form's own `.frm`, the `.report.json`) pointing at a file the running
+/// user can write elsewhere, such as a dotfile in their home directory.
+/// Left unchecked, `--force` would silently overwrite that target instead
+/// of creating a new file inside `resolved_dir`, a write outside the
+/// resolved output directory the containment check in [`plan_writes`] was
+/// built specifically to prevent.
+///
+/// Checked with [`std::fs::symlink_metadata`], which reads the entry
+/// itself rather than following it, before any byte in `plan` is written.
+fn refuse_symlink_targets(plan: &[(PathBuf, &[u8])]) -> Result<(), String> {
+    for (path, _bytes) in plan {
+        if let Ok(metadata) = std::fs::symlink_metadata(path)
+            && metadata.file_type().is_symlink()
+        {
+            return Err(format!(
+                "{} already exists as a symbolic link; refusing to write through it",
+                path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Resolves a user-named `--report` path the same way `output` is
 /// resolved: follows symbolic links on the directory that will hold it.
 /// Never checked against the output directory: the user named this path
@@ -459,10 +490,12 @@ fn resolve_report_path(path: &Path) -> Result<PathBuf, Exit> {
 
 /// Writes every file `written` holds into `resolved_dir`, having already
 /// resolved it (see [`resolve_output_dir`]): refuses a non-empty directory
-/// without `--force`, plans and checks every path with [`plan_writes`]
-/// before writing a single byte, then writes. When `report_path` is
-/// given, the JSON report goes there instead of into `resolved_dir`, is
-/// never checked for containment, and its own resolved path is printed.
+/// without `--force`, plans and checks every path with [`plan_writes`],
+/// refuses a symbolic link already sitting at any planned path with
+/// [`refuse_symlink_targets`], all before writing a single byte, then
+/// writes. When `report_path` is given, the JSON report goes there instead
+/// of into `resolved_dir`, is never checked for containment, and its own
+/// resolved path is printed.
 fn write_project(
     written: &deform6::write::WrittenProject,
     resolved_dir: &Path,
@@ -484,6 +517,11 @@ fn write_project(
             return Exit::Internal;
         }
     };
+
+    if let Err(message) = refuse_symlink_targets(&plan) {
+        eprintln!("{message}");
+        return Exit::Internal;
+    }
 
     for (path, bytes) in &plan {
         if let Err(err) = std::fs::write(path, bytes) {
@@ -1217,6 +1255,40 @@ mod tests {
 
         assert_eq!(exit, Exit::Internal);
         assert_empty(&resolved);
+        std::fs::remove_dir_all(&resolved).ok();
+    }
+
+    /// WR-01: a symbolic link pre-planted at a planned output path, inside
+    /// an otherwise empty output directory used with `--force`, must not
+    /// be written through. The link's own target must be left untouched:
+    /// `write_project` refuses the whole run before it writes any byte.
+    /// Unix-only: `std::os::unix::fs::symlink`, matching this crate's own
+    /// existing symlink test convention (`crates/deform6-cli/tests/cli.rs`).
+    #[test]
+    fn a_preexisting_symlink_at_a_planned_path_refuses_the_whole_run_under_force() {
+        let resolved = fresh_dir("symlink-target-dir");
+        let target = std::env::temp_dir().join(format!(
+            "deform6-cli-test-symlink-target-{}-file",
+            std::process::id()
+        ));
+        std::fs::remove_file(&target).ok();
+        std::fs::write(&target, b"do not touch me").expect("writing the link's own target");
+
+        let link_path = resolved.join("Project1.vbp");
+        std::os::unix::fs::symlink(&target, &link_path).expect("creating the symlink");
+
+        let project = project_named("Project1.vbp");
+        let exit = write_project(&project, &resolved, None, true);
+
+        assert_eq!(exit, Exit::Internal);
+        let target_bytes =
+            std::fs::read(&target).expect("the link's own target must still exist, untouched");
+        assert_eq!(
+            target_bytes, b"do not touch me",
+            "the run must never write through the symlink"
+        );
+
+        std::fs::remove_file(&target).ok();
         std::fs::remove_dir_all(&resolved).ok();
     }
 
