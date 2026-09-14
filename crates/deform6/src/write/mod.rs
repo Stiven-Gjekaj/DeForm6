@@ -31,7 +31,7 @@ use model::CodeKind;
 /// One file this phase writes: its own file name, and its own bytes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WrittenFile {
-    /// The file name, built through [`SafeName::file_name`] wherever the
+    /// The file name, built through [`crate::write::model::SafeName::file_name`] wherever the
     /// name came from a recovered string.
     pub name: String,
     /// The file's own bytes, exactly as they would land on disk.
@@ -82,7 +82,7 @@ pub struct WrittenProject {
 /// control's own properties, graded a second time by confidence. This
 /// function therefore issues every item's path through one shared
 /// [`PathIssuer`], after backfilling evidence with
-/// [`crate::report::with_header_evidence`] for any item that still carries
+/// `crate::report::with_header_evidence` for any item that still carries
 /// none, so a path a writer chose cannot collide, unnoticed, with a path
 /// [`crate::report::build`] chose independently. A control's property may
 /// therefore earn two items, one from the writer that omitted its line,

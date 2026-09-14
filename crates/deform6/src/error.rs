@@ -509,7 +509,7 @@ pub(crate) fn damaged(message: String) -> Refusal {
 /// interpolates the byte offset in hexadecimal, the structure name from
 /// [`Site::structure`], and the field name from [`Site::field`].
 ///
-/// This reaches [`damaged`], and therefore leaks one short string per
+/// This reaches `damaged`, and therefore leaks one short string per
 /// refusal, the same cost `damaged`'s own doc comment already names. The
 /// fuzz job in plan 05-03 turns leak detection off for exactly this reason:
 /// a strict run over a hostile file now reaches this function far more

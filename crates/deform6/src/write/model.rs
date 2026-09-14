@@ -187,9 +187,9 @@ impl SafeName {
     /// applying every rule in this fixed order, and recording a
     /// [`NameFault`] for each rule that fired:
     ///
-    /// 1. An empty raw name becomes [`generated_name`] for `kind`, and
+    /// 1. An empty raw name becomes `generated_name` for `kind`, and
     ///    records [`NameFault::EmptyName`]. Nothing else in this list fires
-    ///    for an empty name, since [`generated_name`] is already legal.
+    ///    for an empty name, since `generated_name` is already legal.
     /// 2. Every character that is not a letter, a digit or an underscore
     ///    becomes an underscore, and each one records a
     ///    [`NameFault::IllegalCharacter`] naming its own character index
@@ -463,7 +463,7 @@ pub struct FormModel {
     /// them apart.
     pub tree_refused: bool,
     /// Every control this form's own tree holds, in the same depth-first
-    /// order [`FormReport::controls`] gives them: index 0 is always the
+    /// order [`crate::vb::FormReport::controls`] gives them: index 0 is always the
     /// form's own outermost block.
     pub controls: Vec<ControlModel>,
     /// The form's own procedures, joined from the `Form`-kind object table

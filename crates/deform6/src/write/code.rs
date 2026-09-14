@@ -63,7 +63,7 @@ pub fn form_attribute_block(name: &SafeName, kind: AttributeFileKind) -> Vec<Str
     ]
 }
 
-/// The field width the three longest names in [`CLS_PREAMBLE_PROPERTIES`]
+/// The field width the three longest names in `CLS_PREAMBLE_PROPERTIES`
 /// pad exactly to. Measured by hand this session, byte for byte, from
 /// `corpus/vb6-code/Fire-effect/FastDrawing.cls`: `DataBindingBehavior` (19
 /// characters) gets 1 space (19 + 1 = 20); `DataSourceBehavior` and
@@ -73,7 +73,7 @@ pub fn form_attribute_block(name: &SafeName, kind: AttributeFileKind) -> Vec<Str
 /// regardless, far short of this width. This is not a general "pad to 20"
 /// formula. A formula that computed `20 - name.len()` for every row would
 /// give `MultiUse` 12 spaces, not the 1 the corpus proves. So
-/// [`CLS_PREAMBLE_PROPERTIES`] stores each row's own measured space count
+/// `CLS_PREAMBLE_PROPERTIES` stores each row's own measured space count
 /// directly, and this constant documents the width the three longest rows
 /// happen to share rather than driving the calculation.
 pub const CLS_NAME_PAD: usize = 20;
@@ -105,7 +105,7 @@ fn cls_property_line(name: &str, spaces_before_eq: usize, value: &str, comment: 
 }
 
 /// Builds the thirteen line `.cls` preamble: the version line, `BEGIN`,
-/// the five property lines [`CLS_PREAMBLE_PROPERTIES`] gives, `END`, then
+/// the five property lines `CLS_PREAMBLE_PROPERTIES` gives, `END`, then
 /// the five `Attribute` lines [`form_attribute_block`] gives for
 /// [`AttributeFileKind::Class`]. The version line's minor part is a single
 /// digit: `VERSION 1.0 CLASS`, never `VERSION 5.00`, per

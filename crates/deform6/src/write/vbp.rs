@@ -94,9 +94,9 @@ const DEFAULT_COMPILER_FLAGS: [(&str, i32); 10] = [
 /// object table order (interleaving forms, modules and classes exactly as
 /// the executable declared them, per [`Report::objects`]), the title, the
 /// executable name and the help file `01-05-SUMMARY.md` settled, and the
-/// external component table. `model` supplies every [`SafeName`] this
+/// external component table. `model` supplies every [`crate::write::model::SafeName`] this
 /// function writes: no line here builds a file name itself, and every one
-/// comes from [`SafeName::as_str`] or [`SafeName::file_name`].
+/// comes from [`crate::write::model::SafeName::as_str`] or [`crate::write::model::SafeName::file_name`].
 ///
 /// # Determinism
 ///

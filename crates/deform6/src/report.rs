@@ -433,7 +433,7 @@ fn assumption_lines(defects: &[Defect]) -> Vec<String> {
 /// property that earns one. The defect array is attached whole, from
 /// [`Report::defects`], never filtered: a run that continued past a
 /// defect still reports it, per RPT-05. `opcode_table_summary` and `mode`
-/// flow straight into [`build_limits`], which is also where `mode` earns
+/// flow straight into `build_limits`, which is also where `mode` earns
 /// its one assumption line per `Recoverable` defect.
 ///
 /// # Determinism
