@@ -173,7 +173,7 @@ impl VbStr {
                 structure: "VbStr",
                 field: "declared_end",
             },
-            kind: DefectKind::OffsetOverflow { offset, len },
+            kind: DefectKind::ItemOffsetOverflow { offset, len },
         };
         (
             Self {
@@ -308,7 +308,7 @@ const fn encoding_name(encoding: StrEncoding) -> &'static str {
 )]
 mod tests {
     use super::{StrEncoding, VbStr};
-    use crate::error::DefectKind;
+    use crate::error::{DefectKind, Severity};
     use crate::read::region::{Off, Region};
 
     #[test]
@@ -385,7 +385,8 @@ mod tests {
         let region = Region::new(&buf, Off::new(0));
         let (s, defect) = VbStr::read(&region, Off::new(u32::MAX - 1), StrEncoding::Ascii);
         let defect = defect.expect("an offset this close to u32::MAX must overflow, not wrap");
-        assert!(matches!(defect.kind, DefectKind::OffsetOverflow { .. }));
+        assert_eq!(defect.kind.severity(), Severity::Recoverable);
+        assert!(matches!(defect.kind, DefectKind::ItemOffsetOverflow { .. }));
         let message = format!("{}", defect.kind);
         assert!(
             message.contains(&format!("{:#x}", u32::MAX - 1)),
