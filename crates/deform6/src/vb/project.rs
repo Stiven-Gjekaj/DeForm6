@@ -514,17 +514,21 @@ impl DeclareTable {
     /// time, through [`Region::subregion`]. The largest count measured in
     /// this corpus is 9, and the whole corpus holds 249 entries.
     ///
-    /// # A known gap in the shared defect vocabulary
+    /// # A gap in the shared defect vocabulary, closed
     ///
-    /// Three recoverable outcomes below reuse a [`DefectKind`] variant whose
-    /// own `severity()` disagrees with the word "recoverable" used here:
-    /// [`DefectKind::UnmappedAddress`] is `Fatal` in `error.rs`, because it
-    /// was written for a spine pointer whose loss means nothing downstream
-    /// resolves. Losing one entry's descriptor is not that: the other
-    /// entries still resolve, which every test in this module proves. `mod
-    /// project.rs` was not opened for this plan, so this doc comment names
-    /// the mismatch rather than silently curing it, and the caller here never
-    /// consults `severity()` to decide whether to continue.
+    /// The three recoverable outcomes below once reused
+    /// [`DefectKind::UnmappedAddress`], a variant whose own `severity()` was
+    /// `Fatal`, written for a spine pointer whose loss means nothing
+    /// downstream resolves. Losing one entry's descriptor is not that: the
+    /// other entries still resolve, which every test in this module proves.
+    /// Phase 5 wired [`crate::journal::Journal::record`] into `inspect`'s
+    /// choke point, and that caller *does* consult `severity()` on every
+    /// defect this walk collects, so the mismatch was no longer harmless: a
+    /// `Fatal` defect here refused the whole file in both `Mode::Strict` and
+    /// `Mode::Salvage`. These three outcomes now build
+    /// [`DefectKind::ItemAddressUnmapped`] instead, which `severity()` marks
+    /// `Recoverable`: `Mode::Strict` still refuses, and `Mode::Salvage`
+    /// loses the one entry and keeps walking the rest of the table.
     #[must_use]
     pub fn read(pe: &PeImage<'_>, info: &ProjectInfo) -> Self {
         let mut declarations = Vec::new();
@@ -672,7 +676,7 @@ impl DeclareDescriptorFailure {
                 structure: "DeclareTableEntry",
                 field,
             },
-            kind: DefectKind::UnmappedAddress {
+            kind: DefectKind::ItemAddressUnmapped {
                 offset: entry_offset,
                 va: va.get(),
             },
@@ -1676,9 +1680,10 @@ mod tests {
         assert!(table.declarations.is_empty());
         assert_eq!(table.defects().len(), 1);
         let defect = &table.defects()[0];
+        assert_eq!(defect.kind.severity(), Severity::Recoverable);
         assert!(matches!(
             defect.kind,
-            DefectKind::UnmappedAddress { va, .. } if va == nowhere
+            DefectKind::ItemAddressUnmapped { va, .. } if va == nowhere
         ));
         assert_eq!(defect.site.field, "lpImportDescriptor");
     }
