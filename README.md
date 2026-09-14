@@ -1,6 +1,6 @@
 <div align="center">
 
-# DeForm6
+<img src="https://raw.githubusercontent.com/Stiven-Gjekaj/DeForm6/main/docs/logo.svg" alt="DeForm6" width="112">
 
 ### Metadata recovery from a Visual Basic 6 executable
 
