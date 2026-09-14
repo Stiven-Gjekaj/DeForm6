@@ -4,7 +4,7 @@ members = ["crates/deform6", "crates/deform6-cli", "crates/xtask"]
 exclude = ["crates/deform6/fuzz"]
 
 [workspace.package]
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.97.1"
 license = "MIT"
