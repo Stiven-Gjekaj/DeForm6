@@ -5,9 +5,15 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+# `doc = false` avoids a `cargo doc` output filename collision: this bin
+# target and the `deform6` lib crate in crates/deform6 share the same
+# name, so rustdoc would write both to target/doc/deform6/. This is a
+# known Cargo limitation (rust-lang/cargo#6313), not a naming choice to
+# revisit; the binary itself keeps the name `deform6`.
 [[bin]]
 name = "deform6"
 path = "src/main.rs"
+doc = false
 
 [dependencies]
 deform6.workspace = true
