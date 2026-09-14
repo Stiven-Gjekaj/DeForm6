@@ -44,9 +44,11 @@ does not do.
 - **FRM-02**: the type and name count that follows from FRM-01 stays open
   for the same cause. The tool recovers the type and name of 686 of 686
   controls, over the forms whose tree it builds.
-- **FRM-03**: the property values of most controls are not yet decoded. The
-  tool recovers 122 named property values against 683 records that report
-  present and not decoded, over 805 property records.
+- **FRM-03**: the property values of most controls are not yet decoded.
+  `tests/ratios.toml` pins 807 property records across the corpus, and 136
+  written property lines that reach the `.frm` files. The gate asserts both
+  numbers on every run. Most of the remaining records report present and not
+  decoded, and the report names the opcode it holds no decoder for.
 - **WRT-03**: the written `.frm` follows the byte level layout the IDE
   produces, proved by targeted unit test only. The corpus wide structural
   check trims each line by design and cannot confirm the exact indentation.
