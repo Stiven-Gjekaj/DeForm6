@@ -1,17 +1,17 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 6
-current_phase_name: Version 1.0
-current_plan: 7
-status: verifying
-stopped_at: Completed 06-07-PLAN.md, the final plan of Phase 6
-last_updated: "2026-09-14T19:04:59.614Z"
+current_phase: 5
+current_phase_name: Hostility
+current_plan: Not started
+status: planning
+stopped_at: Phase 6 complete, ready to plan Phase 5
+last_updated: "2026-09-14T19:45:28.558Z"
 last_activity: 2026-09-14
-last_activity_desc: Phase 6 execution started
-state_head: 73a68a7f1fd7f23737bb4bfd1934cfaa93cdc52a
+last_activity_desc: Phase 6 complete, transitioned to Phase 5
+state_head: 6759d425a86b9bee7158a18b2fc63671c96e7653
 progress:
   total_phases: 6
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 60
   completed_plans: 60
   percent: 100
@@ -63,16 +63,16 @@ See: .planning/PROJECT.md (updated 2026-09-07)
 Visual Basic project that opens in the VB6 IDE, with the forms and the names
 intact, and a report that says how much of it is proved and how much is
 inferred.
-**Current focus:** Phase 6 — Version 1.0
+**Current focus:** Phase 5, Hostility
 
 ## Current Position
 
-Phase: 6 (Version 1.0) — COMPLETE
-Current Plan: 7
+Phase: 5: Hostility
+Current Plan: Not started
 Total Plans in Phase: 7
 Plan: 7 of 7
-Status: Phase complete — ready for verification
-Last activity: 2026-09-14 — Completed 06-07-PLAN.md, the final plan of Phase 6
+Status: Ready to plan
+Last activity: 2026-09-14: Phase 6 complete, transitioned to Phase 5
 
 Progress: [██████████] 100% of the 60 written plans, which is 60 of 60
 
@@ -80,7 +80,7 @@ Progress: [██████████] 100% of the 60 written plans, which i
 
 **Velocity:**
 
-- Total plans completed: 37
+- Total plans completed: 44
 - Average duration: -
 - Total execution time: -
 
@@ -91,6 +91,7 @@ Progress: [██████████] 100% of the 60 written plans, which i
 | 03 | 18 | - | - |
 | 02 | 10 | - | - |
 | 04 | 9 | - | - |
+| 6 | 7 | - | - |
 
 **Recent Trend:**
 
@@ -253,14 +254,14 @@ Recent decisions affecting current work:
 - [Phase 5]: 05-08: MINIMUM_REGRESSION_INPUTS is restated as a literal (1) in no_panic_proof.rs rather than read from regressions.rs's own constant, because the two files compile as separate test binaries and cannot share a private item.
 - [Phase 5]: 05-08: cargo test --release does not compile the test binary with panic=abort; Cargo forces panic=unwind on --test targets so libtest can catch each test's own panic. The proof shows no panic occurs on 48 inputs in both modes and both profiles; it does not exercise real abort-on-panic process behavior, which only a non-test release binary gets.
 - [Phase 5]: 05-08: Measured peak resident set for the whole no-panic-proof run (48 inputs, both modes, plus writer): 5,406,720 bytes maximum resident set size via /usr/bin/time -l. WINDOWS.md finding 14 updated with this measurement; the damaged() leak is not the number driving peak resident set at this input-set size and finding 14 stays open since the leak itself is unfixed.
-- [Phase 06]: jsonschema 0.56.0 approved for the report schema test, default-features off — Task 1 checkpoint confirmed the crates.io repository, licence and download history; no network or TLS feature enters the build
+- [Phase 06]: jsonschema 0.56.0 approved for the report schema test, default-features off: Task 1 checkpoint confirmed the crates.io repository, licence and download history; no network or TLS feature enters the build
 - [Phase 6]: [Phase 06]: 06-02: STRUCTURES.md section 11 rows 6 and 7 (FuncTypDesc header layout, optionalVals grammar) are listed as still-open README limits, matching the register's own Resolution-path column, even though the naming code's own doc comments call both closed on real bytes; the README describes today's actual code behaviour for each while keeping the register-derived open count honest.
-- [Phase 06-version-1-0]: 06-03: Fixed the deform6-cli/deform6 cargo doc output-filename collision (doc = false on the bin target) as a Rule 3 blocking-issue deviation, since it was the one warning that survived every doc-comment fix. — Required to meet the plan's own zero-warning success criterion; a known Cargo limitation (rust-lang/cargo#6313), not a doc-comment defect.
+- [Phase 06-version-1-0]: 06-03: Fixed the deform6-cli/deform6 cargo doc output-filename collision (doc = false on the bin target) as a Rule 3 blocking-issue deviation, since it was the one warning that survived every doc-comment fix.: Required to meet the plan's own zero-warning success criterion; a known Cargo limitation (rust-lang/cargo#6313), not a doc-comment defect.
 - [Phase 6]: 06-04: Decision D-02 confirmed at the checkpoint: the workspace version moves to 1.0.0 and the release tag is v1.0.0. After this release, a breaking change to the public library API of the deform6 crate needs a 2.0.0 major bump.
 - [Phase 6]: 06-04: crates/deform6/tests/gitattributes.rs excludes the writer's own *.report.json output from the audited extension set, since it is a diagnostic artifact and not a file the VB6 IDE reads or the corpus commits.
 - [Phase 6]: 06-04: .gitattributes needed no edit. Both new tests pass against the file exactly as it already stood from an earlier phase.
 - [Phase 6]: 06-05: Decision D-03 delivered as a manual, cargo-metadata-derived LICENSES.md; no cargo-deny, no deny.toml added.
-- [Phase 6]: 06-06: Decision D-04 implemented literally in scripts/check-claim-surface.sh: the check scans README.md, the three --help surfaces and the live report vocabulary, excludes tests/ratios.toml by name with the reason stated in the header comment. — Its decimal ratios are pinned test data a differential harness compares a build against, not a claim surface a reader meets before running the tool.
+- [Phase 6]: 06-06: Decision D-04 implemented literally in scripts/check-claim-surface.sh: the check scans README.md, the three --help surfaces and the live report vocabulary, excludes tests/ratios.toml by name with the reason stated in the header comment.: Its decimal ratios are pinned test data a differential harness compares a build against, not a claim surface a reader meets before running the tool.
 - [Phase 06-version-1-0]: 06-07: Filled README.md's five deferred numbers from the acceptance run over all 44 corpus programs: 185 of 904 procedures, 52 of 53 forms, 686 of 686 controls, 807 property records against 136 written lines. Every pair names the gate test that asserts it, never a single derived figure.
 - [Phase 06-version-1-0]: 06-07: The honesty audit found and fixed one real defect: README.md's S-05 limit row stated the undocumented VB6 type code count as ten; STRUCTURES.md section 11's register and functyp.rs's own match table both give sixteen. Corrected in its own commit, separate from the number-filling commit.
 - [Phase 06-version-1-0]: 06-07: Phase 6 closes with the v1.0.0 annotated tag created locally on the corrected, green commit, matching Cargo.toml, and pushed nowhere. The human runs `git push origin v1.0.0` to publish it; this plan did not run that command.
@@ -293,7 +294,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-09-14T19:04:59.578Z
-Stopped at: Completed 06-07-PLAN.md, the final plan of Phase 6
+Stopped at: Phase 6 complete, ready to plan Phase 5
 
 Plan 05-01 is done: 5 commits, cargo test --workspace at 887 passed, 0 failed,
 up from the 872 baseline this plan started at.
