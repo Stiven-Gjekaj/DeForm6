@@ -63,7 +63,7 @@ See: .planning/PROJECT.md (updated 2026-09-07)
 Visual Basic project that opens in the VB6 IDE, with the forms and the names
 intact, and a report that says how much of it is proved and how much is
 inferred.
-**Current focus:** Phase 5, Hostility
+**Current focus:** All six phases are complete. The milestone is ready to close.
 
 ## Current Position
 
