@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 toml.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 deform6.workspace = true
 ureq = "=3.4.1"
 sha2 = "=0.11.0"

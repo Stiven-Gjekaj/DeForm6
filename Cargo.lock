@@ -1216,6 +1216,7 @@ version = "1.0.0"
 dependencies = [
  "deform6",
  "serde",
+ "serde_json",
  "sha2",
  "toml",
  "ureq",
