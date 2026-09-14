@@ -865,8 +865,8 @@ fn recovered_mismatch_message(
 }
 
 /// The message a corpus program with no `tests/ratios.toml` entry
-/// produces. One function, so [`the_gate_passes_on_the_committed_file`] and
-/// [`a_stale_key_and_a_missing_key_fail_with_two_different_messages`] can
+/// produces. One function, so `the_gate_passes_on_the_committed_file` and
+/// `a_stale_key_and_a_missing_key_fail_with_two_different_messages` can
 /// never let their wording drift apart.
 fn missing_key_message(key: &str) -> String {
     format!("{key}: this corpus program has no entry in tests/ratios.toml")
@@ -1001,8 +1001,8 @@ fn the_pinned_file_holds_eight_hundred_seven_property_records_and_one_hundred_th
 /// both directions on the key set (a program with no entry, and an entry
 /// with no program, per the both-directions rule `differential.rs`
 /// established for names). This is the one function both
-/// [`the_gate_passes_on_the_committed_file`] and
-/// [`a_missing_key_fails_the_real_gate`] run, so a broken key-set check can
+/// `the_gate_passes_on_the_committed_file` and
+/// `a_missing_key_fails_the_real_gate` run, so a broken key-set check can
 /// never pass one and silently ship in the other.
 /// Checks one program's pinned form/control counts against its measured
 /// counts. Reuses [`compare`], [`REGRESSION`] and [`MOVED_UP`]: a pinned

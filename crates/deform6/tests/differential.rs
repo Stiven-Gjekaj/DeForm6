@@ -34,7 +34,7 @@
 //! recovered names, and reported "44 of 44" while the extra capacity slots
 //! silently added unexpected names. That over-count was invisible for
 //! hours behind a green check, because a subset check cannot see an
-//! over-count. [`fabricated_object_passes_a_subset_check_and_fails_the_two_directional_check`]
+//! over-count. `fabricated_object_passes_a_subset_check_and_fails_the_two_directional_check`
 //! is the test that would have caught it.
 
 // `pub(crate)`, not private: `tests/ratios.rs` (plan 02-09) reaches this
@@ -478,7 +478,7 @@ pub(crate) struct ProgramCounts {
 /// recovered objects and already-read declared objects.
 ///
 /// Joining `declared` to `recovered` by name is the same join
-/// [`every_declared_object_is_recovered_and_every_recovered_object_is_declared_across_the_corpus`]
+/// `every_declared_object_is_recovered_and_every_recovered_object_is_declared_across_the_corpus`
 /// performs; per D-02's own already-proven claim (105 of 105, both
 /// directions), every declared object with a name finds exactly one
 /// recovered match here, on the real corpus.
