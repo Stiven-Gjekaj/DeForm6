@@ -667,13 +667,23 @@ documentation.
 **Plans**: 7 plans
 
 Plans:
+**Wave 1**
 
 - [ ] 06-01: The report JSON schema, and all 44 reports validated against it
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 06-02: The README - what it returns, what it does not, the confidence vocabulary, and every open limit
 - [ ] 06-03: The public library API review, the doc comments, and a clean `cargo doc --no-deps`
 - [ ] 06-04: The version, the tag check, and the `.gitattributes` audit for `*.frx` and `*.ctx`
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 06-05: The dependency licence audit and the changelog
 - [ ] 06-06: The claim surface check, with a planted violation for every shape it hunts
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 06-07: The acceptance run over all 44, the honesty audit, and the tag
 
 **Waves**: [06-01] then [06-02, 06-03, 06-04] then [06-05, 06-06] then [06-07]
