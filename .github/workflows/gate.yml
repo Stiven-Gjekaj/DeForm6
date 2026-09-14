@@ -60,6 +60,17 @@ jobs:
       - name: cargo test
         run: cargo test --workspace
 
+      # `cargo fmt`, `cargo clippy` and `cargo test` never run `cargo doc`,
+      # so a broken intra-doc link or a public doc naming a private item
+      # passes the gate silently. This step is the only guard on that.
+      # Plan 06-03 measured 52 warning lines on the unrepaired tree and
+      # brought the count to zero; `RUSTDOCFLAGS` denies warnings so a
+      # pull request cannot reintroduce one without failing this step.
+      - name: cargo doc
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --workspace
+
       # The wall is proved on every run, and not only on the day it was
       # written. The proof steps come after the three gate commands, because
       # each script writes a probe into the source tree and then removes it.
