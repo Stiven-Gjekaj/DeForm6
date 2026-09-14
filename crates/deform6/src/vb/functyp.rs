@@ -923,7 +923,7 @@ fn walk_optional_vals(
                 let Some(next) = cursor.checked_add(width) else {
                     let defect = Defect {
                         site,
-                        kind: DefectKind::OffsetOverflow {
+                        kind: DefectKind::ItemOffsetOverflow {
                             offset: field_offset,
                             len: width,
                         },
