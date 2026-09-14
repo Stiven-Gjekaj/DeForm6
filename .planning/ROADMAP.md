@@ -664,7 +664,7 @@ documentation.
   - **The README is the last place a claim can drift.** It is written after the
     measurement, from the measurement, and not from the plan.
 
-**Plans**: 6/7 plans executed
+**Plans**: 7/7 plans executed
 
 Plans:
 
@@ -674,7 +674,7 @@ Plans:
 - [x] 06-04-PLAN.md
 - [x] 06-05-PLAN.md
 - [x] 06-06-PLAN.md
-- [ ] 06-07-PLAN.md
+- [x] 06-07-PLAN.md
 
 **Wave 1**
 
@@ -689,11 +689,11 @@ Plans:
 **Wave 3** *(blocked on Wave 2 completion)*
 
 - [x] 06-05: The dependency licence audit and the changelog
-- [ ] 06-06: The claim surface check, with a planted violation for every shape it hunts
+- [x] 06-06: The claim surface check, with a planted violation for every shape it hunts
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 06-07: The acceptance run over all 44, the honesty audit, and the tag
+- [x] 06-07: The acceptance run over all 44, the honesty audit, and the tag
 
 **Waves**: [06-01] then [06-02, 06-03, 06-04] then [06-05, 06-06] then [06-07]
 

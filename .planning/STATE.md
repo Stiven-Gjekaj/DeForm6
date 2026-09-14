@@ -3,18 +3,18 @@ gsd_state_version: "1.0"
 current_phase: 6
 current_phase_name: Version 1.0
 current_plan: 7
-status: executing
-stopped_at: Completed 06-06-PLAN.md
-last_updated: "2026-09-14T18:55:11.404Z"
+status: verifying
+stopped_at: Completed 06-07-PLAN.md, the final plan of Phase 6
+last_updated: "2026-09-14T19:04:59.614Z"
 last_activity: 2026-09-14
 last_activity_desc: Phase 6 execution started
-state_head: e6825cea0ddb95a7af99bfb4255f978bcdca1554
+state_head: 73a68a7f1fd7f23737bb4bfd1934cfaa93cdc52a
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 60
-  completed_plans: 59
-  percent: 0
+  completed_plans: 60
+  percent: 100
 ---
 
 ## Continue
@@ -67,14 +67,14 @@ inferred.
 
 ## Current Position
 
-Phase: 6 (Version 1.0) — EXECUTING
+Phase: 6 (Version 1.0) — COMPLETE
 Current Plan: 7
 Total Plans in Phase: 7
 Plan: 7 of 7
-Status: Ready to execute
-Last activity: 2026-09-14 — Phase 6 execution started
+Status: Phase complete — ready for verification
+Last activity: 2026-09-14 — Completed 06-07-PLAN.md, the final plan of Phase 6
 
-Progress: [░░░░░░░░░░] 0% of the 60 written plans, which is 58 of 60
+Progress: [██████████] 100% of the 60 written plans, which is 60 of 60
 
 ## Performance Metrics
 
@@ -146,6 +146,7 @@ Progress: [░░░░░░░░░░] 0% of the 60 written plans, which is 
 | Phase 06-version-1-0 P04 | 20min | 3 tasks | 4 files |
 | Phase 06-version-1-0 P05 | 35min | 2 tasks | 6 files |
 | Phase 06 P06 | 20min | 2 tasks | 2 files |
+| Phase 06-version-1-0 P07 | 35min | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -260,6 +261,9 @@ Recent decisions affecting current work:
 - [Phase 6]: 06-04: .gitattributes needed no edit. Both new tests pass against the file exactly as it already stood from an earlier phase.
 - [Phase 6]: 06-05: Decision D-03 delivered as a manual, cargo-metadata-derived LICENSES.md; no cargo-deny, no deny.toml added.
 - [Phase 6]: 06-06: Decision D-04 implemented literally in scripts/check-claim-surface.sh: the check scans README.md, the three --help surfaces and the live report vocabulary, excludes tests/ratios.toml by name with the reason stated in the header comment. — Its decimal ratios are pinned test data a differential harness compares a build against, not a claim surface a reader meets before running the tool.
+- [Phase 06-version-1-0]: 06-07: Filled README.md's five deferred numbers from the acceptance run over all 44 corpus programs: 185 of 904 procedures, 52 of 53 forms, 686 of 686 controls, 807 property records against 136 written lines. Every pair names the gate test that asserts it, never a single derived figure.
+- [Phase 06-version-1-0]: 06-07: The honesty audit found and fixed one real defect: README.md's S-05 limit row stated the undocumented VB6 type code count as ten; STRUCTURES.md section 11's register and functyp.rs's own match table both give sixteen. Corrected in its own commit, separate from the number-filling commit.
+- [Phase 06-version-1-0]: 06-07: Phase 6 closes with the v1.0.0 annotated tag created locally on the corrected, green commit, matching Cargo.toml, and pushed nowhere. The human runs `git push origin v1.0.0` to publish it; this plan did not run that command.
 
 ### Pending Todos
 
@@ -288,8 +292,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-14T18:55:11.369Z
-Stopped at: Completed 06-06-PLAN.md
+Last session: 2026-09-14T19:04:59.578Z
+Stopped at: Completed 06-07-PLAN.md, the final plan of Phase 6
 
 Plan 05-01 is done: 5 commits, cargo test --workspace at 887 passed, 0 failed,
 up from the 872 baseline this plan started at.
