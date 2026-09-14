@@ -121,7 +121,7 @@ status: complete
 
 Each task was committed atomically:
 
-1. **Task 1: Confirm the move to 1.0.0 and the tag name** - checkpoint decision, no code change; the confirmed strings are recorded in this summary (see Decisions below). No commit — a decision checkpoint carries no file change to stage.
+1. **Task 1: Confirm the move to 1.0.0 and the tag name** - checkpoint decision, no code change; the confirmed strings are recorded in this summary (see Decisions below). No commit: a decision checkpoint carries no file change to stage.
 2. **Task 2: The version, and a check that measures the tag against it** - `29bf93f` (feat)
 3. **Task 3: Audit .gitattributes against the extensions the writer emits** - `71a314d` (test)
 

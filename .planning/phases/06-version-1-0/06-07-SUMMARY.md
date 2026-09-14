@@ -126,7 +126,7 @@ status: complete
 ## Task Commits
 
 1. **Task 1: The acceptance run over all 44, and the numbers it reported** - `d88cdcb` (feat)
-2. **Task 2: The honesty audit** - `8f1dae4` (fix — the one defect the audit found, S-05's wrong count)
+2. **Task 2: The honesty audit** - `8f1dae4` (fix: the one defect the audit found, S-05's wrong count)
 3. **Task 3: The v1.0.0 tag, created locally and pushed nowhere** - no file commit; the annotated tag `v1.0.0` itself, on `8f1dae4`
 
 **Plan metadata:** committed separately, see below.

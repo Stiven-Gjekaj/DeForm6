@@ -73,9 +73,9 @@ sort on the package list).
 The one real defect is in `scripts/check-claim-surface.sh`, the phase's
 flagship "does the release overclaim" gate. Its detection is line-based
 (`grep` without multi-line mode), but the exact prose style this repository's
-own `README.md` uses — hard-wrapped sentences that routinely split a clause
+own `README.md` uses: hard-wrapped sentences that routinely split a clause
 across two physical lines (confirmed by reading the file directly, e.g. line
-3-4, line 19-20) — defeats all six forbidden-shape regexes whenever a future
+3-4, line 19-20): defeats all six forbidden-shape regexes whenever a future
 violation happens to wrap. This was proven experimentally, not asserted: a
 two-line sentence containing both "recover" and "statement" is invisible to
 the `stmt-fwd` shape that is supposed to catch exactly that claim. Two
@@ -88,12 +88,12 @@ misses a spelled-out number) round out the findings.
 ### CR-01: The claim-surface scanner cannot see a claim that wraps across two lines, and this repository's own prose style wraps routinely
 
 **File:** `scripts/check-claim-surface.sh:47-52` (the `SHAPES` table, scanned via `grep -inE` at line 157)
-**Issue:** Every one of the six forbidden-shape regexes is matched with `grep -inE`, which operates strictly within a single physical line — it never joins text across a newline. `README.md`, the primary scanned source, is not written as one sentence per line; it is hard-wrapped prose where a single sentence routinely spans two physical lines (confirmed directly, e.g. `README.md:3-4`: `"DeForm6 reads a compiled Visual Basic 6 executable and writes back a Visual\nBasic project."`, and `README.md:19-20`: `"...naming what the run recovered and how\n  sure it is of each fact."`). A future edit that phrases an overclaim the same way the rest of this file is already written — wrapped across a line boundary — passes the scanner silently. This was reproduced directly:
+**Issue:** Every one of the six forbidden-shape regexes is matched with `grep -inE`, which operates strictly within a single physical line: it never joins text across a newline. `README.md`, the primary scanned source, is not written as one sentence per line; it is hard-wrapped prose where a single sentence routinely spans two physical lines (confirmed directly, e.g. `README.md:3-4`: `"DeForm6 reads a compiled Visual Basic 6 executable and writes back a Visual\nBasic project."`, and `README.md:19-20`: `"...naming what the run recovered and how\n  sure it is of each fact."`). A future edit that phrases an overclaim the same way the rest of this file is already written: wrapped across a line boundary: passes the scanner silently. This was reproduced directly:
 
 ```
 $ printf 'DeForm6 will, after more work in a future release, recover every\nstatement from the compiled executable directly and precisely.\n' > /tmp/t.txt
 $ grep -inE 'recover[a-z]*[^.]{0,40}statement' /tmp/t.txt
-(no output — the line "recover every statement..." is never assembled because "recover" is on line 1 and "statement" is on line 2)
+(no output: the line "recover every statement..." is never assembled because "recover" is on line 1 and "statement" is on line 2)
 ```
 
 The same gap applies to all six shapes (`pct-sign`, `pct-word`, `stmt-fwd`, `stmt-rev`, `compilable`, `decompile-src`) and to all three scanned sources, since none of them are guaranteed to keep a sentence on one line. This defeats the script's own stated purpose ("the claim surface holds no claim the measurement does not support") in exactly the document style it is built to police, and the self-test in Stage 4 does not exercise this failure mode at all: every planted probe line is a single unwrapped sentence appended as one `printf` line, so the self-test's 18/18 pass rate proves nothing about the wrapped case.
@@ -114,7 +114,7 @@ Add a Stage 4 probe that plants a violation split across two lines (matching thi
 ### WR-01: The "compilable" shape misses the plainer, more natural phrasing "compiles" / "compiled"
 
 **File:** `scripts/check-claim-surface.sh:51`
-**Issue:** The shape regex is `compilable|recompilable|compile.ready`. It requires the `-able` suffix or the literal "ready" nearby. The most natural way to write this exact forbidden claim — "the recovered project compiles in the Visual Basic 6 IDE without changes" — contains neither "compilable" nor "compile ready" and is not caught:
+**Issue:** The shape regex is `compilable|recompilable|compile.ready`. It requires the `-able` suffix or the literal "ready" nearby. The most natural way to write this exact forbidden claim: "the recovered project compiles in the Visual Basic 6 IDE without changes": contains neither "compilable" nor "compile ready" and is not caught:
 ```
 $ printf 'The recovered project compiles in the Visual Basic 6 IDE without changes.\n' | grep -inE 'compilable|recompilable|compile.ready'
 (no output)
