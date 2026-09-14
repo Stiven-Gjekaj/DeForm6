@@ -2,19 +2,19 @@
 gsd_state_version: "1.0"
 current_phase: 6
 current_phase_name: Version 1.0
-current_plan: 8
+current_plan: 2
 status: executing
-stopped_at: Completed 05-08-PLAN.md
-last_updated: "2026-09-14T15:41:48.296Z"
-last_activity: 2026-09-13
-last_activity_desc: Phase 5 verified by UAT, 23 of 23 passed, and the learnings extracted
-state_head: 67f5c03429f98869b6a6629600c9ebb377992aef
+stopped_at: Completed 06-01-PLAN.md
+last_updated: "2026-09-14T17:58:44.271Z"
+last_activity: 2026-09-14
+last_activity_desc: Phase 6 execution started
+state_head: b40d1372c2609bf451b17ecdeb186e52c402392c
 progress:
   total_phases: 6
-  completed_phases: 1
+  completed_phases: 0
   total_plans: 60
-  completed_plans: 53
-  percent: 88
+  completed_plans: 54
+  percent: 0
 ---
 
 ## Continue
@@ -63,18 +63,18 @@ See: .planning/PROJECT.md (updated 2026-09-07)
 Visual Basic project that opens in the VB6 IDE, with the forms and the names
 intact, and a report that says how much of it is proved and how much is
 inferred.
-**Current focus:** Phase 6, Version 1.0
+**Current focus:** Phase 6 — Version 1.0
 
 ## Current Position
 
-Phase: 6 (Version 1.0) - READY TO EXECUTE
-Current Plan: 06-01
+Phase: 6 (Version 1.0) — EXECUTING
+Current Plan: 2
 Total Plans in Phase: 7
-Plan: 06-01 through 06-07 are written and verified. None is executed yet.
+Plan: 2 of 7
 Status: Ready to execute
-Last activity: 2026-09-14 - Phase 6 planned, 7 plans in 4 waves, plan checker passed
+Last activity: 2026-09-14 — Phase 6 execution started
 
-Progress: [█████████░] 88% of the 60 written plans, which is 53 of 60
+Progress: [░░░░░░░░░░] 0% of the 60 written plans, which is 53 of 60
 
 ## Performance Metrics
 
@@ -140,6 +140,7 @@ Progress: [█████████░] 88% of the 60 written plans, which is
 | Phase 05 P05 | ~30min | 2 tasks | 4 files |
 | Phase 05-hostility P04 | ~1h10min | 2 tasks | 1 files |
 | Phase 05 P08 | 1 session | 2 tasks | 1 files |
+| Phase 06 P01 | 45min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -246,6 +247,7 @@ Recent decisions affecting current work:
 - [Phase 5]: 05-08: MINIMUM_REGRESSION_INPUTS is restated as a literal (1) in no_panic_proof.rs rather than read from regressions.rs's own constant, because the two files compile as separate test binaries and cannot share a private item.
 - [Phase 5]: 05-08: cargo test --release does not compile the test binary with panic=abort; Cargo forces panic=unwind on --test targets so libtest can catch each test's own panic. The proof shows no panic occurs on 48 inputs in both modes and both profiles; it does not exercise real abort-on-panic process behavior, which only a non-test release binary gets.
 - [Phase 5]: 05-08: Measured peak resident set for the whole no-panic-proof run (48 inputs, both modes, plus writer): 5,406,720 bytes maximum resident set size via /usr/bin/time -l. WINDOWS.md finding 14 updated with this measurement; the damaged() leak is not the number driving peak resident set at this input-set size and finding 14 stays open since the leak itself is unfixed.
+- [Phase 06]: jsonschema 0.56.0 approved for the report schema test, default-features off — Task 1 checkpoint confirmed the crates.io repository, licence and download history; no network or TLS feature enters the build
 
 ### Pending Todos
 
@@ -274,8 +276,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-13T20:58:20.987Z
-Stopped at: Completed 05-08-PLAN.md
+Last session: 2026-09-14T17:58:44.237Z
+Stopped at: Completed 06-01-PLAN.md
 
 Plan 05-01 is done: 5 commits, cargo test --workspace at 887 passed, 0 failed,
 up from the 872 baseline this plan started at.

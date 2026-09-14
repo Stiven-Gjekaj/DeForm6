@@ -664,12 +664,21 @@ documentation.
   - **The README is the last place a claim can drift.** It is written after the
     measurement, from the measurement, and not from the plan.
 
-**Plans**: 7 plans
+**Plans**: 1/7 plans executed
 
 Plans:
+
+- [x] 06-01-PLAN.md
+- [ ] 06-02-PLAN.md
+- [ ] 06-03-PLAN.md
+- [ ] 06-04-PLAN.md
+- [ ] 06-05-PLAN.md
+- [ ] 06-06-PLAN.md
+- [ ] 06-07-PLAN.md
+
 **Wave 1**
 
-- [ ] 06-01: The report JSON schema, and all 44 reports validated against it
+- [x] 06-01: The report JSON schema, and all 44 reports validated against it
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -746,4 +755,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 3. Forms | 18/18 | Complete    | 2026-09-11 |
 | 4. It writes a project | 9/9 | Complete    | 2026-09-13 |
 | 5. Hostility | 8/8 | In Progress|  |
-| 6. Version 1.0 | 0/7 | Not started | - |
+| 6. Version 1.0 | 1/7 | In Progress|  |
