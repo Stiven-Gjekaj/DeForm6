@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:deform6:report:1",
+  "title": "DeForm6 project report",
+  "description": "The shape of the JSON report crates/deform6/src/report.rs serialises. Read from disk by crates/deform6/tests/schema.rs, never derived from the Rust types at run time.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["items", "defects", "limits"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/reportItem" }
+    },
+    "defects": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/defect" }
+    },
+    "limits": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "$defs": {
+    "reportItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "confidence", "basis", "evidence"],
+      "properties": {
+        "path": { "type": "string" },
+        "confidence": {
+          "type": "string",
+          "enum": ["proven", "inferred", "unrecoverable"]
+        },
+        "basis": { "type": "string" },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidence" }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["offset", "structure", "field", "note"],
+      "properties": {
+        "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "structure": { "type": "string" },
+        "field": { "type": "string" },
+        "note": { "type": ["string", "null"] }
+      }
+    },
+    "defect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["site", "kind"],
+      "properties": {
+        "site": { "$ref": "#/$defs/site" },
+        "kind": { "$ref": "#/$defs/defectKind" }
+      }
+    },
+    "site": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["offset", "rva", "structure", "field"],
+      "properties": {
+        "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "rva": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "structure": { "type": "string" },
+        "field": { "type": "string" }
+      }
+    },
+    "defectKind": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "BadMagic",
+          "OffsetOverflow",
+          "PastEndOfFile",
+          "ImplausibleCount",
+          "UnmappedAddress",
+          "SectionOverlap",
+          "NoNulTerminator",
+          "CountMismatch",
+          "UnreadablePointer",
+          "EmptyName",
+          "IndexHighByteSet",
+          "UnrecoverableString",
+          "ClassNameNoDot",
+          "GuidLengthUnexpected",
+          "OcxReservedFieldUnexpected",
+          "BlobLenTooSmall",
+          "StructureUnreadable"
+        ]
+      }
+    }
+  }
+}
