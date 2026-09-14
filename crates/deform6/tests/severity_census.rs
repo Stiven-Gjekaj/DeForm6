@@ -102,6 +102,8 @@ const fn kind_name(kind: &DefectKind) -> &'static str {
         DefectKind::OcxReservedFieldUnexpected { .. } => "OcxReservedFieldUnexpected",
         DefectKind::BlobLenTooSmall { .. } => "BlobLenTooSmall",
         DefectKind::StructureUnreadable { .. } => "StructureUnreadable",
+        DefectKind::ItemAddressUnmapped { .. } => "ItemAddressUnmapped",
+        DefectKind::ItemOffsetOverflow { .. } => "ItemOffsetOverflow",
     }
 }
 

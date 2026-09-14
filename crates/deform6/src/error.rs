@@ -283,6 +283,43 @@ pub enum DefectKind {
         /// The refusal's own message, carried verbatim.
         reason: String,
     },
+
+    /// One item's own address resolves to nothing, and the item is skipped.
+    ///
+    /// Phase 5: [`DefectKind::UnmappedAddress`] is `Fatal`, because it was
+    /// written for the one spine pointer whose loss means nothing
+    /// downstream resolves. This variant names the same fact, an address
+    /// that maps into no section, for a call site where the address
+    /// belongs to one item only: `vb/project.rs::DeclareTable::read` loses
+    /// one `Declare` entry and keeps walking the rest of the table. Nothing
+    /// downstream of this item rests on the value this pointer would have
+    /// named.
+    #[error("address {va:#x} at offset {offset:#x} is in no section, and the item is skipped")]
+    ItemAddressUnmapped {
+        /// The absolute file offset of the pointer that held the address.
+        offset: u32,
+        /// The address that maps nowhere.
+        va: u32,
+    },
+
+    /// One item's own offset plus length arithmetic overflows a `u32`, and
+    /// the item is skipped.
+    ///
+    /// Phase 5: [`DefectKind::OffsetOverflow`] is `Fatal`, because it was
+    /// written for a range every later bound check rests on. This variant
+    /// names the same overflow for a call site where the range belongs to
+    /// one item only: a resource blob's declared length
+    /// (`vb/frx.rs::extract_blob`), a string's declared end
+    /// (`vb/vbstr.rs::VbStr::overflow`), or one prototype's optional value
+    /// records (`vb/functyp.rs`). The item that overflowed is lost; the
+    /// rest of the read continues.
+    #[error("offset {offset:#x} plus length {len:#x} overflows a u32, and the item is skipped")]
+    ItemOffsetOverflow {
+        /// The absolute file offset the sum started from.
+        offset: u32,
+        /// The length that was added to it.
+        len: u32,
+    },
 }
 
 /// How bad a defect is.
@@ -368,6 +405,14 @@ impl DefectKind {
             // The one form, control or table is reported refused, and
             // nothing is written in its place.
             Self::StructureUnreadable { .. } => Severity::Tolerated,
+            // The item this pointer would have named is absent, a fact
+            // downstream rests on the run continuing without it, and strict
+            // mode refuses rather than assume the item away.
+            Self::ItemAddressUnmapped { .. } => Severity::Recoverable,
+            // The item this range would have named is absent, a fact
+            // downstream rests on the run continuing without it, and strict
+            // mode refuses rather than assume the item away.
+            Self::ItemOffsetOverflow { .. } => Severity::Recoverable,
         }
     }
 }
@@ -615,6 +660,20 @@ mod tests {
                 },
                 0x99,
             ),
+            (
+                DefectKind::ItemAddressUnmapped {
+                    offset: 0xaa,
+                    va: 0x0040_3000,
+                },
+                0xaa,
+            ),
+            (
+                DefectKind::ItemOffsetOverflow {
+                    offset: 0xbb,
+                    len: 0xffff_ffff,
+                },
+                0xbb,
+            ),
         ]
     }
 
@@ -686,6 +745,8 @@ mod tests {
                 other_field: "wTotalObjects",
             },
             DefectKind::ClassNameNoDot { offset: 0 },
+            DefectKind::ItemAddressUnmapped { offset: 0, va: 0 },
+            DefectKind::ItemOffsetOverflow { offset: 0, len: 0 },
         ];
         for kind in recoverable {
             assert_eq!(
