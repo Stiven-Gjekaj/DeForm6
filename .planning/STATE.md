@@ -2,19 +2,19 @@
 gsd_state_version: "1.0"
 current_phase: 6
 current_phase_name: Version 1.0
-current_plan: 6
+current_plan: 7
 status: executing
-stopped_at: Completed 06-05-PLAN.md
-last_updated: "2026-09-14T18:41:55.151Z"
+stopped_at: Completed 06-06-PLAN.md
+last_updated: "2026-09-14T18:55:11.404Z"
 last_activity: 2026-09-14
 last_activity_desc: Phase 6 execution started
-state_head: c4239dd72799ebefb54813cb29bc1b3a46ebf2d4
+state_head: e6825cea0ddb95a7af99bfb4255f978bcdca1554
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 60
-  completed_plans: 58
-  percent: 97
+  completed_plans: 59
+  percent: 0
 ---
 
 ## Continue
@@ -68,13 +68,13 @@ inferred.
 ## Current Position
 
 Phase: 6 (Version 1.0) — EXECUTING
-Current Plan: 6
+Current Plan: 7
 Total Plans in Phase: 7
-Plan: 6 of 7
+Plan: 7 of 7
 Status: Ready to execute
 Last activity: 2026-09-14 — Phase 6 execution started
 
-Progress: [█████████░] 97% of the 60 written plans, which is 58 of 60
+Progress: [░░░░░░░░░░] 0% of the 60 written plans, which is 58 of 60
 
 ## Performance Metrics
 
@@ -145,6 +145,7 @@ Progress: [█████████░] 97% of the 60 written plans, which is
 | Phase 06-version-1-0 P03 | 15min | 3 tasks | 21 files |
 | Phase 06-version-1-0 P04 | 20min | 3 tasks | 4 files |
 | Phase 06-version-1-0 P05 | 35min | 2 tasks | 6 files |
+| Phase 06 P06 | 20min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -258,6 +259,7 @@ Recent decisions affecting current work:
 - [Phase 6]: 06-04: crates/deform6/tests/gitattributes.rs excludes the writer's own *.report.json output from the audited extension set, since it is a diagnostic artifact and not a file the VB6 IDE reads or the corpus commits.
 - [Phase 6]: 06-04: .gitattributes needed no edit. Both new tests pass against the file exactly as it already stood from an earlier phase.
 - [Phase 6]: 06-05: Decision D-03 delivered as a manual, cargo-metadata-derived LICENSES.md; no cargo-deny, no deny.toml added.
+- [Phase 6]: 06-06: Decision D-04 implemented literally in scripts/check-claim-surface.sh: the check scans README.md, the three --help surfaces and the live report vocabulary, excludes tests/ratios.toml by name with the reason stated in the header comment. — Its decimal ratios are pinned test data a differential harness compares a build against, not a claim surface a reader meets before running the tool.
 
 ### Pending Todos
 
@@ -286,8 +288,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-14T18:41:55.117Z
-Stopped at: Completed 06-05-PLAN.md
+Last session: 2026-09-14T18:55:11.369Z
+Stopped at: Completed 06-06-PLAN.md
 
 Plan 05-01 is done: 5 commits, cargo test --workspace at 887 passed, 0 failed,
 up from the 872 baseline this plan started at.
