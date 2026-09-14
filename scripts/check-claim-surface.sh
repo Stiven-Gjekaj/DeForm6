@@ -61,19 +61,27 @@ trap cleanup EXIT
 # throughout this project's report vocabulary, never a claim that
 # DeForm6's output compiles, and without this guard it fires on every one
 # of the report's many "does not carry the X compiler flag" lines.
+#
+# pct-word no longer requires a leading digit, so a spelled-out figure
+# such as "DeForm6 recovers ninety percent of every project it reads."
+# is caught too. It carries a word boundary on both sides now, so it
+# still does not fire on a corpus control name that happens to hold
+# "Percent" as a substring, such as `chkPercent`, since that name has no
+# boundary before its capital P.
 SHAPES='pct-sign;[0-9]+(\.[0-9]+)?[[:space:]]*%;a figure stated as a share of one hundred
-pct-word;[0-9]+[[:space:]]*(per cent|percent);the same figure written as a word
+pct-word;\b(per cent|percent)\b;the same figure written as a word, with or without a leading digit
 stmt-fwd;recover[a-z]*[^.]{0,40}statement;a claim of statement recovery
 stmt-rev;statement[^.]{0,40}recover[a-z]*;the same claim, written the other way round
 compilable;compil(able|ed|es|e)([^a-zA-Z]|$)|recompil(able|ed|es|e)([^a-zA-Z]|$)|compile[- ]ready;a claim that the output compiles
 decompile-src;decompil[a-z]*[^.]{0,40}(source|[Bb]asic);a claim of source recovery from native code'
 
 # One violating line per shape, used only by the stage 4 probe below. The
-# compilable line uses the plain "compiles" phrasing, not "compilable", so
-# the probe actually exercises the widened shape above and not only the
-# narrower case the pre-fix shape already caught.
+# compilable line uses the plain "compiles" phrasing, not "compilable",
+# and the pct-word line spells "ninety percent" out with no leading digit,
+# so the probe actually exercises the widened shape above and not only
+# the narrower case the pre-fix shape already caught.
 PROBES='pct-sign;This run recovers 92% of the corpus.
-pct-word;This run recovers 92 percent of the corpus.
+pct-word;DeForm6 recovers ninety percent of every project it reads.
 stmt-fwd;DeForm6 can recover every statement in the file.
 stmt-rev;The statement is recovered fully.
 compilable;The recovered project compiles without changes.
@@ -93,6 +101,7 @@ decompile-src;This binary decompiles cleanly into Basic source.'
 # are, so a two-line probe for it would prove nothing a single-line probe
 # does not already prove.
 WRAPPED_PROBES='pct-sign;This run recovers 92;% of the corpus, measured against source.
+pct-word;DeForm6 recovers ninety per;cent of every project it reads.
 stmt-fwd;DeForm6 can recover every;statement from the executable directly.
 stmt-rev;Every statement in the file comes back fully;recovered, without exception.
 decompile-src;This binary decompiles cleanly into;Basic source, without further work.'
@@ -422,7 +431,7 @@ echo
 echo "Scanned 3 claim surfaces (README.md, the --help output, and the report"
 echo "vocabulary) for 6 forbidden shapes. $PLANTED_FIRED of 18 single-line"
 echo "planted violations fired, one per shape per surface, and $WRAPPED_FIRED"
-echo "of 12 two-line wrapped violations fired, one per wrap-exposed shape per"
+echo "of 15 two-line wrapped violations fired, one per wrap-exposed shape per"
 echo "surface. $FACT_PROBES_FIRED of 3 fact probes fired, one per literal"
 echo "success criterion 3 names."
 echo "tests/ratios.toml was not scanned; see the header comment for why"
