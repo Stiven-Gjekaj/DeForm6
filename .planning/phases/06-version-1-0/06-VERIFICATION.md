@@ -253,8 +253,8 @@ for CR-01 landed after the tag was first cut.
 
 The human chose to move the tag, on 2026-09-14.
 
-`v1.0.0` now points at commit `fd72e10`. That is the last commit in this phase that changes
-shipped content, and it carries the CR-01 fix. The earlier tag pointed at `8f1dae4`, whose
+`v1.0.0` pointed at commit `fd72e10` when this report was written. That is the last commit in
+this phase that changes shipped content, and it carries the CR-01 fix. The earlier tag pointed at `8f1dae4`, whose
 copy of `scripts/check-claim-surface.sh` holds no `join_source` function and therefore cannot
 see a claim that wraps across two lines.
 
@@ -269,3 +269,23 @@ The commits after `fd72e10` change only files under `.planning/`. They are plann
 They do not change what a person gets when they check out the tag.
 
 With this item resolved, every success criterion holds and no item is left for a human.
+
+### The tag moved again, after this report
+
+On the same day, the retrospective review of Phase 5 found a Critical defect in `--salvage`:
+one unresolvable `Declare` descriptor refused the whole file in both modes, because four
+per-item sites reused a `Fatal` defect kind. See
+`.planning/phases/05-hostility/05-REVIEW.md`. The user approved the fix, and it changes shipped
+behaviour.
+
+`v1.0.0` therefore moved a second time, to commit `5581fdf`, the last commit that changes
+shipped content across both phases. The tag is still annotated and still local. Measured after
+the move:
+
+- `git show v1.0.0:scripts/check-claim-surface.sh | grep -c join_source` returns 8, so the
+  CR-01 fix of this phase is in the tagged tree.
+- `git show v1.0.0:crates/deform6/src/error.rs | grep -c ItemAddressUnmapped` returns 4, so the
+  Phase 5 salvage fix is in the tagged tree.
+- `git diff --name-only v1.0.0..HEAD` lists no file outside `.planning/`, so nothing shipped
+  sits after the tag.
+- `sh scripts/check-release-version.sh v1.0.0` passes, so criterion 5 still holds.
