@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: 6
 current_phase_name: Version 1.0
-current_plan: 4
+current_plan: 5
 status: executing
-stopped_at: Completed 06-03-PLAN.md
-last_updated: "2026-09-14T18:23:17.711Z"
+stopped_at: Completed 06-04-PLAN.md
+last_updated: "2026-09-14T18:32:43.594Z"
 last_activity: 2026-09-14
 last_activity_desc: Phase 6 execution started
-state_head: 11129d1a8ed08843ec9c4d9838e079627ff16014
+state_head: 71a314d0956c86adeda21ff024b42f62a80bdb91
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 60
-  completed_plans: 56
+  completed_plans: 57
   percent: 0
 ---
 
@@ -68,9 +68,9 @@ inferred.
 ## Current Position
 
 Phase: 6 (Version 1.0) — EXECUTING
-Current Plan: 4
+Current Plan: 5
 Total Plans in Phase: 7
-Plan: 4 of 7
+Plan: 5 of 7
 Status: Ready to execute
 Last activity: 2026-09-14 — Phase 6 execution started
 
@@ -143,6 +143,7 @@ Progress: [░░░░░░░░░░] 0% of the 60 written plans, which is 
 | Phase 06 P01 | 45min | 3 tasks | 5 files |
 | Phase 06-version-1-0 P02 | 40min | 2 tasks | 1 files |
 | Phase 06-version-1-0 P03 | 15min | 3 tasks | 21 files |
+| Phase 06-version-1-0 P04 | 20min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -252,6 +253,9 @@ Recent decisions affecting current work:
 - [Phase 06]: jsonschema 0.56.0 approved for the report schema test, default-features off — Task 1 checkpoint confirmed the crates.io repository, licence and download history; no network or TLS feature enters the build
 - [Phase 6]: [Phase 06]: 06-02: STRUCTURES.md section 11 rows 6 and 7 (FuncTypDesc header layout, optionalVals grammar) are listed as still-open README limits, matching the register's own Resolution-path column, even though the naming code's own doc comments call both closed on real bytes; the README describes today's actual code behaviour for each while keeping the register-derived open count honest.
 - [Phase 06-version-1-0]: 06-03: Fixed the deform6-cli/deform6 cargo doc output-filename collision (doc = false on the bin target) as a Rule 3 blocking-issue deviation, since it was the one warning that survived every doc-comment fix. — Required to meet the plan's own zero-warning success criterion; a known Cargo limitation (rust-lang/cargo#6313), not a doc-comment defect.
+- [Phase 6]: 06-04: Decision D-02 confirmed at the checkpoint: the workspace version moves to 1.0.0 and the release tag is v1.0.0. After this release, a breaking change to the public library API of the deform6 crate needs a 2.0.0 major bump.
+- [Phase 6]: 06-04: crates/deform6/tests/gitattributes.rs excludes the writer's own *.report.json output from the audited extension set, since it is a diagnostic artifact and not a file the VB6 IDE reads or the corpus commits.
+- [Phase 6]: 06-04: .gitattributes needed no edit. Both new tests pass against the file exactly as it already stood from an earlier phase.
 
 ### Pending Todos
 
@@ -280,8 +284,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-14T18:23:17.677Z
-Stopped at: Completed 06-03-PLAN.md
+Last session: 2026-09-14T18:32:43.559Z
+Stopped at: Completed 06-04-PLAN.md
 
 Plan 05-01 is done: 5 commits, cargo test --workspace at 887 passed, 0 failed,
 up from the 872 baseline this plan started at.
