@@ -44,11 +44,16 @@ trap cleanup EXIT
 
 # The six forbidden shapes. One row per shape: an identifier, an extended
 # regular expression, and what it catches. Scanned case-insensitively.
+#
+# compilable's third alternative uses a character class for the separator,
+# not a bare `.`. A bare `.` is an unescaped regex metacharacter that
+# matches any single character, not only a space or a hyphen, so it used to
+# also match a line such as "compileXready".
 SHAPES='pct-sign;[0-9]+(\.[0-9]+)?[[:space:]]*%;a figure stated as a share of one hundred
 pct-word;[0-9]+[[:space:]]*(per cent|percent);the same figure written as a word
 stmt-fwd;recover[a-z]*[^.]{0,40}statement;a claim of statement recovery
 stmt-rev;statement[^.]{0,40}recover[a-z]*;the same claim, written the other way round
-compilable;compilable|recompilable|compile.ready;a claim that the output compiles
+compilable;compilable|recompilable|compile[- ]ready;a claim that the output compiles
 decompile-src;decompil[a-z]*[^.]{0,40}(source|[Bb]asic);a claim of source recovery from native code'
 
 # One violating line per shape, used only by the stage 4 probe below.
