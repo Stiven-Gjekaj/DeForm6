@@ -670,7 +670,7 @@ Plans:
 
 - [x] 06-01-PLAN.md
 - [x] 06-02-PLAN.md
-- [ ] 06-03-PLAN.md
+- [x] 06-03-PLAN.md
 - [ ] 06-04-PLAN.md
 - [ ] 06-05-PLAN.md
 - [ ] 06-06-PLAN.md
@@ -682,7 +682,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 06-02: The README - what it returns, what it does not, the confidence vocabulary, and every open limit
+- [x] 06-02: The README - what it returns, what it does not, the confidence vocabulary, and every open limit
 - [ ] 06-03: The public library API review, the doc comments, and a clean `cargo doc --no-deps`
 - [ ] 06-04: The version, the tag check, and the `.gitattributes` audit for `*.frx` and `*.ctx`
 
