@@ -358,6 +358,38 @@
               }
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ItemAddressUnmapped"],
+          "properties": {
+            "ItemAddressUnmapped": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "va"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "va": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ItemOffsetOverflow"],
+          "properties": {
+            "ItemOffsetOverflow": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "len"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "len": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              }
+            }
+          }
         }
       ]
     }
