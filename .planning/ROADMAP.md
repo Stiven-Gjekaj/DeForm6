@@ -669,7 +669,7 @@ documentation.
 Plans:
 
 - [x] 06-01-PLAN.md
-- [ ] 06-02-PLAN.md
+- [x] 06-02-PLAN.md
 - [ ] 06-03-PLAN.md
 - [ ] 06-04-PLAN.md
 - [ ] 06-05-PLAN.md

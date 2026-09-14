@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: 6
 current_phase_name: Version 1.0
-current_plan: 2
+current_plan: 3
 status: executing
-stopped_at: Completed 06-01-PLAN.md
-last_updated: "2026-09-14T17:58:44.271Z"
+stopped_at: Completed 06-02-PLAN.md
+last_updated: "2026-09-14T18:10:07.901Z"
 last_activity: 2026-09-14
 last_activity_desc: Phase 6 execution started
-state_head: b40d1372c2609bf451b17ecdeb186e52c402392c
+state_head: e69a614ce6adc5976f3dfdffbe02f5e0f9059efa
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 60
-  completed_plans: 54
+  completed_plans: 55
   percent: 0
 ---
 
@@ -68,9 +68,9 @@ inferred.
 ## Current Position
 
 Phase: 6 (Version 1.0) — EXECUTING
-Current Plan: 2
+Current Plan: 3
 Total Plans in Phase: 7
-Plan: 2 of 7
+Plan: 3 of 7
 Status: Ready to execute
 Last activity: 2026-09-14 — Phase 6 execution started
 
@@ -141,6 +141,7 @@ Progress: [░░░░░░░░░░] 0% of the 60 written plans, which is 
 | Phase 05-hostility P04 | ~1h10min | 2 tasks | 1 files |
 | Phase 05 P08 | 1 session | 2 tasks | 1 files |
 | Phase 06 P01 | 45min | 3 tasks | 5 files |
+| Phase 06-version-1-0 P02 | 40min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -248,6 +249,7 @@ Recent decisions affecting current work:
 - [Phase 5]: 05-08: cargo test --release does not compile the test binary with panic=abort; Cargo forces panic=unwind on --test targets so libtest can catch each test's own panic. The proof shows no panic occurs on 48 inputs in both modes and both profiles; it does not exercise real abort-on-panic process behavior, which only a non-test release binary gets.
 - [Phase 5]: 05-08: Measured peak resident set for the whole no-panic-proof run (48 inputs, both modes, plus writer): 5,406,720 bytes maximum resident set size via /usr/bin/time -l. WINDOWS.md finding 14 updated with this measurement; the damaged() leak is not the number driving peak resident set at this input-set size and finding 14 stays open since the leak itself is unfixed.
 - [Phase 06]: jsonschema 0.56.0 approved for the report schema test, default-features off — Task 1 checkpoint confirmed the crates.io repository, licence and download history; no network or TLS feature enters the build
+- [Phase 6]: [Phase 06]: 06-02: STRUCTURES.md section 11 rows 6 and 7 (FuncTypDesc header layout, optionalVals grammar) are listed as still-open README limits, matching the register's own Resolution-path column, even though the naming code's own doc comments call both closed on real bytes; the README describes today's actual code behaviour for each while keeping the register-derived open count honest.
 
 ### Pending Todos
 
@@ -276,8 +278,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-14T17:58:44.237Z
-Stopped at: Completed 06-01-PLAN.md
+Last session: 2026-09-14T18:10:07.866Z
+Stopped at: Completed 06-02-PLAN.md
 
 Plan 05-01 is done: 5 commits, cargo test --workspace at 887 passed, 0 failed,
 up from the 872 baseline this plan started at.
