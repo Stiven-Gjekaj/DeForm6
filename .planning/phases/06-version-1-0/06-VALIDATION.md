@@ -9,7 +9,7 @@ wave_0_complete: false
 created: "2026-09-14"
 ---
 
-# Phase 6 — Validation Strategy
+# Phase 6 Validation Strategy
 
 > Per-phase validation contract for feedback sampling during execution.
 
@@ -44,7 +44,7 @@ warning, and the whole claim surface is checked, not a subset.
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| {N}-01-01 | 01 | 1 | REQ-{XX} | T-{N}-01 / — | {expected secure behavior or "N/A"} | unit | `{command}` | ✅ / ❌ W0 | ⬜ pending |
+| {N}-01-01 | 01 | 1 | REQ-{XX} | T-{N}-01 / none | {expected secure behavior or "N/A"} | unit | `{command}` | ✅ / ❌ W0 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -72,13 +72,13 @@ that prove them. It is the input the per-task map above is built from.
 
 ## Wave 0 Requirements
 
-- [ ] `crates/deform6/schema/report.schema.json` — the schema SC1 validates against. Does not exist.
-- [ ] `crates/deform6/tests/schema.rs` — validates all 44 produced reports against that schema. Does not exist.
-- [ ] `scripts/check-claim-surface.sh` — implements the SC2 and SC3 greps, in the existing `scripts/prove-*-wall.sh` style. Does not exist.
+- [ ] `crates/deform6/schema/report.schema.json`: the schema SC1 validates against. Does not exist.
+- [ ] `crates/deform6/tests/schema.rs`: validates all 44 produced reports against that schema. Does not exist.
+- [ ] `scripts/check-claim-surface.sh`: implements the SC2 and SC3 greps, in the existing `scripts/prove-*-wall.sh` style. Does not exist.
 - [ ] A `cargo doc --no-deps` step in `.github/workflows/gate.yml`, asserting zero warnings, after the 49 current warnings are fixed.
-- [ ] `README.md` — does not exist. The whole file is new.
-- [ ] `CHANGELOG.md` — does not exist.
-- [ ] `LICENSES.md` — does not exist. Holds the manual dependency licence audit, re-derived from `cargo metadata`.
+- [ ] `README.md`: does not exist. The whole file is new.
+- [ ] `CHANGELOG.md`: does not exist.
+- [ ] `LICENSES.md`: does not exist. Holds the manual dependency licence audit, re-derived from `cargo metadata`.
 - [ ] A tag-versus-`Cargo.toml`-version check. No automation exists.
 
 Framework install: none needed. `cargo test` is already the only test runner.
