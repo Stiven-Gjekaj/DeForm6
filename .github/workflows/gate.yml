@@ -108,3 +108,15 @@ jobs:
       # commits. This step is that rule where it runs every time.
       - name: Prove the ordered output wall
         run: sh scripts/prove-ordered-output-wall.sh
+
+      # `cargo fmt`, `cargo clippy` and `cargo test` read types and tests.
+      # None of them reads prose, so a sentence that overclaims what this
+      # tool proved passes every one of them. This step hunts six forbidden
+      # shapes across README.md, the --help output and the report
+      # vocabulary, and plants a violation of each before it reports a pass,
+      # so it cannot go green because it looked in the wrong place.
+      # tests/ratios.toml is deliberately out of scope: its decimal ratios
+      # are pinned test data, not a claim surface a reader meets before they
+      # run the tool (decision D-04).
+      - name: Check the claim surface
+        run: sh scripts/check-claim-surface.sh
