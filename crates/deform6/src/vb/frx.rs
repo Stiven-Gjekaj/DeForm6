@@ -169,7 +169,7 @@ pub fn extract_blob(block: &Region<'_>, at: Off) -> (Option<Blob>, u32, Option<D
     let Some(payload_end) = ends_within(after_len, blob_len, block_end) else {
         let overflowed = after_len.checked_add(blob_len).is_none();
         let kind = if overflowed {
-            DefectKind::OffsetOverflow {
+            DefectKind::ItemOffsetOverflow {
                 offset,
                 len: blob_len,
             }
@@ -384,6 +384,7 @@ pub fn sniff_format(image: &[u8]) -> ImageFormat {
 )]
 mod tests {
     use super::{Blob, BlobCursor, FRX_ITEM_HEADER_LEN, ImageFormat, extract_blob, sniff_format};
+    use crate::error::{DefectKind, Severity};
     use crate::read::region::{Off, Region};
 
     // --- Task 1: the inline blob and its bounds --------------------------
@@ -487,6 +488,8 @@ mod tests {
         let (blob, _consumed, defect) = extract_blob(&region, Off::new(0));
         assert!(blob.is_none());
         let defect = defect.expect("an overflowing end must refuse");
+        assert_eq!(defect.kind.severity(), Severity::Recoverable);
+        assert!(matches!(defect.kind, DefectKind::ItemOffsetOverflow { .. }));
         let message = format!("{}", defect.kind);
         assert!(message.contains("0x3000"), "{message}");
     }
