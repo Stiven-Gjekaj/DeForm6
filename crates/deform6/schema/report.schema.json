@@ -74,30 +74,292 @@
       }
     },
     "defectKind": {
-      "type": "object",
-      "minProperties": 1,
-      "maxProperties": 1,
-      "propertyNames": {
-        "enum": [
-          "BadMagic",
-          "OffsetOverflow",
-          "PastEndOfFile",
-          "ImplausibleCount",
-          "UnmappedAddress",
-          "SectionOverlap",
-          "NoNulTerminator",
-          "CountMismatch",
-          "UnreadablePointer",
-          "EmptyName",
-          "IndexHighByteSet",
-          "UnrecoverableString",
-          "ClassNameNoDot",
-          "GuidLengthUnexpected",
-          "OcxReservedFieldUnexpected",
-          "BlobLenTooSmall",
-          "StructureUnreadable"
-        ]
-      }
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["BadMagic"],
+          "properties": {
+            "BadMagic": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "expected", "found"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "expected": { "type": "string" },
+                "found": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["OffsetOverflow"],
+          "properties": {
+            "OffsetOverflow": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "len"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "len": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["PastEndOfFile"],
+          "properties": {
+            "PastEndOfFile": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "file_len"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "file_len": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709551615
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ImplausibleCount"],
+          "properties": {
+            "ImplausibleCount": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "count", "max"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "count": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "max": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["UnmappedAddress"],
+          "properties": {
+            "UnmappedAddress": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "va"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "va": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["SectionOverlap"],
+          "properties": {
+            "SectionOverlap": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "other"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "other": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["NoNulTerminator"],
+          "properties": {
+            "NoNulTerminator": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "limit"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "limit": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["CountMismatch"],
+          "properties": {
+            "CountMismatch": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "count", "expected", "other_field"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "count": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "expected": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "other_field": { "type": "string" }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["UnreadablePointer"],
+          "properties": {
+            "UnreadablePointer": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "va"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "va": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["EmptyName"],
+          "properties": {
+            "EmptyName": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["IndexHighByteSet"],
+          "properties": {
+            "IndexHighByteSet": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "high"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "high": { "type": "integer", "minimum": 0, "maximum": 255 }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["UnrecoverableString"],
+          "properties": {
+            "UnrecoverableString": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "declared_len", "first_encoding", "second_encoding"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "declared_len": { "type": "integer", "minimum": 0, "maximum": 65535 },
+                "first_encoding": { "type": "string" },
+                "second_encoding": { "type": "string" }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ClassNameNoDot"],
+          "properties": {
+            "ClassNameNoDot": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["GuidLengthUnexpected"],
+          "properties": {
+            "GuidLengthUnexpected": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "value"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "value": {
+                  "type": "integer",
+                  "minimum": -2147483648,
+                  "maximum": 2147483647
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["OcxReservedFieldUnexpected"],
+          "properties": {
+            "OcxReservedFieldUnexpected": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "value"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "value": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["BlobLenTooSmall"],
+          "properties": {
+            "BlobLenTooSmall": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "blob_len"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "blob_len": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["StructureUnreadable"],
+          "properties": {
+            "StructureUnreadable": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "reason"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "reason": { "type": "string" }
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

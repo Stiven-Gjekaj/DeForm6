@@ -24,7 +24,7 @@
 //! with a bug in those types, and the disagreement this file exists to
 //! catch would be invisible.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use deform6::vb::opcodes::OpcodeTable;
 use jsonschema::Validator;
@@ -88,5 +88,151 @@ fn one_corpus_report_validates_against_the_committed_schema() {
         "{}: report failed schema validation:\n{}",
         exe.display(),
         errors.join("\n")
+    );
+}
+
+/// Gives the directory that holds the `corpus/` this workspace vendors.
+fn corpus_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus")
+}
+
+/// Walks `corpus/` recursively and gives every file whose extension is
+/// `.exe`, compared case-insensitively, sorted.
+///
+/// Copied from `tests/corpus_sweep.rs` rather than walked a second way;
+/// that file's own doc comment explains why the compare is
+/// case-insensitive and why the count assertion below is what actually
+/// catches a corpus that changed.
+fn executables() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    walk(&corpus_root(), &mut out);
+    out.sort();
+    out
+}
+
+fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+    let entries =
+        std::fs::read_dir(dir).unwrap_or_else(|err| panic!("reading {}: {err}", dir.display()));
+    for entry in entries {
+        let entry =
+            entry.unwrap_or_else(|err| panic!("reading an entry of {}: {err}", dir.display()));
+        let path = entry.path();
+        if path.is_dir() {
+            walk(&path, out);
+        } else if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
+        {
+            out.push(path);
+        }
+    }
+}
+
+/// Every one of the 44 corpus programs produces a `report.json` that holds
+/// no shape the committed schema refuses.
+#[test]
+fn every_corpus_report_validates_against_the_committed_schema() {
+    let validator = compiled_schema();
+    let files = executables();
+    let count = files.len();
+    assert_eq!(count, 44, "found {count} corpus executables, wanted 44");
+
+    let mut failed = Vec::new();
+    for exe in &files {
+        let key = exe
+            .strip_prefix(corpus_root())
+            .unwrap_or(exe)
+            .display()
+            .to_string();
+        let value = report_value_for(exe);
+        for error in describe_errors(&validator, &value) {
+            failed.push(format!("{key}: {error}"));
+        }
+    }
+    assert!(
+        failed.is_empty(),
+        "{} schema violation(s) across {count} corpus programs:\n{}",
+        failed.len(),
+        failed.join("\n")
+    );
+}
+
+/// Proves the schema has teeth: four separate doctored copies of one real
+/// report each fail validation, one doctored shape at a time. A test that
+/// cannot fail is worse than no test, and this test is the proof that the
+/// other two can.
+#[test]
+fn the_schema_refuses_a_doctored_report() {
+    let validator = compiled_schema();
+    let exe = corpus_root().join("vb6-code/Fire-effect/Fast_Flames.exe");
+    let value = report_value_for(&exe);
+
+    assert!(
+        validator.is_valid(&value),
+        "{}: the undoctored report must itself validate, or this test proves nothing",
+        exe.display()
+    );
+
+    // 1. A fourth confidence word the enum does not hold.
+    let items = value["items"].as_array().expect("items must be an array");
+    assert!(
+        !items.is_empty(),
+        "{}: this program produced no report items, and case 1 needs one",
+        exe.display()
+    );
+    let mut confidence_doctored = value.clone();
+    confidence_doctored["items"][0]["confidence"] = serde_json::json!("dubious");
+    assert!(
+        !validator.is_valid(&confidence_doctored),
+        "a confidence value outside proven/inferred/unrecoverable must be refused"
+    );
+
+    // 2. The `limits` key removed.
+    let mut limits_doctored = value.clone();
+    limits_doctored
+        .as_object_mut()
+        .expect("the report's root must be a JSON object")
+        .remove("limits");
+    assert!(
+        !validator.is_valid(&limits_doctored),
+        "a report missing the required limits key must be refused"
+    );
+
+    // 3. An extra top-level key the root schema does not allow.
+    let mut extra_key_doctored = value.clone();
+    extra_key_doctored
+        .as_object_mut()
+        .expect("the report's root must be a JSON object")
+        .insert("extra".to_owned(), serde_json::json!(true));
+    assert!(
+        !validator.is_valid(&extra_key_doctored),
+        "a report carrying an extra top-level key must be refused"
+    );
+
+    // 4. The first defect's `kind` renamed to a variant name that is not in
+    //    the enum. Skipped, loudly, if this program raised no defect.
+    let defects = value["defects"]
+        .as_array()
+        .expect("defects must be an array");
+    assert!(
+        !defects.is_empty(),
+        "{}: this program produced no defect, and case 4 needs one; pick a program \
+         that raises at least one defect",
+        exe.display()
+    );
+    let mut kind_doctored = value.clone();
+    let payload = kind_doctored["defects"][0]["kind"]
+        .as_object()
+        .expect("a defect's kind must be a JSON object")
+        .values()
+        .next()
+        .expect("a DefectKind object holds exactly one key")
+        .clone();
+    let mut renamed = serde_json::Map::new();
+    renamed.insert("NotARealDefectKind".to_owned(), payload);
+    kind_doctored["defects"][0]["kind"] = serde_json::Value::Object(renamed);
+    assert!(
+        !validator.is_valid(&kind_doctored),
+        "a defect kind renamed to a variant the schema does not name must be refused"
     );
 }
