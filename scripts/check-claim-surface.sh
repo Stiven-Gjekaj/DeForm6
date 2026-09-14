@@ -68,12 +68,18 @@ trap cleanup EXIT
 # still does not fire on a corpus control name that happens to hold
 # "Percent" as a substring, such as `chkPercent`, since that name has no
 # boundary before its capital P.
+#
+# stmt-fwd, stmt-rev, and decompile-src bound the gap between the trigger
+# word and the target word to 120 characters, not 40. A realistic, only
+# slightly more verbose rephrasing of the exact claim a shape is meant to
+# catch clears a 40-character gap easily; 120 characters is wide enough to
+# span a whole ordinary sentence clause instead of only a few words.
 SHAPES='pct-sign;[0-9]+(\.[0-9]+)?[[:space:]]*%;a figure stated as a share of one hundred
 pct-word;\b(per cent|percent)\b;the same figure written as a word, with or without a leading digit
-stmt-fwd;recover[a-z]*[^.]{0,40}statement;a claim of statement recovery
-stmt-rev;statement[^.]{0,40}recover[a-z]*;the same claim, written the other way round
+stmt-fwd;recover[a-z]*[^.]{0,120}statement;a claim of statement recovery
+stmt-rev;statement[^.]{0,120}recover[a-z]*;the same claim, written the other way round
 compilable;compil(able|ed|es|e)([^a-zA-Z]|$)|recompil(able|ed|es|e)([^a-zA-Z]|$)|compile[- ]ready;a claim that the output compiles
-decompile-src;decompil[a-z]*[^.]{0,40}(source|[Bb]asic);a claim of source recovery from native code'
+decompile-src;decompil[a-z]*[^.]{0,120}(source|[Bb]asic);a claim of source recovery from native code'
 
 # One violating line per shape, used only by the stage 4 probe below. The
 # compilable line uses the plain "compiles" phrasing, not "compilable",
