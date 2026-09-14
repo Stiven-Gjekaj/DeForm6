@@ -30,7 +30,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: The object graph** - Objects, kinds, public procedure names, prototypes, the external table, and the differential harness that measures all of it (completed 2026-09-11)
 - [x] **Phase 3: Forms** - The control tree, control types and names, property values, the `.frx` blobs, and the event structure (completed 2026-09-11)
 - [x] **Phase 4: It writes a project** - `extract` emits `.vbp`, `.frm`, `.frx`, `.bas` and `.cls`, plus the JSON confidence report (completed 2026-09-13)
-- [ ] **Phase 5: Hostility** - `--salvage`, fuzzing in the gate, and the run-time robustness corpus
+- [x] **Phase 5: Hostility** - `--salvage`, fuzzing in the gate, and the run-time robustness corpus (completed 2026-09-14)
 - [x] **Phase 6: Version 1.0** - The metadata deliverable is finished, measured, and documented with its limits stated (completed 2026-09-14)
 
 ## Phase Details
@@ -754,5 +754,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 2. The object graph | 10/10 | Complete    | 2026-09-11 |
 | 3. Forms | 18/18 | Complete    | 2026-09-11 |
 | 4. It writes a project | 9/9 | Complete    | 2026-09-13 |
-| 5. Hostility | 8/8 | In Progress|  |
+| 5. Hostility | 8/8 | Complete    | 2026-09-14 |
 | 6. Version 1.0 | 7/7 | Complete    | 2026-09-14 |
