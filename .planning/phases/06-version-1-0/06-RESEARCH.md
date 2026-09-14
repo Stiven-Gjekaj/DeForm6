@@ -390,7 +390,10 @@ documents, it does not rewrite.
 | A3 | Cargo.toml's `version = "0.1.0"` should be bumped to a `1.0.0`-shaped version for this release, matching the phase name "Version 1.0" | Open Questions | Medium — if the user intends to keep semver `0.x` (common for a tool that still calls itself pre-1.0 in spirit while the *milestone* is named "Version 1.0"), planning a version bump the user did not want would need reverting; this must be confirmed with the user before plan 06-05 commits to a specific tag string |
 | A4 | `cargo-deny` on crates.io (`0.20.2`, confirmed via `cargo search` this session) is the same well-known EmbarkStudios tool and not a similarly-named impostor | Package Legitimacy Audit | Low — `cargo search` alone does not prove provenance the way an official-docs citation would; treat as `[ASSUMED]` per the package-name provenance rule and gate behind `checkpoint:human-verify` if adopted |
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+All three questions below were settled by the user during the /gsd-plan-phase 6
+run, before the planner was spawned. Each resolution is recorded inline.
 
 1. **What exactly does "the JSON report validates against the schema" (success criterion 1) mean, given no schema exists today?**
    - What we know: `report.json`'s shape is fully determined by
@@ -409,6 +412,10 @@ documents, it does not rewrite.
      current Rust types, and 06-03's acceptance run should validate all 44
      produced reports against it. This is new work, not re-verification, and
      the planner should size it as such.
+   - **RESOLVED (decision D-01):** Yes, this phase authors the schema. Plan
+     06-01 owns it as a dedicated task, ahead of the acceptance run, and adds
+     `crates/deform6/tests/schema.rs` to validate all 44 produced reports
+     against it. The planner moved the schema to wave 1 for this reason.
 
 2. **Does "the measured `recovery.ratio`" (success criterion 2) refer to a JSON field or to `tests/ratios.toml`'s `ratio` key?**
    - What we know: No field literally named `ratio` or `recovery.ratio`
@@ -425,6 +432,10 @@ documents, it does not rewrite.
      explicitly exclude `tests/ratios.toml`, since that file's numeric ratios
      are pinned test data, not a claim surface a reader encounters before
      running the tool.
+   - **RESOLVED (decision D-04):** The grep scopes to the three sources
+     criterion 2 names literally, and excludes `tests/ratios.toml`. Plan 06-06
+     records the reason in the script, so a later reader does not close the
+     gap by mistake.
 
 3. **Should `Cargo.toml`'s version move from `0.1.0` to a `1.0.0`-shaped number for this release?**
    - What we know: `Cargo.toml` currently pins `version = "0.1.0"` workspace-wide
@@ -439,6 +450,9 @@ documents, it does not rewrite.
    - Recommendation: Confirm with the user before 06-05 locks a tag string;
      this is exactly the kind of decision `/gsd-discuss-phase` normally
      captures, and no `CONTEXT.md` exists for this phase.
+   - **RESOLVED (decision D-02):** The workspace version moves to `1.0.0` and
+     the tag is `v1.0.0`. Plan 06-04 carries the one-way decision checkpoint,
+     and the tag-versus-version match is measured, not asserted.
 
 ## Environment Availability
 

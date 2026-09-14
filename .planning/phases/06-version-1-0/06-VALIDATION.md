@@ -75,7 +75,7 @@ that prove them. It is the input the per-task map above is built from.
 - [ ] `crates/deform6/schema/report.schema.json`: the schema SC1 validates against. Does not exist.
 - [ ] `crates/deform6/tests/schema.rs`: validates all 44 produced reports against that schema. Does not exist.
 - [ ] `scripts/check-claim-surface.sh`: implements the SC2 and SC3 greps, in the existing `scripts/prove-*-wall.sh` style. Does not exist.
-- [ ] A `cargo doc --no-deps` step in `.github/workflows/gate.yml`, asserting zero warnings, after the 49 current warnings are fixed.
+- [ ] A `cargo doc --no-deps` step in `.github/workflows/gate.yml`, asserting zero warnings, after the current warnings are fixed (52 lines begin `warning` today: 49 located plus 3 per-crate summary lines).
 - [ ] `README.md`: does not exist. The whole file is new.
 - [ ] `CHANGELOG.md`: does not exist.
 - [ ] `LICENSES.md`: does not exist. Holds the manual dependency licence audit, re-derived from `cargo metadata`.
