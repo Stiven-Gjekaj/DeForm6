@@ -24,8 +24,12 @@
 use deform6::Refusal;
 use deform6::inspect;
 use deform6::journal::Mode;
+use deform6::read::pe::PeImage;
+use deform6::read::region::Off;
 use deform6::report::ProjectReport;
+use deform6::vb::header::{VbHeader, header_region};
 use deform6::vb::opcodes::OpcodeTable;
+use deform6::vb::project::ProjectInfo;
 
 /// `corpus/vb6-code/Fire-effect/Fast_Flames.exe`, read once at compile time.
 ///
@@ -234,4 +238,112 @@ fn two_salvage_runs_over_the_same_bytes_give_byte_identical_json() {
     let first = built_project_report(&patched, &table, Mode::Salvage).to_json();
     let second = built_project_report(&patched, &table, Mode::Salvage).to_json();
     assert_eq!(first, second);
+}
+
+// --- CR-01 regression: a per-item pointer that maps nowhere must not
+// refuse the whole file --------------------------------------------------
+
+/// `corpus/vb6-code/Mandelbrot/Mandelbrot.exe`, read once at compile time.
+///
+/// This program declares exactly one external `Declare`, `gdi32::SetPixelV`,
+/// per `crates/deform6/src/vb/project.rs`'s own
+/// `the_corpus_file_declares_one_external_import`. Patching that one entry's
+/// `lpImportDescriptor` field to an address in no section loses that one
+/// `Declare`, and nothing else in the file, because it is the only entry the
+/// table holds.
+const MANDELBROT: &[u8] = include_bytes!("../../../corpus/vb6-code/Mandelbrot/Mandelbrot.exe");
+
+/// Copies `data` and writes an address that resolves to no section into the
+/// `lpImportDescriptor` field of the `Declare` table's one entry (entry 0,
+/// field offset `0x04`), reached through the same route the parser uses:
+/// the header, then `ProjectInfo`, then the external table address, then the
+/// entry stride. Nothing searches for a byte pattern.
+fn with_declare_descriptor_unresolved(data: &[u8]) -> Vec<u8> {
+    let image = PeImage::parse(data).expect("Mandelbrot.exe must parse as a PE image");
+    let header = header_region(&image).expect("Mandelbrot.exe must hold a VB header");
+    let vb_header = VbHeader::read(&header).expect("Mandelbrot.exe must hold a valid VB header");
+    let info = ProjectInfo::read(&image, vb_header.lp_project_data)
+        .expect("Mandelbrot.exe must hold valid ProjectInfo");
+    let table = image
+        .region_at_va(info.lp_external_table)
+        .expect("Mandelbrot.exe's external table address must resolve");
+    let entry = table
+        .subregion(Off::new(0), 8)
+        .expect("Mandelbrot.exe's one Declare entry must fit its own table");
+    let at = entry
+        .file_offset(Off::new(0x04))
+        .expect("the entry's own field offset must resolve to a file offset");
+    let at = usize::try_from(at.get()).expect("a file offset must fit a usize on every host");
+
+    // An address well past every section this small program's PE header
+    // declares. `vb/project.rs`'s own unit test for this exact fixture uses
+    // the same recipe: `image_base() + 0x00F0_0000`.
+    let nowhere = image.image_base().wrapping_add(0x00F0_0000);
+
+    let mut patched = data.to_vec();
+    assert_ne!(
+        &patched[at..at + 4],
+        nowhere.to_le_bytes(),
+        "the fixture writes the value the field already holds, so it proves nothing"
+    );
+    patched[at..at + 4].copy_from_slice(&nowhere.to_le_bytes());
+    patched
+}
+
+#[test]
+fn an_unresolvable_declare_descriptor_refuses_in_strict_mode() {
+    let table = OpcodeTable::builtin();
+    let patched = with_declare_descriptor_unresolved(MANDELBROT);
+
+    let refusal = inspect(&patched, &table, Mode::Strict).expect_err(
+        "a Declare entry whose descriptor resolves to no section must refuse in strict mode",
+    );
+    let message = format!("{refusal}");
+    assert!(
+        message.contains("is in no section"),
+        "the refusal must name what the parser expected there: {message}"
+    );
+}
+
+#[test]
+fn an_unresolvable_declare_descriptor_succeeds_in_salvage_mode_losing_only_that_entry() {
+    let table = OpcodeTable::builtin();
+    let unpatched = inspect(MANDELBROT, &table, Mode::Salvage)
+        .expect("the shipped file must inspect cleanly in salvage mode");
+    assert_eq!(
+        unpatched.declarations.len(),
+        1,
+        "Mandelbrot.exe declares exactly one external Declare before patching"
+    );
+
+    let patched = with_declare_descriptor_unresolved(MANDELBROT);
+    let salvaged = inspect(&patched, &table, Mode::Salvage).expect(
+        "salvage mode must continue past the recoverable defect and still produce a report; \
+         this is the CR-01 regression: a per-item pointer that maps nowhere must not refuse \
+         the whole file",
+    );
+
+    assert!(
+        salvaged.declarations.is_empty(),
+        "the one unresolvable Declare entry must be lost, not invented: {:?}",
+        salvaged.declarations
+    );
+    assert_eq!(
+        salvaged.object_count, unpatched.object_count,
+        "every other fact in the file must still read, because the loss is per-item"
+    );
+    assert_eq!(
+        salvaged.project_name, unpatched.project_name,
+        "the project name does not come from the Declare table, so it must be unaffected"
+    );
+
+    let new_defect_is_recoverable = salvaged.defects.iter().any(|defect| {
+        format!("{defect}").contains("lpImportDescriptor")
+            && defect.kind.severity() == deform6::error::Severity::Recoverable
+    });
+    assert!(
+        new_defect_is_recoverable,
+        "the new defect must name lpImportDescriptor and carry Severity::Recoverable: {:?}",
+        salvaged.defects
+    );
 }
