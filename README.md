@@ -125,20 +125,30 @@ DeForm6 gives one of six exit codes.
 
 ## The numbers
 
-The numbers below are measured, not estimated. Plan 06-07 fills each one in
-after the acceptance run over the full corpus.
+The numbers below are measured, not estimated. Each one is the number
+`tests/ratios.toml` states and the gate test named beside it asserts on
+every run, never a single derived figure calculated from a part.
 
-DeForm6's test corpus holds <!-- measured:corpus-programs --> Visual Basic 6
-programs.
+DeForm6's test corpus holds 44 Visual Basic 6 programs. `cargo test -p
+deform6 --test corpus_sweep` reads all 44 and reports what they hold.
 
-Across that corpus, DeForm6 recovers <!-- measured:procedures --> procedure
-signatures.
+Across that corpus, DeForm6 recovers 185 procedure signatures against 904
+declared. `cargo test -p deform6 --test ratios` recomputes this pair from
+`tests/ratios.toml` on every run.
 
-DeForm6 recovers <!-- measured:forms --> forms.
+DeForm6 recovers 52 forms against 53 declared. One corpus form refuses: the
+refusal names the byte offset and the byte the code expected to find there,
+and a refusal is the correct result, because the tool does not print a tree
+it cannot prove. `cargo test -p deform6 --test ratios` asserts this pair.
 
-DeForm6 recovers <!-- measured:controls --> controls.
+DeForm6 recovers 686 controls against 686 declared. `cargo test -p deform6
+--test ratios` asserts this pair.
 
-DeForm6 recovers <!-- measured:properties --> property values.
+DeForm6 recovers 807 property records, of which 136 written lines reach the
+`.frm` file. A single recovered `Position` record becomes four written
+lines and a single `Font` record becomes seven, so this pair is a coverage
+count for DeForm6's own writer, not a recovery count against source. `cargo
+test -p deform6 --test ratios` asserts this pair.
 
 ## Known limits still open at release
 
