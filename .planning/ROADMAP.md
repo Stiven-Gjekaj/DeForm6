@@ -664,17 +664,33 @@ documentation.
   - **The README is the last place a claim can drift.** It is written after the
     measurement, from the measurement, and not from the plan.
 
-**Plans**: 5 plans
+**Plans**: 7 plans
 
 Plans:
 
-- [ ] 06-01: The README - what it returns, what it does not, and the confidence vocabulary defined
-- [ ] 06-02: The public library API review, the doc comments, and a clean `cargo doc --no-deps`
-- [ ] 06-03: The end-to-end acceptance run over all 44 corpus programs, with the numbers recorded
-- [ ] 06-04: The honesty audit - every claim checked against a measured result, and every open gap listed as a known limit
-- [ ] 06-05: Release mechanics - the version, the changelog, the licence check, `.gitattributes` for `*.frx` and `*.ctx`, the tag
+- [ ] 06-01: The report JSON schema, and all 44 reports validated against it
+- [ ] 06-02: The README - what it returns, what it does not, the confidence vocabulary, and every open limit
+- [ ] 06-03: The public library API review, the doc comments, and a clean `cargo doc --no-deps`
+- [ ] 06-04: The version, the tag check, and the `.gitattributes` audit for `*.frx` and `*.ctx`
+- [ ] 06-05: The dependency licence audit and the changelog
+- [ ] 06-06: The claim surface check, with a planted violation for every shape it hunts
+- [ ] 06-07: The acceptance run over all 44, the honesty audit, and the tag
 
-**Waves**: [06-01, 06-02, 06-05] then [06-03] then [06-04]
+**Waves**: [06-01] then [06-02, 06-03, 06-04] then [06-05, 06-06] then [06-07]
+
+The plan count and the wave order both moved during planning, for two measured
+reasons.
+
+1. Success criterion 1 validates all 44 reports against a schema, and no schema
+   file exists. Decision D-01 makes that a task of its own. The acceptance run
+   cannot precede the artifact it validates against, so the schema became plan
+   06-01 in wave 1 and the acceptance run moved to the last wave.
+2. The claim surface check greps `README.md`, so it cannot run before the README
+   exists. It became plan 06-06, one wave after the README.
+
+The release mechanics split into two plans, 06-04 and 06-05, because the version,
+the changelog, the licence audit and the tag are five deliverables and a plan
+holds two or three tasks.
 
 ---
 
@@ -720,4 +736,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 3. Forms | 18/18 | Complete    | 2026-09-11 |
 | 4. It writes a project | 9/9 | Complete    | 2026-09-13 |
 | 5. Hostility | 8/8 | In Progress|  |
-| 6. Version 1.0 | 0/5 | Not started | - |
+| 6. Version 1.0 | 0/7 | Not started | - |
