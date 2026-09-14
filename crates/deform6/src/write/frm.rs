@@ -104,21 +104,21 @@ fn append_blob(
 // form file agrees with -----------------------------------------------------
 
 /// The width every property name is padded to before the `=` on a `.frm`
-/// line, before the mandatory three spaces. `.planning/research/
-/// FILE-FORMATS.md` section 3.1: measured at 5899 of 5899 property lines.
+/// line, before the mandatory three spaces. `docs/FILE-FORMATS.md`
+/// section 3.1: measured at 5899 of 5899 property lines.
 /// A name at or over this width still gets exactly one space, per section
 /// 3.1's own `Object.Width` proof that the field is a minimum, never a
 /// truncation.
 pub const FRM_NAME_PAD: usize = 16;
 
 /// The number of spaces one nesting depth level indents by.
-/// `.planning/research/FILE-FORMATS.md` section 2.4: measured at 0, 3, 6, 9
+/// `docs/FILE-FORMATS.md` section 2.4: measured at 0, 3, 6, 9
 /// and 12 spaces across the whole corpus.
 pub const FRM_INDENT: usize = 3;
 
 /// The exact twelve bytes the corpus proves the IDE leaves behind when a
 /// picture property exists but its own blob was removed:
-/// `.planning/research/FILE-FORMATS.md` section 4.3. The first four bytes
+/// `docs/FILE-FORMATS.md` section 4.3. The first four bytes
 /// are a declared length of 8, the eight byte inline picture header alone
 /// with zero image bytes; the next four are the `6C 74 00 00` marker; the
 /// last four are the header's own zeroed length and format fields.
@@ -173,7 +173,7 @@ enum ResolvedLine {
 }
 
 /// Pads `name` to `width`, or, when `name` is already `width` characters or
-/// more, appends exactly one space: `.planning/research/FILE-FORMATS.md`
+/// more, appends exactly one space: `docs/FILE-FORMATS.md`
 /// section 3.1's own `Object.Width` proof that the field is a minimum, not
 /// a truncation.
 fn pad_name(name: &str, width: usize) -> String {
@@ -376,7 +376,7 @@ fn children_of_model(controls: &[ControlModel]) -> Vec<Vec<usize>> {
 
 /// Gives `kids` reordered so every non-menu child precedes every menu
 /// child, keeping each group's own relative order unchanged.
-/// `.planning/research/FILE-FORMATS.md` section 2.5: a hard load
+/// `docs/FILE-FORMATS.md` section 2.5: a hard load
 /// requirement, not a display preference; the IDE's own documented error
 /// is `Line 'item1': All controls must precede menus; can't load control
 /// 'item2'.` `sort_by_key` is stable, so this is the whole rule: split
@@ -388,7 +388,7 @@ fn child_order(kids: &[usize], controls: &[ControlModel]) -> Vec<usize> {
     ordered
 }
 
-/// The intrinsic control classes `.planning/research/FILE-FORMATS.md`
+/// The intrinsic control classes `docs/FILE-FORMATS.md`
 /// section 2.4 counts in the corpus, by their own bare name (without the
 /// `VB.` prefix): `Label` 125, `PictureBox` 80, `TextBox` 66, `Menu` 46,
 /// `CommandButton` 45, `Form` 36, `HScrollBar` 22, `Frame` 19, `CheckBox`
@@ -1275,7 +1275,7 @@ mod tests {
 
     #[test]
     fn pad_name_gives_exactly_one_space_for_a_name_at_or_over_the_width() {
-        // `.planning/research/FILE-FORMATS.md` section 3.1: the field is a
+        // `docs/FILE-FORMATS.md` section 3.1: the field is a
         // minimum, not a truncation, so a name at or over sixteen
         // characters still gets exactly one space, never zero.
         assert_eq!(pad_name("StartUpPosition", 16), "StartUpPosition ");

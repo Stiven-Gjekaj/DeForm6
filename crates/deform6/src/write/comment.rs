@@ -2,7 +2,7 @@
 //! `.frm` file, after the last `Attribute` line, where an apostrophe
 //! comment is legal.
 //!
-//! `.planning/research/FILE-FORMATS.md` section 2.6 proves, over 7379
+//! `docs/FILE-FORMATS.md` section 2.6 proves, over 7379
 //! measured header lines, that a `Begin` block holds no comment and no
 //! blank line. Section 2.7 gives the one place a comment is legal: the
 //! code region, starting on the line after the last `Attribute` line. This

@@ -22,17 +22,17 @@
 
 /// The longest name any writer in this phase emits, counted in encoded
 /// bytes, never in Unicode scalar values and never in grapheme clusters.
-/// `.planning/research/FILE-FORMATS.md` section 7.3: the IDE truncates a
+/// `docs/FILE-FORMATS.md` section 7.3: the IDE truncates a
 /// control or a class name over this length silently, and the failure
 /// shows up later, in a log file the user may never open.
 pub const MAX_NAME_LEN: usize = 40;
 
 /// The deepest a control tree may nest before the IDE refuses to load it.
-/// `.planning/research/FILE-FORMATS.md` section 7.3.
+/// `docs/FILE-FORMATS.md` section 7.3.
 pub const MAX_NESTING_DEPTH: usize = 7;
 
 /// The longest inline string this phase writes without falling back to the
-/// `.frx`. `.planning/research/FILE-FORMATS.md` section 3.3: the corpus's
+/// `.frx`. `docs/FILE-FORMATS.md` section 3.3: the corpus's
 /// longest inline string is 97 characters, and the threshold above it is
 /// not resolved, so this constant states the proven floor, not a guessed
 /// ceiling.
@@ -44,7 +44,7 @@ pub const MAX_INLINE_STRING_LEN: usize = 97;
 /// Gives the encoded bytes and the list of characters that could not be
 /// represented: each substituted character becomes a literal `?` byte in
 /// the output, and is also returned so a caller can report the
-/// substitution. `.planning/research/FILE-FORMATS.md` section 6.1 states
+/// substitution. `docs/FILE-FORMATS.md` section 6.1 states
 /// the rule for the emitter: never fall back to UTF-8, replace the
 /// character, and record the substitution.
 #[must_use]
@@ -67,7 +67,7 @@ pub fn encode_windows_1252(text: &str) -> (Vec<u8>, Vec<char>) {
 /// Accumulates lines and terminates every one with the two bytes `0x0D
 /// 0x0A`, including the last, and writes no byte order mark.
 ///
-/// `.planning/research/FILE-FORMATS.md` section 6.2: every line of every
+/// `docs/FILE-FORMATS.md` section 6.2: every line of every
 /// text file this phase writes ends with CRLF, the file itself ends with
 /// CRLF, and no file carries a bare `LF`. Section 6.3: no file carries a
 /// byte order mark. This is the one place this phase writes either fact,

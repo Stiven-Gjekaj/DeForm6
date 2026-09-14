@@ -72,7 +72,7 @@ pub const CRON_RUNS: u32 = 500_000;
 /// `crate::error::refusal_for_defect`, so a fuzz run refuses almost every
 /// input it generates and would otherwise report this deliberate leak as a
 /// crash on nearly every iteration. Turning the detector off is a stated,
-/// reasoned choice, recorded as an open finding in `.planning/WINDOWS.md`,
+/// reasoned choice, recorded as an open finding in `docs/WINDOWS.md`,
 /// not a silent flag: `CRON_RUNS` is the number that keeps the leak this
 /// flag stops reporting below `RSS_LIMIT_MB` on its own.
 ///

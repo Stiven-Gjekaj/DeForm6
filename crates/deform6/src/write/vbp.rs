@@ -1,6 +1,6 @@
 //! The complete `.vbp` writer.
 //!
-//! `.planning/research/FILE-FORMATS.md` section 1: a `.vbp` is a flat list
+//! `docs/FILE-FORMATS.md` section 1: a `.vbp` is a flat list
 //! of `Key=Value` lines, with no space around the `=` and no line indented.
 //! This grammar shares no line-template helper with `write::frm` or
 //! `write::code`, whose own grammars differ in indent, name pad and space
@@ -18,7 +18,7 @@ use super::values::escape_inline_string;
 // Plan 04-03, Task 1: the component lines, in recovered order.
 // ---------------------------------------------------------------------
 
-/// The 34 setting keys `.planning/research/FILE-FORMATS.md` section 1.4
+/// The 34 setting keys `docs/FILE-FORMATS.md` section 1.4
 /// gives, in the corpus order. Held as an ordered constant, not as a
 /// sequence of statements, so a reader can compare this list against the
 /// document line by line, and so a test can assert the whole order in one

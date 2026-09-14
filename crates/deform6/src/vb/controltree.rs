@@ -512,7 +512,7 @@ const MENU_C_TYPE: u8 = 19;
 /// control is lost), but the recovered tree gives `menuAboutForm`,
 /// `menuSeparatorC` and `menuWebsite` `menuHelp` as their parent rather
 /// than `menuAbout`. Recorded honestly as an open, narrowly-scoped
-/// limitation in `.planning/WINDOWS.md`, distinct from the closed
+/// limitation in `docs/WINDOWS.md`, distinct from the closed
 /// two-level-deep-close case this rule does settle.
 ///
 /// # Errors
@@ -1416,7 +1416,7 @@ mod tests {
     /// `menuAbout`'s own siblings rather than its children. This is a
     /// known, measured, narrowly-scoped limitation beyond what `FrmHex` and
     /// `frmUUID2`'s own two-program measurement settles, recorded in
-    /// `.planning/WINDOWS.md`, not silently claimed as solved. This test
+    /// `docs/WINDOWS.md`, not silently claimed as solved. This test
     /// proves the walk still succeeds and every control this program
     /// declares is present in the tree by name, without asserting the one
     /// parent relationship this session's own measurement does not settle.

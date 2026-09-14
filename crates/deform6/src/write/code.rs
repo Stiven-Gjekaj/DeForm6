@@ -2,7 +2,7 @@
 //! signature every recovered procedure becomes, and the code region
 //! emitter `write::frm` (plan 04-04) shares.
 //!
-//! `.planning/research/FILE-FORMATS.md` section 5: the `.bas` header is
+//! `docs/FILE-FORMATS.md` section 5: the `.bas` header is
 //! one line, and the `.cls` preamble is thirteen lines, byte identical
 //! across the whole corpus apart from the name. This file writes exactly
 //! those fixed shapes. The class grammar and the form grammar look alike
@@ -37,7 +37,7 @@ pub enum AttributeFileKind {
 
 /// Builds the five `Attribute` lines every `.cls` and `.frm` file writes,
 /// always all five, in this fixed order, every time.
-/// `.planning/research/FILE-FORMATS.md` section 5.2 and section 9 gap 3: no
+/// `docs/FILE-FORMATS.md` section 5.2 and section 9 gap 3: no
 /// corpus file omits one, and whether the loader tolerates a missing
 /// attribute is unverified, so the safe default is to write all five
 /// always.
@@ -82,7 +82,7 @@ pub const CLS_NAME_PAD: usize = 20;
 /// identical across the whole 46 file corpus:
 /// `(name, spaces before "=", value, comment word)`. Held as ordered data,
 /// not as five separate `push_line` calls, so a reader can compare this
-/// table against `.planning/research/FILE-FORMATS.md` section 5.2 without
+/// table against `docs/FILE-FORMATS.md` section 5.2 without
 /// reading control flow, and so a test can assert the whole block in one
 /// place. Values proven **(a)** 46 of 46: for a Standard EXE project all
 /// five properties are inert, all take `0` except `MultiUse`, which the
@@ -109,7 +109,7 @@ fn cls_property_line(name: &str, spaces_before_eq: usize, value: &str, comment: 
 /// the five `Attribute` lines [`form_attribute_block`] gives for
 /// [`AttributeFileKind::Class`]. The version line's minor part is a single
 /// digit: `VERSION 1.0 CLASS`, never `VERSION 5.00`, per
-/// `.planning/research/FILE-FORMATS.md` section 5.2's own layout note.
+/// `docs/FILE-FORMATS.md` section 5.2's own layout note.
 #[must_use]
 pub fn cls_preamble_lines(name: &SafeName) -> Vec<String> {
     let mut lines = vec!["VERSION 1.0 CLASS".to_owned(), "BEGIN".to_owned()];
@@ -121,7 +121,7 @@ pub fn cls_preamble_lines(name: &SafeName) -> Vec<String> {
     lines
 }
 
-/// Builds the one line `.bas` header: `.planning/research/FILE-FORMATS.md`
+/// Builds the one line `.bas` header: `docs/FILE-FORMATS.md`
 /// section 5.1. There is no `VERSION` line and no `BEGIN` block for a
 /// module: the whole header is this one line, and the code region starts
 /// on the next line.
@@ -429,7 +429,7 @@ pub fn format_procedures(procedures: &ObjectProcedures) -> (Vec<String>, Vec<Rep
 
 /// Appends one [`ReportItem`] naming every character this call's own
 /// writer could not represent in Windows-1252, when there is at least one.
-/// `.planning/research/FILE-FORMATS.md` section 6.1: the emitter never
+/// `docs/FILE-FORMATS.md` section 6.1: the emitter never
 /// falls back to UTF-8; it substitutes `?` and records the substitution.
 fn push_substitution_item(items: &mut Vec<ReportItem>, substituted: &[char]) {
     if substituted.is_empty() {

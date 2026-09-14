@@ -1475,7 +1475,7 @@ fn all_corpus_programs_extract_with_exit_zero_and_the_written_file_count_matches
 }
 
 /// Research open question 2, settled: `Map Editor.exe`'s own `Main` form,
-/// whose control tree walk refuses (`.planning/WINDOWS.md` finding 8),
+/// whose control tree walk refuses (`docs/WINDOWS.md` finding 8),
 /// still exits 0, still gets a `.frm` file, and the report marks it
 /// `unrecoverable` rather than silently omitting it.
 #[test]

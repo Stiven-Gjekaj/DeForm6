@@ -151,7 +151,7 @@ fn regression_inputs(dir: &Path) -> Vec<PathBuf> {
 /// The fetched run time robustness set's own count. Zero and absent are
 /// two different answers: a set of zero files passes every check in this
 /// file, and reporting an absent directory as a set of zero files that
-/// passed is exactly the silence the named risk in `.planning/WINDOWS.md`
+/// passed is exactly the silence the named risk in `docs/WINDOWS.md`
 /// (finding 14) and `05-RESEARCH.md` describe.
 #[derive(Debug, PartialEq, Eq)]
 enum FetchedCount {
