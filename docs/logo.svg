@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="DeForm6">
+  <title>DeForm6</title>
+  <desc>Raw bytes on the left resolve into a recovered control tree inside a Visual Basic form window.</desc>
+
+  <!-- The form window. A VB6 form is the thing DeForm6 gives back. -->
+  <rect x="15.5" y="21.5" width="97" height="85" rx="9"
+        fill="none" stroke="#D98A3E" stroke-width="3"/>
+
+  <!-- The title bar, and the three window buttons a VB6 form carries. -->
+  <line x1="15.5" y1="40.5" x2="112.5" y2="40.5" stroke="#D98A3E" stroke-width="3"/>
+  <g fill="#D98A3E">
+    <rect x="76" y="27" width="8" height="7" rx="1.5"/>
+    <rect x="88" y="27" width="8" height="7" rx="1.5"/>
+    <rect x="100" y="27" width="8" height="7" rx="1.5"/>
+  </g>
+
+  <!-- The bytes the run reads. Every fact traces back to one of these. -->
+  <g fill="#5B8DBE">
+    <rect x="25" y="51" width="7" height="7" rx="1.5" opacity="1"/>
+    <rect x="35" y="51" width="7" height="7" rx="1.5" opacity="0.55"/>
+    <rect x="25" y="63" width="7" height="7" rx="1.5" opacity="0.8"/>
+    <rect x="35" y="63" width="7" height="7" rx="1.5" opacity="0.4"/>
+    <rect x="25" y="75" width="7" height="7" rx="1.5" opacity="1"/>
+    <rect x="35" y="75" width="7" height="7" rx="1.5" opacity="0.55"/>
+    <rect x="25" y="87" width="7" height="7" rx="1.5" opacity="0.7"/>
+    <rect x="35" y="87" width="7" height="7" rx="1.5" opacity="0.35"/>
+  </g>
+
+  <!-- The control tree that comes back out of them. -->
+  <path d="M53 55.5 L53 91.5 M53 73.5 L60 73.5 M53 91.5 L60 91.5"
+        fill="none" stroke="#5B8DBE" stroke-width="2.5"
+        stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>
+  <g fill="#D98A3E">
+    <rect x="49" y="51" width="50" height="9" rx="2.5"/>
+    <rect x="60" y="69" width="39" height="9" rx="2.5"/>
+    <rect x="60" y="87" width="39" height="9" rx="2.5"/>
+  </g>
+</svg>
