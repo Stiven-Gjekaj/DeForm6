@@ -94,14 +94,14 @@ pub enum PropertyValue {
         value: String,
     },
     /// A `Position` payload: four coordinates, read through
-    /// [`read_position_block`].
+    /// `read_position_block`.
     Position {
         /// The property this opcode names.
         name: String,
         /// The four coordinates, in the short or the long form.
         value: PositionBlock,
     },
-    /// A `Font` payload, read through [`read_font_block`].
+    /// A `Font` payload, read through `read_font_block`.
     Font {
         /// The property this opcode names.
         name: String,
@@ -676,7 +676,7 @@ fn read_scale_mode(block: &Region<'_>, payload_start: u32, block_end: u32) -> Re
 /// reads its header from. `header` is that block's own [`ControlHeader`],
 /// which gives [`ControlHeader::header_len`], the byte offset the property
 /// stream begins at. `table` resolves each opcode to a name and a payload
-/// shape. On a Form or MDIForm control, [`read_special_opcode`] is tried
+/// shape. On a Form or MDIForm control, `read_special_opcode` is tried
 /// first, per `STRUCTURES.md` section 8.5.1; a resolved
 /// [`PayloadType::Picture`] entry calls [`frx::extract_blob`] and advances
 /// the cursor by the count that call returns, never by a count this

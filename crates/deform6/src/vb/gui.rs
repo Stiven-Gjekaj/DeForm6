@@ -78,7 +78,7 @@ impl GuiTable {
     ///
     /// Each element is narrowed to its own [`GUI_ENTRY_SIZE`]-byte window
     /// before any field inside it is read, the loop bound is
-    /// `header.w_form_count` clamped by [`bound_form_count`] against the
+    /// `header.w_form_count` clamped by `bound_form_count` against the
     /// GUI table's own mapped region, and the element offset is computed
     /// with `checked_mul` on a bare `u32`, then `subregion`: the same shape
     /// `vb::object::ObjectTable::walk` uses for its own array.

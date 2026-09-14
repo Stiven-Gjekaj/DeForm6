@@ -115,7 +115,7 @@ impl ObjectTable {
     /// 44 corpus programs, against 44 of 44 for `wTotalObjects`. Nothing
     /// here reads or loops on the compiled count.
     ///
-    /// Each element is narrowed to its own [`OBJECT_SIZE`]-byte window before
+    /// Each element is narrowed to its own `OBJECT_SIZE`-byte window before
     /// any field inside it is read. A name that resolves nowhere, or a
     /// `ProcCount` too large for the file to hold, is a defect on the object
     /// that carried it, not a reason to refuse the whole array: one
@@ -127,7 +127,7 @@ impl ObjectTable {
     /// object array pointer is in no section, when the file ends inside the
     /// object table structure, or when the file ends inside an `Object`
     /// element. Every index up to `head.w_total_objects` must resolve a full
-    /// [`OBJECT_SIZE`]-byte window, or the walk stops there: a partial
+    /// `OBJECT_SIZE`-byte window, or the walk stops there: a partial
     /// element is not read in part.
     pub fn walk(
         pe: &PeImage<'_>,

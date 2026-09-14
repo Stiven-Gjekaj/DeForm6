@@ -133,7 +133,7 @@ pub struct ObjectInfo {
 impl ObjectInfo {
     /// Reads `ObjectInfo` at the address `Object.lpObjectInfo` holds.
     ///
-    /// The window is exactly [`OBJECT_INFO_SIZE`] bytes, taken before any
+    /// The window is exactly `OBJECT_INFO_SIZE` bytes, taken before any
     /// field is read, matching the window-before-fields discipline
     /// `vb/project.rs` documents.
     ///
@@ -486,7 +486,7 @@ impl ProcedureList {
     ///
     /// 1. It resolves inside a mapped section
     ///    ([`PeImage::region_at_va`]).
-    /// 2. The bytes there are NUL terminated within [`PROC_NAME_MAX`] bytes.
+    /// 2. The bytes there are NUL terminated within `PROC_NAME_MAX` bytes.
     /// 3. The first byte is an ASCII letter or an underscore.
     /// 4. Every byte is an ASCII alphanumeric character or an underscore.
     ///
@@ -552,7 +552,7 @@ impl ProcedureList {
     }
 
     /// Gives the defects the walk found: an entry that resolved to no
-    /// section, one with no NUL terminator within [`PROC_NAME_MAX`] bytes, or
+    /// section, one with no NUL terminator within `PROC_NAME_MAX` bytes, or
     /// one whose bytes are not a plausible identifier.
     #[must_use]
     pub fn defects(&self) -> &[Defect] {

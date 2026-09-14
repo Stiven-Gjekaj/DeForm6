@@ -43,7 +43,7 @@
 //! form's own top level: `MAX_UNEXPLAINED_TAIL` (`vb/controltree.rs`)
 //! existed only as a defensive stand-in for this gap. This session measured
 //! the real rule from five independent transitions across two programs
-//! (`HexScroll.exe`, `UUID2.exe`) and implemented it in [`read_scope_run`];
+//! (`HexScroll.exe`, `UUID2.exe`) and implemented it in `read_scope_run`;
 //! see that function's own doc comment for the bytes, the rule, and the
 //! one shape (`corpus/public-domain/PassGen/PassGen.exe`) this rule does
 //! not settle.
@@ -779,7 +779,7 @@ fn close_walk(region: &Region<'_>, end_at: Off, tiling: &mut Tiling) -> Result<(
 /// scope-separator run, apply its pops to the current parent stack, and
 /// either read the next control block (for `OpenChild`, `Sibling`, or
 /// `Menu`) or stop (for `EndForm`, or for a next position that
-/// [`block_fits`] finds implausible; see [`close_walk`]). Every block's own
+/// `block_fits` finds implausible; see `close_walk`). Every block's own
 /// span and every run's own length is accounted into `tiling`. The walk
 /// ends by calling [`Tiling::finish`]; a tree whose bytes do not tile the
 /// stream's own declared length exactly is refused with the byte offset of

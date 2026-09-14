@@ -80,7 +80,7 @@ pub struct Blob {
     /// [`extract_blob`] already performed.
     pub image: Vec<u8>,
     /// The blob's own declared length (`blobLen`), read from the file:
-    /// `image.len()` plus [`PICTURE_HEADER_LEN`]. Carried on the blob so
+    /// `image.len()` plus `PICTURE_HEADER_LEN`. Carried on the blob so
     /// [`BlobCursor::take`] never has to recompute it from `image.len()`.
     pub declared_len: u32,
     /// The absolute file offset the blob's own length field was read from.

@@ -49,7 +49,7 @@
 //! the form's own declared name; it is always the literal string `"Form"`.
 //! `join_by_name` excludes the tree's own root and the `"Form"` entry, one
 //! on each side, so the form's own slot is never reported as unjoined. See
-//! [`FORM_SELF_ENTRY_NAME`]'s own doc comment for the evidence.
+//! `FORM_SELF_ENTRY_NAME`'s own doc comment for the evidence.
 
 use std::collections::BTreeSet;
 
@@ -375,7 +375,7 @@ pub struct ControlJoin {
 /// against every tree node that carries it. Two entries are excluded from
 /// the comparison, one on each side, so the form's own slot is never
 /// reported as unjoined: the tree's own root (the form itself), and the
-/// `ControlInfo` entry named [`FORM_SELF_ENTRY_NAME`]; see that constant's
+/// `ControlInfo` entry named `FORM_SELF_ENTRY_NAME`; see that constant's
 /// doc comment for the measurement behind the exclusion.
 #[must_use]
 pub fn join_by_name(tree: &ControlTree, table: &ControlInfoTable) -> ControlJoin {
@@ -489,10 +489,10 @@ pub enum EventSlot {
 /// A native stub, decoded.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StubHandler {
-    /// `true` when the stub's own `imm32` is [`METHOD_MARKER`] (`0xFFFF`), a
+    /// `true` when the stub's own `imm32` is `METHOD_MARKER` (`0xFFFF`), a
     /// method. A smaller value marks an event.
     pub is_method: bool,
-    /// The handler's own address: the stub start plus [`STUB_LEN`] plus the
+    /// The handler's own address: the stub start plus `STUB_LEN` plus the
     /// signed four-byte value at the stub start plus `0x09`. Computed with
     /// checked arithmetic over the whole signed range, so a negative
     /// relative value gives an address below the stub start rather than

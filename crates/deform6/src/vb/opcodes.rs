@@ -13,7 +13,7 @@
 //! `STRUCTURES.md` section 8.5.1, which itself cites Semi VB Decompiler's
 //! own authored source comments, never `VB6.OLB`; and, since plan 03-13,
 //! rows this repository measured directly against its own corpus, per
-//! [`CORPUS_MEASURED`]'s own doc comment, D-01's other allowed source when
+//! `CORPUS_MEASURED`'s own doc comment, D-01's other allowed source when
 //! no prior art states a fact. [`OpcodeTable::parse`] builds it from bytes a
 //! user supplies at run time, having built their own table on their own
 //! machine with `xtask derive-opcode-table`. [`OpcodeTable::lookup`] is the
@@ -109,7 +109,7 @@ pub struct OpcodeEntry {
     ///
     /// A builtin entry names the exact SVBD function `STRUCTURES.md`
     /// section 8.5 cites for it. A parsed entry names only that it came
-    /// from a user supplied table, per [`PARSED_TABLE_SOURCE`]: a table a
+    /// from a user supplied table, per `PARSED_TABLE_SOURCE`: a table a
     /// user built on their own machine names no SVBD function, because it
     /// did not come from one.
     pub source: &'static str,
@@ -165,9 +165,9 @@ impl OpcodeTable {
     /// row, each naming its own source. `STRUCTURES.md` section 8.5.1's
     /// Form, MDIForm, CommandButton, Label and ListBox rows are transcribed
     /// from Semi VB Decompiler's own authored source comments and nothing
-    /// else. [`FORM_CORPUS_ROWS`] carries three further Form/MDIForm rows
+    /// else. `FORM_CORPUS_ROWS` carries three further Form/MDIForm rows
     /// plan 03-13 measured directly against this repository's own corpus
-    /// instead, per [`CORPUS_MEASURED`]'s own doc comment: `STRUCTURES.md`
+    /// instead, per `CORPUS_MEASURED`'s own doc comment: `STRUCTURES.md`
     /// names no payload width for these three, so there was nothing to
     /// transcribe, and a corpus measurement is D-01's other allowed source.
     ///

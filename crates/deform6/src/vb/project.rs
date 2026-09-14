@@ -96,7 +96,7 @@ pub struct ProjectInfo {
 impl ProjectInfo {
     /// Reads `ProjectInfo` at the address `VBHeader.lpProjectData` holds.
     ///
-    /// The window is exactly [`PROJECT_INFO_SIZE`] bytes, taken before any
+    /// The window is exactly `PROJECT_INFO_SIZE` bytes, taken before any
     /// field is read. That ordering is the whole mitigation: a file truncated
     /// in the middle of the structure is refused at the window, rather than
     /// yielding three plausible fields and then failing on the fourth.
@@ -218,7 +218,7 @@ pub struct ObjectTableHead {
 impl ObjectTableHead {
     /// Reads the head of the object table.
     ///
-    /// The window is exactly [`OBJECT_TABLE_SIZE`] bytes, taken before any
+    /// The window is exactly `OBJECT_TABLE_SIZE` bytes, taken before any
     /// field is read, for the reason [`ProjectInfo::read`] gives.
     ///
     /// # Errors
@@ -226,7 +226,7 @@ impl ObjectTableHead {
     /// Returns [`Refusal::Damaged`] when the object table address is in no
     /// section, when the file ends inside the structure, when the project
     /// name address is in no section, and when no NUL byte follows the name
-    /// within [`NAME_MAX`] bytes.
+    /// within `NAME_MAX` bytes.
     ///
     /// A disagreement between the two counts is **not** an error. It is a
     /// [`DefectKind::CountMismatch`] at [`crate::error::Severity::Recoverable`]
@@ -485,7 +485,7 @@ fn parse_export_name(name: String) -> ExportName {
 
 /// The `Declare` import table, reached from [`ProjectInfo::lp_external_table`].
 ///
-/// Read the doc comment above [`DECLARE_ENTRY_SIZE`] before reaching for this
+/// Read the doc comment above `DECLARE_ENTRY_SIZE` before reaching for this
 /// type from the wrong pointer: [`crate::vb::header::VbHeader`] holds a
 /// different table under the same field name.
 #[derive(Clone, Debug)]
@@ -723,7 +723,7 @@ fn read_latin1_cstr(pe: &PeImage<'_>, va: Va) -> Option<String> {
 /// One entry of the external component table: an OCX or type library
 /// reference a form pulls in.
 ///
-/// Read the doc comment above [`DECLARE_ENTRY_SIZE`] first: this is reached
+/// Read the doc comment above `DECLARE_ENTRY_SIZE` first: this is reached
 /// from [`crate::vb::header::VbHeader::lp_external_table`], never from
 /// [`ProjectInfo::lp_external_table`].
 ///
@@ -753,7 +753,7 @@ pub struct Component {
     /// [`Self::ouuid_text`]; `guid_length` governs `GUIDoffset` alone.
     pub guid_length: i32,
     /// The textual GUID, decoded from [`Self::guid_offset`] and
-    /// [`Self::guid_length`] inside [`ComponentTable::walk`], where the
+    /// [`Self::guid_length`] inside `ComponentTable::walk`, where the
     /// entry's own region is in scope: `guid_offset` is relative to the
     /// entry, not to the table, the same warning `STRUCTURES.md` section 7.3
     /// opens with.
@@ -791,7 +791,7 @@ pub struct Component {
     /// uses for every other byte offset this crate reports.
     pub ouuid_field_offset: u32,
     /// The textual form of the sixteen raw bytes at [`Self::o_uuid`],
-    /// decoded inside [`ComponentTable::walk`], where the entry's own
+    /// decoded inside `ComponentTable::walk`, where the entry's own
     /// region is in scope, as a standard Microsoft binary GUID: the first
     /// three fields (four, two and two bytes) are stored little-endian and
     /// are reversed back to their textual byte order; the fourth field

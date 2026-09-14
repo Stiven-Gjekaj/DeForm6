@@ -211,7 +211,7 @@ impl VbHeader {
     ///
     /// Returns [`Refusal::Damaged`] naming the field when the window is too
     /// short to hold it, and naming the string when the offset leaves the
-    /// window or no NUL byte appears within [`STRING_MAX`] bytes of it.
+    /// window or no NUL byte appears within `STRING_MAX` bytes of it.
     pub fn read(hdr: &Region<'_>) -> Result<Self, Refusal> {
         let signature: [u8; 4] = hdr
             .take(Off::new(0x00), 4)

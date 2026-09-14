@@ -147,7 +147,7 @@ fn split_class_name(class_name: &str, offset: u32, defects: &mut Vec<Defect>) ->
 /// The textual GUID `vb/project.rs::Component::guid_text` carries is 32 hex
 /// digits in the eight-four-four-four-twelve grouping, with three internal
 /// hyphens and no braces (`STRUCTURES.md` section 7.3). [`Clsid::parse`]
-/// removes the hyphens and reads the 32 digits as bytes; [`Display`] renders
+/// removes the hyphens and reads the 32 digits as bytes; [`std::fmt::Display`] renders
 /// them back in the same fixed grouping, with braces added. GUID formatting
 /// is written by hand: the output shape never varies, and this workspace
 /// carries no `uuid` crate for it.
