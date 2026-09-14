@@ -51,19 +51,32 @@ trap cleanup EXIT
 # not a bare `.`. A bare `.` is an unescaped regex metacharacter that
 # matches any single character, not only a space or a hyphen, so it used to
 # also match a line such as "compileXready".
+#
+# compilable's first two alternatives now catch the verb directly
+# ("compile", "compiles", "compiled") and not only the "-able" suffix, so
+# the plainer, more natural phrasing "the recovered project compiles in
+# the Visual Basic 6 IDE" is caught. Each requires a non-letter (or end of
+# line) right after the word it matches, so it still catches those forms
+# but not "compiler": that word names an input file's own compiler flag
+# throughout this project's report vocabulary, never a claim that
+# DeForm6's output compiles, and without this guard it fires on every one
+# of the report's many "does not carry the X compiler flag" lines.
 SHAPES='pct-sign;[0-9]+(\.[0-9]+)?[[:space:]]*%;a figure stated as a share of one hundred
 pct-word;[0-9]+[[:space:]]*(per cent|percent);the same figure written as a word
 stmt-fwd;recover[a-z]*[^.]{0,40}statement;a claim of statement recovery
 stmt-rev;statement[^.]{0,40}recover[a-z]*;the same claim, written the other way round
-compilable;compilable|recompilable|compile[- ]ready;a claim that the output compiles
+compilable;compil(able|ed|es|e)([^a-zA-Z]|$)|recompil(able|ed|es|e)([^a-zA-Z]|$)|compile[- ]ready;a claim that the output compiles
 decompile-src;decompil[a-z]*[^.]{0,40}(source|[Bb]asic);a claim of source recovery from native code'
 
-# One violating line per shape, used only by the stage 4 probe below.
+# One violating line per shape, used only by the stage 4 probe below. The
+# compilable line uses the plain "compiles" phrasing, not "compilable", so
+# the probe actually exercises the widened shape above and not only the
+# narrower case the pre-fix shape already caught.
 PROBES='pct-sign;This run recovers 92% of the corpus.
 pct-word;This run recovers 92 percent of the corpus.
 stmt-fwd;DeForm6 can recover every statement in the file.
 stmt-rev;The statement is recovered fully.
-compilable;The output is fully compilable Basic.
+compilable;The recovered project compiles without changes.
 decompile-src;This binary decompiles cleanly into Basic source.'
 
 # One violation per shape, split across two physical lines with no blank
@@ -111,8 +124,32 @@ decompile-src;This binary decompiles cleanly into;Basic source, without further 
 #   Reason: the opening paragraph of the README's "What version 1.0 does
 #   not return" section, the same negation restated as the section's own
 #   claim about the tool.
+#
+# "DeForm6 does not open the Visual Basic 6 IDE and it does not compile
+# anything. No sentence in this file states a recovery figure as a share of
+# one hundred. Every capability sentence in this file traces to a report
+# field, a confidence word, or a limit the report states in its own words."
+#   Reason: "it does not compile anything" is the compile claim's own
+#   negation, stated plainly.
+#
+# "| S-10 | How a source level `Alias "#123"` ordinal import is encoded in
+# the compiled file. | When the Visual Basic level name is not present in
+# the file, the tool reports the export as an inferred ordinal number,
+# rather than guessing a name. |"
+#   Reason: a known-limits table row. "encoded in the compiled file"
+#   describes the compiled input executable the row is about, not a claim
+#   that DeForm6's own output compiles.
+#
+# "`deform6`: reads a compiled Visual Basic 6 executable and reports what
+# it holds"
+#   Reason: the CLI's own one-line `--help` summary. "a compiled ...
+#   executable" describes the input file, the same way it does in
+#   README.md's opening paragraph above.
 ALLOWED='DeForm6 reads a compiled Visual Basic 6 executable and writes back a Visual Basic project. The first milestone recovers the metadata only: the forms, the control trees, the property values, the names, and the procedure signatures. It does not recover statements. Do not add a claim that it does.
-DeForm6 does not recover statements. The forms, the control trees, the property values, the names, and the procedure signatures come back. The code inside a procedure does not.'
+DeForm6 does not recover statements. The forms, the control trees, the property values, the names, and the procedure signatures come back. The code inside a procedure does not.
+DeForm6 does not open the Visual Basic 6 IDE and it does not compile anything. No sentence in this file states a recovery figure as a share of one hundred. Every capability sentence in this file traces to a report field, a confidence word, or a limit the report states in its own words.
+| S-10 | How a source level `Alias "#123"` ordinal import is encoded in the compiled file. | When the Visual Basic level name is not present in the file, the tool reports the export as an inferred ordinal number, rather than guessing a name. |
+`deform6`: reads a compiled Visual Basic 6 executable and reports what it holds'
 
 # The three facts success criterion 3 names. README.md must state all three,
 # and removing any one of them from a copy must be detectable.
