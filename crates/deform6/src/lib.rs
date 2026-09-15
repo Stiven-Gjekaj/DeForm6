@@ -11,6 +11,7 @@
 //! wave never edit this file.
 
 pub mod error;
+pub mod fidelity;
 pub mod journal;
 pub mod read;
 pub mod report;
