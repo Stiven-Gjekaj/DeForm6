@@ -261,9 +261,9 @@ it.
 ## The numbers
 
 The numbers below are measured, not estimated.
-Each one is the number `tests/ratios.toml` states and the gate test named
-beside it asserts on every run, never a single derived figure calculated from
-a part.
+Each one is the number a pinned file or a pinned constant states, and the gate
+test named beside it asserts on every run, never a single derived figure
+calculated from a part.
 
 | Measured | Against | Asserted by |
 | -------- | ------- | ----------- |
@@ -272,6 +272,8 @@ a part.
 | 52 forms recovered | 53 declared | `cargo test -p deform6 --test ratios` |
 | 686 controls recovered | 686 declared | `cargo test -p deform6 --test ratios` |
 | 807 property records recovered, of which 136 written lines reach the `.frm` | | `cargo test -p deform6 --test ratios` |
+| 50 header bytes written back unchanged | 104 in the header record | `cargo test -p deform6 --test byte_fidelity` |
+| 16 object bytes written back unchanged | 48 in each of the 105 object records | `cargo test -p deform6 --test byte_fidelity` |
 
 One corpus form refuses.
 The refusal names the byte offset and the byte the code expected to find
@@ -281,6 +283,19 @@ tree it cannot prove.
 A single recovered `Position` record becomes four written lines and a single
 `Font` record becomes seven, so the property pair is a coverage count for
 DeForm6's own writer, not a recovery count against source.
+
+The last two rows measure the reader against the bytes of the original file.
+DeForm6 writes each structure back over the place it was read from and
+compares the result with what is there.
+A byte that goes back unchanged is one the reader reproduces.
+
+This is a coverage figure and not a proof of correctness.
+A field that is read at one offset and written back at the same offset cannot
+disagree with itself.
+The half that carries the information is the other half: the 54 header bytes
+and the 32 object bytes that no field of the model claims at all.
+`docs/STRUCTURES.md` names every one of them, so they are work not yet done
+rather than unknowns.
 
 ---
 
