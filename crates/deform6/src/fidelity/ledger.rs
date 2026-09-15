@@ -68,11 +68,17 @@ pub enum Verdict {
     ///
     /// **This is wider than "the reader never read these bytes".** It means
     /// the bytes cannot be reproduced from what the model keeps, which also
-    /// covers a field the reader reads and then discards.
+    /// covers a field the reader reads, uses, and then discards.
     ///
-    /// `crate::vb::object::ObjectTable::walk` reads `lpszObjectName` at
-    /// `Object + 0x18` and keeps only the name it resolved, so those four
-    /// bytes are `Unmodelled` even though the reader does read them.
+    /// The first case measured was `lpszObjectName` at `Object + 0x18`:
+    /// `crate::vb::object::ObjectTable::walk` resolved the name through that
+    /// address and kept only the string, so four bytes the reader plainly
+    /// read graded `Unmodelled`. `Object` now carries the address as well, so
+    /// no structure graded today holds such a field.
+    ///
+    /// The distinction stays real for every structure not yet graded, and it
+    /// caps what a coverage figure can claim: a reader that reads a field and
+    /// does not keep it understands more than its coverage reports.
     Unmodelled,
 }
 

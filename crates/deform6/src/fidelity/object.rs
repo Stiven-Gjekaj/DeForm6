@@ -22,20 +22,27 @@
 //!
 //! # What this reader models, and what it leaves
 //!
-//! Four fields, 16 of the 48 bytes.
+//! Five fields, 20 of the 48 bytes.
 //!
 //! | Bytes | Length | Fields section 5.1 names there |
 //! |---|---|---|
-//! | `0x04` | 24 | `dwReserved`, `lpPublicBytes`, `lpStaticBytes`, `lpModulePublic`, `lpModuleStatic`, `lpszObjectName` |
+//! | `0x04` | 20 | `dwReserved`, `lpPublicBytes`, `lpStaticBytes`, `lpModulePublic`, `lpModuleStatic` |
 //! | `0x24` | 4 | `oStaticVars` |
 //! | `0x2C` | 4 | `dwNull` |
 //!
-//! **`lpszObjectName` at `0x18` is the live example of the wider meaning of
-//! [`Verdict::Unmodelled`](crate::fidelity::Verdict::Unmodelled).** The reader
-//! does read it, and then keeps only the name it resolved through it. The
-//! address itself is gone, so those four bytes cannot be written back. An
-//! `Unmodelled` run means "this model cannot reproduce these bytes", which is
-//! wider than "the reader never looked".
+//! # `lpszObjectName` at `0x18` was the reason this measurement exists
+//!
+//! The reader first kept only the name it resolved through that address, and
+//! threw the address away. Those four bytes therefore graded
+//! [`Unmodelled`](crate::fidelity::Verdict::Unmodelled) although the reader
+//! plainly read them, which is what showed that an `Unmodelled` run means
+//! "this model cannot reproduce these bytes" and not "the reader never
+//! looked".
+//!
+//! `Object` now carries `lpsz_object_name` and the four bytes are modelled.
+//! The distinction the case exposed is still real, and it still caps what a
+//! coverage figure can claim: a reader that reads a field, uses it, and does
+//! not keep it understands more than its coverage figure reports.
 
 use crate::fidelity::{Emit, Slate};
 use crate::read::region::Off;
@@ -49,6 +56,7 @@ impl Emit for Object {
 
     fn emit(&self, slate: &mut Slate) -> Option<()> {
         slate.put_va_le(Off::new(0x00), self.lp_object_info)?; // lpObjectInfo
+        slate.put_va_le(Off::new(0x18), self.lpsz_object_name)?; // lpszObjectName
         slate.put_u32_le(Off::new(0x1C), self.proc_count)?; // ProcCount
         slate.put_va_le(Off::new(0x20), self.lp_proc_names_array)?; // lpProcNamesArray
         slate.put_u32_le(Off::new(0x28), self.f_object_type)?; // fObjectType
@@ -58,10 +66,10 @@ impl Emit for Object {
 
 /// The bytes of an `Object` no field of [`Object`] reproduces, as
 /// `(structure relative offset, length)` pairs.
-pub const UNMODELLED: &[(u32, u32)] = &[(0x04, 24), (0x24, 4), (0x2C, 4)];
+pub const UNMODELLED: &[(u32, u32)] = &[(0x04, 20), (0x24, 4), (0x2C, 4)];
 
 /// The number of `Object` bytes this reader reproduces.
-pub const MODELLED_BYTES: u32 = 16;
+pub const MODELLED_BYTES: u32 = 20;
 
 #[cfg(test)]
 mod tests {
@@ -84,6 +92,7 @@ mod tests {
     fn object() -> Object {
         Object {
             lp_object_info: Va::new(0x0040_5000),
+            lpsz_object_name: Va::new(0x0040_7000),
             name: "Form1".to_owned(),
             proc_count: 7,
             lp_proc_names_array: Va::new(0x0040_6000),
@@ -98,6 +107,7 @@ mod tests {
         let mut raw = vec![0xA5_u8; 0x30];
         let mut put = |at: usize, src: &[u8]| raw[at..at + src.len()].copy_from_slice(src);
         put(0x00, &0x0040_5000_u32.to_le_bytes());
+        put(0x18, &0x0040_7000_u32.to_le_bytes());
         put(0x1C, &7_u32.to_le_bytes());
         put(0x20, &0x0040_6000_u32.to_le_bytes());
         put(0x28, &0x21_u32.to_le_bytes());
@@ -123,13 +133,13 @@ mod tests {
     }
 
     #[test]
-    fn the_reader_models_sixteen_of_the_forty_eight_object_bytes() {
+    fn the_reader_models_twenty_of_the_forty_eight_object_bytes() {
         let raw = bytes();
         let ledger = compare(&object(), &Region::new(&raw, Off::new(0))).unwrap();
         assert_eq!(ledger.bytes_with(Verdict::Same), MODELLED_BYTES);
-        assert_eq!(ledger.bytes_with(Verdict::Same), 16);
-        assert_eq!(ledger.bytes_with(Verdict::Unmodelled), 32);
-        assert_eq!(MODELLED_BYTES + 32, Object::LEN);
+        assert_eq!(ledger.bytes_with(Verdict::Same), 20);
+        assert_eq!(ledger.bytes_with(Verdict::Unmodelled), 28);
+        assert_eq!(MODELLED_BYTES + 28, Object::LEN);
     }
 
     #[test]
@@ -148,17 +158,29 @@ mod tests {
     }
 
     #[test]
-    fn the_object_name_address_at_eighteen_hex_grades_unmodelled_though_the_reader_reads_it() {
-        // The reader resolves lpszObjectName and keeps only the string, so
-        // the address cannot be written back. The run that covers it must
-        // therefore be Unmodelled, and it is part of the 0x04 run of 24.
+    fn the_object_name_address_at_eighteen_hex_is_modelled_now_that_the_reader_keeps_it() {
+        // This test was written the other way round first: the reader
+        // resolved lpszObjectName and threw the address away, so these four
+        // bytes graded Unmodelled although the reader read them. That is what
+        // the measurement found, and the reader now keeps the address.
         let raw = bytes();
         let ledger = compare(&object(), &Region::new(&raw, Off::new(0))).unwrap();
+
+        assert!(
+            ledger
+                .runs_with(Verdict::Unmodelled)
+                .all(|run| !(run.span.at <= Off::new(0x18)
+                    && Off::new(0x18) < run.span.end().unwrap())),
+            "0x18 must no longer sit in an unmodelled run"
+        );
         let covering = ledger
-            .runs_with(Verdict::Unmodelled)
+            .runs_with(Verdict::Same)
             .find(|run| run.span.at <= Off::new(0x18) && Off::new(0x18) < run.span.end().unwrap())
-            .expect("some run must cover 0x18");
-        assert_eq!(covering.span, Span::new(Off::new(0x04), 24));
+            .expect("some Same run must cover 0x18");
+        // 0x18, 0x1C and 0x20 are all modelled and adjacent, so they
+        // coalesce into one run of twelve. A ledger never leaves two
+        // neighbouring runs carrying the same verdict.
+        assert_eq!(covering.span, Span::new(Off::new(0x18), 12));
     }
 
     #[test]

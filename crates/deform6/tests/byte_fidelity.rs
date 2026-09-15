@@ -14,7 +14,7 @@
 //!
 //! # What a clean result here does and does not mean
 //!
-//! Thirteen of the fourteen header fields, and all four `Object` fields, are
+//! Thirteen of the fourteen header fields, and all five `Object` fields, are
 //! carried verbatim: read at an offset, written back at the same offset, with
 //! no arithmetic between. A verbatim field cannot disagree with itself, so a
 //! clean map is the expected result and **is not** a proof that the reader is
@@ -258,7 +258,7 @@ fn the_corpus_grades_one_hundred_and_five_objects() {
 }
 
 #[test]
-fn the_object_reader_models_sixteen_of_the_forty_eight_object_bytes_in_every_recovered_object() {
+fn the_object_reader_models_twenty_of_the_forty_eight_object_bytes_in_every_recovered_object() {
     let mut failed = Vec::new();
     for (path, ledgers) in graded() {
         for (index, ledger) in ledgers

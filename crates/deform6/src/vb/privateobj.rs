@@ -1153,6 +1153,7 @@ mod tests {
         let image = PeImage::parse(GRAYSCALE).unwrap();
         let object = Object {
             lp_object_info: Va::new(0x0040_1000),
+            lpsz_object_name: Va::new(0),
             name: "SyntheticModule".to_owned(),
             proc_count: 7,
             lp_proc_names_array: Va::new(0),

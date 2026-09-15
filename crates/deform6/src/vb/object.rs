@@ -65,6 +65,17 @@ const PROC_NAME_PTR_SIZE: u32 = 4;
 pub struct Object {
     /// The address of this object's `ObjectInfo`.
     pub lp_object_info: Va,
+    /// The address the object's name was read from.
+    ///
+    /// Carried as well as the resolved [`Object::name`], because the address
+    /// is the evidence and the string is the reading of it. A report that
+    /// names a byte a run actually read can point at this; a report that
+    /// holds only the string cannot say where it came from.
+    ///
+    /// It is carried whether or not the name resolved. When
+    /// [`Object::name`] is empty this is the address that did not resolve,
+    /// which is the address a person needs in a hex editor.
+    pub lpsz_object_name: Va,
     /// The object's name, resolved from `lpszObjectName`.
     ///
     /// Empty when the name pointer resolves nowhere or holds no bounded
@@ -178,6 +189,7 @@ impl ObjectTable {
 
             objects.push(Object {
                 lp_object_info,
+                lpsz_object_name,
                 name,
                 proc_count,
                 lp_proc_names_array,
@@ -673,6 +685,7 @@ mod tests {
         let expected = vec![
             Object {
                 lp_object_info: Va::new(0x0040_1ff0),
+                lpsz_object_name: Va::new(0x0040_2ae0),
                 name: "frmGrayscale".to_owned(),
                 proc_count: 20,
                 lp_proc_names_array: Va::new(0x0040_2a40),
@@ -680,6 +693,7 @@ mod tests {
             },
             Object {
                 lp_object_info: Va::new(0x0040_1b98),
+                lpsz_object_name: Va::new(0x0040_2b0c),
                 name: "pdOpenSaveDialog".to_owned(),
                 proc_count: 6,
                 lp_proc_names_array: Va::new(0x0040_2a90),
@@ -687,6 +701,7 @@ mod tests {
             },
             Object {
                 lp_object_info: Va::new(0x0040_1c98),
+                lpsz_object_name: Va::new(0x0040_2b00),
                 name: "FastDrawing".to_owned(),
                 proc_count: 8,
                 lp_proc_names_array: Va::new(0x0040_2aa8),

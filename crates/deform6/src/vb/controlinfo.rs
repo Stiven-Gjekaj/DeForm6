@@ -977,6 +977,7 @@ mod tests {
     fn synthetic_form_object() -> Object {
         Object {
             lp_object_info: Va::new(0x0040_1000),
+            lpsz_object_name: Va::new(0),
             name: "SyntheticForm".to_owned(),
             proc_count: 0,
             lp_proc_names_array: Va::new(0),
@@ -990,6 +991,7 @@ mod tests {
     fn synthetic_module_object() -> Object {
         Object {
             lp_object_info: Va::new(0x0040_1000),
+            lpsz_object_name: Va::new(0),
             name: "SyntheticModule".to_owned(),
             proc_count: 0,
             lp_proc_names_array: Va::new(0),
