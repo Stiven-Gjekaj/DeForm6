@@ -16,8 +16,15 @@
 //! One run reads every file in the vendored corpus, every file in the
 //! fetched run time robustness set, and every file in the committed
 //! regression directory. It drives each one through `Mode::Strict` and
-//! `Mode::Salvage`, and calls the writer on every successful salvage
-//! result. The run prints the number of inputs it read, per source and in
+//! `Mode::Salvage`, calls the writer on every successful salvage result,
+//! and drives the fidelity walk over the same bytes.
+//!
+//! **Every public entry point that takes untrusted bytes belongs in
+//! `drive_one`.** `crate::lib`'s own claim is that no function in the crate
+//! panics on any input, so a new public function that reads a byte slice and
+//! is not driven here leaves that claim wider than the proof behind it.
+//! `deform6::fidelity::walk::walk` was added to this file in the same change
+//! that made the fidelity module public, for exactly that reason. The run prints the number of inputs it read, per source and in
 //! total, and that number equals the number of files that exist in those
 //! sources, each counted where it lives.
 //!
@@ -395,7 +402,8 @@ fn gather_inputs() -> (Vec<Input>, Counts) {
     (inputs, counts)
 }
 
-/// Reads one input and drives it through both modes and the writer.
+/// Reads one input and drives it through both modes, the writer and the
+/// fidelity walk.
 ///
 /// Prints the source, the path and the mode before each call runs, never
 /// after: the aborting release profile ends the process the instant one
@@ -403,8 +411,9 @@ fn gather_inputs() -> (Vec<Input>, Counts) {
 /// reach the log. Asserts nothing about the result. A refusal is the
 /// correct answer for most of these inputs; the assertion this whole
 /// file makes is that the process is still running once every input has
-/// been read, which is why `inspect`'s and `write::project`'s own return
-/// values are discarded with `let _ =` rather than matched on.
+/// been read, which is why the return values of `inspect`,
+/// `write::project` and `fidelity::walk::walk` are discarded with
+/// `let _ =` rather than matched on.
 fn drive_one(source: &str, path: &Path, opcode_table: &OpcodeTable) {
     let data =
         std::fs::read(path).unwrap_or_else(|err| panic!("reading {}: {err}", path.display()));
@@ -422,13 +431,20 @@ fn drive_one(source: &str, path: &Path, opcode_table: &OpcodeTable) {
         );
         let _ = deform6::write::project(&report, &data, Mode::Salvage);
     }
+
+    // The fidelity walk resolves the pointer chain a second time, over the
+    // same untrusted bytes, through its own code. It is public, so it is
+    // held to the same claim as everything above it.
+    println!("no_panic_proof: {source} {} fidelity::walk", path.display());
+    let _ = deform6::fidelity::walk::walk(&data);
 }
 
 /// Roadmap success criterion 5, and SAF-01: one run reads every file in
 /// the vendored corpus, every file in the fetched robustness set and
 /// every file in the regression directory, drives each one through
-/// `Mode::Strict` and `Mode::Salvage`, and calls the writer on every
-/// successful salvage result. No process aborts, and the number of
+/// `Mode::Strict` and `Mode::Salvage`, calls the writer on every
+/// successful salvage result, and drives the fidelity walk over the same
+/// bytes. No process aborts, and the number of
 /// inputs read equals the total [`gather_inputs`] counted, which in turn
 /// is the sum of the three counts each source's own function above took.
 ///
@@ -440,7 +456,8 @@ fn drive_one(source: &str, path: &Path, opcode_table: &OpcodeTable) {
 /// under `cargo test --release`; see 05-08-SUMMARY.md for that run's own
 /// command, counts, duration and peak resident set.
 #[test]
-fn every_input_this_repository_can_reach_runs_through_both_modes_and_the_writer() {
+fn every_input_this_repository_can_reach_runs_through_both_modes_the_writer_and_the_fidelity_walk()
+{
     let (inputs, counts) = gather_inputs();
     print_report(&counts);
 
