@@ -273,7 +273,7 @@ calculated from a part.
 | 686 controls recovered | 686 declared | `cargo test -p deform6 --test ratios` |
 | 807 property records recovered, of which 136 written lines reach the `.frm` | | `cargo test -p deform6 --test ratios` |
 | 50 header bytes written back unchanged | 104 in the header record | `cargo test -p deform6 --test byte_fidelity` |
-| 16 object bytes written back unchanged | 48 in each of the 105 object records | `cargo test -p deform6 --test byte_fidelity` |
+| 20 object bytes written back unchanged | 48 in each of the 105 object records | `cargo test -p deform6 --test byte_fidelity` |
 
 One corpus form refuses.
 The refusal names the byte offset and the byte the code expected to find
@@ -293,7 +293,7 @@ This is a coverage figure and not a proof of correctness.
 A field that is read at one offset and written back at the same offset cannot
 disagree with itself.
 The half that carries the information is the other half: the 54 header bytes
-and the 32 object bytes that no field of the model claims at all.
+and the 28 object bytes that no field of the model claims at all.
 `docs/STRUCTURES.md` names every one of them, so they are work not yet done
 rather than unknowns.
 
