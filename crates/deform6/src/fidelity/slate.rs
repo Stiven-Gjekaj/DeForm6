@@ -39,6 +39,7 @@
 //! figure wrong in the quiet direction. A repeated `0x30` where the second
 //! field meant `0x34` therefore fails on the first file it meets.
 
+use crate::fidelity::ledger::{Run, Span, Verdict};
 use crate::read::region::{Off, Region, Va};
 
 /// The largest structure a slate holds.
@@ -180,6 +181,58 @@ impl Slate {
     #[must_use]
     pub fn region(&self) -> Region<'_> {
         Region::new(&self.bytes, self.base)
+    }
+
+    /// Grades every byte of this slate against the bytes it was laid over.
+    ///
+    /// `original` is a window whose byte 0 is the structure's first byte: the
+    /// same window the reader read the structure out of. A window based
+    /// somewhere else returns `None` rather than a wrong answer, which is what
+    /// catches "the header was compared against the ProjectInfo bytes".
+    ///
+    /// A byte that was never written grades [`Verdict::Unmodelled`] whatever
+    /// it holds. The emitted value at an unwritten position is never read, so
+    /// a zero in this slate that matches a zero in the file is still
+    /// `Unmodelled` and never [`Verdict::Same`].
+    #[must_use]
+    pub fn against(&self, original: &Region<'_>) -> Option<Vec<Run>> {
+        if original.file_offset(Off::new(0)) != Some(self.base) {
+            return None;
+        }
+        // `take` gives exactly `self.len()` bytes or nothing, so the zip below
+        // cannot truncate in silence. Never take the original as a bare slice.
+        let theirs = original.take(Off::new(0), self.len())?;
+
+        let verdicts: Vec<Verdict> = self
+            .bytes
+            .iter()
+            .zip(theirs.iter())
+            .zip(self.covered.iter())
+            .map(|((ours, theirs), covered)| {
+                if !*covered {
+                    Verdict::Unmodelled
+                } else if ours == theirs {
+                    Verdict::Same
+                } else {
+                    Verdict::Differs
+                }
+            })
+            .collect();
+
+        // `chunk_by` does the coalescing, so no index arithmetic of ours is
+        // involved and the runs cannot drift out of step with the verdicts.
+        let mut runs = Vec::new();
+        let mut at = self.base;
+        for chunk in verdicts.chunk_by(|a, b| a == b) {
+            let len = u32::try_from(chunk.len()).ok()?;
+            let verdict = *chunk.first()?;
+            runs.push(Run {
+                span: Span::new(at, len),
+                verdict,
+            });
+            at = at.checked_add(len)?;
+        }
+        Some(runs)
     }
 
     /// The one funnel every write goes through.
