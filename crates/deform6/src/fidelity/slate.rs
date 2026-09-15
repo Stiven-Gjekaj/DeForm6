@@ -1,5 +1,5 @@
 //! The `Slate` bounded write window, the mirror of
-//! [`Region`](crate::read::region::Region).
+//! [`Region`].
 //!
 //! A [`Slate`] holds a byte buffer and the absolute file offset of its first
 //! byte, and it exposes neither. There is no `as_bytes`, no `as_slice`, no
@@ -63,7 +63,8 @@ impl Slate {
     /// Builds a slate of `len` bytes whose first byte is at file offset
     /// `base`.
     ///
-    /// Returns `None` when `len` is larger than [`MAX_SLATE`], and when
+    /// Returns `None` when `len` is larger than the private `MAX_SLATE`
+    /// cap, and when
     /// `base` plus `len` leaves a `u32`. The second case matters for the same
     /// reason it matters in `Region::take`: a wrapped sum is small, and a
     /// small sum looks like a valid place.
