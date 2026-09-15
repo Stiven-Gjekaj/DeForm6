@@ -395,7 +395,7 @@ collected.
 cargo test --workspace
 ```
 
-986 tests run. The suite includes:
+1037 tests run. The suite includes:
 
 - **The corpus sweep.** All 44 programs are read and report what they hold.
 - **The structural check.** Every extracted project is checked against the
@@ -405,10 +405,14 @@ cargo test --workspace
   to fail.
 - **The ratio gate.** Every pinned figure in `tests/ratios.toml` must hold
   unchanged.
-- **The no-panic proof.** Every corpus input is swept through both modes and
-  the writer.
+- **The no-panic proof.** Every corpus input is swept through both modes, the
+  writer and the byte fidelity walk. Every public entry point that takes
+  untrusted bytes belongs in that sweep.
 - **The hostile corpus.** Mutated and crafted inputs, including a form count
   of `0xFFFF` in a 4096 byte file, which must allocate nothing.
+- **The byte fidelity map.** Each structure is written back over the bytes it
+  was read from and compared against them, over all 44 programs. The bytes the
+  reader reproduces and the bytes no field of it claims are both pinned.
 - **The walls.** `scripts/prove-*.sh` each prove one property, by planting a
   violation and requiring the check to catch it.
 
@@ -430,11 +434,18 @@ itself to, and they are not style preferences:
 - A new claim in this file needs a measurement behind it, and
   `scripts/check-claim-surface.sh` is the test that says so.
 
-The gate is three commands, and they all have to pass:
+The gate is nine steps and every one has to pass. Run them all with one
+command, which is what `.github/workflows/gate.yml` runs, in the same order:
 
 ```
-cargo fmt --all --check && cargo clippy --all-targets -- -D warnings && cargo test --workspace
+sh scripts/gate.sh
 ```
+
+An earlier version of this file said the gate was three commands. It is not,
+and the three it named leave out `cargo doc`, which denies a broken or private
+documentation link and which neither `cargo clippy` nor `cargo test` reports.
+`scripts/gate.sh` reads the workflow and refuses to run when the workflow names
+a check the script does not, so the two cannot drift apart in silence.
 
 ---
 
