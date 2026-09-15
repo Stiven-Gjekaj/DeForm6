@@ -49,7 +49,9 @@
 
 pub mod header;
 pub mod ledger;
+pub mod object;
 pub mod slate;
+pub mod walk;
 
 pub use ledger::{Ledger, Run, Span, Verdict};
 pub use slate::Slate;
