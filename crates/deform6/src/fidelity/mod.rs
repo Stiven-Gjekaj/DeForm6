@@ -47,8 +47,10 @@
 //! executable is damaged", and printing that sentence because a `put` in this
 //! crate wrote the same byte twice would be a lie about someone's file.
 
+pub mod ledger;
 pub mod slate;
 
+pub use ledger::{Ledger, Run, Span, Verdict};
 pub use slate::Slate;
 
 /// What this module's own emitter did wrong.
