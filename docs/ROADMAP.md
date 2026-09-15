@@ -56,6 +56,62 @@ is either a closed gap or a named limit in the register.
 
 **Estimate.** 2 to 4 weeks.
 
+#### Segment 1, done on 2026-09-15
+
+The mechanism plus the VB header and the `Object` record. Measured over all 44
+corpus programs and asserted by
+`cargo test -p deform6 --test byte_fidelity`:
+
+| Structure | Bytes reproduced | Of | Instances |
+|---|---|---|---|
+| VB header | 50 | 104 | 44 |
+| `Object` | 20 | 48 | 105 |
+
+No byte differs anywhere. `bound_proc_count` clamps `ProcCount` to what the
+file can hold, and across 105 objects that clamp never fires.
+
+Segment 1 also found one real gap in the reader and closed it. `Object` kept
+only the name it resolved and threw away `lpszObjectName`, the address it read
+the name through, so four bytes the reader plainly read could not be written
+back. `Object` now carries that address.
+
+#### What segment 1 learned, and how it reorders segment 2
+
+**A verbatim field cannot disagree with itself.** A field read at one offset
+and written back at the same offset, with no arithmetic between, is green by
+construction. Most fields in most structures are verbatim, so most of this
+phase reports coverage rather than correctness.
+
+**The measurement can only find a fault where the reader cooks a value
+instead of carrying it.** So segment 2 must not take the next structures in
+size order. It must take the structures that hold a cooked field first. These
+are the ones this session found:
+
+| Where | What it cooks |
+|---|---|
+| `vb/gui.rs:152` | clamps the GUI table entry count to what the file holds |
+| `vb/controlinfo.rs:278` | clamps the `ControlInfo` array the same way |
+| `vb/controlinfo.rs:610` | clamps the event slot count |
+| `vb/functyp.rs:668` | substitutes zero for a type address that is not present |
+| `vb/functyp.rs:589` | derives an argument count by shifting rather than reading it |
+
+The first three are the same shape as `bound_proc_count`. **Segment 2
+therefore leads with `GuiTableEntry` and `ControlInfo`**, and takes
+`ProjectInfo`, `ObjectInfo`, `PrivateObj`, `OptionalObjectInfo` and the
+`FuncTypDesc` header after them.
+
+**Two limits cap what this phase can ever claim.** They are properties of the
+method and not faults to fix.
+
+The `Unmodelled` verdict means "this model cannot reproduce these bytes",
+which is wider than "the reader never read them". A reader that reads a field,
+uses it and does not keep it understands more than its coverage figure
+reports. So a coverage figure is a floor, never a measure.
+
+The grading is by byte and not by field, so a count that is wrong by a small
+amount shows as a one byte run rather than a whole field. A person reading the
+map needs the `emit` function open beside it.
+
 ### Phase 8: The build gate
 
 **Goal.** DeForm6 proves its own output compiles, on the user's machine, with
