@@ -106,11 +106,11 @@ pub(crate) const HEADER: &str = r#"# The committed fidelity map: what the fideli
 # offset and written back at the same offset cannot differ from itself.
 #
 # An `EventStub` record is 13 bytes, and the emitter writes all 13. The reader
-# reads only 8 of them: `imm32`, and the jump, from which it keeps the handler
-# address. The emitter works the jump back out of that address. The other 5
-# bytes are the opcodes of the native stub, which the reader assumes and does
-# not read. A stub of another shape shows as bytes that differ, or as a
-# refused record when the reader cannot work out its handler address.
+# keeps what 8 of them hold: `imm32`, and the handler address that it works
+# out from the jump. The emitter works the jump back out of that address. The
+# other 5 bytes are the opcodes of the native stub. The reader checks them and
+# keeps no field for them. It decodes no stub of another shape, so such a
+# stub shows as a refused record.
 "#;
 
 /// The ranges of one structure that the emitter does not write, and the

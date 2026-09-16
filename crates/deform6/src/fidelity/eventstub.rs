@@ -7,20 +7,17 @@
 //! handler address is `stub + 0x0D + rel32`. Not one of these values is copied
 //! from `vb::controlinfo`, which is the reader this grades.
 //!
-//! # Five of the thirteen bytes are asserted, not read
+//! # Five of the thirteen bytes are checked, not kept
 //!
-//! The reader reads `imm32` at `0x04` and `rel32` at `0x09`. It never reads
-//! the two opcodes, so it decodes every stub as if the stub had the native
-//! shape. This emitter writes that shape: the opcode bytes at `0x00` and at
-//! `0x08`. A stub of another shape therefore shows as bytes that differ,
-//! which is the fault that the assumption would hide.
+//! The reader keeps `imm32` from `0x04`, and the handler address that it
+//! works out from `rel32` at `0x09`. It keeps no field for the two opcodes.
+//! It checks them, and it decodes no stub of another shape. This emitter
+//! writes the native opcodes at `0x00` and at `0x08`, restated from section
+//! 8.6, so every stub that has a record has these five bytes.
 //!
-//! That is true only when the reader can work out a handler address from the
-//! stub. A P-code stub at an address in a corpus program ends with `0xC3`,
-//! which is the high byte of what the reader takes as `rel32`. The handler
-//! address then goes below 0, and the reader keeps no handler.
-//! [`EventStubRecord::of`] gives `None`, and the walk records the stub as
-//! refused.
+//! A stub of another shape, such as a P-code stub, has no record: the reader
+//! keeps no handler for it, and [`EventStubRecord::of`] gives `None`. The walk
+//! records the stub as refused, and `has_native_shape` gives the reason.
 //!
 //! # `rel32` is not verbatim
 //!

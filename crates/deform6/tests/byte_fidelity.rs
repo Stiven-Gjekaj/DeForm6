@@ -44,13 +44,13 @@
 //! # The event stub is the second structure that can differ
 //!
 //! The reader keeps the handler address of each stub, not its jump. The
-//! emitter works the jump back out of that address, and it writes the opcode
-//! bytes of the native stub, which the reader assumes and never reads. A wrong
-//! handler arithmetic, or a stub of another shape, therefore shows here. A
-//! stub shows as bytes that differ when the reader works out a handler
-//! address from it, and as a stub that is not graded when the reader cannot.
+//! emitter works the jump back out of that address, so a wrong handler
+//! arithmetic shows here as bytes that differ. The emitter also writes the
+//! opcode bytes of the native stub. The reader checks them and decodes no
+//! stub of another shape, so such a stub shows here as a stub that is not
+//! graded.
 //! `a_p_code_stub_that_a_bound_slot_names_is_refused_and_owned_by_its_slot`
-//! shows the second case.
+//! shows that case.
 //!
 //! Measured on 2026-09-16: all 390 stubs reproduce all 13 of their bytes.
 //!

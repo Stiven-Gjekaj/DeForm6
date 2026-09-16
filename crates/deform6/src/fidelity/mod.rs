@@ -42,11 +42,10 @@
 //! handler address that it works out, and [`eventstub`] works the jump back
 //! out of that address with its own arithmetic.
 //!
-//! An emitter can also write bytes that the reader assumes and never reads.
-//! The event stub emitter writes the opcode bytes of the native stub, so a
-//! stub of another shape cannot pass as native. It shows as bytes that
-//! differ when the reader still works out a handler address from it, and as
-//! a refused record when the reader cannot.
+//! An emitter can also write constant bytes that the reader checks and does
+//! not keep. The event stub emitter writes the opcode bytes of the native
+//! stub. The reader decodes no stub of another shape, so such a stub shows as
+//! a refused record, and never as bytes that differ.
 //!
 //! The clamps on `wFormCount`, `dwControlCount` and `wEventCount` do not work
 //! that way. They only bound a loop: the reader returns fewer entries, and no
@@ -141,9 +140,9 @@ pub enum Fault {
 /// 4. Every offset inside `emit` is read from `docs/STRUCTURES.md`, and never
 ///    copied from the reader this grades. See the module doc comment for why
 ///    the whole measurement depends on that.
-/// 5. `emit` may write a byte that the reader assumes and does not read, such
-///    as an opcode the reader decodes around. The module doc comment of that
-///    emitter says which bytes these are.
+/// 5. `emit` may write a constant byte that the reader checks and does not
+///    keep, such as an opcode. The module doc comment of that emitter says
+///    which bytes these are.
 ///
 /// A structure whose length is not fixed cannot implement this trait, because
 /// an associated constant cannot depend on `self`. That is deliberate. Those
