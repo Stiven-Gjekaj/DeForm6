@@ -363,6 +363,51 @@ fn no_object_byte_this_reader_models_differs_from_the_file_in_any_corpus_program
     );
 }
 
+/// `STRUCTURES.md` section 3: `lpObjectTable` sits at `ProjectInfo + 0x04`.
+const INFO_OBJECT_TABLE: usize = 0x04;
+
+/// `STRUCTURES.md` section 4: `lpObjectArray` sits at `ObjectTable + 0x30`.
+const TABLE_OBJECT_ARRAY: usize = 0x30;
+
+/// `STRUCTURES.md` section 4: the object table is `0x54` bytes.
+const OBJECT_TABLE_LEN: u32 = 0x54;
+
+#[test]
+fn the_object_array_starts_where_the_eighty_four_bytes_of_the_object_table_end_in_all_forty_four_corpus_programs()
+ {
+    // Both addresses are read by hand: lpObjectTable from the ProjectInfo
+    // ledger, then lpObjectArray from that table. Measured on 2026-09-16
+    // before this was asserted. The walk grades the first Object at the
+    // same byte, so the walk and this test place the array at one byte.
+    let mut failed = Vec::new();
+    let mut checked = 0_usize;
+    for (path, ledgers) in graded() {
+        let data = std::fs::read(&path).unwrap();
+        let pe = PeImage::parse(&data).unwrap();
+        let dword = |at: usize| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
+        let info = ledgers
+            .iter()
+            .find(|l| l.structure == "ProjectInfo")
+            .unwrap();
+        let table = dword(usize::try_from(info.base.get()).unwrap() + INFO_OBJECT_TABLE);
+        let array = dword(file_offset_of(&pe, table) + TABLE_OBJECT_ARRAY);
+        let first_object = ledgers
+            .iter()
+            .find(|l| l.structure == "Object")
+            .map(|l| usize::try_from(l.base.get()).unwrap());
+        checked += 1;
+        if array != table + OBJECT_TABLE_LEN || first_object != Some(file_offset_of(&pe, array)) {
+            failed.push(format!(
+                "{}: the object table is at {table:#x} and names the array at {array:#x}, and \
+                 the walk graded the first Object at file offset {first_object:x?}",
+                path.display()
+            ));
+        }
+    }
+    assert_eq!(checked, EXPECTED_EXECUTABLE_COUNT);
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
 // --- Segment 2: shared checks, one call per structure ------------------------
 
 /// Gives every program's failure for one structure's coverage: the modelled
