@@ -22,10 +22,11 @@
 //! agree with the reader about a wrong one.
 
 use crate::error::Refusal;
+use crate::fidelity::census::{Array, Count, Evidence, Owner, outcome};
 use crate::fidelity::ledger::Ledger;
 use crate::fidelity::{Emit, Fault, compare};
 use crate::read::pe::PeImage;
-use crate::read::region::Off;
+use crate::read::region::{Off, Region};
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::object::{Object, ObjectTable};
 use crate::vb::project::{ObjectTableHead, ProjectInfo};
@@ -35,6 +36,9 @@ const LP_OBJECT_ARRAY: u32 = 0x30;
 
 /// `STRUCTURES.md` section 4: the `ObjectTable` structure is `0x54` bytes.
 const OBJECT_TABLE_SIZE: u32 = 0x54;
+
+/// `STRUCTURES.md` section 4: `wTotalObjects` sits at `ObjectTable + 0x2A`.
+const W_TOTAL_OBJECTS: u32 = 0x2A;
 
 /// What stopped a walk.
 #[derive(Clone, Debug, thiserror::Error)]
@@ -56,6 +60,8 @@ pub enum WalkError {
 pub struct Walk {
     /// One ledger per structure graded, in the order the walk reached them.
     pub ledgers: Vec<Ledger>,
+    /// One row per array counted, in the order the walk reached them.
+    pub counts: Vec<Count>,
 }
 
 /// Grades every structure this module knows how to emit, in one file.
@@ -108,5 +114,46 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
         ledgers.push(compare(object, &element)?);
     }
 
-    Ok(Walk { ledgers })
+    let counts = vec![count_objects(&object_table, &head, &table)?];
+
+    Ok(Walk { ledgers, counts })
+}
+
+/// Counts the objects the object table declares against the objects the
+/// reader returned.
+///
+/// `ObjectTable::walk` refuses rather than clamps when an element will not
+/// read, so this row can only be whole or the walk has already stopped. It is
+/// still counted: the census states every array it can reach, including the
+/// ones that cannot come up short, so that a later reader that did start to
+/// clamp here would show up.
+fn count_objects(
+    object_table: &Region<'_>,
+    head: &ObjectTableHead,
+    table: &ObjectTable,
+) -> Result<Count, WalkError> {
+    let declared_at =
+        object_table
+            .file_offset(Off::new(W_TOTAL_OBJECTS))
+            .ok_or(Refusal::Damaged(
+                "the object table count has no file offset",
+            ))?;
+    let declared = u32::from(head.w_total_objects);
+    let recovered = u32::try_from(table.objects.len())
+        .map_err(|_ignored| Refusal::Damaged("the object count leaves a u32"))?;
+    Ok(Count {
+        array: Array::Objects,
+        owner: Owner::Program,
+        declared_at,
+        declared,
+        recovered,
+        outcome: outcome(&Evidence {
+            array: Array::Objects,
+            declared,
+            recovered,
+            defects: table.defects(),
+            unmapped: false,
+            unsupported_control_type: None,
+        }),
+    })
 }

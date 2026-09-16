@@ -47,6 +47,7 @@
 //! executable is damaged", and printing that sentence because a `put` in this
 //! crate wrote the same byte twice would be a lie about someone's file.
 
+pub mod census;
 pub mod header;
 pub mod ledger;
 pub mod object;
