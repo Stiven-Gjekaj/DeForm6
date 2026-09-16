@@ -20,6 +20,14 @@
 //! table for one rather than resolving real bytes that hold something else
 //! entirely.
 //!
+//! The two fields this module reads from the block are kept in
+//! [`OptionalObjectInfo`], and [`OptionalObjectInfo::read`] reads them on its
+//! own. They were once locals inside [`ControlInfoTable::read`], and the raw
+//! `dwControlCount` was lost there: only the clamped count survived, as a loop
+//! bound. A census that compares the count the file declares against the
+//! entries the reader returns needs the raw count, and it needs it even when
+//! the array behind it is unmapped.
+//!
 //! # The `ControlInfo` field layout (`STRUCTURES.md` section 8.6)
 //!
 //! `fControlType` and `wEventCount` are read as two-byte values, at offsets
@@ -116,6 +124,85 @@ pub struct ControlInfo {
     pub name: String,
 }
 
+/// The two fields this module reads from one object's `OptionalObjectInfo`
+/// block, `STRUCTURES.md` section 5.3.
+///
+/// The block sits at `Object.lpObjectInfo` plus `0x38` and is `0x40` bytes.
+/// A standard module has no block at all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OptionalObjectInfo {
+    /// `dwControlCount` at `0x20`, exactly as the file holds it.
+    ///
+    /// This is never the clamped count. [`ControlInfoTable::read`] bounds its
+    /// own copy against the real length of the array before it loops, and
+    /// that bounded copy is a loop bound and nothing more.
+    pub dw_control_count: u32,
+    /// `lpControls` at `0x24`: the address of the `ControlInfo` array.
+    pub lp_controls: Va,
+}
+
+impl OptionalObjectInfo {
+    /// Reads the block for one object.
+    ///
+    /// Gives `Ok(None)`, and reads nothing, for an object
+    /// [`has_optional_info`] says carries no block: resolving
+    /// `lpObjectInfo + 0x38` for a standard module would read real bytes that
+    /// hold something else entirely.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Refusal::Damaged`] when `object.lp_object_info` is in no
+    /// section, and when the file ends inside the `0x40` byte block.
+    pub fn read(pe: &PeImage<'_>, object: &Object) -> Result<Option<Self>, Refusal> {
+        Ok(optional_object_info(pe, object)?.map(|(_block, info)| info))
+    }
+}
+
+/// The block's own window and the fields read from it.
+///
+/// The window is kept for [`ControlInfoTable::read`], whose clamp defect
+/// names the absolute file offset of `dwControlCount` inside it.
+type OptionalBlock<'a> = (Region<'a>, OptionalObjectInfo);
+
+/// Resolves and reads one object's `OptionalObjectInfo` block.
+///
+/// The one place both readers in this file resolve the block, so the presence
+/// test, the four refusal messages and their order cannot drift apart.
+fn optional_object_info<'a>(
+    pe: &PeImage<'a>,
+    object: &Object,
+) -> Result<Option<OptionalBlock<'a>>, Refusal> {
+    if !has_optional_info(object.f_object_type) {
+        return Ok(None);
+    }
+
+    let base = pe
+        .region_at_va(object.lp_object_info)
+        .ok_or(Refusal::Damaged(
+            "an Object's lpObjectInfo is in no section",
+        ))?;
+    let block = base
+        .subregion(Off::new(OPTIONAL_OBJECT_INFO_AT), OPTIONAL_OBJECT_INFO_SIZE)
+        .ok_or(Refusal::Damaged(
+            "the file ends inside an OptionalObjectInfo block",
+        ))?;
+
+    let dw_control_count = block.u32_le(Off::new(0x20)).ok_or(Refusal::Damaged(
+        "OptionalObjectInfo holds no dwControlCount",
+    ))?;
+    let lp_controls = block.va_le(Off::new(0x24)).ok_or(Refusal::Damaged(
+        "OptionalObjectInfo holds no address for its ControlInfo array",
+    ))?;
+
+    Ok(Some((
+        block,
+        OptionalObjectInfo {
+            dw_control_count,
+            lp_controls,
+        },
+    )))
+}
+
 /// The `ControlInfo` array one object's `OptionalObjectInfo` names, plus the
 /// defects the walk found.
 #[derive(Clone, Debug)]
@@ -154,30 +241,14 @@ impl ControlInfoTable {
     /// or when the file ends inside a `ControlInfo` element the bounded
     /// count still calls for.
     pub fn read(pe: &PeImage<'_>, object: &Object) -> Result<Self, Refusal> {
-        if !has_optional_info(object.f_object_type) {
+        let Some((optional, info)) = optional_object_info(pe, object)? else {
             return Ok(Self {
                 entries: Vec::new(),
                 defects: Vec::new(),
             });
-        }
-
-        let base = pe
-            .region_at_va(object.lp_object_info)
-            .ok_or(Refusal::Damaged(
-                "an Object's lpObjectInfo is in no section",
-            ))?;
-        let optional = base
-            .subregion(Off::new(OPTIONAL_OBJECT_INFO_AT), OPTIONAL_OBJECT_INFO_SIZE)
-            .ok_or(Refusal::Damaged(
-                "the file ends inside an OptionalObjectInfo block",
-            ))?;
-
-        let raw_control_count = optional.u32_le(Off::new(0x20)).ok_or(Refusal::Damaged(
-            "OptionalObjectInfo holds no dwControlCount",
-        ))?;
-        let lp_controls = optional.va_le(Off::new(0x24)).ok_or(Refusal::Damaged(
-            "OptionalObjectInfo holds no address for its ControlInfo array",
-        ))?;
+        };
+        let raw_control_count = info.dw_control_count;
+        let lp_controls = info.lp_controls;
 
         if raw_control_count == 0 {
             return Ok(Self {
@@ -886,10 +957,11 @@ pub fn report_events(
 )]
 mod tests {
     use super::{
-        ControlInfoTable, EventNameTable, EventReport, EventSlot, join_by_name, read_event_table,
-        read_raw_control_info, report_events,
+        ControlInfoTable, EventNameTable, EventReport, EventSlot, OptionalObjectInfo, join_by_name,
+        read_event_table, read_raw_control_info, report_events,
     };
     use crate::error::DefectKind;
+    use crate::error::Refusal;
     use crate::read::pe::PeImage;
     use crate::read::region::{Off, Region, Va};
     use crate::vb::classify::{self, ObjectKind};
@@ -1021,6 +1093,98 @@ mod tests {
         let table = ControlInfoTable::read(&image, &synthetic_module_object()).unwrap();
         assert!(table.entries.is_empty());
         assert!(table.defects().is_empty());
+    }
+
+    #[test]
+    fn a_standard_module_has_no_optional_object_info_and_nothing_is_read() {
+        // The section holds 0x10 bytes. Had the reader resolved
+        // lpObjectInfo + 0x38 it would have been refused, so Ok(None) is the
+        // proof that nothing was read.
+        let bytes = synthetic_image(&[0_u8; 0x10]);
+        let image = PeImage::parse(&bytes).unwrap();
+        assert_eq!(
+            OptionalObjectInfo::read(&image, &synthetic_module_object()),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn the_two_fields_are_read_from_their_own_offsets_and_not_from_their_neighbours() {
+        // The block starts at extra offset 0x38. The words either side of the
+        // two fields hold values neither field could be mistaken for.
+        let mut extra = vec![0_u8; 0x100];
+        extra[0x38 + 0x1C..0x38 + 0x20].copy_from_slice(&0xDDDD_DDDD_u32.to_le_bytes());
+        extra[0x38 + 0x20..0x38 + 0x24].copy_from_slice(&7_u32.to_le_bytes());
+        extra[0x38 + 0x24..0x38 + 0x28].copy_from_slice(&0x0040_1080_u32.to_le_bytes());
+        extra[0x38 + 0x28..0x38 + 0x2C].copy_from_slice(&0xEEEE_EEEE_u32.to_le_bytes());
+        let bytes = synthetic_image(&extra);
+        let image = PeImage::parse(&bytes).unwrap();
+
+        let info = OptionalObjectInfo::read(&image, &synthetic_form_object())
+            .unwrap()
+            .unwrap();
+        assert_eq!(info.dw_control_count, 7);
+        assert_eq!(info.lp_controls, Va::new(0x0040_1080));
+    }
+
+    #[test]
+    fn the_raw_control_count_survives_when_the_table_clamps_it() {
+        // The same bytes as the clamp test below: the file declares 1000 and
+        // can hold none. The table clamps its own copy to a loop bound of 0.
+        // The structure must still say 1000, because that is the number a
+        // census compares against what the table returned.
+        let mut extra = vec![0_u8; 0x84];
+        extra[0x58..0x5C].copy_from_slice(&1000_u32.to_le_bytes());
+        extra[0x5C..0x60].copy_from_slice(&0x0040_1080_u32.to_le_bytes());
+        let bytes = synthetic_image(&extra);
+        let image = PeImage::parse(&bytes).unwrap();
+
+        let info = OptionalObjectInfo::read(&image, &synthetic_form_object())
+            .unwrap()
+            .unwrap();
+        let table = ControlInfoTable::read(&image, &synthetic_form_object()).unwrap();
+        assert_eq!(info.dw_control_count, 1000);
+        assert!(table.entries.is_empty());
+    }
+
+    #[test]
+    fn an_object_info_address_in_no_section_is_refused() {
+        let bytes = synthetic_image(&[0_u8; 0x100]);
+        let image = PeImage::parse(&bytes).unwrap();
+        let mut object = synthetic_form_object();
+        object.lp_object_info = Va::new(0x00F0_0000);
+        assert_eq!(
+            OptionalObjectInfo::read(&image, &object),
+            Err(Refusal::Damaged(
+                "an Object's lpObjectInfo is in no section"
+            ))
+        );
+    }
+
+    #[test]
+    fn a_block_that_the_file_ends_inside_is_refused() {
+        // The section holds 0x40 bytes, and the block needs 0x38 + 0x40.
+        let bytes = synthetic_image(&[0_u8; 0x40]);
+        let image = PeImage::parse(&bytes).unwrap();
+        assert_eq!(
+            OptionalObjectInfo::read(&image, &synthetic_form_object()),
+            Err(Refusal::Damaged(
+                "the file ends inside an OptionalObjectInfo block"
+            ))
+        );
+    }
+
+    #[test]
+    fn the_sk_gradient_form_declares_as_many_control_entries_as_the_table_returns() {
+        let image = PeImage::parse(SK_GRADIENT_SAMPLE).unwrap();
+        let object = first_form_object(SK_GRADIENT_SAMPLE);
+        let info = OptionalObjectInfo::read(&image, &object).unwrap().unwrap();
+        let table = ControlInfoTable::read(&image, &object).unwrap();
+        assert!(!table.entries.is_empty());
+        assert_eq!(
+            usize::try_from(info.dw_control_count).unwrap(),
+            table.entries.len()
+        );
     }
 
     #[test]
