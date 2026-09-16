@@ -483,6 +483,77 @@ fn the_walk_grades_one_gui_table_entry_for_each_form_inspect_reports() {
     assert!(failed.is_empty(), "{}", failed.join("\n"));
 }
 
+/// `STRUCTURES.md` section 8.1: `uuidObjectGUI` sits at GUI table entry
+/// `+ 0x04`.
+const ENTRY_OBJECT_GUID: usize = 0x04;
+
+/// `STRUCTURES.md` section 8.1: `aFormPointer` sits at GUI table entry
+/// `+ 0x48`.
+const ENTRY_FORM_POINTER: usize = 0x48;
+
+/// `STRUCTURES.md` section 8.2: `guidObjectGUI` sits at `GUIObjectInfo +
+/// 0x05`, one byte past the aligned place, because of the single byte at
+/// `0x04`.
+const INFO_OBJECT_GUID: usize = 0x05;
+
+#[test]
+fn the_object_gui_guid_sits_at_five_and_never_at_four_in_fifty_three_gui_object_info_records() {
+    // STRUCTURES.md section 8.2 rates the GUIObjectInfo layout [L] and warns
+    // that the single byte at 0x04 moves every later field to an odd offset.
+    // The GUI table entry holds the same GUID, so the two records test the
+    // layout against each other. Everything below is read by hand: the walk
+    // gives only where each GUI table entry starts.
+    //
+    // Measured on 2026-09-16: the GUID matches at 0x05 in all 53 forms and at
+    // the aligned 0x04 in none. The head dword is 0x0031CCFF in all 53, and
+    // the byte at 0x04 takes more than one value.
+    let mut forms = 0_usize;
+    let mut at_five = 0_usize;
+    let mut at_four = 0_usize;
+    let mut constant_head = 0_usize;
+    let mut bytes_at_four = BTreeSet::new();
+    for (path, ledgers) in graded() {
+        let data = std::fs::read(&path).unwrap();
+        let pe = PeImage::parse(&data).unwrap();
+        for ledger in ledgers.iter().filter(|l| l.structure == "GuiTableEntry") {
+            forms += 1;
+            let entry = usize::try_from(ledger.base.get()).unwrap();
+            let guid = &data[entry + ENTRY_OBJECT_GUID..entry + ENTRY_OBJECT_GUID + 16];
+            let pointer = u32::from_le_bytes(
+                data[entry + ENTRY_FORM_POINTER..entry + ENTRY_FORM_POINTER + 4]
+                    .try_into()
+                    .unwrap(),
+            );
+            let info = pe
+                .region_at_va(Va::new(pointer))
+                .and_then(|region| region.file_offset(Off::new(0)))
+                .unwrap_or_else(|| {
+                    panic!("{}: aFormPointer {pointer:#x} maps nowhere", path.display())
+                });
+            let info = usize::try_from(info.get()).unwrap();
+
+            if data[info + INFO_OBJECT_GUID..info + INFO_OBJECT_GUID + 16] == *guid {
+                at_five += 1;
+            }
+            if data[info + 0x04..info + 0x04 + 16] == *guid {
+                at_four += 1;
+            }
+            if data[info..info + 4] == 0x0031_CCFF_u32.to_le_bytes() {
+                constant_head += 1;
+            }
+            bytes_at_four.insert(data[info + 0x04]);
+        }
+    }
+    assert_eq!(forms, 53);
+    assert_eq!(at_five, 53, "the GUID must sit at GUIObjectInfo + 0x05");
+    assert_eq!(at_four, 0, "the GUID must never sit at the aligned + 0x04");
+    assert_eq!(constant_head, 53);
+    assert!(
+        bytes_at_four.len() > 1,
+        "the byte at 0x04 holds one value in every form: {bytes_at_four:?}"
+    );
+}
+
 #[test]
 fn the_corpus_grades_one_hundred_and_five_object_info_records() {
     assert_eq!(graded_count("ObjectInfo"), 105);
