@@ -22,13 +22,13 @@
 //! agree with the reader about a wrong one.
 
 use crate::error::Refusal;
-use crate::fidelity::census::{Array, Count, Evidence, Owner, outcome};
+use crate::fidelity::census::{Array, Count, Evidence, Outcome, Owner, outcome};
 use crate::fidelity::ledger::Ledger;
 use crate::fidelity::privateobj::PrivateObjRecord;
 use crate::fidelity::{Emit, Fault, compare};
 use crate::read::pe::PeImage;
 use crate::read::region::{Off, Region, Va};
-use crate::vb::controlinfo::OptionalObjectInfo;
+use crate::vb::controlinfo::{ControlInfoTable, OptionalObjectInfo};
 use crate::vb::gui::{GuiTable, GuiTableEntry};
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::object::{Object, ObjectTable};
@@ -49,6 +49,9 @@ const W_FORM_COUNT: u32 = 0x44;
 
 /// `STRUCTURES.md` section 5.3: the block sits at `lpObjectInfo + 0x38`.
 const OPTIONAL_OBJECT_INFO_AT: u32 = 0x38;
+
+/// `STRUCTURES.md` section 5.3: `dwControlCount` sits at block `+ 0x20`.
+const DW_CONTROL_COUNT: u32 = 0x20;
 
 /// What stopped a walk.
 #[derive(Clone, Debug, thiserror::Error)]
@@ -185,7 +188,9 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
         if let Some(info) = grade_object_info(&pe, object, owner, &mut found)? {
             grade_private_obj(&pe, &info, owner, &mut found)?;
         }
-        grade_optional_object_info(&pe, object, owner, &mut found)?;
+        if let Some(optional) = grade_optional_object_info(&pe, object, owner, &mut found)? {
+            count_controls(&pe, object, &optional, owner, &mut found)?;
+        }
     }
 
     Ok(found)
@@ -292,6 +297,60 @@ fn grade_optional_object_info(
         Err(reason) => found.ungraded.push(skip(Reason::Refused(reason))),
     }
     Ok(Some(info))
+}
+
+/// Counts the `ControlInfo` entries one object's block declares against the
+/// entries the reader returned.
+///
+/// This is the census row for `controlinfo::bound_control_count`, the clamp
+/// that bounds a loop and changes no byte. The walk decides for itself whether
+/// the array's address maps anywhere, so an unmapped array is told apart from
+/// a clamp without asking the reader.
+///
+/// Gives back the table the reader returned, for the structures below it.
+fn count_controls(
+    pe: &PeImage<'_>,
+    object: &Object,
+    optional: &OptionalObjectInfo,
+    owner: Owner,
+    found: &mut Walk,
+) -> Result<Option<ControlInfoTable>, WalkError> {
+    let Some(declared_at) = pe
+        .region_at_va(object.lp_object_info)
+        .and_then(|base| base.file_offset(Off::new(OPTIONAL_OBJECT_INFO_AT)))
+        .and_then(|block| block.checked_add(DW_CONTROL_COUNT))
+    else {
+        // The count field cannot be located, so there is no row to state.
+        return Ok(None);
+    };
+    let declared = optional.dw_control_count;
+
+    let (recovered, decided, table) = match ControlInfoTable::read(pe, object) {
+        Ok(table) => {
+            let recovered = u32::try_from(table.entries.len())
+                .map_err(|_ignored| Refusal::Damaged("the control entry count leaves a u32"))?;
+            let decided = outcome(&Evidence {
+                array: Array::Controls,
+                declared,
+                recovered,
+                defects: table.defects(),
+                unmapped: pe.region_at_va(optional.lp_controls).is_none(),
+                unsupported_control_type: None,
+            });
+            (recovered, decided, Some(table))
+        }
+        Err(reason) => (0, Outcome::Refused(reason), None),
+    };
+
+    found.counts.push(Count {
+        array: Array::Controls,
+        owner,
+        declared_at,
+        declared,
+        recovered,
+        outcome: decided,
+    });
+    Ok(table)
 }
 
 /// Grades one object's `PrivateObj`, or records why it could not.

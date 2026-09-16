@@ -278,3 +278,83 @@ fn the_rows_that_are_not_whole_are_exactly_the_rows_this_file_names() {
          refusal the corpus did not have before. A missing row is one that went away."
     );
 }
+
+#[test]
+fn the_census_counts_seven_hundred_and_six_control_information_entries_declared_and_returned() {
+    // ControlInfo entries, not controls. ControlInfo is the event binding
+    // table, and the README's 686 controls counts nodes in the control tree:
+    // a different quantity, and not a disagreement.
+    assert_eq!(totals(&census(), Array::Controls), (706, 706));
+}
+
+#[test]
+fn the_census_carries_ninety_seven_control_count_rows_one_for_each_object_with_a_block() {
+    let rows: usize = census()
+        .iter()
+        .map(|program| {
+            program
+                .counts
+                .iter()
+                .filter(|row| row.array == Array::Controls)
+                .count()
+        })
+        .sum();
+    assert_eq!(rows, 97);
+}
+
+/// Walks SK-Gradient with one four byte value patched in memory, and gives
+/// back its control rows. The patch lands relative to the first control row
+/// that declares at least one entry, at the offset that row itself names.
+fn patched_control_rows(delta: u32, value: u32) -> Vec<Count> {
+    let path = corpus_root().join("public-domain/SK-Gradient-Sample__VB6/demo/Project1.exe");
+    let original = std::fs::read(&path).unwrap();
+    let row = walk(&original)
+        .unwrap()
+        .counts
+        .into_iter()
+        .find(|row| row.array == Array::Controls && row.declared > 0)
+        .expect("the fixture declares at least one control entry");
+
+    let at = usize::try_from(row.declared_at.get() + delta).unwrap();
+    let mut patched = original.clone();
+    assert_ne!(
+        patched[at..at + 4],
+        value.to_le_bytes(),
+        "the patch must change the file, or this test proves nothing"
+    );
+    patched[at..at + 4].copy_from_slice(&value.to_le_bytes());
+
+    walk(&patched)
+        .expect("a patched control array must not stop the walk")
+        .counts
+        .into_iter()
+        .filter(|row| row.array == Array::Controls)
+        .collect()
+}
+
+#[test]
+fn a_control_array_whose_address_maps_nowhere_is_counted_as_unmapped() {
+    // lpControls sits four bytes after dwControlCount.
+    let rows = patched_control_rows(4, 0x00F0_0000);
+    let unmapped: Vec<&Count> = rows
+        .iter()
+        .filter(|row| row.outcome == Outcome::Unmapped)
+        .collect();
+    assert_eq!(unmapped.len(), 1, "{rows:?}");
+    assert!(unmapped[0].declared > 0);
+    assert_eq!(unmapped[0].recovered, 0);
+}
+
+#[test]
+fn a_control_count_larger_than_the_file_can_hold_is_counted_as_clamped() {
+    let rows = patched_control_rows(0, 0xFFFF_FFFF);
+    let clamped: Vec<&Count> = rows
+        .iter()
+        .filter(|row| matches!(row.outcome, Outcome::Clamped { .. }))
+        .collect();
+    assert_eq!(clamped.len(), 1, "{rows:?}");
+    let row = clamped[0];
+    assert_eq!(row.declared, 0xFFFF_FFFF);
+    assert_eq!(row.outcome, Outcome::Clamped { max: row.recovered });
+    assert!(row.recovered < row.declared);
+}
