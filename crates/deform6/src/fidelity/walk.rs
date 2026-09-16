@@ -28,6 +28,7 @@ use crate::fidelity::privateobj::PrivateObjRecord;
 use crate::fidelity::{Emit, Fault, compare};
 use crate::read::pe::PeImage;
 use crate::read::region::{Off, Region, Va};
+use crate::vb::controlinfo::OptionalObjectInfo;
 use crate::vb::gui::{GuiTable, GuiTableEntry};
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::object::{Object, ObjectTable};
@@ -45,6 +46,9 @@ const W_TOTAL_OBJECTS: u32 = 0x2A;
 
 /// `STRUCTURES.md` section 2: `wFormCount` sits at `VBHeader + 0x44`.
 const W_FORM_COUNT: u32 = 0x44;
+
+/// `STRUCTURES.md` section 5.3: the block sits at `lpObjectInfo + 0x38`.
+const OPTIONAL_OBJECT_INFO_AT: u32 = 0x38;
 
 /// What stopped a walk.
 #[derive(Clone, Debug, thiserror::Error)]
@@ -181,6 +185,7 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
         if let Some(info) = grade_object_info(&pe, object, owner, &mut found)? {
             grade_private_obj(&pe, &info, owner, &mut found)?;
         }
+        grade_optional_object_info(&pe, object, owner, &mut found)?;
     }
 
     Ok(found)
@@ -238,6 +243,55 @@ fn grade_object_info(
             Ok(None)
         }
     }
+}
+
+/// Grades one object's `OptionalObjectInfo` block, or records why it could
+/// not.
+///
+/// Tried for every object on its own, not only when `ObjectInfo` was read:
+/// the block's declared control count is what the census compares against,
+/// and it must survive whatever happened to the record before it.
+///
+/// Gives back the block whenever it was read, even when its window could not
+/// be graded, because the count is still the file's own number.
+fn grade_optional_object_info(
+    pe: &PeImage<'_>,
+    object: &Object,
+    owner: Owner,
+    found: &mut Walk,
+) -> Result<Option<OptionalObjectInfo>, WalkError> {
+    let skip = |reason: Reason| Ungraded {
+        structure: OptionalObjectInfo::STRUCTURE,
+        owner,
+        reason,
+    };
+    let info = match OptionalObjectInfo::read(pe, object) {
+        Ok(Some(info)) => info,
+        Ok(None) => {
+            found.ungraded.push(skip(Reason::Absent));
+            return Ok(None);
+        }
+        Err(reason) => {
+            found.ungraded.push(skip(Reason::Refused(reason)));
+            return Ok(None);
+        }
+    };
+    let block = pe
+        .region_at_va(object.lp_object_info)
+        .ok_or(Refusal::Damaged(
+            "an Object's lpObjectInfo is in no section",
+        ))
+        .and_then(|base| {
+            base.subregion(Off::new(OPTIONAL_OBJECT_INFO_AT), OptionalObjectInfo::LEN)
+                .ok_or(Refusal::Damaged(
+                    "the file ends inside an OptionalObjectInfo block",
+                ))
+        });
+    match block {
+        Ok(block) => found.ledgers.push(compare(&info, &block)?),
+        Err(reason) => found.ungraded.push(skip(Reason::Refused(reason))),
+    }
+    Ok(Some(info))
 }
 
 /// Grades one object's `PrivateObj`, or records why it could not.

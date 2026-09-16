@@ -52,6 +52,7 @@ use deform6::fidelity::header;
 use deform6::fidelity::ledger::{Ledger, Verdict};
 use deform6::fidelity::object;
 use deform6::fidelity::objectinfo;
+use deform6::fidelity::optionalobjectinfo;
 use deform6::fidelity::privateobj;
 use deform6::fidelity::project;
 use deform6::fidelity::walk::Reason;
@@ -643,15 +644,7 @@ fn the_objects_with_no_private_obj_are_exactly_the_modules_inspect_reports() {
             .unwrap_or_else(|err| panic!("inspecting {}: {err}", path.display()));
         let found = walk(&data).unwrap();
 
-        let absent: BTreeSet<u32> = found
-            .ungraded
-            .iter()
-            .filter(|row| row.structure == "PrivateObj" && row.reason == Reason::Absent)
-            .filter_map(|row| match row.owner {
-                Owner::Object { object } => Some(object),
-                Owner::Program | Owner::Control { .. } => None,
-            })
-            .collect();
+        let absent = absent_objects(&found, "PrivateObj");
         let modules: BTreeSet<u32> = report
             .objects
             .iter()
@@ -670,4 +663,66 @@ fn the_objects_with_no_private_obj_are_exactly_the_modules_inspect_reports() {
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
     assert_eq!(modules_seen, 8, "the corpus holds eight standard modules");
+}
+
+/// Gives the indexes of the objects a walk found to have no record of one
+/// structure.
+fn absent_objects(found: &deform6::fidelity::walk::Walk, structure: &str) -> BTreeSet<u32> {
+    found
+        .ungraded
+        .iter()
+        .filter(|row| row.structure == structure && row.reason == Reason::Absent)
+        .filter_map(|row| match row.owner {
+            Owner::Object { object } => Some(object),
+            Owner::Program | Owner::Control { .. } => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_corpus_grades_ninety_seven_optional_object_info_records() {
+    assert_eq!(graded_count("OptionalObjectInfo"), 97);
+}
+
+#[test]
+fn the_optional_object_info_reader_models_eight_of_the_sixty_four_bytes_in_every_graded_record() {
+    let failed = coverage_failures(
+        "OptionalObjectInfo",
+        64,
+        optionalobjectinfo::MODELLED_BYTES,
+        optionalobjectinfo::UNMODELLED,
+    );
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+#[test]
+fn no_optional_object_info_byte_this_reader_models_differs_from_the_file_in_any_corpus_program() {
+    let failed = difference_failures("OptionalObjectInfo");
+    assert!(
+        failed.is_empty(),
+        "{} OptionalObjectInfo byte run(s) differ from the file:\n{}",
+        failed.len(),
+        failed.join("\n")
+    );
+}
+
+#[test]
+fn the_objects_with_no_optional_object_info_are_exactly_the_objects_with_no_private_obj() {
+    // Two structures, two presence rules: fObjectType bit 0x2 for the block,
+    // the lpPrivateObject sentinel for the private object. Both say which
+    // objects are standard modules, and they must say the same thing.
+    let mut failed = Vec::new();
+    for path in executables() {
+        let data = std::fs::read(&path).unwrap();
+        let found = walk(&data).unwrap();
+        let no_block = absent_objects(&found, "OptionalObjectInfo");
+        let no_private = absent_objects(&found, "PrivateObj");
+        if no_block != no_private {
+            failed.push(format!(
+                "{}: no OptionalObjectInfo {no_block:?}, no PrivateObj {no_private:?}",
+                path.display()
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
 }
