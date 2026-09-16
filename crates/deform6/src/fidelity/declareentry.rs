@@ -14,7 +14,8 @@
 //! So the walk places an entry by its position in that list alone.
 //!
 //! [`DeclareTableEntry::descriptor`] is not in these 8 bytes. It is the start
-//! of a different structure, and this emitter does not write it.
+//! of a different structure, and [`crate::fidelity::declaredescriptor`]
+//! writes it back.
 
 use crate::fidelity::{Emit, Slate};
 use crate::read::region::Off;

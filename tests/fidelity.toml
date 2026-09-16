@@ -50,6 +50,11 @@ length = 8
 modelled = 8
 unmodelled = []
 
+[layout.DeclareDescriptor]
+length = 24
+modelled = 8
+unmodelled = [[0x08, 16]]
+
 [layout.GuiTableEntry]
 length = 80
 modelled = 8
@@ -99,6 +104,7 @@ unmodelled = []
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 2, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -118,6 +124,7 @@ array.EventSlots = { rows = 23, declared = 325, returned = 325, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -137,6 +144,7 @@ array.EventSlots = { rows = 1, declared = 31, returned = 31, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 4, same = 32, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 4, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -156,6 +164,7 @@ array.EventSlots = { rows = 90, declared = 1377, returned = 1377, not_whole = 0 
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -175,6 +184,7 @@ array.EventSlots = { rows = 4, declared = 92, returned = 92, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 13, same = 104, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 12, same = 96, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -194,6 +204,7 @@ array.EventSlots = { rows = 31, declared = 579, returned = 579, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -213,6 +224,7 @@ array.EventSlots = { rows = 13, declared = 253, returned = 253, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -232,6 +244,7 @@ array.EventSlots = { rows = 5, declared = 101, returned = 101, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -251,6 +264,7 @@ array.EventSlots = { rows = 10, declared = 203, returned = 203, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 2, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -270,6 +284,7 @@ array.EventSlots = { rows = 27, declared = 335, returned = 335, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -289,6 +304,7 @@ array.EventSlots = { rows = 8, declared = 116, returned = 116, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -308,6 +324,7 @@ array.EventSlots = { rows = 5, declared = 114, returned = 114, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -327,6 +344,7 @@ array.EventSlots = { rows = 6, declared = 132, returned = 132, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -346,6 +364,7 @@ array.EventSlots = { rows = 5, declared = 114, returned = 114, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 8, same = 64, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 7, same = 56, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -365,6 +384,7 @@ array.EventSlots = { rows = 32, declared = 623, returned = 623, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 9, same = 72, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 8, same = 64, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -384,6 +404,7 @@ array.EventSlots = { rows = 10, declared = 135, returned = 135, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 0, same = 0, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -403,6 +424,7 @@ array.EventSlots = { rows = 6, declared = 134, returned = 134, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -422,6 +444,7 @@ array.EventSlots = { rows = 6, declared = 134, returned = 134, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 4, same = 32, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 4, same = 32, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -441,6 +464,7 @@ array.EventSlots = { rows = 7, declared = 131, returned = 131, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 9, same = 72, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 8, same = 64, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -460,6 +484,7 @@ array.EventSlots = { rows = 9, declared = 123, returned = 123, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 9, same = 72, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 8, same = 64, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -479,6 +504,7 @@ array.EventSlots = { rows = 15, declared = 226, returned = 226, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 9, same = 72, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 8, same = 64, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -498,6 +524,7 @@ array.EventSlots = { rows = 10, declared = 135, returned = 135, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 9, same = 72, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 8, same = 64, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -517,6 +544,7 @@ array.EventSlots = { rows = 9, declared = 139, returned = 139, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 9, same = 72, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 8, same = 64, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -536,6 +564,7 @@ array.EventSlots = { rows = 16, declared = 268, returned = 268, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 9, same = 72, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 8, same = 64, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -555,6 +584,7 @@ array.EventSlots = { rows = 16, declared = 233, returned = 233, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 26, same = 208, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 25, same = 200, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -574,6 +604,7 @@ array.EventSlots = { rows = 12, declared = 160, returned = 160, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 11, same = 88, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 10, same = 80, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -593,6 +624,7 @@ array.EventSlots = { rows = 14, declared = 209, returned = 209, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -612,6 +644,7 @@ array.EventSlots = { rows = 3, declared = 75, returned = 75, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 10, same = 80, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 9, same = 72, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -631,6 +664,7 @@ array.EventSlots = { rows = 19, declared = 325, returned = 325, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -650,6 +684,7 @@ array.EventSlots = { rows = 19, declared = 450, returned = 450, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -669,6 +704,7 @@ array.EventSlots = { rows = 6, declared = 122, returned = 122, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 9, same = 72, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 8, same = 64, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -688,6 +724,7 @@ array.EventSlots = { rows = 17, declared = 250, returned = 250, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 4, same = 32, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 4, same = 32, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -707,6 +744,7 @@ array.EventSlots = { rows = 41, declared = 742, returned = 742, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 9, same = 72, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 8, same = 64, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 2, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -726,6 +764,7 @@ array.EventSlots = { rows = 31, declared = 537, returned = 537, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 9, same = 72, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 8, same = 64, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 2, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -745,6 +784,7 @@ array.EventSlots = { rows = 23, declared = 402, returned = 402, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 9, same = 72, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 8, same = 64, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 2, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -764,6 +804,7 @@ array.EventSlots = { rows = 44, declared = 734, returned = 734, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -783,6 +824,7 @@ array.EventSlots = { rows = 16, declared = 323, returned = 323, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 6, same = 48, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 5, same = 40, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 2, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -802,6 +844,7 @@ array.EventSlots = { rows = 32, declared = 409, returned = 409, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 9, same = 72, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 8, same = 64, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -821,6 +864,7 @@ array.EventSlots = { rows = 9, declared = 127, returned = 127, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 10, same = 80, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 9, same = 72, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -840,6 +884,7 @@ array.EventSlots = { rows = 14, declared = 224, returned = 224, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 8, same = 64, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 7, same = 56, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -859,6 +904,7 @@ array.EventSlots = { rows = 9, declared = 185, returned = 185, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 5, same = 40, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 4, same = 32, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -878,6 +924,7 @@ array.EventSlots = { rows = 3, declared = 67, returned = 67, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 9, same = 72, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 8, same = 64, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -897,6 +944,7 @@ array.EventSlots = { rows = 9, declared = 123, returned = 123, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 9, same = 72, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 8, same = 64, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
@@ -916,6 +964,7 @@ array.EventSlots = { rows = 13, declared = 188, returned = 188, not_whole = 0 }
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.DeclareTableEntry = { records = 4, same = 32, differs = 0, absent = 0, refused = 0 }
+structure.DeclareDescriptor = { records = 4, same = 32, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
 structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }

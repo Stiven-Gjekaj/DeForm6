@@ -15,7 +15,7 @@
 //! # What a clean result here does and does not mean
 //!
 //! Thirteen of the fourteen header fields, all five `Object` fields, every
-//! field of the other nine structures, and the `imm32` of an event stub are
+//! field of the other ten structures, and the `imm32` of an event stub are
 //! carried verbatim: read at an
 //! offset, written back at the same offset, with no arithmetic between. A
 //! verbatim field cannot disagree with itself, so a clean map is the expected
@@ -71,6 +71,7 @@
 use deform6::error::Refusal;
 use deform6::fidelity::census::{Array, Owner};
 use deform6::fidelity::controlinfo;
+use deform6::fidelity::declaredescriptor;
 use deform6::fidelity::declareentry;
 use deform6::fidelity::eventstub;
 use deform6::fidelity::gui;
@@ -1188,7 +1189,7 @@ fn the_event_slots_fit_the_word_at_two_and_refuse_the_word_at_four_in_seven_hund
 
 #[test]
 fn no_two_structures_the_walk_grades_share_a_byte_in_any_corpus_program() {
-    // Measured on 2026-09-17: 1987 records across the corpus, and no two of
+    // Measured on 2026-09-17: 2207 records across the corpus, and no two of
     // them overlap. Two structures claiming the same byte would mean one of
     // them is placed wrongly.
     let mut failed = Vec::new();
@@ -1218,9 +1219,9 @@ fn no_two_structures_the_walk_grades_share_a_byte_in_any_corpus_program() {
 }
 
 #[test]
-fn the_walk_grades_one_thousand_nine_hundred_and_eighty_seven_records_across_the_corpus() {
+fn the_walk_grades_two_thousand_two_hundred_and_seven_records_across_the_corpus() {
     let total: usize = graded().iter().map(|(_path, ledgers)| ledgers.len()).sum();
-    assert_eq!(total, 1987);
+    assert_eq!(total, 2207);
 }
 
 #[test]
@@ -1658,6 +1659,9 @@ const INFO_EXTERNAL_COUNT: usize = 0x238;
 /// `STRUCTURES.md` section 7.1: a `Declare` table entry is 8 bytes.
 const DECLARE_ENTRY_LEN: usize = 8;
 
+/// `STRUCTURES.md` section 7.1: the runtime resolves an entry of type 6.
+const INTERNAL_ENTRY: u32 = 6;
+
 /// `STRUCTURES.md` section 7.1: an entry of type 7 names a library and an
 /// export.
 const EXTERNAL_ENTRY: u32 = 7;
@@ -1819,4 +1823,269 @@ fn the_walk_grades_each_declare_table_entry_at_its_place_in_the_table_that_proje
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
     assert_eq!(entries, 249);
+}
+
+#[test]
+fn the_corpus_grades_two_hundred_and_twenty_declare_descriptor_records() {
+    assert_eq!(graded_count("DeclareDescriptor"), 220);
+}
+
+#[test]
+fn the_declare_descriptor_reader_models_eight_of_the_twenty_four_bytes_in_every_graded_record() {
+    let failed = coverage_failures(
+        "DeclareDescriptor",
+        24,
+        declaredescriptor::MODELLED_BYTES,
+        declaredescriptor::UNMODELLED,
+    );
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+#[test]
+fn no_declare_descriptor_byte_this_reader_models_differs_from_the_file_in_any_corpus_program() {
+    let failed = difference_failures("DeclareDescriptor");
+    assert!(
+        failed.is_empty(),
+        "{} DeclareDescriptor byte run(s) differ from the file:\n{}",
+        failed.len(),
+        failed.join("\n")
+    );
+}
+
+#[test]
+fn the_walk_grades_one_declare_descriptor_at_the_address_each_external_entry_names() {
+    // The entries are read by hand, in table order, and each descriptor
+    // address is resolved through the PE image. The walk grades a
+    // descriptor the first time an entry names it, and the list read by hand
+    // follows the same rule.
+    let mut descriptors = 0_usize;
+    let mut failed = Vec::new();
+    for (path, ledgers) in graded() {
+        let data = std::fs::read(&path).unwrap();
+        let pe = PeImage::parse(&data).unwrap();
+        let mut seen = BTreeSet::new();
+        let named: Vec<usize> = declare_entries(&data, &pe, project_info_base(&ledgers))
+            .iter()
+            .filter(|entry| entry.entry_type == EXTERNAL_ENTRY)
+            .map(|entry| file_offset_of(&pe, entry.descriptor))
+            .filter(|at| seen.insert(*at))
+            .collect();
+        let graded: Vec<usize> = ledgers
+            .iter()
+            .filter(|l| l.structure == "DeclareDescriptor")
+            .map(|l| usize::try_from(l.base.get()).unwrap())
+            .collect();
+        descriptors += graded.len();
+        if named != graded {
+            failed.push(format!(
+                "{}: the external entries name {named:x?}, and the walk graded \
+                 DeclareDescriptor at {graded:x?}",
+                path.display()
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+    assert_eq!(descriptors, 220);
+}
+
+#[test]
+fn the_twenty_nine_internal_declare_entries_name_no_graded_descriptor_and_no_refused_row() {
+    let mut internal = 0_usize;
+    let mut failed = Vec::new();
+    for path in executables() {
+        let data = std::fs::read(&path).unwrap();
+        let pe = PeImage::parse(&data).unwrap();
+        let found = walk(&data).unwrap();
+        let graded: BTreeSet<usize> = found
+            .ledgers
+            .iter()
+            .filter(|l| l.structure == "DeclareDescriptor")
+            .map(|l| usize::try_from(l.base.get()).unwrap())
+            .collect();
+        for entry in declare_entries(&data, &pe, project_info_base(&found.ledgers)) {
+            if entry.entry_type != INTERNAL_ENTRY {
+                continue;
+            }
+            internal += 1;
+            let at = file_offset_of(&pe, entry.descriptor);
+            if graded.contains(&at) {
+                failed.push(format!(
+                    "{}: the walk graded the pair that an internal entry names at {at:#x}",
+                    path.display()
+                ));
+            }
+        }
+        for row in found
+            .ungraded
+            .iter()
+            .filter(|row| row.structure == "DeclareDescriptor")
+        {
+            failed.push(format!("{}: {row:?}", path.display()));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+    assert_eq!(internal, 29);
+}
+
+fn grayscale() -> Vec<u8> {
+    std::fs::read(corpus_root().join("vb6-code/Grayscale-effect/Grayscale.exe")).unwrap()
+}
+
+/// The nine entries of Grayscale, read by hand. Entries 1 and 2 are
+/// external.
+fn grayscale_entries(original: &[u8], before: &Walk) -> Vec<DeclareEntry> {
+    let pe = PeImage::parse(original).unwrap();
+    let entries = declare_entries(original, &pe, project_info_base(&before.ledgers));
+    assert_eq!(entries.len(), 9);
+    assert_eq!(entries[1].entry_type, EXTERNAL_ENTRY);
+    assert_eq!(entries[2].entry_type, EXTERNAL_ENTRY);
+    entries
+}
+
+/// Requires `after` to hold one refused `DeclareDescriptor` row more than
+/// `before`, owned by entry 1 and refused for `reason`, and no ledger at file
+/// offset `descriptor_at`. Entry 1 keeps a clean ledger at `entry_at`, and
+/// nothing else changes.
+fn assert_one_refused_descriptor(
+    before: &Walk,
+    after: &Walk,
+    entry_at: usize,
+    descriptor_at: usize,
+    reason: &'static str,
+) {
+    let added: Vec<_> = after
+        .ungraded
+        .iter()
+        .filter(|row| !before.ungraded.contains(row))
+        .collect();
+    assert_eq!(added.len(), 1, "{added:?}");
+    assert_eq!(added[0].structure, "DeclareDescriptor");
+    assert_eq!(added[0].owner, Owner::Declare { entry: 1 });
+    assert_eq!(added[0].reason, Reason::Refused(Refusal::Damaged(reason)));
+    assert_eq!(after.ledgers.len() + 1, before.ledgers.len());
+    let descriptor_at = u32::try_from(descriptor_at).unwrap();
+    assert!(after.ledgers.iter().all(|l| l.base.get() != descriptor_at));
+    let entry_at = u32::try_from(entry_at).unwrap();
+    let entry = after
+        .ledgers
+        .iter()
+        .find(|l| l.structure == "DeclareTableEntry" && l.base.get() == entry_at)
+        .expect("the entry keeps its ledger");
+    assert!(entry.is_clean());
+    assert_eq!(after.counts, before.counts);
+}
+
+#[test]
+fn an_external_declare_entry_whose_descriptor_maps_nowhere_keeps_its_entry_and_loses_its_descriptor()
+ {
+    // Patched in memory only. AGENTS.md bars committing a patched program.
+    let original = grayscale();
+    let before = walk(&original).unwrap();
+    let entry = &grayscale_entries(&original, &before)[1];
+    let descriptor_at = file_offset_of(&PeImage::parse(&original).unwrap(), entry.descriptor);
+
+    let unmapped = 0x00F0_0000_u32.to_le_bytes();
+    let mut patched = original.clone();
+    assert_ne!(patched[entry.at + 4..entry.at + 8], unmapped);
+    patched[entry.at + 4..entry.at + 8].copy_from_slice(&unmapped);
+
+    let after = walk(&patched).expect("one bad descriptor must not stop the walk");
+    assert_one_refused_descriptor(
+        &before,
+        &after,
+        entry.at,
+        descriptor_at,
+        "a Declare descriptor address is in no section",
+    );
+}
+
+#[test]
+fn a_declare_entry_of_an_undocumented_type_keeps_its_entry_and_its_descriptor_is_refused() {
+    let original = grayscale();
+    let before = walk(&original).unwrap();
+    let entry = &grayscale_entries(&original, &before)[1];
+    let descriptor_at = file_offset_of(&PeImage::parse(&original).unwrap(), entry.descriptor);
+
+    let mut patched = original.clone();
+    patched[entry.at..entry.at + 4].copy_from_slice(&99_u32.to_le_bytes());
+
+    let after = walk(&patched).expect("one undocumented type must not stop the walk");
+    assert_one_refused_descriptor(
+        &before,
+        &after,
+        entry.at,
+        descriptor_at,
+        "a Declare entry has a type that is neither 6 nor 7",
+    );
+}
+
+#[test]
+fn a_declare_descriptor_whose_library_name_maps_nowhere_is_still_graded_and_clean() {
+    // The reader keeps both addresses and loses the declaration, so the
+    // descriptor is still graded, and the walk changes nothing else.
+    let original = grayscale();
+    let before = walk(&original).unwrap();
+    let entry = &grayscale_entries(&original, &before)[1];
+    let descriptor_at = file_offset_of(&PeImage::parse(&original).unwrap(), entry.descriptor);
+
+    let unmapped = 0x00F0_0000_u32.to_le_bytes();
+    let mut patched = original.clone();
+    assert_ne!(patched[descriptor_at..descriptor_at + 4], unmapped);
+    patched[descriptor_at..descriptor_at + 4].copy_from_slice(&unmapped);
+
+    let after = walk(&patched).expect("one bad name must not stop the walk");
+    assert_eq!(after.ungraded, before.ungraded);
+    assert_eq!(after.counts, before.counts);
+    assert_eq!(after.ledgers.len(), before.ledgers.len());
+    let at = u32::try_from(descriptor_at).unwrap();
+    let ledger = after
+        .ledgers
+        .iter()
+        .find(|l| l.structure == "DeclareDescriptor" && l.base.get() == at)
+        .expect("the descriptor is still graded");
+    assert!(ledger.is_clean());
+
+    let table = OpcodeTable::builtin();
+    let mode = deform6::journal::Mode::Salvage;
+    let kept = |data: &[u8]| {
+        deform6::inspect(data, &table, mode)
+            .unwrap()
+            .declarations
+            .len()
+    };
+    assert_eq!(kept(&original), 8);
+    assert_eq!(kept(&patched), 7);
+}
+
+#[test]
+fn a_declare_descriptor_that_two_entries_name_is_graded_once() {
+    // No corpus table names one descriptor twice, so entry 2 is patched in
+    // memory to name the descriptor of entry 1.
+    let original = grayscale();
+    let pe = PeImage::parse(&original).unwrap();
+    let before = walk(&original).unwrap();
+    let entries = grayscale_entries(&original, &before);
+    let (first, second) = (&entries[1], &entries[2]);
+    let orphan = u32::try_from(file_offset_of(&pe, second.descriptor)).unwrap();
+
+    let shared = first.descriptor.to_le_bytes();
+    let mut patched = original.clone();
+    assert_ne!(patched[second.at + 4..second.at + 8], shared);
+    patched[second.at + 4..second.at + 8].copy_from_slice(&shared);
+
+    let after = walk(&patched).expect("a shared descriptor must not stop the walk");
+    let descriptors = |found: &Walk| -> Vec<u32> {
+        found
+            .ledgers
+            .iter()
+            .filter(|l| l.structure == "DeclareDescriptor")
+            .map(|l| l.base.get())
+            .collect()
+    };
+    let (old, new) = (descriptors(&before), descriptors(&after));
+    assert_eq!(new.len() + 1, old.len());
+    let distinct: BTreeSet<u32> = new.iter().copied().collect();
+    assert_eq!(distinct.len(), new.len(), "a descriptor was graded twice");
+    assert!(!new.contains(&orphan), "no entry names this descriptor now");
+    assert_eq!(after.ungraded, before.ungraded);
 }

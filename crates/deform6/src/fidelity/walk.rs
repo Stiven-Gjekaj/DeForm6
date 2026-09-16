@@ -5,7 +5,7 @@
 //! Most parsed structures in this crate do not keep the file offset they were
 //! read from. Three do: `VbHeader`, `ProjectInfo` and `ControlInfo` each hold
 //! a `file_offset`, because a defect about a count that one of them carries
-//! must name the byte of that count. The other nine structures this module
+//! must name the byte of that count. The other ten structures this module
 //! grades keep no offset, and to add one to each would change every reader
 //! under `vb/` to serve a measurement.
 //!
@@ -49,10 +49,19 @@ use crate::vb::gui::{GuiObjectInfo, GuiTable, GuiTableEntry};
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::object::{Object, ObjectTable};
 use crate::vb::privateobj::{ObjectInfo, PrivateObj};
-use crate::vb::project::{DeclareTable, DeclareTableEntry, ObjectTableHead, ProjectInfo};
+use crate::vb::project::{
+    DeclareDescriptor, DeclareTable, DeclareTableEntry, ObjectTableHead, ProjectInfo,
+};
 
 /// `STRUCTURES.md` section 3: `dwExternalCount` sits at `ProjectInfo + 0x238`.
 const DW_EXTERNAL_COUNT: u32 = 0x238;
+
+/// `STRUCTURES.md` section 7.1: the runtime resolves an entry of type 6.
+const INTERNAL_ENTRY: u32 = 6;
+
+/// `STRUCTURES.md` section 7.1: an entry of type 7 names a library and an
+/// export.
+const EXTERNAL_ENTRY: u32 = 7;
 
 /// `STRUCTURES.md` section 4: `lpObjectArray` sits at `ObjectTable + 0x30`.
 const LP_OBJECT_ARRAY: u32 = 0x30;
@@ -129,14 +138,15 @@ pub enum Reason {
 /// counts every array the census knows.
 ///
 /// The ledgers come in the order the walk reaches the structures. First come
-/// the VB header, `ProjectInfo`, each `Declare` table entry, each GUI table
-/// entry followed by the `GUIObjectInfo` of its form, the object table, and
-/// each `Object` element.
+/// the VB header, `ProjectInfo`, each `Declare` table entry followed by the
+/// descriptor that it names, each GUI table entry followed by the
+/// `GUIObjectInfo` of its form, the object table, and each `Object` element.
 /// Then each object adds its `ObjectInfo`, its `PrivateObj`, its
 /// `OptionalObjectInfo`, and its `ControlInfo` elements, in that order. Each
 /// `ControlInfo` is followed by the stubs that its bound event slots name, in
-/// slot order. A stub that an earlier slot named is not graded again, so no
-/// two ledgers share its bytes, and an unbound slot names no stub.
+/// slot order. A stub or a descriptor that an earlier slot or entry named is
+/// not graded again, so no two ledgers share its bytes. An unbound slot names
+/// no stub, and the walk grades no descriptor for an entry of type 6.
 ///
 /// A structure that the walk reaches and cannot grade gets a row in
 /// `ungraded` and no ledger. The walk does not try a `PrivateObj` for an
@@ -249,13 +259,15 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
     Ok(found)
 }
 
-/// Grades each `Declare` table entry that the reader returned, or records why
-/// one could not be graded.
+/// Grades each `Declare` table entry that the reader returned, and the
+/// descriptor that each graded entry names, or records why one could not be
+/// graded.
 ///
 /// A table whose address maps nowhere has no entries to grade: the reader
 /// returned none, and the census row says why. The reader cut each entry out
 /// of the same region, so a cut here fails only when the walk's stride and
-/// the reader's stride disagree.
+/// the reader's stride disagree. An entry that is not graded gets no
+/// descriptor row.
 fn grade_declare_entries(
     pe: &PeImage<'_>,
     info: &ProjectInfo,
@@ -265,6 +277,7 @@ fn grade_declare_entries(
     let Some(region) = pe.region_at_va(info.lp_external_table) else {
         return Ok(());
     };
+    let mut descriptors = BTreeSet::new();
     for (index, entry) in table.entries.iter().enumerate() {
         let owner = declare_owner(index)?;
         match element::<DeclareTableEntry>(
@@ -272,13 +285,74 @@ fn grade_declare_entries(
             index,
             "the file ends inside a Declare table entry",
         ) {
-            Ok(window) => found.ledgers.push(compare(entry, &window)?),
+            Ok(window) => {
+                found.ledgers.push(compare(entry, &window)?);
+                grade_declare_descriptor(pe, entry, owner, &mut descriptors, found)?;
+            }
             Err(reason) => found.ungraded.push(Ungraded {
                 structure: DeclareTableEntry::STRUCTURE,
                 owner,
                 reason: Reason::Refused(reason),
             }),
         }
+    }
+    Ok(())
+}
+
+/// Grades the descriptor that one `Declare` table entry names, or records why
+/// it could not be graded.
+///
+/// An entry of type 6 names a pair of a different shape, so it gets no row. A
+/// descriptor address already in `seen` is not graded again. An entry of any
+/// other type gets a refused row, because the walk knows no descriptor shape
+/// for it.
+///
+/// The reader keeps no descriptor when its address is in no section, or when
+/// the file ends inside its first 8 bytes. The walk's window starts at the
+/// same byte and is 24 bytes long, so a window that the walk cut always holds
+/// those 8 bytes. The last refusal below therefore cannot fire. It exists so
+/// that nothing here unwraps.
+fn grade_declare_descriptor(
+    pe: &PeImage<'_>,
+    entry: &DeclareTableEntry,
+    owner: Owner,
+    seen: &mut BTreeSet<Va>,
+    found: &mut Walk,
+) -> Result<(), WalkError> {
+    let graded = match entry.dw_entry_type {
+        INTERNAL_ENTRY => return Ok(()),
+        EXTERNAL_ENTRY => {
+            if !seen.insert(entry.lp_import_descriptor) {
+                return Ok(());
+            }
+            pe.region_at_va(entry.lp_import_descriptor)
+                .ok_or(Refusal::Damaged(
+                    "a Declare descriptor address is in no section",
+                ))
+                .and_then(|region| {
+                    window::<DeclareDescriptor>(
+                        &region,
+                        "the file ends inside a Declare descriptor",
+                    )
+                })
+                .and_then(|window| {
+                    let record = entry.descriptor.ok_or(Refusal::Damaged(
+                        "the reader kept no descriptor for a Declare entry",
+                    ))?;
+                    Ok((record, window))
+                })
+        }
+        _ => Err(Refusal::Damaged(
+            "a Declare entry has a type that is neither 6 nor 7",
+        )),
+    };
+    match graded {
+        Ok((record, window)) => found.ledgers.push(compare(&record, &window)?),
+        Err(reason) => found.ungraded.push(Ungraded {
+            structure: DeclareDescriptor::STRUCTURE,
+            owner,
+            reason: Reason::Refused(reason),
+        }),
     }
     Ok(())
 }

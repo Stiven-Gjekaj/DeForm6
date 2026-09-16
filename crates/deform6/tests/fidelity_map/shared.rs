@@ -43,6 +43,7 @@ pub(crate) const STRUCTURES: &[&str] = &[
     "VBHeader",
     "ProjectInfo",
     "DeclareTableEntry",
+    "DeclareDescriptor",
     "GuiTableEntry",
     "GuiObjectInfo",
     "ObjectTable",
