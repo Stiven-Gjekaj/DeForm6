@@ -1325,7 +1325,9 @@ shows `0x3F`). PVB reads it as `wProcType` and treats `0xFFFF` as "method". The
 handler address is at stub + 0x8 as a `jmp rel32`. IDC computes it as
 `stub + 0x0D + dword(stub + 0x09)`. The corpus agrees with this shape and
 this arithmetic in all 390 of its event stubs. It also has 311 native stubs
-that hold `0xFFFF` and that no slot names (§19).
+that hold `0xFFFF` and that no slot names (§19). DeForm6 decodes the native
+shape only. A stub of another shape gets an `UnknownStubShape` defect
+(§19).
 
 In a **P-code** build the stub is a 13-byte sequence
 `xor eax,eax / mov edx,<addr> / push <addr> / ret` (SVBD `MethodLinkPCode`), and
@@ -2152,21 +2154,26 @@ in `tests/byte_fidelity.rs` keep the other facts of this section true:
   for the second row, for the one address of each stub, and for the 311
   stubs that no slot names.
 
-**A stub of another shape.** The reader does not read the two opcodes, so it
-decodes every stub as native. The emitter writes the native opcodes, so a
-stub of another shape cannot hide in the fidelity map:
+**A stub of another shape.** The reader checks the two opcodes before it
+reads a value. A stub that does not hold `81 6C 24 04` at 0x00 and `E9` at
+0x08 gets an `UnknownStubShape` defect at the first byte of the stub, and
+the defect gives the 13 bytes that the stub holds. The slot stays bound and
+keeps no handler address. The fidelity walk records the stub as refused,
+and it gives as the reason that the stub does not have the native shape.
+The defect is `Tolerated`, so a strict run reports it and continues.
 
-- If the handler arithmetic of §8.6 stays inside the `u32` range, the reader
-  keeps a wrong handler address, and the opcode bytes show as bytes that
-  differ.
-- If the arithmetic leaves the range, the reader keeps no handler and
-  reports an `UnreadablePointer` defect at the slot. The walk records the
-  stub as refused.
+Before this check, the reader decoded every stub as native. A P-code stub
+(§8.6) at an address in a corpus program then gave an `UnreadablePointer`
+defect at the slot. Its last byte, `0xC3`, is the high byte of what the
+reader took as `rel32`, so the handler address went below 0. The address of
+the stub was readable, so that defect named the wrong fault. At a high
+address, the same bytes stayed inside the `u32` range and gave a wrong
+handler address with no defect.
 
-A P-code stub (§8.6) at an address in a corpus program takes the second
-path. Its last byte, `0xC3`, is the high byte of `rel32`, so `rel32` is a
-large negative number. A check that patched one corpus program in memory, on
-2026-09-16, showed this. The check is not in the repository.
+`tests/stub_shapes.rs` patches a P-code stub into one corpus program in
+memory and requires the defect. It also requires that no corpus program
+raises one. Unit tests in `vb/controlinfo.rs` change each of the five
+opcode bytes, and put a P-code stub at a low and at a high address.
 
 **What the measurement did not settle.** All 390 stubs are native, so the
 P-code stub shapes of §8.6 stay **[L]**.

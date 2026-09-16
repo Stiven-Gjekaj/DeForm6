@@ -308,10 +308,10 @@ A byte that goes back unchanged is one the reader reproduces.
 No reproduced byte differs from the file in any of the 1694 records, and no two
 records claim the same byte.
 
-The reader reads only 8 of the 13 bytes of an event stub.
-The emitter writes the other 5 as the opcodes of the native stub, which the
-reader assumes and does not read, so a stub of another shape cannot pass as
-native.
+The reader keeps what 8 of the 13 bytes of an event stub hold.
+The other 5 are the opcodes of the native stub.
+The reader checks them and keeps no field for them, and the emitter writes
+them back as constants.
 
 This is a coverage figure and not a proof of correctness.
 A field that is read at one offset and written back at the same offset cannot
@@ -408,7 +408,7 @@ crates/
     src/error.rs    the defect vocabulary and its three severities
     src/journal.rs  the one place a severity decides whether a run continues
     schema/         the JSON Schema every report is validated against
-    tests/          22 integration suites, including the corpus sweep
+    tests/          23 integration suites, including the corpus sweep
   deform6-cli/      the command line: it owns the file system
   xtask/            build tasks, including the licence audit
 docs/               the reverse engineering surveys the source cites

@@ -270,13 +270,14 @@ Section 18 of `STRUCTURES.md` gives the numbers.
 stubs. Section 17 of `STRUCTURES.md` could not name that word, and it still
 cannot. Section 19 gives the numbers.
 
-**A P-code stub does not give a wrong handler address.** The reader does not
+**A P-code stub did not give a wrong handler address.** The reader did not
 read the opcodes. At the addresses of a corpus program, the last byte of a
-P-code stub makes the jump go below address 0. The reader then keeps no
-handler and reports an `UnreadablePointer` defect, and the walk records the
-stub as refused. A test patches a P-code stub into a corpus program in memory
-and requires this. The defect names the wrong fault: the address is readable,
-and the stub has another shape.
+P-code stub makes the jump go below address 0, so the reader kept no handler
+and reported an `UnreadablePointer` defect. That defect named the wrong fault:
+the address is readable, and the stub has another shape. The reader now
+checks the opcodes, and such a stub gets an `UnknownStubShape` defect at the
+stub. `tests/stub_shapes.rs` requires this, and the fidelity walk records the
+stub as refused.
 
 **`lObjectID` gives the object of each form.** In all 44 programs, the
 `lObjectID` values of the GUI table entries, in order, are the indexes of the

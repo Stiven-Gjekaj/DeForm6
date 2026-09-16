@@ -37,6 +37,9 @@ heading its version and its date.
 - More corpus evidence: the single byte at `GUIObjectInfo + 0x04` is real,
   and no event slot names a method stub. Sections 18 and 19 of
   `docs/STRUCTURES.md` give the numbers.
+- `inspect` checks the two opcodes of each event stub. A stub of another
+  shape, such as a P-code stub, gets an `UnknownStubShape` defect at the
+  stub, and its slot keeps no handler address.
 - The gap 2 cross-check runs: `inspect` compares bit `0x2` of
   `fObjectType` with `lpPrivateObject` for each object, and reports a
   disagreement as a `ModuleMarkerMismatch` defect at `ObjectInfo + 0x0C`.
@@ -67,9 +70,13 @@ is therefore 2.0.0, not 1.1.0.
   gives `ProjectInfo + 0x238`, and its `rva` is now `null`, because that
   byte was not reached through the address of the `Declare` table that
   1.0.0 gave.
-- `DefectKind` has a new variant, `ModuleMarkerMismatch`, and
-  `schema/report.schema.json` accepts it. A `match` on `DefectKind` with no
-  wildcard arm does not compile until it names the new variant.
+- `DefectKind` has two new variants, `ModuleMarkerMismatch` and
+  `UnknownStubShape`, and `schema/report.schema.json` accepts both. A
+  `match` on `DefectKind` with no wildcard arm does not compile until it
+  names them.
+- An event stub without the native opcodes now gives `UnknownStubShape` at
+  the stub. 1.0.0 gave `UnreadablePointer` at the slot when the jump left
+  the address space, and otherwise a wrong handler address with no defect.
 - `vb::classify::agree` now treats an `lpPrivateObject` of `0` as no private
   object, as `PrivateObj::read` already did. It now gives `false` for a form
   whose pointer is `0`, and `true` for a module whose pointer is `0`. The new
@@ -79,9 +86,6 @@ is therefore 2.0.0, not 1.1.0.
 
 - The fidelity walk grades ten structures. `docs/ROADMAP.md` names the
   work on the other structures that is left.
-- The reader does not check the opcode bytes of an event stub. A P-code stub
-  at an address in a corpus program gives an `UnreadablePointer` defect. The
-  address is readable, so the defect names the wrong fault.
 - The census does not count the `Declare` table or the type buffer. The
   clamps on those two arrays only bound a loop, so the byte diff cannot see
   them either.
