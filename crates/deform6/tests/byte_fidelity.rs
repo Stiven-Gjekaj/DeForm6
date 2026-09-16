@@ -14,12 +14,12 @@
 //!
 //! # What a clean result here does and does not mean
 //!
-//! Thirteen of the fourteen header fields, all five `Object` fields, every
-//! field of the other ten structures, and the `imm32` of an event stub are
-//! carried verbatim: read at an
-//! offset, written back at the same offset, with no arithmetic between. A
-//! verbatim field cannot disagree with itself, so a clean map is the expected
-//! result and **is not** a proof that the reader is correct.
+//! Thirteen of the fourteen header fields, four of the five `Object` fields,
+//! every field of the other ten structures, and the `imm32` of an event stub
+//! are carried verbatim: read at an offset, written back at the same offset,
+//! with no arithmetic between. A verbatim field cannot disagree with itself,
+//! so a clean map is the expected result and **is not** a proof that the
+//! reader is correct.
 //!
 //! What it does prove is worth having. The coverage counts are real, and they
 //! are pinned here, so a field dropped from the reader fails this file. And
@@ -29,7 +29,7 @@
 //! the mechanism to reporting a difference when one exists; this file
 //! measures the corpus.
 //!
-//! # `ProcCount` is the one field that can differ, and it does not
+//! # `ProcCount` is the one `Object` field that can differ, and it does not
 //!
 //! `vb::object::bound_proc_count` clamps `ProcCount` to the number of entries
 //! the file can hold behind `lpProcNamesArray`. Where that clamp fires, the
