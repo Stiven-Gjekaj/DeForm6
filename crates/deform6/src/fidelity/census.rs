@@ -99,6 +99,15 @@ pub enum Owner {
         /// The control's index in that object's `ControlInfo` array.
         control: u32,
     },
+    /// One event slot of one control.
+    Slot {
+        /// The owning object's index in the object array.
+        object: u32,
+        /// The control's index in that object's `ControlInfo` array.
+        control: u32,
+        /// The slot's index in that control's event table.
+        slot: u16,
+    },
 }
 
 /// Why the declared count and the returned count agree or differ.

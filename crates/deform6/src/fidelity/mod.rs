@@ -38,7 +38,13 @@
 //! The fields worth watching are the ones that are **not** verbatim.
 //! `crate::vb::object::Object::proc_count` is the first: the reader clamps it
 //! to what the file can hold, so it differs in exactly the programs where the
-//! clamp fires.
+//! clamp fires. The jump of an event stub is the second: the reader keeps the
+//! handler address that it works out, and [`eventstub`] works the jump back
+//! out of that address with its own arithmetic.
+//!
+//! An emitter can also write bytes that the reader assumes and never reads.
+//! The event stub emitter writes the opcode bytes of the native stub, so a
+//! stub of another shape shows as bytes that differ.
 //!
 //! The clamps on `wFormCount`, `dwControlCount` and `wEventCount` do not work
 //! that way. They only bound a loop: the reader returns fewer entries, and no
@@ -56,6 +62,7 @@
 
 pub mod census;
 pub mod controlinfo;
+pub mod eventstub;
 pub mod gui;
 pub mod guiobjectinfo;
 pub mod header;
@@ -132,6 +139,9 @@ pub enum Fault {
 /// 4. Every offset inside `emit` is read from `docs/STRUCTURES.md`, and never
 ///    copied from the reader this grades. See the module doc comment for why
 ///    the whole measurement depends on that.
+/// 5. `emit` may write a byte that the reader assumes and does not read, such
+///    as an opcode the reader decodes around. The module doc comment of that
+///    emitter says which bytes these are.
 ///
 /// A structure whose length is not fixed cannot implement this trait, because
 /// an associated constant cannot depend on `self`. That is deliberate. Those

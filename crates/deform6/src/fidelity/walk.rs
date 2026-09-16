@@ -5,7 +5,7 @@
 //! Most parsed structures in this crate do not keep the file offset they were
 //! read from. Three do: `VbHeader`, `ProjectInfo` and `ControlInfo` each hold
 //! a `file_offset`, because a defect about a count that one of them carries
-//! must name the byte of that count. The other six structures this module
+//! must name the byte of that count. The other seven structures this module
 //! grades keep no offset, and to add one to each would change every reader
 //! under `vb/` to serve a measurement.
 //!
@@ -28,15 +28,20 @@
 //! visibility problem: an emitter that shared the reader's constant would
 //! agree with the reader about a wrong one.
 
+use std::collections::BTreeSet;
+
 use crate::error::Refusal;
 use crate::fidelity::census::{Array, Count, Evidence, Outcome, Owner, outcome};
+use crate::fidelity::eventstub::EventStubRecord;
 use crate::fidelity::guiobjectinfo::GuiObjectInfoRecord;
 use crate::fidelity::ledger::Ledger;
 use crate::fidelity::privateobj::PrivateObjRecord;
 use crate::fidelity::{Emit, Fault, compare};
 use crate::read::pe::PeImage;
 use crate::read::region::{Off, Region, Va};
-use crate::vb::controlinfo::{ControlInfo, ControlInfoTable, OptionalObjectInfo, read_event_table};
+use crate::vb::controlinfo::{
+    ControlInfo, ControlInfoTable, EventSlot, EventTable, OptionalObjectInfo, read_event_table,
+};
 use crate::vb::gui::{GuiObjectInfo, GuiTable, GuiTableEntry};
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::object::{Object, ObjectTable};
@@ -124,7 +129,10 @@ pub enum Reason {
 /// the VB header, `ProjectInfo`, each GUI table entry followed by the
 /// `GUIObjectInfo` of its form, and each `Object` element. Then each object
 /// adds its `ObjectInfo`, its `PrivateObj`, its `OptionalObjectInfo`, and its
-/// `ControlInfo` elements, in that order.
+/// `ControlInfo` elements, in that order. Each `ControlInfo` is followed by the
+/// stubs that its bound event slots name, in slot order. A stub that an
+/// earlier slot named is not graded again, so no two ledgers share its bytes,
+/// and an unbound slot names no stub.
 ///
 /// A structure that the walk reaches and cannot grade gets a row in
 /// `ungraded` and no ledger. The walk does not try a `PrivateObj` for an
@@ -213,6 +221,7 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
         .counts
         .push(count_objects(&object_table, &head, &table)?);
 
+    let mut stubs = BTreeSet::new();
     for (index, object) in table.objects.iter().enumerate() {
         let owner = object_owner(index)?;
         if let Some(info) = grade_object_info(&pe, object, owner, &mut found)? {
@@ -221,7 +230,7 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
         if let Some(optional) = grade_optional_object_info(&pe, object, owner, &mut found)?
             && let Some(table) = count_controls(&pe, object, &optional, owner, &mut found)?
         {
-            grade_controls(&pe, &optional, &table, owner, &mut found)?;
+            grade_controls(&pe, &optional, &table, owner, &mut stubs, &mut found)?;
         }
     }
 
@@ -427,11 +436,14 @@ fn count_controls(
 ///
 /// An array whose address maps nowhere has no entries to grade: the reader
 /// already returned none, and the census row says why.
+///
+/// `stubs` holds the address of every event stub the walk has reached so far.
 fn grade_controls(
     pe: &PeImage<'_>,
     optional: &OptionalObjectInfo,
     table: &ControlInfoTable,
     owner: Owner,
+    stubs: &mut BTreeSet<Va>,
     found: &mut Walk,
 ) -> Result<(), WalkError> {
     let Owner::Object { object } = owner else {
@@ -441,15 +453,19 @@ fn grade_controls(
         return Ok(());
     };
     for (index, control) in table.entries.iter().enumerate() {
+        let control_index = u32::try_from(index)
+            .map_err(|_ignored| Refusal::Damaged("the control index leaves a u32"))?;
         let control_owner = Owner::Control {
             object,
-            control: u32::try_from(index)
-                .map_err(|_ignored| Refusal::Damaged("the control index leaves a u32"))?,
+            control: control_index,
         };
         match element::<ControlInfo>(&array, index, "the file ends inside a ControlInfo element") {
             Ok(window) => {
                 found.ledgers.push(compare(control, &window)?);
-                count_event_slots(pe, control, &window, control_owner, found)?;
+                if let Some(events) = count_event_slots(pe, control, &window, control_owner, found)?
+                {
+                    grade_event_stubs(pe, &events, object, control_index, stubs, found)?;
+                }
             }
             Err(reason) => found.ungraded.push(Ungraded {
                 structure: ControlInfo::STRUCTURE,
@@ -468,20 +484,22 @@ fn grade_controls(
 /// returns no slots, and says so, for a control type it knows no header
 /// layout for, and it refuses a table whose address maps nowhere; the row
 /// keeps those two apart from a clamp.
+///
+/// Gives back the table the reader returned, for the stubs its slots name.
 fn count_event_slots(
     pe: &PeImage<'_>,
     control: &ControlInfo,
     element: &Region<'_>,
     owner: Owner,
     found: &mut Walk,
-) -> Result<(), WalkError> {
+) -> Result<Option<EventTable>, WalkError> {
     let Some(declared_at) = element.file_offset(Off::new(W_EVENT_COUNT)) else {
         // The count field cannot be located, so there is no row to state.
-        return Ok(());
+        return Ok(None);
     };
     let declared = u32::from(control.w_event_count);
 
-    let (recovered, decided) = match read_event_table(pe, control) {
+    let (recovered, decided, table) = match read_event_table(pe, control) {
         Ok(table) => {
             let recovered = u32::try_from(table.slots.len())
                 .map_err(|_ignored| Refusal::Damaged("the event slot count leaves a u32"))?;
@@ -493,9 +511,9 @@ fn count_event_slots(
                 unmapped: false,
                 unsupported_control_type: table.unsupported_control_type,
             });
-            (recovered, decided)
+            (recovered, decided, Some(table))
         }
-        Err(reason) => (0, Outcome::Refused(reason)),
+        Err(reason) => (0, Outcome::Refused(reason), None),
     };
 
     found.counts.push(Count {
@@ -506,6 +524,51 @@ fn count_event_slots(
         recovered,
         outcome: decided,
     });
+    Ok(table)
+}
+
+/// Grades the stub that each bound slot of one control names, or records why
+/// one could not be graded.
+///
+/// An unbound slot names no stub, and the census row already counts it. A
+/// stub address already in `stubs` is not graded again. The set also bounds
+/// what a hostile file can make the walk keep: one ledger or one row for each
+/// address, never one for each slot.
+fn grade_event_stubs(
+    pe: &PeImage<'_>,
+    table: &EventTable,
+    object: u32,
+    control: u32,
+    stubs: &mut BTreeSet<Va>,
+    found: &mut Walk,
+) -> Result<(), WalkError> {
+    for slot in &table.slots {
+        let EventSlot::Bound { index, stub, .. } = *slot else {
+            continue;
+        };
+        if !stubs.insert(stub) {
+            continue;
+        }
+        let graded = located::<EventStubRecord>(pe, stub, "the file ends inside an event stub")
+            .and_then(|window| {
+                let record = EventStubRecord::of(slot).ok_or(Refusal::Damaged(
+                    "the handler address of an event stub leaves a u32",
+                ))?;
+                Ok((record, window))
+            });
+        match graded {
+            Ok((record, window)) => found.ledgers.push(compare(&record, &window)?),
+            Err(reason) => found.ungraded.push(Ungraded {
+                structure: EventStubRecord::STRUCTURE,
+                owner: Owner::Slot {
+                    object,
+                    control,
+                    slot: index,
+                },
+                reason: Reason::Refused(reason),
+            }),
+        }
+    }
     Ok(())
 }
 

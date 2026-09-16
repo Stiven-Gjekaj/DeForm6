@@ -14,8 +14,9 @@
 //!
 //! # What a clean result here does and does not mean
 //!
-//! Thirteen of the fourteen header fields, all five `Object` fields, and
-//! every field of the other seven structures are carried verbatim: read at an
+//! Thirteen of the fourteen header fields, all five `Object` fields, every
+//! field of the other six structures, and the `imm32` of an event stub are
+//! carried verbatim: read at an
 //! offset, written back at the same offset, with no arithmetic between. A
 //! verbatim field cannot disagree with itself, so a clean map is the expected
 //! result and **is not** a proof that the reader is correct.
@@ -40,6 +41,15 @@
 //! `the_corpus_grades_one_hundred_and_five_objects` pins the denominator so
 //! the claim cannot quietly become a claim about fewer objects.
 //!
+//! # The event stub is the second structure that can differ
+//!
+//! The reader keeps the handler address of each stub, not its jump. The
+//! emitter works the jump back out of that address, and it writes the opcode
+//! bytes of the native stub, which the reader assumes and never reads. A wrong
+//! handler arithmetic, or a stub of another shape, therefore shows here.
+//!
+//! Measured on 2026-09-16: all 390 stubs reproduce all 13 of their bytes.
+//!
 //! # The disputed front of `ControlInfo` is checked another way
 //!
 //! `docs/STRUCTURES.md` section 8.6 disputes the first two `ControlInfo`
@@ -54,8 +64,9 @@
 //! that file and `tests/differential.rs` both give: two corpus tests must be
 //! able to fail independently.
 
-use deform6::fidelity::census::Owner;
+use deform6::fidelity::census::{Array, Owner};
 use deform6::fidelity::controlinfo;
+use deform6::fidelity::eventstub;
 use deform6::fidelity::gui;
 use deform6::fidelity::guiobjectinfo;
 use deform6::fidelity::header;
@@ -867,7 +878,9 @@ fn absent_objects(found: &deform6::fidelity::walk::Walk, structure: &str) -> BTr
         .filter(|row| row.structure == structure && row.reason == Reason::Absent)
         .filter_map(|row| match row.owner {
             Owner::Object { object } => Some(object),
-            Owner::Program | Owner::Form { .. } | Owner::Control { .. } => None,
+            Owner::Program | Owner::Form { .. } | Owner::Control { .. } | Owner::Slot { .. } => {
+                None
+            }
         })
         .collect()
 }
@@ -1051,7 +1064,7 @@ fn the_event_slots_fit_the_word_at_two_and_refuse_the_word_at_four_in_seven_hund
 
 #[test]
 fn no_two_structures_the_walk_grades_share_a_byte_in_any_corpus_program() {
-    // Measured on 2026-09-16 before this was asserted: 1304 records across
+    // Measured on 2026-09-16 before this was asserted: 1694 records across
     // the corpus, and no two of them overlap. Two structures claiming the
     // same byte would mean one of them is placed wrongly.
     let mut failed = Vec::new();
@@ -1081,7 +1094,207 @@ fn no_two_structures_the_walk_grades_share_a_byte_in_any_corpus_program() {
 }
 
 #[test]
-fn the_walk_grades_one_thousand_three_hundred_and_four_records_across_the_corpus() {
+fn the_walk_grades_one_thousand_six_hundred_and_ninety_four_records_across_the_corpus() {
     let total: usize = graded().iter().map(|(_path, ledgers)| ledgers.len()).sum();
-    assert_eq!(total, 1304);
+    assert_eq!(total, 1694);
+}
+
+#[test]
+fn the_corpus_grades_three_hundred_and_ninety_event_stubs() {
+    assert_eq!(graded_count("EventStub"), 390);
+}
+
+#[test]
+fn the_event_stub_emitter_writes_all_thirteen_bytes_in_every_graded_stub() {
+    let failed = coverage_failures(
+        "EventStub",
+        13,
+        eventstub::MODELLED_BYTES,
+        eventstub::UNMODELLED,
+    );
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+#[test]
+fn no_event_stub_byte_differs_from_the_file_in_any_corpus_program() {
+    // Five of these bytes are opcodes the reader assumes, and four are a
+    // jump the emitter works out again. A clean result here says that every
+    // stub has the native shape and that the reader's handler arithmetic
+    // agrees with section 8.6.
+    let failed = difference_failures("EventStub");
+    assert!(
+        failed.is_empty(),
+        "{} EventStub byte run(s) differ from the file:\n{}",
+        failed.len(),
+        failed.join("\n")
+    );
+}
+
+/// One bound slot of a native event table, read by hand.
+struct BoundSlot {
+    /// The slot's index in its event table.
+    index: u16,
+    /// The file offset of the slot.
+    at: usize,
+    /// The stub address the slot holds.
+    stub: u32,
+}
+
+/// Reads, by hand, the bound slots of the event table that the `ControlInfo`
+/// at file offset `base` names. Only the `0x40` header is known here, as in
+/// `the_event_slots_fit_the_word_at_two_and_refuse_the_word_at_four_in_seven_hundred_and_six_control_info_records`.
+fn bound_slots(data: &[u8], pe: &PeImage<'_>, base: usize) -> Vec<BoundSlot> {
+    let word = |at: usize| u16::from_le_bytes([data[at], data[at + 1]]);
+    let dword = |at: usize| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
+    assert_eq!(word(base), 0x40, "this helper reads the 0x40 header only");
+    let table = pe
+        .region_at_va(Va::new(dword(base + 0x18)))
+        .and_then(|region| region.file_offset(Off::new(0)))
+        .unwrap();
+    let table = usize::try_from(table.get()).unwrap();
+    (0..word(base + 0x02))
+        .filter_map(|index| {
+            let at =
+                table + usize::try_from(NATIVE_EVENT_HEADER_LEN).unwrap() + usize::from(index) * 4;
+            let stub = dword(at);
+            (stub != 0).then_some(BoundSlot { index, at, stub })
+        })
+        .collect()
+}
+
+fn sk_gradient() -> Vec<u8> {
+    std::fs::read(corpus_root().join("public-domain/SK-Gradient-Sample__VB6/demo/Project1.exe"))
+        .unwrap()
+}
+
+#[test]
+fn a_stub_whose_first_opcode_byte_is_changed_differs_at_that_byte_and_nowhere_else() {
+    // Patched in memory only. The reader decodes the stub all the same,
+    // because it never reads that byte.
+    let original = sk_gradient();
+    let before = walk(&original).unwrap();
+    let stub = before
+        .ledgers
+        .iter()
+        .find(|l| l.structure == "EventStub")
+        .unwrap()
+        .clone();
+    let at = usize::try_from(stub.base.get()).unwrap();
+    let mut patched = original.clone();
+    assert_eq!(
+        patched[at], 0x81,
+        "the stub must open with the native opcode"
+    );
+    patched[at] = 0x80;
+
+    let after = walk(&patched).unwrap();
+    assert_eq!(after.ledgers.len(), before.ledgers.len());
+    let changed: Vec<&Ledger> = after
+        .ledgers
+        .iter()
+        .filter(|l| !before.ledgers.contains(l))
+        .collect();
+    assert_eq!(changed.len(), 1, "{changed:?}");
+    assert_eq!(changed[0].base, stub.base);
+    let differs: Vec<(u32, u32)> = changed[0]
+        .runs_with(Verdict::Differs)
+        .map(|run| (run.span.at.get(), run.span.len))
+        .collect();
+    assert_eq!(differs, vec![(stub.base.get(), 1)]);
+}
+
+#[test]
+fn a_bound_slot_whose_stub_maps_nowhere_is_ungraded_and_owned_by_its_slot() {
+    let original = sk_gradient();
+    let before = walk(&original).unwrap();
+    let pe = PeImage::parse(&original).unwrap();
+    let (control_base, slot) = before
+        .ledgers
+        .iter()
+        .filter(|l| l.structure == "ControlInfo")
+        .find_map(|l| {
+            let base = usize::try_from(l.base.get()).unwrap();
+            bound_slots(&original, &pe, base)
+                .into_iter()
+                .next()
+                .map(|slot| (l.base.get(), slot))
+        })
+        .unwrap();
+    // The census names each control by the offset of its wEventCount.
+    let row = before
+        .counts
+        .iter()
+        .find(|c| c.array == Array::EventSlots && c.declared_at.get() == control_base + 2)
+        .unwrap();
+    let Owner::Control { object, control } = row.owner else {
+        panic!("an event slot row must belong to a control: {row:?}");
+    };
+
+    let unmapped = 0x00F0_0000_u32.to_le_bytes();
+    let mut patched = original.clone();
+    assert_ne!(patched[slot.at..slot.at + 4], unmapped);
+    patched[slot.at..slot.at + 4].copy_from_slice(&unmapped);
+
+    let after = walk(&patched).expect("one bad stub must not stop the walk");
+    let added: Vec<_> = after
+        .ungraded
+        .iter()
+        .filter(|row| !before.ungraded.contains(row))
+        .collect();
+    assert_eq!(added.len(), 1, "{added:?}");
+    assert_eq!(added[0].structure, "EventStub");
+    assert_eq!(
+        added[0].owner,
+        Owner::Slot {
+            object,
+            control,
+            slot: slot.index
+        }
+    );
+    assert!(matches!(added[0].reason, Reason::Refused(_)));
+    assert_eq!(after.ledgers.len() + 1, before.ledgers.len());
+    assert_eq!(after.counts, before.counts);
+}
+
+#[test]
+fn a_stub_that_two_slots_name_is_graded_once() {
+    // No corpus control names one stub twice, so the first control with two
+    // bound slots is patched in memory: its second slot takes the first
+    // slot's stub.
+    for path in executables() {
+        let original = std::fs::read(&path).unwrap();
+        let pe = PeImage::parse(&original).unwrap();
+        let before = walk(&original).unwrap();
+        let Some(slots) = before
+            .ledgers
+            .iter()
+            .filter(|l| l.structure == "ControlInfo")
+            .map(|l| bound_slots(&original, &pe, usize::try_from(l.base.get()).unwrap()))
+            .find(|slots| slots.len() >= 2)
+        else {
+            continue;
+        };
+
+        let mut patched = original.clone();
+        let first = slots[0].stub.to_le_bytes();
+        assert_ne!(patched[slots[1].at..slots[1].at + 4], first);
+        patched[slots[1].at..slots[1].at + 4].copy_from_slice(&first);
+
+        let after = walk(&patched).unwrap();
+        let stubs = |found: &deform6::fidelity::walk::Walk| -> Vec<u32> {
+            found
+                .ledgers
+                .iter()
+                .filter(|l| l.structure == "EventStub")
+                .map(|l| l.base.get())
+                .collect()
+        };
+        let (old, new) = (stubs(&before), stubs(&after));
+        assert_eq!(new.len() + 1, old.len(), "{}", path.display());
+        let distinct: BTreeSet<u32> = new.iter().copied().collect();
+        assert_eq!(distinct.len(), new.len(), "a stub was graded twice");
+        assert_eq!(after.ungraded, before.ungraded);
+        return;
+    }
+    panic!("no corpus control has two bound slots");
 }

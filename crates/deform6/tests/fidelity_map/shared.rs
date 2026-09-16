@@ -49,6 +49,7 @@ pub(crate) const STRUCTURES: &[&str] = &[
     "PrivateObj",
     "OptionalObjectInfo",
     "ControlInfo",
+    "EventStub",
 ];
 
 /// The arrays the census counts, in the order the walk reaches them.
@@ -103,6 +104,12 @@ pub(crate) const HEADER: &str = r#"# The committed fidelity map: what the fideli
 #
 # A byte that is the same is coverage, not proof. A field that is read at one
 # offset and written back at the same offset cannot differ from itself.
+#
+# An `EventStub` record is 13 bytes, and the emitter writes all 13. The reader
+# reads only 8 of them: `imm32`, and the jump, from which it keeps the handler
+# address. The emitter works the jump back out of that address. The other 5
+# bytes are the opcodes of the native stub, which the reader assumes and does
+# not read, so a stub of another shape shows as bytes that differ.
 "#;
 
 /// The ranges of one structure that the emitter does not write, and the

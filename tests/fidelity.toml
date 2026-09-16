@@ -27,6 +27,12 @@
 #
 # A byte that is the same is coverage, not proof. A field that is read at one
 # offset and written back at the same offset cannot differ from itself.
+#
+# An `EventStub` record is 13 bytes, and the emitter writes all 13. The reader
+# reads only 8 of them: `imm32`, and the jump, from which it keeps the handler
+# address. The emitter works the jump back out of that address. The other 5
+# bytes are the opcodes of the native stub, which the reader assumes and does
+# not read, so a stub of another shape shows as bytes that differ.
 
 [layout.VBHeader]
 length = 104
@@ -73,6 +79,11 @@ length = 40
 modelled = 16
 unmodelled = [[0x04, 4], [0x0C, 12], [0x1C, 4], [0x24, 4]]
 
+[layout.EventStub]
+length = 13
+modelled = 13
+unmodelled = []
+
 [program."public-domain/HexScroll/Hex Scroll.exe"]
 structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
@@ -83,6 +94,7 @@ structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 23, same = 368, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 22, same = 286, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
 array.Objects = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
 array.Controls = { rows = 2, declared = 23, returned = 23, not_whole = 0 }
@@ -98,6 +110,7 @@ structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 1, same = 13, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Controls = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
@@ -113,6 +126,7 @@ structure.ObjectInfo = { records = 4, same = 24, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 4, same = 64, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 4, same = 32, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 90, same = 1440, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 76, same = 988, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 4, returned = 4, not_whole = 0 }
 array.Objects = { rows = 1, declared = 4, returned = 4, not_whole = 0 }
 array.Controls = { rows = 4, declared = 90, returned = 90, not_whole = 0 }
@@ -128,6 +142,7 @@ structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 1, refused = 0 }
 structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 1, refused = 0 }
 structure.ControlInfo = { records = 4, same = 64, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 1, same = 13, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
 array.Controls = { rows = 1, declared = 4, returned = 4, not_whole = 0 }
@@ -143,6 +158,7 @@ structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 31, same = 496, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 21, same = 273, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Controls = { rows = 1, declared = 31, returned = 31, not_whole = 0 }
@@ -158,6 +174,7 @@ structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 13, same = 208, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 13, same = 169, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Controls = { rows = 1, declared = 13, returned = 13, not_whole = 0 }
@@ -173,6 +190,7 @@ structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 5, same = 80, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 6, same = 78, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Controls = { rows = 1, declared = 5, returned = 5, not_whole = 0 }
@@ -188,6 +206,7 @@ structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 10, same = 160, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 5, same = 65, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Controls = { rows = 1, declared = 10, returned = 10, not_whole = 0 }
@@ -203,6 +222,7 @@ structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 27, same = 432, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 20, same = 260, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
 array.Objects = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
 array.Controls = { rows = 2, declared = 27, returned = 27, not_whole = 0 }
@@ -218,6 +238,7 @@ structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 8, same = 128, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 9, same = 117, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Controls = { rows = 1, declared = 8, returned = 8, not_whole = 0 }
@@ -233,6 +254,7 @@ structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 5, same = 80, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 5, same = 65, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Controls = { rows = 1, declared = 5, returned = 5, not_whole = 0 }
@@ -248,6 +270,7 @@ structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 6, same = 96, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 6, same = 78, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Controls = { rows = 1, declared = 6, returned = 6, not_whole = 0 }
@@ -263,6 +286,7 @@ structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 5, same = 80, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 5, same = 65, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Controls = { rows = 1, declared = 5, returned = 5, not_whole = 0 }
@@ -278,6 +302,7 @@ structure.ObjectInfo = { records = 4, same = 24, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 1, refused = 0 }
 structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 1, refused = 0 }
 structure.ControlInfo = { records = 32, same = 512, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 10, same = 130, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 4, returned = 4, not_whole = 0 }
 array.Controls = { rows = 3, declared = 32, returned = 32, not_whole = 0 }
@@ -293,6 +318,7 @@ structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 10, same = 160, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 5, same = 65, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
 array.Controls = { rows = 3, declared = 10, returned = 10, not_whole = 0 }
@@ -308,6 +334,7 @@ structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 6, same = 96, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 2, same = 26, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Controls = { rows = 1, declared = 6, returned = 6, not_whole = 0 }
@@ -323,6 +350,7 @@ structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 6, same = 96, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 2, same = 26, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Controls = { rows = 1, declared = 6, returned = 6, not_whole = 0 }
@@ -338,6 +366,7 @@ structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 7, same = 112, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 3, same = 39, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
 array.Controls = { rows = 2, declared = 7, returned = 7, not_whole = 0 }
@@ -353,6 +382,7 @@ structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 9, same = 144, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 4, same = 52, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
 array.Controls = { rows = 3, declared = 9, returned = 9, not_whole = 0 }
@@ -368,6 +398,7 @@ structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 15, same = 240, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 9, same = 117, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
 array.Controls = { rows = 3, declared = 15, returned = 15, not_whole = 0 }
@@ -383,6 +414,7 @@ structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 10, same = 160, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 4, same = 52, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
 array.Controls = { rows = 3, declared = 10, returned = 10, not_whole = 0 }
@@ -398,6 +430,7 @@ structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 9, same = 144, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 5, same = 65, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
 array.Controls = { rows = 3, declared = 9, returned = 9, not_whole = 0 }
@@ -413,6 +446,7 @@ structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 16, same = 256, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 8, same = 104, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
 array.Controls = { rows = 3, declared = 16, returned = 16, not_whole = 0 }
@@ -428,6 +462,7 @@ structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 16, same = 256, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 9, same = 117, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
 array.Controls = { rows = 3, declared = 16, returned = 16, not_whole = 0 }
@@ -443,6 +478,7 @@ structure.ObjectInfo = { records = 4, same = 24, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 4, same = 64, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 4, same = 32, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 12, same = 192, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 4, same = 52, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 4, returned = 4, not_whole = 0 }
 array.Controls = { rows = 4, declared = 12, returned = 12, not_whole = 0 }
@@ -458,6 +494,7 @@ structure.ObjectInfo = { records = 4, same = 24, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 4, same = 64, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 4, same = 32, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 14, same = 224, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 8, same = 104, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 4, returned = 4, not_whole = 0 }
 array.Controls = { rows = 4, declared = 14, returned = 14, not_whole = 0 }
@@ -473,6 +510,7 @@ structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 3, same = 39, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Controls = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
@@ -488,6 +526,7 @@ structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 19, same = 304, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 3, same = 39, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
 array.Controls = { rows = 2, declared = 19, returned = 19, not_whole = 0 }
@@ -503,6 +542,7 @@ structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 1, refused = 0 }
 structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 1, refused = 0 }
 structure.ControlInfo = { records = 19, same = 304, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 6, same = 78, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
 array.Controls = { rows = 1, declared = 19, returned = 19, not_whole = 0 }
@@ -518,6 +558,7 @@ structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 6, same = 96, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 7, same = 91, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
 array.Controls = { rows = 2, declared = 6, returned = 6, not_whole = 0 }
@@ -533,6 +574,7 @@ structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 17, same = 272, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 8, same = 104, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
 array.Controls = { rows = 3, declared = 17, returned = 17, not_whole = 0 }
@@ -548,6 +590,7 @@ structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 41, same = 656, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 4, same = 52, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
 array.Controls = { rows = 2, declared = 41, returned = 41, not_whole = 0 }
@@ -563,6 +606,7 @@ structure.ObjectInfo = { records = 5, same = 30, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 4, same = 64, differs = 0, absent = 1, refused = 0 }
 structure.OptionalObjectInfo = { records = 4, same = 32, differs = 0, absent = 1, refused = 0 }
 structure.ControlInfo = { records = 31, same = 496, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 12, same = 156, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
 array.Objects = { rows = 1, declared = 5, returned = 5, not_whole = 0 }
 array.Controls = { rows = 4, declared = 31, returned = 31, not_whole = 0 }
@@ -578,6 +622,7 @@ structure.ObjectInfo = { records = 5, same = 30, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 4, same = 64, differs = 0, absent = 1, refused = 0 }
 structure.OptionalObjectInfo = { records = 4, same = 32, differs = 0, absent = 1, refused = 0 }
 structure.ControlInfo = { records = 23, same = 368, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 8, same = 104, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
 array.Objects = { rows = 1, declared = 5, returned = 5, not_whole = 0 }
 array.Controls = { rows = 4, declared = 23, returned = 23, not_whole = 0 }
@@ -593,6 +638,7 @@ structure.ObjectInfo = { records = 5, same = 30, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 4, same = 64, differs = 0, absent = 1, refused = 0 }
 structure.OptionalObjectInfo = { records = 4, same = 32, differs = 0, absent = 1, refused = 0 }
 structure.ControlInfo = { records = 44, same = 704, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 20, same = 260, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
 array.Objects = { rows = 1, declared = 5, returned = 5, not_whole = 0 }
 array.Controls = { rows = 4, declared = 44, returned = 44, not_whole = 0 }
@@ -608,6 +654,7 @@ structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 16, same = 256, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 7, same = 91, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Controls = { rows = 1, declared = 16, returned = 16, not_whole = 0 }
@@ -623,6 +670,7 @@ structure.ObjectInfo = { records = 5, same = 30, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 2, refused = 0 }
 structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 2, refused = 0 }
 structure.ControlInfo = { records = 32, same = 512, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 22, same = 286, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
 array.Objects = { rows = 1, declared = 5, returned = 5, not_whole = 0 }
 array.Controls = { rows = 3, declared = 32, returned = 32, not_whole = 0 }
@@ -638,6 +686,7 @@ structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 9, same = 144, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 4, same = 52, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
 array.Controls = { rows = 3, declared = 9, returned = 9, not_whole = 0 }
@@ -653,6 +702,7 @@ structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 14, same = 224, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 5, same = 65, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
 array.Controls = { rows = 3, declared = 14, returned = 14, not_whole = 0 }
@@ -668,6 +718,7 @@ structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 9, same = 144, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 4, same = 52, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Controls = { rows = 1, declared = 9, returned = 9, not_whole = 0 }
@@ -683,6 +734,7 @@ structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 1, same = 13, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Controls = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
@@ -698,6 +750,7 @@ structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 9, same = 144, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 4, same = 52, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
 array.Controls = { rows = 3, declared = 9, returned = 9, not_whole = 0 }
@@ -713,6 +766,7 @@ structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 13, same = 208, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 6, same = 78, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
 array.Controls = { rows = 3, declared = 13, returned = 13, not_whole = 0 }
@@ -728,6 +782,7 @@ structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refuse
 structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }
 structure.OptionalObjectInfo = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.ControlInfo = { records = 8, same = 128, differs = 0, absent = 0, refused = 0 }
+structure.EventStub = { records = 3, same = 39, differs = 0, absent = 0, refused = 0 }
 array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
 array.Objects = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
 array.Controls = { rows = 2, declared = 8, returned = 8, not_whole = 0 }
