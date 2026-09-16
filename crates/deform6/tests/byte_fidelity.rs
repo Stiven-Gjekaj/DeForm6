@@ -108,8 +108,9 @@ fn graded() -> Vec<(PathBuf, Vec<Ledger>)> {
         .map(|path| {
             let data = std::fs::read(&path)
                 .unwrap_or_else(|err| panic!("reading {}: {err}", path.display()));
-            let ledgers =
-                walk(&data).unwrap_or_else(|err| panic!("grading {}: {err}", path.display()));
+            let ledgers = walk(&data)
+                .unwrap_or_else(|err| panic!("grading {}: {err}", path.display()))
+                .ledgers;
             (path, ledgers)
         })
         .collect()

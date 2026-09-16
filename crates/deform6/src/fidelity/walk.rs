@@ -47,15 +47,27 @@ pub enum WalkError {
     Emit(#[from] Fault),
 }
 
-/// Grades every structure this segment knows how to emit, in one file.
+/// Everything one walk found in one file.
 ///
-/// Returns one ledger for the VB header, then one per object in array order.
+/// A value rather than a bare list, so that what the walk measures beside the
+/// ledgers has a place to go without changing this function's signature
+/// again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Walk {
+    /// One ledger per structure graded, in the order the walk reached them.
+    pub ledgers: Vec<Ledger>,
+}
+
+/// Grades every structure this module knows how to emit, in one file.
+///
+/// The ledgers hold one entry for the VB header, then one per object in array
+/// order.
 ///
 /// # Errors
 ///
 /// Returns [`WalkError::Read`] when the file does not resolve, and
 /// [`WalkError::Emit`] when an emitter in this crate is at fault.
-pub fn walk(data: &[u8]) -> Result<Vec<Ledger>, WalkError> {
+pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
     let pe = PeImage::parse(data).map_err(Refusal::from)?;
 
     let hdr = header_region(&pe)?;
@@ -96,5 +108,5 @@ pub fn walk(data: &[u8]) -> Result<Vec<Ledger>, WalkError> {
         ledgers.push(compare(object, &element)?);
     }
 
-    Ok(ledgers)
+    Ok(Walk { ledgers })
 }
