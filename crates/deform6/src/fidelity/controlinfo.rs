@@ -70,6 +70,7 @@ mod tests {
 
     fn control() -> ControlInfo {
         ControlInfo {
+            file_offset: Off::new(0x6000),
             f_control_type: 0x0040,
             w_event_count: 0x0017,
             lp_guid: Va::new(0x0040_B008),

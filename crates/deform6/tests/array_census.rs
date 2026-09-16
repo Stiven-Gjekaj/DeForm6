@@ -36,8 +36,14 @@
 //! Copied rather than shared, for the reason `tests/corpus_sweep.rs` gives:
 //! two corpus tests must be able to fail independently.
 
+use deform6::error::DefectKind;
 use deform6::fidelity::census::{Array, Count, Outcome, Owner};
 use deform6::fidelity::walk::walk;
+use deform6::read::pe::PeImage;
+use deform6::vb::controlinfo::{ControlInfoTable, read_event_table};
+use deform6::vb::header::{VbHeader, header_region};
+use deform6::vb::object::ObjectTable;
+use deform6::vb::project::{ObjectTableHead, ProjectInfo};
 use std::path::{Path, PathBuf};
 
 /// The number of executables the corpus vendors.
@@ -483,4 +489,65 @@ fn a_control_type_with_no_known_header_layout_is_counted_as_unsized() {
         }
     );
     assert_eq!(after.recovered, 0);
+}
+
+#[test]
+fn a_clamped_event_row_and_the_readers_own_defect_name_the_same_byte() {
+    // Two independent statements of where wEventCount sits: the census reads
+    // it from the walk's own layout, and the reader's defect from the offset
+    // the ControlInfo element keeps. A clamp must make both name one byte.
+    let path = corpus_root().join("public-domain/SK-Gradient-Sample__VB6/demo/Project1.exe");
+    let original = std::fs::read(&path).unwrap();
+    let row = walk(&original)
+        .unwrap()
+        .counts
+        .into_iter()
+        .find(|row| row.array == Array::EventSlots && row.declared > 0)
+        .expect("the fixture declares at least one event slot");
+    let Owner::Control { object, control } = row.owner else {
+        panic!("an event slot row belongs to a control: {row:?}");
+    };
+
+    let at = usize::try_from(row.declared_at.get()).unwrap();
+    let mut patched = original.clone();
+    assert_ne!(
+        patched[at..at + 2],
+        [0xFF, 0xFF],
+        "the patch must change the file"
+    );
+    patched[at..at + 2].copy_from_slice(&[0xFF, 0xFF]);
+
+    let clamped = walk(&patched)
+        .unwrap()
+        .counts
+        .into_iter()
+        .find(|r| r.array == Array::EventSlots && r.owner == row.owner)
+        .unwrap();
+    assert!(
+        matches!(clamped.outcome, Outcome::Clamped { .. }),
+        "the patch must clamp: {clamped:?}"
+    );
+
+    // Now ask the reader directly, through its own chain.
+    let pe = PeImage::parse(&patched).unwrap();
+    let header = VbHeader::read(&header_region(&pe).unwrap()).unwrap();
+    let info = ProjectInfo::read(&pe, header.lp_project_data).unwrap();
+    let head = ObjectTableHead::read(&pe, info.lp_object_table).unwrap();
+    let table = ObjectTable::walk(&pe, info.lp_object_table, &head).unwrap();
+    let owner = &table.objects[usize::try_from(object).unwrap()];
+    let controls = ControlInfoTable::read(&pe, owner).unwrap();
+    let entry = &controls.entries[usize::try_from(control).unwrap()];
+    let events = read_event_table(&pe, entry).unwrap();
+
+    let defect = events
+        .defects()
+        .iter()
+        .find(|d| matches!(d.kind, DefectKind::ImplausibleCount { .. }))
+        .expect("the reader raises a clamp defect");
+    assert_eq!(defect.site.field, "wEventCount");
+    assert_eq!(
+        defect.site.offset,
+        clamped.declared_at.get(),
+        "the reader's defect and the census name different bytes for one count"
+    );
 }

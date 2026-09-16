@@ -72,6 +72,12 @@ use crate::vb::object::Object;
 /// `0x28` = 40 bytes.
 pub const CONTROL_INFO_SIZE: u32 = 0x28;
 
+/// `STRUCTURES.md` section 8.6: `wEventCount` sits at element `+ 0x02`.
+///
+/// The event table clamp defect names this byte, which is where the count it
+/// bounds was read from.
+const W_EVENT_COUNT_AT: u32 = 0x02;
+
 /// The offset of `OptionalObjectInfo` from `Object.lpObjectInfo`.
 /// `STRUCTURES.md` section 5.3: it is not a separate allocation, and it sits
 /// immediately after the `0x38`-byte `ObjectInfo`.
@@ -96,6 +102,13 @@ const NAME_MAX: u32 = 0x104;
 /// contract.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ControlInfo {
+    /// The absolute file offset of this element's first byte.
+    ///
+    /// Kept so a defect about a field in this element can name that field's
+    /// own byte. [`read_event_table`] is handed only this value, not the
+    /// array the element was cut from, and has no other way to know where the
+    /// element sits.
+    pub file_offset: Off,
     /// `0x40` for an intrinsic control's plain event sink, `0x2E` for a COM
     /// control's `IDispatch` sink. Carried raw: [`read_event_table`] selects
     /// the event table's header size from it, and this reader refuses no
@@ -293,7 +306,11 @@ impl ControlInfoTable {
                 defects.push(defect);
             }
 
+            let file_offset = element
+                .file_offset(Off::new(0))
+                .ok_or(Refusal::Damaged("a ControlInfo element has no file offset"))?;
             entries.push(ControlInfo {
+                file_offset,
                 f_control_type: raw.f_control_type,
                 w_event_count: raw.w_event_count,
                 lp_guid: raw.lp_guid,
@@ -643,7 +660,12 @@ pub fn read_event_table(pe: &PeImage<'_>, control: &ControlInfo) -> Result<Event
         ))?;
 
     let mut defects = Vec::new();
-    let (event_count, count_defect) = bound_event_count(&table, header_len, control.w_event_count);
+    let count_at = control
+        .file_offset
+        .checked_add(W_EVENT_COUNT_AT)
+        .map_or(0, Off::get);
+    let (event_count, count_defect) =
+        bound_event_count(&table, header_len, control.w_event_count, count_at);
     if let Some(defect) = count_defect {
         defects.push(defect);
     }
@@ -688,7 +710,17 @@ pub fn read_event_table(pe: &PeImage<'_>, control: &ControlInfo) -> Result<Event
 /// Bounds `wEventCount` against the real length of the file that remains
 /// after `header_len`, and clamps it when it does not fit. The same shape
 /// [`bound_control_count`] uses for `dwControlCount`.
-fn bound_event_count(table: &Region<'_>, header_len: u32, raw_count: u16) -> (u16, Option<Defect>) {
+///
+/// `count_at` is the absolute file offset of `wEventCount` itself, which lives
+/// in the `ControlInfo` element and not in the event table. `ImplausibleCount`
+/// documents its offset as that of the count field, so the defect names this
+/// offset, never the start of the table the count bounds.
+fn bound_event_count(
+    table: &Region<'_>,
+    header_len: u32,
+    raw_count: u16,
+    count_at: u32,
+) -> (u16, Option<Defect>) {
     let remaining = table.len().saturating_sub(header_len);
     let max_entries = remaining.checked_div(EVENT_SLOT_SIZE).unwrap_or(0);
     let raw_count_u32 = u32::from(raw_count);
@@ -697,7 +729,7 @@ fn bound_event_count(table: &Region<'_>, header_len: u32, raw_count: u16) -> (u1
     }
 
     let max = u16::try_from(max_entries).unwrap_or(u16::MAX);
-    let offset = table.file_offset(Off::new(0)).map_or(0, Off::get);
+    let offset = count_at;
     let defect = Defect {
         site: Site {
             offset,
@@ -1436,6 +1468,7 @@ mod tests {
         // as unjoined on the info side, and nothing on the tree side.
         let control_info_table = ControlInfoTable {
             entries: vec![super::ControlInfo {
+                file_offset: Off::new(0),
                 f_control_type: 0x40,
                 w_event_count: 0,
                 lp_guid: Va::new(0),
@@ -1459,6 +1492,7 @@ mod tests {
         lp_event_table: u32,
     ) -> super::ControlInfo {
         super::ControlInfo {
+            file_offset: Off::new(0x0000_0200),
             f_control_type,
             w_event_count,
             lp_guid: Va::new(0),
@@ -1543,6 +1577,37 @@ mod tests {
                 ..
             }
         ));
+
+        // The count lives in the ControlInfo element, two bytes in. The
+        // defect must name that byte, not the start of the event table.
+        let defect = &table.defects()[0];
+        assert_eq!(defect.site.structure, "ControlInfo");
+        assert_eq!(defect.site.field, "wEventCount");
+        assert_eq!(defect.site.offset, 0x0000_0200 + 0x02);
+        assert!(matches!(
+            defect.kind,
+            DefectKind::ImplausibleCount {
+                offset: 0x0000_0202,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn every_control_entry_keeps_the_file_offset_of_its_own_element() {
+        // Two elements, forty bytes apart, at extra offsets 0x80 and 0xA8.
+        let mut extra = vec![0_u8; 0x200];
+        extra[0x58..0x5C].copy_from_slice(&2_u32.to_le_bytes());
+        extra[0x5C..0x60].copy_from_slice(&0x0040_1080_u32.to_le_bytes());
+        let bytes = synthetic_image(&extra);
+        let image = PeImage::parse(&bytes).unwrap();
+        let table = ControlInfoTable::read(&image, &synthetic_form_object()).unwrap();
+        assert_eq!(table.entries.len(), 2);
+        let first = table.entries[0].file_offset;
+        let second = table.entries[1].file_offset;
+        assert_eq!(second.get() - first.get(), super::CONTROL_INFO_SIZE);
+        // The section starts at file offset 0x400 and the array at 0x80 in it.
+        assert_eq!(first, Off::new(0x400 + 0x80));
     }
 
     #[test]
