@@ -347,6 +347,8 @@ PVB `ObjectTable`.)
 | 0x4C | 4 | `lpIdeData3` | IDE only. | **[C]** |
 | 0x50 | 4 | `dwIdentifier` | Template version of the structure. | **[C]** |
 
+Section 20 gives what each field holds in the corpus.
+
 **Trap.** AI's table prints `dwTotalObjects`, `dwCompiledObjects` and
 `dwObjectsInUse` with the `dw` prefix at 0x2A, 0x2C, 0x2E. They are two bytes
 apart, so they are **words**, and AI's naming is a typo. SEK, SVBD, PVB and IDC
@@ -897,6 +899,9 @@ thunking data (module handle plus resolved address), used by VB's own
 For `dwEntryType == 6`, `lpImportDescriptor` points at a pair
 `{ VA descriptor, VA thunk }` where the descriptor is four dwords that AG
 reports are identical across all VB applications. Skip these entries. **[L]**
+
+Section 21 gives what the table holds in the corpus. There, the descriptor of
+an entry of type 7 is 24 bytes, and machine code follows it.
 
 ### 7.2 Reconstructing the `Declare` statement
 
@@ -2148,7 +2153,143 @@ P-code stub shapes of §8.6 stay **[L]**.
 
 ---
 
-## 20. Practical parse order for DeForm6
+## 20. The object table, measured on the corpus, 2026-09-16
+
+Section 4 gives the 84 bytes of the object table. A script read each field in
+the 44 corpus programs.
+
+| Offset | Name | What the 44 programs hold |
+|---|---|---|
+| 0x00 | `lpHeapLink` | 0 in 44 |
+| 0x04 | `lpExecProj` | An address in `.data` in 44, with 28 different values |
+| 0x08 | `lpProjectInfo2` | An address in `.text` in 44, with 44 different values |
+| 0x0C | `dwReserved` | `0xFFFFFFFF` in 44 |
+| 0x10 | `dwNull` | 0 in 44 |
+| 0x14 | `lpProjectObject` | An address in `.data` in 44, with 28 different values |
+| 0x18 | `uuidObject` | 44 different values |
+| 0x28 | `fCompileState` | `0x0A` in 44 |
+| 0x2A | `wTotalObjects` | The number of objects (§4.1) |
+| 0x2C | `wCompiledObjects` | The capacity of the object array (§4.1) |
+| 0x2E | `wObjectsInUse` | The value of `wTotalObjects` in 44 |
+| 0x30 | `lpObjectArray` | The address of the byte after the table in 44 |
+| 0x34 | `fIdeFlag` | 0 in 44 |
+| 0x38 | `lpIdeData` | 0 in 44 |
+| 0x3C | `lpIdeData2` | 0 in 44 |
+| 0x40 | `lpszProjectName` | An address in `.text` in 44, with 44 different values |
+| 0x44 | `dwLcid` | `0x409` in 44 |
+| 0x48 | `dwLcid2` | `0x409` in 31, `0x809` in 8, `0x3809` in 5 |
+| 0x4C | `lpIdeData3` | 0 in 44 |
+| 0x50 | `dwIdentifier` | 2 in 44 |
+
+**Two rows of section 4 do not agree with these files.** Section 4 says that
+`lpExecProj` is zero on disk, and that `lpProjectObject` is used only in
+memory. In all 44 programs, each of the two holds an address in `.data`. This
+document does not know what is at those addresses.
+
+**The object array follows the table.** In all 44 programs, `lpObjectArray`
+holds the address of the byte after the 84 bytes of the table. A longer table
+would share bytes with the first `Object`, so in these files the table is not
+longer than 84 bytes. **[C]** for the size that section 4 gives, on the
+corpus.
+
+**What the reader keeps.** The reader keeps four fields: `wTotalObjects`,
+`wCompiledObjects`, `lpObjectArray` and `lpszProjectName`. The fidelity walk
+writes the four back over the table, and in the 44 programs no byte of the
+four differs from the file.
+
+Two tests in `tests/byte_fidelity.rs` keep these facts true:
+
+- `the_object_array_starts_where_the_eighty_four_bytes_of_the_object_table_end_in_all_forty_four_corpus_programs`,
+  for the address in `lpObjectArray`;
+- `no_object_table_byte_this_reader_models_differs_from_the_file_in_any_corpus_program`,
+  for the four fields that the reader keeps.
+
+The other values in the table above were measured one time. No test keeps
+them true.
+
+**What the measurement did not settle.** This document does not know what
+`lpExecProj` and `lpProjectObject` point at, or what the two LCID values
+control.
+
+---
+
+## 21. The `Declare` table, measured on the corpus, 2026-09-16
+
+Section 7.1 gives an entry of 8 bytes, and the first 8 bytes of the
+descriptor that an entry of type 7 names. A script read every entry and every
+descriptor in the 44 corpus programs.
+
+**The entries.** 36 of the 44 programs have a `Declare` table. The other 8
+hold 0 in `dwExternalCount`. The 36 tables hold 249 entries:
+
+| Check | Entries |
+|---|---|
+| `dwEntryType` is 7 | 220 of 249 |
+| `dwEntryType` is 6 | 29 of 249 |
+| `dwEntryType` has a different value | 0 of 249 |
+| The descriptor address is also in a different entry | 0 of 249 |
+
+29 programs have one entry of type 6 each. The other 7 tables have no entry
+of type 6. The entry of type 6 is entry 0 in 28 programs, and entry 17 in
+`corpus/vb6-code/Edge-detection/Edge_Detection.exe`. That program also has
+the largest count, 26.
+
+**The descriptor of an entry of type 6.** It holds two addresses, as section
+7.1 says. In all 29, the first address is in `.text` and the second address
+is in `.data`. The address of each of these descriptors occurs one time in
+its file, in its entry.
+
+**The descriptor of an entry of type 7 is 24 bytes.** In all 220:
+
+| Offset | Size | Name | What the 220 descriptors hold | Conf |
+|---|---|---|---|---|
+| 0x00 | 4 | `lpDllName` | VA of the library name NTS (§7.1) | **[C]** |
+| 0x04 | 4 | `lpApiName` | VA of the export name NTS (§7.1) | **[C]** |
+| 0x08 | 4 | unknown | `0x00040000` | **[G]** |
+| 0x0C | 4 | thunk data address | A VA in `.data` | **[L]** |
+| 0x10 | 4 | unknown | 0 | **[G]** |
+| 0x14 | 4 | unknown | 0 | **[G]** |
+
+Machine code starts at 0x18:
+
+- At 0x18, `A1 <imm32>` loads a dword. `imm32` is the address at 0x0C plus 8.
+- At 0x23, `68 <imm32>` pushes a value. `imm32` is the address of the
+  descriptor.
+
+So the code uses this descriptor, and it starts where the 24 bytes end. The
+address of each descriptor occurs two times in its file: in its entry, and in
+the `push` at 0x23. In one file, the starts of two descriptors are 64 bytes
+apart or more, so no two descriptors share a byte. **[C]** for the length of
+24 bytes, on the corpus. The dword at 0x0C is the address of the thunk data
+that section 7.1 gives from AG, and the code at 0x18 reads through it.
+**[L]**
+
+**No import is by ordinal.** No `lpApiName` of the 220 descriptors starts
+with `#`, so the corpus cannot close gap 10 (§7.2, §11).
+
+These tests keep facts of this section true:
+
+- `the_census_counts_two_hundred_and_forty_nine_declare_entries_declared_and_returned`
+  in `tests/array_census.rs`, for the 249 entries;
+- `every_count_the_census_carries_is_the_count_the_file_holds_at_the_offset_it_names`
+  in `tests/array_census.rs`, for `dwExternalCount` at 0x238;
+- `the_thunk_code_of_each_external_declare_descriptor_starts_twenty_four_bytes_after_it`
+  in `tests/byte_fidelity.rs`, for the 220 descriptors, the values from 0x08
+  to 0x14, and the two instructions;
+- `grayscale_keeps_its_nine_entries_in_table_order_and_the_descriptor_of_each_external_one`
+  in `vb/project.rs`, which reads the 9 entries of `Grayscale.exe` by hand.
+
+The positions of the entries of type 6, the pairs that they name, the count
+of 26, the two places of each descriptor address, the 64 bytes and the
+ordinal check were measured one time. No test keeps them true.
+
+**What the measurement did not settle.** This document does not know what
+`0x00040000` at 0x08 is, or why 0x10 and 0x14 hold 0. Nothing reads the pair
+that an entry of type 6 names.
+
+---
+
+## 22. Practical parse order for DeForm6
 
 1. Parse the PE. Reject anything that is not 32-bit x86. Record `ImageBase` and
    build the RVA-to-file-offset map from the section table.
