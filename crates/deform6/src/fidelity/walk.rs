@@ -27,6 +27,7 @@ use crate::fidelity::ledger::Ledger;
 use crate::fidelity::{Emit, Fault, compare};
 use crate::read::pe::PeImage;
 use crate::read::region::{Off, Region};
+use crate::vb::gui::GuiTable;
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::object::{Object, ObjectTable};
 use crate::vb::project::{ObjectTableHead, ProjectInfo};
@@ -39,6 +40,9 @@ const OBJECT_TABLE_SIZE: u32 = 0x54;
 
 /// `STRUCTURES.md` section 4: `wTotalObjects` sits at `ObjectTable + 0x2A`.
 const W_TOTAL_OBJECTS: u32 = 0x2A;
+
+/// `STRUCTURES.md` section 2: `wFormCount` sits at `VBHeader + 0x44`.
+const W_FORM_COUNT: u32 = 0x44;
 
 /// What stopped a walk.
 #[derive(Clone, Debug, thiserror::Error)]
@@ -89,6 +93,8 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
         &window::<ProjectInfo>(&project, "the file ends inside ProjectInfo")?,
     )?);
 
+    let gui_table = GuiTable::walk(&pe, &header)?;
+
     let head = ObjectTableHead::read(&pe, info.lp_object_table)?;
     let table = ObjectTable::walk(&pe, info.lp_object_table, &head)?;
 
@@ -122,7 +128,10 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
         ledgers.push(compare(object, &element)?);
     }
 
-    let counts = vec![count_objects(&object_table, &head, &table)?];
+    let counts = vec![
+        count_gui_table(&hdr, &header, &gui_table)?,
+        count_objects(&object_table, &head, &table)?,
+    ];
 
     Ok(Walk { ledgers, counts })
 }
@@ -137,6 +146,42 @@ fn window<'a, T: Emit>(region: &Region<'a>, what: &'static str) -> Result<Region
     region
         .subregion(Off::new(0), T::LEN)
         .ok_or(Refusal::Damaged(what))
+}
+
+/// Counts the GUI table entries the header declares against the entries the
+/// reader returned.
+///
+/// The GUI table walk clamps `wFormCount` to the entries the file can hold and
+/// raises a defect when it does, so this is the row where that clamp would
+/// show. It cannot be triggered on a real file layout: raising `wFormCount`
+/// makes the walk read past the real entries, and it refuses the whole table
+/// on the next `lStructSize` before any clamp could matter.
+fn count_gui_table(
+    header_window: &Region<'_>,
+    header: &VbHeader,
+    table: &GuiTable,
+) -> Result<Count, WalkError> {
+    let declared_at = header_window
+        .file_offset(Off::new(W_FORM_COUNT))
+        .ok_or(Refusal::Damaged("the form count has no file offset"))?;
+    let declared = u32::from(header.w_form_count);
+    let recovered = u32::try_from(table.entries.len())
+        .map_err(|_ignored| Refusal::Damaged("the GUI table entry count leaves a u32"))?;
+    Ok(Count {
+        array: Array::GuiTable,
+        owner: Owner::Program,
+        declared_at,
+        declared,
+        recovered,
+        outcome: outcome(&Evidence {
+            array: Array::GuiTable,
+            declared,
+            recovered,
+            defects: table.defects(),
+            unmapped: false,
+            unsupported_control_type: None,
+        }),
+    })
 }
 
 /// Counts the objects the object table declares against the objects the

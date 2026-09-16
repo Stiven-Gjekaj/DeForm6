@@ -174,6 +174,30 @@ fn the_census_counts_one_hundred_and_five_objects_declared_and_one_hundred_and_f
 }
 
 #[test]
+fn the_census_counts_fifty_three_gui_table_entries_declared_and_fifty_three_returned() {
+    assert_eq!(totals(&census(), Array::GuiTable), (53, 53));
+}
+
+#[test]
+fn every_corpus_program_carries_exactly_one_gui_table_count_row() {
+    let mut failed = Vec::new();
+    for program in census() {
+        let rows = program
+            .counts
+            .iter()
+            .filter(|row| row.array == Array::GuiTable)
+            .count();
+        if rows != 1 {
+            failed.push(format!(
+                "{}: {rows} GUI table count rows, wanted 1",
+                program.key
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+#[test]
 fn every_corpus_program_carries_exactly_one_object_count_row() {
     let mut failed = Vec::new();
     for program in census() {
