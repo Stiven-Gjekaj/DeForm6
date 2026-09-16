@@ -58,7 +58,7 @@ pub const PR_MAX_TOTAL_TIME: u32 = 60;
 /// grows: libFuzzer keeps its whole corpus in memory. So the bound is
 /// measured, not calculated.
 ///
-/// This is the highest `rss:` value that libFuzzer printed in five
+/// This is the highest `rss:` value that libFuzzer printed in six
 /// campaigns of 500_000 runs. Each campaign was seeded the way
 /// `.github/workflows/fuzz.yml` seeds the scheduled job.
 ///
@@ -69,10 +69,13 @@ pub const PR_MAX_TOTAL_TIME: u32 = 60;
 /// | scheduled run 35073097537, 2026-09-16 | CI, Linux x86_64 | 953 MiB |
 /// | commit `dee22c0`, 2026-09-16 | macOS arm64 | 1159 MiB |
 /// | commit `69b5618`, 2026-09-16 | macOS arm64 | 979 MiB |
+/// | commit `ce7df1f`, 2026-09-17 | macOS arm64 | 977 MiB |
 ///
 /// The first two campaigns ran no fidelity walk. The third ran the walk
 /// before it counted arrays. The fourth ran the walk with the census. The
 /// fifth ran the walk that also grades `GUIObjectInfo` and each event stub.
+/// The sixth ran the walk that also grades the object table, each `Declare`
+/// table entry and the descriptor of each external entry.
 ///
 /// The highest peak, 1159 MiB, is a little more than half of
 /// `RSS_LIMIT_MB`. Most of each rise came in the first 100_000 runs, but
@@ -227,7 +230,7 @@ mod tests {
 
     use super::{CRON_RUNS, DETECT_LEAKS, FUZZ_DIR, PR_MAX_TOTAL_TIME, RSS_LIMIT_MB, asan_options};
 
-    /// The run count of the five campaigns that `CRON_RUNS`'s doc comment
+    /// The run count of the six campaigns that `CRON_RUNS`'s doc comment
     /// records.
     const MEASURED_RUNS: u32 = 500_000;
 
@@ -251,8 +254,8 @@ mod tests {
 
     /// The measured peak must leave at least a third of the limit free. A
     /// campaign that finds its inputs in a different order grows by a
-    /// different amount: the five measured peaks are 710, 953, 979, 1056 and
-    /// 1159 MiB.
+    /// different amount: the six measured peaks are 710, 953, 977, 979, 1056
+    /// and 1159 MiB.
     #[test]
     fn the_measured_peak_leaves_at_least_a_third_of_the_resident_set_limit_free() {
         assert!(
