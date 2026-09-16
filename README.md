@@ -296,8 +296,11 @@ A byte that goes back unchanged is one the reader reproduces.
 | --------- | ---------------- | ------------- | ------- |
 | VB header | 50 | 104 | 44 |
 | `ProjectInfo` | 20 | 572 | 44 |
+| `Declare` table entry | 8 | 8 | 249 |
+| `Declare` descriptor | 8 | 24 | 220 |
 | GUI table entry | 8 | 80 | 53 |
 | `GUIObjectInfo` | 4 | 93 | 53 |
+| Object table | 12 | 84 | 44 |
 | `Object` | 20 | 48 | 105 |
 | `ObjectInfo` | 6 | 56 | 105 |
 | `PrivateObj` | 16 | 64 | 97 |
@@ -305,13 +308,17 @@ A byte that goes back unchanged is one the reader reproduces.
 | `ControlInfo` | 16 | 40 | 706 |
 | Event stub | 13 | 13 | 390 |
 
-No reproduced byte differs from the file in any of the 1694 records, and no two
+No reproduced byte differs from the file in any of the 2207 records, and no two
 records claim the same byte.
 
 The reader keeps what 8 of the 13 bytes of an event stub hold.
 The other 5 are the opcodes of the native stub.
 The reader checks them and keeps no field for them, and the emitter writes
 them back as constants.
+
+A `Declare` descriptor is written back only for an entry of type 7.
+The reader keeps its first 8 bytes, which hold the addresses of the library
+name and the export name.
 
 This is a coverage figure and not a proof of correctness.
 A field that is read at one offset and written back at the same offset cannot
@@ -331,6 +338,7 @@ second measurement counts both.
 
 | Array | Declared | Returned |
 | ----- | -------- | -------- |
+| `Declare` table entries | 249 | 249 |
 | GUI table entries | 53 | 53 |
 | Objects | 105 | 105 |
 | `ControlInfo` entries | 706 | 706 |
@@ -459,14 +467,14 @@ cargo test --workspace
   untrusted bytes belongs in that sweep.
 - **The hostile corpus.** Mutated and crafted inputs, including a form count
   of `0xFFFF` in a 4096 byte file, which must allocate nothing.
-- **The byte fidelity map.** The ten structures in the table above are
+- **The byte fidelity map.** The thirteen structures in the table above are
   written back over the bytes they were read from and compared against them,
   over all 44 programs. The bytes the reader reproduces and the bytes no field
   of it claims are both pinned.
 - **The committed fidelity map.** The totals of each corpus program in
   `tests/fidelity.toml` must hold unchanged. A value that moves fails the
   gate, and the message says whether the move is a regression.
-- **The array census.** For the four arrays in the table above, the count the
+- **The array census.** For the five arrays in the table above, the count the
   file declares is compared with the number of items the reader returns, and
   the count is read back from the file at the offset the census names.
 - **The walls.** `scripts/prove-*.sh` each prove one property, by planting a
