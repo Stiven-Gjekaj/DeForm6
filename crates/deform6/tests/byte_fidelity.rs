@@ -1645,3 +1645,114 @@ fn a_stub_that_two_slots_name_is_graded_once() {
     }
     panic!("no corpus control has two bound slots");
 }
+
+/// `STRUCTURES.md` section 3: `lpExternalTable` sits at `ProjectInfo + 0x234`.
+const INFO_EXTERNAL_TABLE: usize = 0x234;
+
+/// `STRUCTURES.md` section 3: `dwExternalCount` sits at `ProjectInfo + 0x238`.
+const INFO_EXTERNAL_COUNT: usize = 0x238;
+
+/// `STRUCTURES.md` section 7.1: a `Declare` table entry is 8 bytes.
+const DECLARE_ENTRY_LEN: usize = 8;
+
+/// `STRUCTURES.md` section 7.1: an entry of type 7 names a library and an
+/// export.
+const EXTERNAL_ENTRY: u32 = 7;
+
+/// Where the thunk code after an external `Declare` descriptor starts.
+/// `the_thunk_code_of_each_external_declare_descriptor_starts_twenty_four_bytes_after_it`
+/// measures it.
+const THUNK_CODE_AT: usize = 0x18;
+
+/// One entry of the `Declare` table, read by hand.
+struct DeclareEntry {
+    /// `dwEntryType`.
+    entry_type: u32,
+    /// `lpImportDescriptor`.
+    descriptor: u32,
+}
+
+/// Reads, by hand, every entry of the `Declare` table that the
+/// `ProjectInfo` at file offset `base` names.
+fn declare_entries(data: &[u8], pe: &PeImage<'_>, base: usize) -> Vec<DeclareEntry> {
+    let dword = |at: usize| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
+    let count = usize::try_from(dword(base + INFO_EXTERNAL_COUNT)).unwrap();
+    if count == 0 {
+        return Vec::new();
+    }
+    let table = file_offset_of(pe, dword(base + INFO_EXTERNAL_TABLE));
+    (0..count)
+        .map(|index| {
+            let at = table + index * DECLARE_ENTRY_LEN;
+            DeclareEntry {
+                entry_type: dword(at),
+                descriptor: dword(at + 4),
+            }
+        })
+        .collect()
+}
+
+/// Gives the file offset of the `ProjectInfo` that a walk graded.
+fn project_info_base(ledgers: &[Ledger]) -> usize {
+    let info = ledgers
+        .iter()
+        .find(|l| l.structure == "ProjectInfo")
+        .unwrap();
+    usize::try_from(info.base.get()).unwrap()
+}
+
+#[test]
+fn the_thunk_code_of_each_external_declare_descriptor_starts_twenty_four_bytes_after_it() {
+    // Every value is read by hand. Measured on 2026-09-16 before this was
+    // asserted. The instruction at 0x18 loads from the address at 0x0C plus
+    // 8, and the instruction at 0x23 pushes the address of the descriptor
+    // itself. So the descriptor ends where that code starts, and it is 24
+    // bytes long. `STRUCTURES.md` section 7.1 names only its first 8 bytes.
+    let mut descriptors = 0_usize;
+    let mut failed = Vec::new();
+    for (path, ledgers) in graded() {
+        let data = std::fs::read(&path).unwrap();
+        let pe = PeImage::parse(&data).unwrap();
+        let dword = |at: usize| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
+        for entry in declare_entries(&data, &pe, project_info_base(&ledgers)) {
+            if entry.entry_type != EXTERNAL_ENTRY {
+                continue;
+            }
+            descriptors += 1;
+            let at = file_offset_of(&pe, entry.descriptor);
+            let thunk_data = dword(at + 0x0C);
+            let code = at + THUNK_CODE_AT;
+            let holds = (
+                dword(at + 0x08),
+                pe.region_at_va(Va::new(thunk_data)).is_some(),
+                dword(at + 0x10),
+                dword(at + 0x14),
+                // mov eax, [imm32]
+                data[code],
+                dword(code + 0x01),
+                // push imm32
+                data[code + 0x0B],
+                dword(code + 0x0C),
+            );
+            let wanted = (
+                0x0004_0000,
+                true,
+                0,
+                0,
+                0xA1,
+                thunk_data + 8,
+                0x68,
+                entry.descriptor,
+            );
+            if holds != wanted {
+                failed.push(format!(
+                    "{}: the descriptor at {:#x} holds {holds:x?}, wanted {wanted:x?}",
+                    path.display(),
+                    entry.descriptor
+                ));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+    assert_eq!(descriptors, 220);
+}
