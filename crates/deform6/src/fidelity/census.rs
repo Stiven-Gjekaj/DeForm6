@@ -82,6 +82,11 @@ impl Array {
 pub enum Owner {
     /// The program as a whole.
     Program,
+    /// One form, by its index in the GUI table.
+    Form {
+        /// The form's index in the GUI table.
+        form: u32,
+    },
     /// One object, by its index in the object array.
     Object {
         /// The object's index in the object array.

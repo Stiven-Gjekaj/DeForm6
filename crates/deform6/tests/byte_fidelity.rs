@@ -15,7 +15,7 @@
 //! # What a clean result here does and does not mean
 //!
 //! Thirteen of the fourteen header fields, all five `Object` fields, and
-//! every field of the other six structures are carried verbatim: read at an
+//! every field of the other seven structures are carried verbatim: read at an
 //! offset, written back at the same offset, with no arithmetic between. A
 //! verbatim field cannot disagree with itself, so a clean map is the expected
 //! result and **is not** a proof that the reader is correct.
@@ -57,6 +57,7 @@
 use deform6::fidelity::census::Owner;
 use deform6::fidelity::controlinfo;
 use deform6::fidelity::gui;
+use deform6::fidelity::guiobjectinfo;
 use deform6::fidelity::header;
 use deform6::fidelity::ledger::{Ledger, Verdict};
 use deform6::fidelity::object;
@@ -555,6 +556,116 @@ fn the_object_gui_guid_sits_at_five_and_never_at_four_in_fifty_three_gui_object_
 }
 
 #[test]
+fn the_corpus_grades_fifty_three_gui_object_info_records() {
+    assert_eq!(graded_count("GuiObjectInfo"), 53);
+}
+
+#[test]
+fn the_gui_object_info_reader_models_four_of_the_ninety_three_bytes_in_every_graded_record() {
+    let failed = coverage_failures(
+        "GuiObjectInfo",
+        93,
+        guiobjectinfo::MODELLED_BYTES,
+        guiobjectinfo::UNMODELLED,
+    );
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+#[test]
+fn no_gui_object_info_byte_this_reader_models_differs_from_the_file_in_any_corpus_program() {
+    let failed = difference_failures("GuiObjectInfo");
+    assert!(
+        failed.is_empty(),
+        "{} GuiObjectInfo byte run(s) differ from the file:\n{}",
+        failed.len(),
+        failed.join("\n")
+    );
+}
+
+#[test]
+fn the_walk_grades_one_gui_object_info_at_the_address_each_gui_table_entry_names() {
+    // The entry's aFormPointer is read by hand and resolved through the PE
+    // image, so the place is not the walk's own statement.
+    let mut failed = Vec::new();
+    for (path, ledgers) in graded() {
+        let data = std::fs::read(&path).unwrap();
+        let pe = PeImage::parse(&data).unwrap();
+        let named: Vec<u32> = ledgers
+            .iter()
+            .filter(|l| l.structure == "GuiTableEntry")
+            .map(|entry| {
+                let at = usize::try_from(entry.base.get()).unwrap() + ENTRY_FORM_POINTER;
+                let pointer = u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
+                pe.region_at_va(Va::new(pointer))
+                    .and_then(|region| region.file_offset(Off::new(0)))
+                    .unwrap()
+                    .get()
+            })
+            .collect();
+        let graded: Vec<u32> = ledgers
+            .iter()
+            .filter(|l| l.structure == "GuiObjectInfo")
+            .map(|l| l.base.get())
+            .collect();
+        if named != graded {
+            failed.push(format!(
+                "{}: the GUI table entries name {named:x?}, and the walk graded GUIObjectInfo at {graded:x?}",
+                path.display()
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+#[test]
+fn one_form_whose_gui_object_info_is_unmapped_loses_its_own_record_and_nothing_else() {
+    // Patched in memory only. AGENTS.md bars committing a patched program.
+    let path = corpus_root().join("public-domain/HexScroll/Hex Scroll.exe");
+    let original = std::fs::read(&path).unwrap();
+    let before = walk(&original).unwrap();
+
+    let entries: Vec<&Ledger> = before
+        .ledgers
+        .iter()
+        .filter(|l| l.structure == "GuiTableEntry")
+        .collect();
+    assert_eq!(entries.len(), 2, "the fixture holds two forms");
+    let at = usize::try_from(entries[1].base.get()).unwrap() + ENTRY_FORM_POINTER;
+
+    let unmapped = 0x00F0_0000_u32.to_le_bytes();
+    let mut patched = original.clone();
+    assert_ne!(
+        patched[at..at + 4],
+        unmapped,
+        "the patch must change the file, or this test proves nothing"
+    );
+    patched[at..at + 4].copy_from_slice(&unmapped);
+
+    let after = walk(&patched).expect("one bad form must not stop the walk");
+
+    let added: Vec<_> = after
+        .ungraded
+        .iter()
+        .filter(|row| !before.ungraded.contains(row))
+        .collect();
+    assert_eq!(added.len(), 1, "{added:?}");
+    assert_eq!(added[0].structure, "GuiObjectInfo");
+    assert_eq!(added[0].owner, Owner::Form { form: 1 });
+    assert!(matches!(added[0].reason, Reason::Refused(_)));
+
+    for ledger in &after.ledgers {
+        assert!(
+            before.ledgers.contains(ledger),
+            "the patch changed a ledger it should not have touched: {} at {:#x}",
+            ledger.structure,
+            ledger.base.get()
+        );
+    }
+    assert_eq!(after.ledgers.len() + 1, before.ledgers.len());
+    assert_eq!(after.counts, before.counts);
+}
+
+#[test]
 fn the_corpus_grades_one_hundred_and_five_object_info_records() {
     assert_eq!(graded_count("ObjectInfo"), 105);
 }
@@ -756,7 +867,7 @@ fn absent_objects(found: &deform6::fidelity::walk::Walk, structure: &str) -> BTr
         .filter(|row| row.structure == structure && row.reason == Reason::Absent)
         .filter_map(|row| match row.owner {
             Owner::Object { object } => Some(object),
-            Owner::Program | Owner::Control { .. } => None,
+            Owner::Program | Owner::Form { .. } | Owner::Control { .. } => None,
         })
         .collect()
 }
@@ -940,7 +1051,7 @@ fn the_event_slots_fit_the_word_at_two_and_refuse_the_word_at_four_in_seven_hund
 
 #[test]
 fn no_two_structures_the_walk_grades_share_a_byte_in_any_corpus_program() {
-    // Measured on 2026-09-16 before this was asserted: 1251 records across
+    // Measured on 2026-09-16 before this was asserted: 1304 records across
     // the corpus, and no two of them overlap. Two structures claiming the
     // same byte would mean one of them is placed wrongly.
     let mut failed = Vec::new();
@@ -970,7 +1081,7 @@ fn no_two_structures_the_walk_grades_share_a_byte_in_any_corpus_program() {
 }
 
 #[test]
-fn the_walk_grades_one_thousand_two_hundred_and_fifty_one_records_across_the_corpus() {
+fn the_walk_grades_one_thousand_three_hundred_and_four_records_across_the_corpus() {
     let total: usize = graded().iter().map(|(_path, ledgers)| ledgers.len()).sum();
-    assert_eq!(total, 1251);
+    assert_eq!(total, 1304);
 }

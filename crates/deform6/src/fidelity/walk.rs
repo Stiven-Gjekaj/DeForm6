@@ -5,7 +5,7 @@
 //! Most parsed structures in this crate do not keep the file offset they were
 //! read from. Three do: `VbHeader`, `ProjectInfo` and `ControlInfo` each hold
 //! a `file_offset`, because a defect about a count that one of them carries
-//! must name the byte of that count. The other five structures this module
+//! must name the byte of that count. The other six structures this module
 //! grades keep no offset, and to add one to each would change every reader
 //! under `vb/` to serve a measurement.
 //!
@@ -30,13 +30,14 @@
 
 use crate::error::Refusal;
 use crate::fidelity::census::{Array, Count, Evidence, Outcome, Owner, outcome};
+use crate::fidelity::guiobjectinfo::GuiObjectInfoRecord;
 use crate::fidelity::ledger::Ledger;
 use crate::fidelity::privateobj::PrivateObjRecord;
 use crate::fidelity::{Emit, Fault, compare};
 use crate::read::pe::PeImage;
 use crate::read::region::{Off, Region, Va};
 use crate::vb::controlinfo::{ControlInfo, ControlInfoTable, OptionalObjectInfo, read_event_table};
-use crate::vb::gui::{GuiTable, GuiTableEntry};
+use crate::vb::gui::{GuiObjectInfo, GuiTable, GuiTableEntry};
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::object::{Object, ObjectTable};
 use crate::vb::privateobj::{ObjectInfo, PrivateObj};
@@ -120,9 +121,10 @@ pub enum Reason {
 /// counts every array the census knows.
 ///
 /// The ledgers come in the order the walk reaches the structures. First come
-/// the VB header, `ProjectInfo`, each GUI table entry, and each `Object`
-/// element. Then each object adds its `ObjectInfo`, its `PrivateObj`, its
-/// `OptionalObjectInfo`, and its `ControlInfo` elements, in that order.
+/// the VB header, `ProjectInfo`, each GUI table entry followed by the
+/// `GUIObjectInfo` of its form, and each `Object` element. Then each object
+/// adds its `ObjectInfo`, its `PrivateObj`, its `OptionalObjectInfo`, and its
+/// `ControlInfo` elements, in that order.
 ///
 /// A structure that the walk reaches and cannot grade gets a row in
 /// `ungraded` and no ledger. The walk does not try a `PrivateObj` for an
@@ -136,9 +138,9 @@ pub enum Reason {
 ///
 /// Returns [`WalkError::Read`] when the PE image, the VB header,
 /// `ProjectInfo`, the GUI table, the object table, or one element of those
-/// two tables does not read. A refusal about the structures under one object
-/// does not stop the walk: it becomes a row in `ungraded` or a refused census
-/// row. Returns [`WalkError::Emit`] when an emitter in this crate is at
+/// two tables does not read. A refusal about the `GUIObjectInfo` of one form,
+/// or about the structures under one object, does not stop the walk: it
+/// becomes a row in `ungraded` or a refused census row. Returns [`WalkError::Emit`] when an emitter in this crate is at
 /// fault.
 pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
     let pe = PeImage::parse(data).map_err(Refusal::from)?;
@@ -168,6 +170,7 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
         let at =
             element::<GuiTableEntry>(&gui_array, index, "the file ends inside a GUI table entry")?;
         found.ledgers.push(compare(entry, &at)?);
+        grade_gui_object_info(&pe, entry, form_owner(index)?, &mut found)?;
     }
 
     let head = ObjectTableHead::read(&pe, info.lp_object_table)?;
@@ -223,6 +226,43 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
     }
 
     Ok(found)
+}
+
+/// Names one form as the owner of what the walk finds under it.
+fn form_owner(index: usize) -> Result<Owner, Refusal> {
+    let form = u32::try_from(index)
+        .map_err(|_ignored| Refusal::Damaged("the GUI table index leaves a u32"))?;
+    Ok(Owner::Form { form })
+}
+
+/// Grades the `GUIObjectInfo` of one form, or records why it could not.
+///
+/// `inspect` treats a refused `GUIObjectInfo` as a fault in one form and goes
+/// on, so the walk records it and goes on too. An emitter fault still stops
+/// the walk.
+fn grade_gui_object_info(
+    pe: &PeImage<'_>,
+    entry: &GuiTableEntry,
+    owner: Owner,
+    found: &mut Walk,
+) -> Result<(), WalkError> {
+    let read = GuiObjectInfo::read(pe, entry.a_form_pointer).and_then(|info| {
+        let window = located::<GuiObjectInfoRecord>(
+            pe,
+            entry.a_form_pointer,
+            "the file ends inside a GUIObjectInfo block",
+        )?;
+        Ok((GuiObjectInfoRecord::of(&info), window))
+    });
+    match read {
+        Ok((record, window)) => found.ledgers.push(compare(&record, &window)?),
+        Err(reason) => found.ungraded.push(Ungraded {
+            structure: GuiObjectInfoRecord::STRUCTURE,
+            owner,
+            reason: Reason::Refused(reason),
+        }),
+    }
+    Ok(())
 }
 
 /// Names one object as the owner of what the walk finds under it.

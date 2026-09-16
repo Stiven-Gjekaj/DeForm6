@@ -57,6 +57,7 @@
 pub mod census;
 pub mod controlinfo;
 pub mod gui;
+pub mod guiobjectinfo;
 pub mod header;
 pub mod ledger;
 pub mod object;
