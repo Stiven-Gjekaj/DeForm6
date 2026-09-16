@@ -591,7 +591,10 @@ impl DeclareTable {
             defects.push(Defect {
                 site: Site {
                     offset,
-                    rva: info.lp_external_table.to_rva(pe.image_base()).map(Rva::get),
+                    // The offset came from where ProjectInfo sits, not from
+                    // lpExternalTable, so the table's address is not the
+                    // address of this byte.
+                    rva: None,
                     structure: "ProjectInfo",
                     field: "dwExternalCount",
                 },
@@ -1753,6 +1756,9 @@ mod tests {
         assert_eq!(defect.site.structure, "ProjectInfo");
         assert_eq!(defect.site.field, "dwExternalCount");
         assert_eq!(usize::try_from(defect.site.offset).unwrap(), at);
+        // Site::rva is the address the offset came from. This offset did not
+        // come from lpExternalTable, so the defect must not give that address.
+        assert_eq!(defect.site.rva, None);
     }
 
     #[test]
