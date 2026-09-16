@@ -5,7 +5,7 @@
 //! Most parsed structures in this crate do not keep the file offset they were
 //! read from. Three do: `VbHeader`, `ProjectInfo` and `ControlInfo` each hold
 //! a `file_offset`, because a defect about a count that one of them carries
-//! must name the byte of that count. The other seven structures this module
+//! must name the byte of that count. The other eight structures this module
 //! grades keep no offset, and to add one to each would change every reader
 //! under `vb/` to serve a measurement.
 //!
@@ -37,6 +37,7 @@ use crate::fidelity::census::{Array, Count, Evidence, Outcome, Owner, outcome};
 use crate::fidelity::eventstub::{EventStubRecord, has_native_shape};
 use crate::fidelity::guiobjectinfo::GuiObjectInfoRecord;
 use crate::fidelity::ledger::Ledger;
+use crate::fidelity::objecttable::ObjectTableRecord;
 use crate::fidelity::privateobj::PrivateObjRecord;
 use crate::fidelity::{Emit, Fault, compare};
 use crate::read::pe::PeImage;
@@ -55,9 +56,6 @@ const DW_EXTERNAL_COUNT: u32 = 0x238;
 
 /// `STRUCTURES.md` section 4: `lpObjectArray` sits at `ObjectTable + 0x30`.
 const LP_OBJECT_ARRAY: u32 = 0x30;
-
-/// `STRUCTURES.md` section 4: the `ObjectTable` structure is `0x54` bytes.
-const OBJECT_TABLE_SIZE: u32 = 0x54;
 
 /// `STRUCTURES.md` section 4: `wTotalObjects` sits at `ObjectTable + 0x2A`.
 const W_TOTAL_OBJECTS: u32 = 0x2A;
@@ -132,12 +130,12 @@ pub enum Reason {
 ///
 /// The ledgers come in the order the walk reaches the structures. First come
 /// the VB header, `ProjectInfo`, each GUI table entry followed by the
-/// `GUIObjectInfo` of its form, and each `Object` element. Then each object
-/// adds its `ObjectInfo`, its `PrivateObj`, its `OptionalObjectInfo`, and its
-/// `ControlInfo` elements, in that order. Each `ControlInfo` is followed by the
-/// stubs that its bound event slots name, in slot order. A stub that an
-/// earlier slot named is not graded again, so no two ledgers share its bytes,
-/// and an unbound slot names no stub.
+/// `GUIObjectInfo` of its form, the object table, and each `Object` element.
+/// Then each object adds its `ObjectInfo`, its `PrivateObj`, its
+/// `OptionalObjectInfo`, and its `ControlInfo` elements, in that order. Each
+/// `ControlInfo` is followed by the stubs that its bound event slots name, in
+/// slot order. A stub that an earlier slot named is not graded again, so no
+/// two ledgers share its bytes, and an unbound slot names no stub.
 ///
 /// A structure that the walk reaches and cannot grade gets a row in
 /// `ungraded` and no ledger. The walk does not try a `PrivateObj` for an
@@ -197,11 +195,14 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
         .region_at_va(info.lp_object_table)
         .ok_or(Refusal::Damaged(
             "the object table pointer is in no section",
-        ))?
-        .subregion(Off::new(0), OBJECT_TABLE_SIZE)
-        .ok_or(Refusal::Damaged(
-            "the file ends inside the object table structure",
         ))?;
+    let object_table = window::<ObjectTableRecord>(
+        &object_table,
+        "the file ends inside the object table structure",
+    )?;
+    found
+        .ledgers
+        .push(compare(&ObjectTableRecord::of(&head), &object_table)?);
     let lp_object_array = object_table
         .va_le(Off::new(LP_OBJECT_ARRAY))
         .ok_or(Refusal::Damaged(

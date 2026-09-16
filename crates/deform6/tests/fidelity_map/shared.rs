@@ -44,6 +44,7 @@ pub(crate) const STRUCTURES: &[&str] = &[
     "ProjectInfo",
     "GuiTableEntry",
     "GuiObjectInfo",
+    "ObjectTable",
     "Object",
     "ObjectInfo",
     "PrivateObj",

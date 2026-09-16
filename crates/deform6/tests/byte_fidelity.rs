@@ -15,7 +15,7 @@
 //! # What a clean result here does and does not mean
 //!
 //! Thirteen of the fourteen header fields, all five `Object` fields, every
-//! field of the other six structures, and the `imm32` of an event stub are
+//! field of the other eight structures, and the `imm32` of an event stub are
 //! carried verbatim: read at an
 //! offset, written back at the same offset, with no arithmetic between. A
 //! verbatim field cannot disagree with itself, so a clean map is the expected
@@ -78,6 +78,7 @@ use deform6::fidelity::header;
 use deform6::fidelity::ledger::{Ledger, Verdict};
 use deform6::fidelity::object;
 use deform6::fidelity::objectinfo;
+use deform6::fidelity::objecttable;
 use deform6::fidelity::optionalobjectinfo;
 use deform6::fidelity::privateobj;
 use deform6::fidelity::project;
@@ -728,6 +729,70 @@ fn one_form_whose_gui_object_info_is_unmapped_loses_its_own_record_and_nothing_e
 }
 
 #[test]
+fn the_corpus_grades_forty_four_object_table_records() {
+    assert_eq!(graded_count("ObjectTable"), 44);
+}
+
+#[test]
+fn the_object_table_reader_models_twelve_of_the_eighty_four_bytes_in_every_graded_record() {
+    let failed = coverage_failures(
+        "ObjectTable",
+        84,
+        objecttable::MODELLED_BYTES,
+        objecttable::UNMODELLED,
+    );
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+#[test]
+fn no_object_table_byte_this_reader_models_differs_from_the_file_in_any_corpus_program() {
+    // Two of these bytes are wCompiledObjects, which is larger than the
+    // object count in 15 programs. The head keeps it as the file holds it.
+    let failed = difference_failures("ObjectTable");
+    assert!(
+        failed.is_empty(),
+        "{} ObjectTable byte run(s) differ from the file:\n{}",
+        failed.len(),
+        failed.join("\n")
+    );
+}
+
+#[test]
+fn the_walk_grades_one_object_table_at_the_address_each_project_info_names() {
+    // lpObjectTable is read by hand from the ProjectInfo ledger and resolved
+    // through the PE image, so the place is not the walk's own statement.
+    let mut failed = Vec::new();
+    for (path, ledgers) in graded() {
+        let data = std::fs::read(&path).unwrap();
+        let pe = PeImage::parse(&data).unwrap();
+        let named: Vec<usize> = ledgers
+            .iter()
+            .filter(|l| l.structure == "ProjectInfo")
+            .map(|info| {
+                let at = usize::try_from(info.base.get()).unwrap() + INFO_OBJECT_TABLE;
+                file_offset_of(
+                    &pe,
+                    u32::from_le_bytes(data[at..at + 4].try_into().unwrap()),
+                )
+            })
+            .collect();
+        let graded: Vec<usize> = ledgers
+            .iter()
+            .filter(|l| l.structure == "ObjectTable")
+            .map(|l| usize::try_from(l.base.get()).unwrap())
+            .collect();
+        if named.len() != 1 || named != graded {
+            failed.push(format!(
+                "{}: ProjectInfo names the object table at {named:x?}, and the walk graded \
+                 ObjectTable at {graded:x?}",
+                path.display()
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+#[test]
 fn the_corpus_grades_one_hundred_and_five_object_info_records() {
     assert_eq!(graded_count("ObjectInfo"), 105);
 }
@@ -1120,9 +1185,9 @@ fn the_event_slots_fit_the_word_at_two_and_refuse_the_word_at_four_in_seven_hund
 
 #[test]
 fn no_two_structures_the_walk_grades_share_a_byte_in_any_corpus_program() {
-    // Measured on 2026-09-16 before this was asserted: 1694 records across
-    // the corpus, and no two of them overlap. Two structures claiming the
-    // same byte would mean one of them is placed wrongly.
+    // Measured on 2026-09-17: 1738 records across the corpus, and no two of
+    // them overlap. Two structures claiming the same byte would mean one of
+    // them is placed wrongly.
     let mut failed = Vec::new();
     for (path, ledgers) in graded() {
         let mut spans: Vec<(u32, u32, &str)> = ledgers
@@ -1150,9 +1215,9 @@ fn no_two_structures_the_walk_grades_share_a_byte_in_any_corpus_program() {
 }
 
 #[test]
-fn the_walk_grades_one_thousand_six_hundred_and_ninety_four_records_across_the_corpus() {
+fn the_walk_grades_one_thousand_seven_hundred_and_thirty_eight_records_across_the_corpus() {
     let total: usize = graded().iter().map(|(_path, ledgers)| ledgers.len()).sum();
-    assert_eq!(total, 1694);
+    assert_eq!(total, 1738);
 }
 
 #[test]

@@ -342,6 +342,7 @@ const RECORDS: &[(&str, u32)] = &[
     ("ProjectInfo", 44),
     ("GuiTableEntry", 53),
     ("GuiObjectInfo", 53),
+    ("ObjectTable", 44),
     ("Object", 105),
     ("ObjectInfo", 105),
     ("PrivateObj", 97),
@@ -351,7 +352,7 @@ const RECORDS: &[(&str, u32)] = &[
 ];
 
 /// The sum of [`RECORDS`].
-const RECORD_TOTAL: u32 = 1694;
+const RECORD_TOTAL: u32 = 1738;
 
 /// The records the corpus does not have: the `PrivateObj` and the
 /// `OptionalObjectInfo` of each of the 8 standard modules.
@@ -591,7 +592,7 @@ fn structure_totals(map: &FidelityMap) -> BTreeMap<&'static str, Graded> {
 }
 
 #[test]
-fn the_committed_map_holds_one_thousand_six_hundred_and_ninety_four_graded_records_and_no_differing_byte()
+fn the_committed_map_holds_one_thousand_seven_hundred_and_thirty_eight_graded_records_and_no_differing_byte()
  {
     let totals = structure_totals(&committed());
     let records: Vec<(&str, u32)> = STRUCTURES
@@ -642,9 +643,9 @@ fn the_committed_map_counts_nine_hundred_and_thirty_five_census_rows_and_none_th
 }
 
 #[test]
-fn the_committed_map_states_ten_layouts_that_agree_with_the_walk() {
+fn the_committed_map_states_eleven_layouts_that_agree_with_the_walk() {
     let map = committed();
-    assert_eq!(map.layouts.len(), 10);
+    assert_eq!(map.layouts.len(), 11);
     assert_eq!(map.layouts, measured().layouts);
 }
 

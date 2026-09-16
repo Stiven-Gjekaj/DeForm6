@@ -55,6 +55,11 @@ length = 93
 modelled = 4
 unmodelled = [[0x00, 89]]
 
+[layout.ObjectTable]
+length = 84
+modelled = 12
+unmodelled = [[0x00, 42], [0x2E, 2], [0x34, 12], [0x44, 16]]
+
 [layout.Object]
 length = 48
 modelled = 20
@@ -90,6 +95,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 2, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 2, same = 40, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }
@@ -107,6 +113,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
@@ -124,6 +131,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 4, same = 32, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 4, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 4, same = 80, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 4, same = 24, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 4, same = 64, differs = 0, absent = 0, refused = 0 }
@@ -141,6 +149,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 2, same = 40, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 1, refused = 0 }
@@ -158,6 +167,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
@@ -175,6 +185,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
@@ -192,6 +203,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
@@ -209,6 +221,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
@@ -226,6 +239,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 2, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 2, same = 40, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }
@@ -243,6 +257,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
@@ -260,6 +275,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
@@ -277,6 +293,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
@@ -294,6 +311,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
@@ -311,6 +329,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 4, same = 80, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 4, same = 24, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 1, refused = 0 }
@@ -328,6 +347,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
@@ -345,6 +365,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
@@ -362,6 +383,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
@@ -379,6 +401,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 2, same = 40, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }
@@ -396,6 +419,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
@@ -413,6 +437,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
@@ -430,6 +455,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
@@ -447,6 +473,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
@@ -464,6 +491,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
@@ -481,6 +509,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
@@ -498,6 +527,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 4, same = 80, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 4, same = 24, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 4, same = 64, differs = 0, absent = 0, refused = 0 }
@@ -515,6 +545,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 4, same = 80, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 4, same = 24, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 4, same = 64, differs = 0, absent = 0, refused = 0 }
@@ -532,6 +563,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
@@ -549,6 +581,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 2, same = 40, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }
@@ -566,6 +599,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 2, same = 40, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 1, refused = 0 }
@@ -583,6 +617,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 2, same = 40, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }
@@ -600,6 +635,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
@@ -617,6 +653,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 2, same = 40, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }
@@ -634,6 +671,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 2, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 5, same = 100, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 5, same = 30, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 4, same = 64, differs = 0, absent = 1, refused = 0 }
@@ -651,6 +689,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 2, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 5, same = 100, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 5, same = 30, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 4, same = 64, differs = 0, absent = 1, refused = 0 }
@@ -668,6 +707,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 2, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 5, same = 100, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 5, same = 30, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 4, same = 64, differs = 0, absent = 1, refused = 0 }
@@ -685,6 +725,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
@@ -702,6 +743,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 2, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 5, same = 100, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 5, same = 30, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 2, refused = 0 }
@@ -719,6 +761,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
@@ -736,6 +779,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
@@ -753,6 +797,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
@@ -770,6 +815,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
@@ -787,6 +833,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
@@ -804,6 +851,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
@@ -821,6 +869,7 @@ structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused 
 structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
 structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
 structure.GuiObjectInfo = { records = 1, same = 4, differs = 0, absent = 0, refused = 0 }
+structure.ObjectTable = { records = 1, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.Object = { records = 2, same = 40, differs = 0, absent = 0, refused = 0 }
 structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refused = 0 }
 structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }

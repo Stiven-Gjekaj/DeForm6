@@ -70,6 +70,7 @@ pub mod header;
 pub mod ledger;
 pub mod object;
 pub mod objectinfo;
+pub mod objecttable;
 pub mod optionalobjectinfo;
 pub mod privateobj;
 pub mod project;
