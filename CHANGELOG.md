@@ -12,24 +12,29 @@ heading its version and its date.
 
 ### What this delivers
 
-- Byte fidelity: `deform6::fidelity::walk::walk` writes ten structures
-  back over the bytes they were read from. It grades each byte as the same,
-  as different, or as not modelled. Across the 44 corpus programs it grades
-  1694 records, and no byte that a reader models differs from the file.
-- The ten include `GUIObjectInfo` and the event stub. The event stub
+- Byte fidelity: `deform6::fidelity::walk::walk` writes thirteen
+  structures back over the bytes they were read from. It grades each byte as
+  the same, as different, or as not modelled. Across the 44 corpus programs
+  it grades 2207 records, and no byte that a reader models differs from the
+  file.
+- The thirteen include `GUIObjectInfo` and the event stub. The event stub
   emitter writes all 13 bytes. It works the jump back out of the handler
   address that the reader keeps, and it writes the five opcode bytes that
   the reader assumes and does not read.
+- The thirteen also include the object table, each `Declare` table entry,
+  and the descriptor of each external entry. In the corpus the descriptor is
+  24 bytes, and machine code that uses it follows it. The reader reads its
+  first 8 bytes, which hold the addresses of the two names.
 - The committed fidelity map: `tests/fidelity.toml` holds the totals of each
   corpus program, and `cargo run -p xtask -- update-fidelity` writes it.
   `cargo test -p deform6 --test fidelity_map` fails when a value moves. The
   message names the value, says whether the move is a regression, and gives
   the table to paste.
-- The array census: the same walk counts four arrays, which are the GUI
-  table, the object array, the controls of each object and the event slots
-  of each control. For each one it compares the count that the file
-  declares with the number of entries that the reader returns. No array in
-  the corpus comes up short.
+- The array census: the same walk counts five arrays, which are the
+  `Declare` table, the GUI table, the object array, the controls of each
+  object and the event slots of each control. For each one it compares the
+  count that the file declares with the number of entries that the reader
+  returns. No array in the corpus comes up short.
 - Corpus evidence: gap 2, the `OptionalObjectInfo` presence test, is
   closed. The dispute about `fControlType` and `wEventCount` at the start of
   `ControlInfo` is settled. Sections 16 and 17 of `docs/STRUCTURES.md` give
@@ -37,6 +42,11 @@ heading its version and its date.
 - More corpus evidence: the single byte at `GUIObjectInfo + 0x04` is real,
   and no event slot names a method stub. Sections 18 and 19 of
   `docs/STRUCTURES.md` give the numbers.
+- The object table and the `Declare` table as the corpus holds them:
+  sections 20 and 21 of `docs/STRUCTURES.md`. Two rows of section 4 are
+  corrected, because `lpExecProj` and `lpProjectObject` hold an address in
+  each corpus program. Section 8.7 gives the value that each corpus OCX
+  header holds at `+0x10`.
 - `inspect` checks the two opcodes of each event stub. A stub of another
   shape, such as a P-code stub, gets an `UnknownStubShape` defect at the
   stub, and its slot keeps no handler address.
@@ -70,6 +80,22 @@ is therefore 2.0.0, not 1.1.0.
   gives `ProjectInfo + 0x238`, and its `rva` is now `null`, because that
   byte was not reached through the address of the `Declare` table that
   1.0.0 gave.
+- New public fields that break no caller: `ObjectTableHead::lp_object_array`
+  and `DeclareTable::entries`. Each of the two structures already has a
+  private field, so no code outside this crate builds one or names every
+  field of one.
+- New `#[non_exhaustive]` types: `vb::project::DeclareTableEntry` and
+  `vb::project::DeclareDescriptor`. `DeclareTable::entries` holds one entry
+  for each 8 bytes that the reader read, of every type, in table order.
+- `fidelity::census::Array` has the new variant `DeclareEntries`, and
+  `fidelity::census::Owner` has the new variant `Declare`. A `match` on
+  either with no wildcard arm does not compile until it names the new
+  variant.
+- A `dwExternalCount` of `0x2000_0000` or more now gives
+  `ImplausibleCount`. 1.0.0 gave no defect for such a count, because the
+  size of the table in bytes left a `u32`, and the loop still stopped at the
+  end of the table's region. A strict run can now refuse such a file even
+  when no entry gives a defect.
 - `DefectKind` has two new variants, `ModuleMarkerMismatch` and
   `UnknownStubShape`, and `schema/report.schema.json` accepts both. A
   `match` on `DefectKind` with no wildcard arm does not compile until it
@@ -84,11 +110,14 @@ is therefore 2.0.0, not 1.1.0.
 
 ### What stays open
 
-- The fidelity walk grades ten structures. `docs/ROADMAP.md` names the
-  work on the other structures that is left.
-- The census does not count the `Declare` table or the type buffer. The
-  clamps on those two arrays only bound a loop, so the byte diff cannot see
-  them either.
+- The fidelity walk grades thirteen structures. `docs/ROADMAP.md` names
+  the work on the other structures that is left.
+- The census does not count the type buffer. The clamp on that array only
+  bounds a loop, so the byte diff cannot see it either.
+- Three `Declare` defects give the offset of the first byte of the entry. A
+  defect about `lpImportDescriptor` does not give the byte of that field,
+  and a defect about `lpDllName` or `lpApiName` names the entry, not the
+  descriptor that holds the field.
 - The internal `damaged` helper still leaks one message for each refusal.
   The scheduled fuzz job is held to a measured peak resident set, not to a
   model of the leak.
