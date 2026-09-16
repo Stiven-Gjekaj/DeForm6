@@ -227,7 +227,7 @@ mod tests {
 
     use super::{CRON_RUNS, DETECT_LEAKS, FUZZ_DIR, PR_MAX_TOTAL_TIME, RSS_LIMIT_MB, asan_options};
 
-    /// The run count of the four campaigns that `CRON_RUNS`'s doc comment
+    /// The run count of the five campaigns that `CRON_RUNS`'s doc comment
     /// records.
     const MEASURED_RUNS: u32 = 500_000;
 
@@ -251,7 +251,7 @@ mod tests {
 
     /// The measured peak must leave at least a third of the limit free. A
     /// campaign that finds its inputs in a different order grows by a
-    /// different amount: the four measured peaks are 710, 953, 1056 and
+    /// different amount: the five measured peaks are 710, 953, 979, 1056 and
     /// 1159 MiB.
     #[test]
     fn the_measured_peak_leaves_at_least_a_third_of_the_resident_set_limit_free() {
