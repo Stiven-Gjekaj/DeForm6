@@ -82,23 +82,40 @@ and written back at the same offset, with no arithmetic between, is green by
 construction. Most fields in most structures are verbatim, so most of this
 phase reports coverage rather than correctness.
 
-**The measurement can only find a fault where the reader cooks a value
-instead of carrying it.** So segment 2 must not take the next structures in
-size order. It must take the structures that hold a cooked field first. These
-are the ones this session found:
+**The byte diff can only find a fault where the reader keeps a cooked value
+in a field that the emitter writes back.** `bound_proc_count` is that shape.
+It clamps `ProcCount`, and `Object.proc_count` keeps the clamped value, which
+the emitter writes at `Object + 0x1C`.
 
-| Where | What it cooks |
-|---|---|
-| `vb/gui.rs:152` | clamps the GUI table entry count to what the file holds |
-| `vb/controlinfo.rs:278` | clamps the `ControlInfo` array the same way |
-| `vb/controlinfo.rs:610` | clamps the event slot count |
-| `vb/functyp.rs:668` | substitutes zero for a type address that is not present |
-| `vb/functyp.rs:589` | derives an argument count by shifting rather than reading it |
+**A correction.** An earlier version of this section listed five more sites
+that cook a value, and said that three of them have the same shape as
+`bound_proc_count`. That is not correct. No site in this list keeps its result
+in a field that a structure writes back:
 
-The first three are the same shape as `bound_proc_count`. **Segment 2
-therefore leads with `GuiTableEntry` and `ControlInfo`**, and takes
-`ProjectInfo`, `ObjectInfo`, `PrivateObj`, `OptionalObjectInfo` and the
-`FuncTypDesc` header after them.
+| Where | What it does | Why no byte can differ |
+|---|---|---|
+| `gui::bound_form_count` | clamps `wFormCount` | The clamped value only bounds the loop. `VbHeader.w_form_count` keeps the raw value. |
+| `controlinfo::bound_control_count` | clamps `dwControlCount` | The clamped value only bounds the loop. The raw value is a local that the reader discards. |
+| `controlinfo::bound_event_count` | clamps `wEventCount` | The clamped value only bounds the loop. `ControlInfo.w_event_count` keeps the raw value. |
+| `functyp::vb_type_of` | substitutes zero for a missing type address | The default cannot occur. The type buffer walk stops before it keeps an entry that has no address. |
+| `functyp::walk_type_buffer` | derives an argument count from `argSize` by a shift | The derived count only bounds the loop. |
+
+The table names functions and not line numbers, because segment 2 moves those
+lines.
+
+A clamp that only bounds a loop makes the reader return fewer instances. It
+never changes a byte, so the byte diff cannot see it. A census finds it: for
+each array, the count that the file declares against the number of instances
+that the reader returns.
+
+**Segment 2 therefore adds that census.** First, three readers keep what they
+read and discard today: `lStructSize` on the GUI table entry, `lpszName` on
+`ControlInfo`, and `dwControlCount` and `lpControls` in a new
+`OptionalObjectInfo` structure. Segment 2 then grades `ProjectInfo`,
+`GuiTableEntry`, `ObjectInfo`, `PrivateObj`, `OptionalObjectInfo` and
+`ControlInfo`. Every field that these six structures keep is verbatim, so their
+ledgers report coverage only. The census is the part that can find a fault.
+The `FuncTypDesc` header is not part of segment 2.
 
 **Two limits cap what this phase can ever claim.** They are properties of the
 method and not faults to fix.
