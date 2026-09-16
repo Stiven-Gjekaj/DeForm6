@@ -82,7 +82,7 @@ use deform6::read::pe::PeImage;
 use deform6::read::region::{Off, Va};
 use deform6::vb::classify::ObjectKind;
 use deform6::vb::opcodes::OpcodeTable;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// The number of executables the corpus vendors.
@@ -977,15 +977,20 @@ fn event_slot(pe: &PeImage<'_>, table: Va, index: u32) -> Option<Va> {
         .va_le(Off::new(NATIVE_EVENT_HEADER_LEN + index * 4))
 }
 
-/// Tells whether `va` holds the native stub section 8.6 shows:
+/// Tells whether `bytes` open with the native stub section 8.6 shows:
 /// `81 6C 24 04 <imm32>`, then `E9 <rel32>`.
+fn opens_a_native_stub(bytes: &[u8]) -> bool {
+    bytes.len() >= 13 && bytes[..4] == [0x81, 0x6C, 0x24, 0x04] && bytes[8] == 0xE9
+}
+
+/// Tells whether `va` holds the native stub section 8.6 shows.
 ///
 /// Read by hand, so this file does not take the reader's word for what a
 /// stub is.
 fn is_native_stub(pe: &PeImage<'_>, va: Va) -> bool {
     pe.region_at_va(va)
         .and_then(|stub| stub.take(Off::new(0), 13))
-        .is_some_and(|bytes| bytes[..4] == [0x81, 0x6C, 0x24, 0x04] && bytes[8] == 0xE9)
+        .is_some_and(opens_a_native_stub)
 }
 
 /// Tells whether a slot holds what a slot may hold: a null for an event with
@@ -1200,6 +1205,112 @@ fn the_walk_grades_one_event_stub_at_each_address_a_bound_slot_names() {
                 "{}: the bound slots name {named:x?}, and the walk graded EventStub at {graded:x?}",
                 path.display()
             ));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+    assert_eq!(stubs, 390);
+}
+
+/// `STRUCTURES.md` section 8.6: a stub whose `imm32` is `0xFFFF` belongs to
+/// a method.
+const METHOD_IMM32: u32 = 0xFFFF;
+
+/// Gives the file offset of the virtual address `va`, by the PE image.
+fn file_offset_of(pe: &PeImage<'_>, va: u32) -> usize {
+    let at = pe
+        .region_at_va(Va::new(va))
+        .and_then(|region| region.file_offset(Off::new(0)))
+        .unwrap();
+    usize::try_from(at.get()).unwrap()
+}
+
+#[test]
+fn the_three_hundred_and_eleven_native_stubs_no_slot_names_hold_the_method_value_and_no_four_bytes_name_them()
+ {
+    // Every place in the file that opens with the native stub bytes is
+    // visited, not only the places the slots name. A stub that a slot names
+    // is an event stub. Every other one holds the value that section 8.6
+    // gives for a method, and no four bytes of the file hold its address.
+    //
+    // The same address search finds each named stub exactly once, in its
+    // own slot. That shows that the search can find an address.
+    //
+    // Measured on 2026-09-16: 701 places, 390 of them named by a slot.
+    let mut named_total = 0_usize;
+    let mut other_total = 0_usize;
+    let mut failed = Vec::new();
+    for (path, ledgers) in graded() {
+        let data = std::fs::read(&path).unwrap();
+        let pe = PeImage::parse(&data).unwrap();
+        let named: BTreeSet<usize> = ledgers
+            .iter()
+            .filter(|l| l.structure == "ControlInfo")
+            .flat_map(|control| {
+                bound_slots(&data, &pe, usize::try_from(control.base.get()).unwrap())
+            })
+            .map(|slot| file_offset_of(&pe, slot.stub))
+            .collect();
+        // How many four byte values in the file are an address of each
+        // file offset.
+        let mut pointers = BTreeMap::<usize, usize>::new();
+        for window in data.windows(4) {
+            let value = u32::from_le_bytes(window.try_into().unwrap());
+            if let Some(at) = pe.va_to_off(Va::new(value)) {
+                *pointers
+                    .entry(usize::try_from(at.get()).unwrap())
+                    .or_default() += 1;
+            }
+        }
+        for at in (0..data.len()).filter(|&at| opens_a_native_stub(&data[at..])) {
+            let imm32 = u32::from_le_bytes(data[at + 4..at + 8].try_into().unwrap());
+            let pointed = pointers.get(&at).copied().unwrap_or(0);
+            let place = format!("{}: stub at file offset {at:#x}", path.display());
+            if named.contains(&at) {
+                named_total += 1;
+                if imm32 == METHOD_IMM32 || pointed != 1 {
+                    failed.push(format!(
+                        "{place}: a slot names it, and it holds imm32 {imm32:#x} and has {pointed} pointer(s)"
+                    ));
+                }
+            } else {
+                other_total += 1;
+                if imm32 != METHOD_IMM32 || pointed != 0 {
+                    failed.push(format!(
+                        "{place}: no slot names it, and it holds imm32 {imm32:#x} and has {pointed} pointer(s)"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+    assert_eq!((named_total, other_total), (390, 311));
+}
+
+#[test]
+fn each_stub_a_slot_names_holds_one_less_than_the_word_at_four_of_its_control() {
+    // STRUCTURES.md section 17 could not name the word at ControlInfo 0x04.
+    // Measured on 2026-09-16: in each of the 390 stubs, imm32 is that word
+    // less one. So all the stubs of one control hold one imm32.
+    let mut stubs = 0_usize;
+    let mut failed = Vec::new();
+    for (path, ledgers) in graded() {
+        let data = std::fs::read(&path).unwrap();
+        let pe = PeImage::parse(&data).unwrap();
+        for control in ledgers.iter().filter(|l| l.structure == "ControlInfo") {
+            let base = usize::try_from(control.base.get()).unwrap();
+            let word_at_four = u32::from(u16::from_le_bytes([data[base + 4], data[base + 5]]));
+            for slot in bound_slots(&data, &pe, base) {
+                stubs += 1;
+                let at = file_offset_of(&pe, slot.stub) + 4;
+                let imm32 = u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
+                if imm32 + 1 != word_at_four {
+                    failed.push(format!(
+                        "{}: ControlInfo at file offset {base:#x}: slot {} holds imm32 {imm32:#x}, and the word at 0x04 is {word_at_four:#x}",
+                        path.display(),
+                        slot.index
+                    ));
+                }
+            }
         }
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
