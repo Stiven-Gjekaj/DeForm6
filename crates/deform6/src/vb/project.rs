@@ -419,12 +419,15 @@ fn va_at(window: &Region<'_>, at: u32, what: &'static str) -> Result<Va, Refusal
 /// The size of one `Declare` import table entry.
 const DECLARE_ENTRY_SIZE: u32 = 8;
 
-/// The size of the descriptor a `dwEntryType == 7` entry points at.
+/// The number of bytes this reader reads from the descriptor that a
+/// `dwEntryType == 7` entry points at.
 ///
-/// `STRUCTURES.md` section 7.1 also records a third dword after these two,
-/// pointing at thunking data (a module handle and a resolved address) that
-/// the runtime fills in after loading. It holds nothing before that, so it
-/// is not read here. `[L]`
+/// `STRUCTURES.md` section 21 finds that the descriptor is 24 bytes. The
+/// first 8 hold the two addresses of the names. The dword at `0x0C` holds the
+/// address of the thunk data, a module handle and a resolved address that
+/// the runtime fills in after loading. The dword at `0x08` holds
+/// `0x00040000`, and `0x10` and `0x14` hold 0. None of the other 16 bytes
+/// names the library or the export, so this reader reads only the first 8.
 const DECLARE_DESCRIPTOR_SIZE: u32 = 8;
 
 /// One `Declare` statement recovered from the external import table.
@@ -591,7 +594,8 @@ impl DeclareTable {
     /// is `DefectKind::ImplausibleCount` at `Recoverable`, and
     /// the loop below still bounds itself independently, one entry at a
     /// time, through [`Region::subregion`]. The largest count measured in
-    /// this corpus is 9, and the whole corpus holds 249 entries.
+    /// this corpus is 26, in `Edge_Detection.exe`, and the whole corpus holds
+    /// 249 entries.
     ///
     /// # A gap in the shared defect vocabulary, closed
     ///
@@ -700,8 +704,9 @@ impl DeclareTable {
                 // Visual Basic application. Dereferencing one as a library
                 // and export name pair would present unrelated in-image
                 // bytes as a recovered declaration. This is not a defect: 29
-                // of the 249 entries in this corpus are this type, so this
-                // is a path every third program takes. `[VERIFIED: local]`
+                // of the 249 entries in this corpus are this type, one in
+                // each of 29 of the 44 programs, so most programs take this
+                // path. `[VERIFIED: local]`
                 6 => {}
                 7 => match descriptor
                     .ok_or(DeclareDescriptorFailure::Descriptor)
@@ -788,9 +793,8 @@ impl DeclareDescriptorFailure {
 /// Reads the two addresses at the start of the descriptor that a
 /// `dwEntryType == 7` entry names.
 ///
-/// The third word `STRUCTURES.md` section 7.1 records after these two is
-/// runtime scratch, a module handle and a resolved address that hold
-/// nothing before the loader runs. It is not read.
+/// The descriptor is 24 bytes, and the other 16 bytes hold no name. See
+/// `DECLARE_DESCRIPTOR_SIZE`.
 ///
 /// `None` when the address is in no section, or when the file ends inside
 /// the `DECLARE_DESCRIPTOR_SIZE` bytes that this function reads.
@@ -1699,10 +1703,11 @@ mod tests {
         assert!(table.defects().is_empty());
     }
 
-    /// Eight of the nine entries are external. The ninth is `dwEntryType ==
-    /// 6`, resolved inside the runtime, and it must not appear here.
+    /// Eight of the nine entries are external. The other one, entry 0, is
+    /// `dwEntryType == 6`, resolved inside the runtime, and it must not
+    /// appear here.
     #[test]
-    fn eight_of_nine_grayscale_entries_are_external_and_the_ninth_is_skipped() {
+    fn eight_of_nine_grayscale_entries_are_external_and_the_internal_one_is_skipped() {
         let table = declare_table(GRAYSCALE);
         assert_eq!(
             as_pairs(&table),
@@ -1722,7 +1727,7 @@ mod tests {
         assert_eq!(
             table.declarations.len(),
             8,
-            "the ninth entry is internal (dwEntryType == 6) and must not be dereferenced"
+            "entry 0 is internal (dwEntryType == 6) and must not be dereferenced"
         );
         assert!(table.defects().is_empty());
     }
@@ -1807,7 +1812,7 @@ mod tests {
     /// A descriptor address in no section produces a defect, and the walk
     /// does not stop: it is the only entry `Mandelbrot.exe` has, so this
     /// proves the walk finishes rather than that another entry survives.
-    /// [`eight_of_nine_grayscale_entries_are_external_and_the_ninth_is_skipped`]
+    /// [`eight_of_nine_grayscale_entries_are_external_and_the_internal_one_is_skipped`]
     /// is the test that a real defect on one entry leaves the others intact,
     /// because `Grayscale.exe` has more than one.
     #[test]
@@ -1968,7 +1973,7 @@ mod tests {
     /// A bound `dwExternalCount` still resolves every entry the region can
     /// hold, and it does not panic on the ones it cannot.
     ///
-    /// This corpus never exercises an implausible count: the largest is 9.
+    /// This corpus never exercises an implausible count: the largest is 26.
     /// The fixture inflates `Mandelbrot.exe`'s own count by a wide margin,
     /// which the file's own external table region cannot hold.
     #[test]
