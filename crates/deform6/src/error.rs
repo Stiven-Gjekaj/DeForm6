@@ -171,6 +171,22 @@ pub enum DefectKind {
         va: u32,
     },
 
+    /// An event slot names a stub that does not have the native shape.
+    ///
+    /// `STRUCTURES.md` section 8.6 gives the native stub as `81 6C 24 04
+    /// <imm32>`, then `E9 <rel32>`. A stub that holds other bytes at one of
+    /// these five places, such as a P-code stub, is not decoded. The slot
+    /// stays bound and keeps its stub address, and it has no handler.
+    #[error(
+        "the event stub at offset {offset:#x} holds {found:02x?}, and a native stub holds 81 6c 24 04 at +0x00 and e9 at +0x08"
+    )]
+    UnknownStubShape {
+        /// The absolute file offset of the stub.
+        offset: u32,
+        /// The 13 bytes of the stub, in file order.
+        found: [u8; 13],
+    },
+
     /// A length-prefixed name field declares a length of zero.
     ///
     /// Plan 03-04: a control's declared name length can legitimately be
@@ -407,6 +423,10 @@ impl DefectKind {
             // The item keeps its other fields, and the pointer's target is
             // simply absent: nothing is invented in its place.
             Self::UnreadablePointer { .. } => Severity::Tolerated,
+            // The slot keeps its index and its stub address, and only the
+            // handler is absent: no handler is invented from bytes of a shape
+            // the reader does not decode.
+            Self::UnknownStubShape { .. } => Severity::Tolerated,
             // The control keeps its type, and no name is invented in its
             // place.
             Self::EmptyName { .. } => Severity::Tolerated,
@@ -695,6 +715,16 @@ mod tests {
                 0x99,
             ),
             (
+                DefectKind::UnknownStubShape {
+                    offset: 0x9e,
+                    found: [
+                        0x33, 0xc0, 0xba, 0x34, 0x12, 0x40, 0x00, 0x68, 0x34, 0x12, 0x40, 0x00,
+                        0xc3,
+                    ],
+                },
+                0x9e,
+            ),
+            (
                 DefectKind::ItemAddressUnmapped {
                     offset: 0xaa,
                     va: 0x0040_3000,
@@ -736,6 +766,24 @@ mod tests {
         assert!(message.contains("0x18083"), "{message}");
         assert!(message.contains("fObjectType"), "{message}");
         assert!(message.contains("private object address"), "{message}");
+    }
+
+    #[test]
+    fn an_unknown_stub_shape_message_names_the_bytes_found_and_the_bytes_expected() {
+        let kind = DefectKind::UnknownStubShape {
+            offset: 0x19d0,
+            found: [
+                0x33, 0xc0, 0xba, 0xd0, 0x19, 0x40, 0x00, 0x68, 0xd0, 0x19, 0x40, 0x00, 0xc3,
+            ],
+        };
+        let message = format!("{kind}");
+        assert!(message.contains("0x19d0"), "{message}");
+        assert!(
+            message.contains("[33, c0, ba, d0, 19, 40, 00, 68, d0, 19, 40, 00, c3]"),
+            "{message}"
+        );
+        assert!(message.contains("81 6c 24 04"), "{message}");
+        assert!(message.contains("e9 at +0x08"), "{message}");
     }
 
     #[test]
@@ -808,6 +856,10 @@ mod tests {
 
         let tolerated = [
             DefectKind::UnreadablePointer { offset: 0, va: 0 },
+            DefectKind::UnknownStubShape {
+                offset: 0,
+                found: [0; 13],
+            },
             DefectKind::EmptyName { offset: 0 },
             DefectKind::IndexHighByteSet { offset: 0, high: 0 },
             DefectKind::UnrecoverableString {

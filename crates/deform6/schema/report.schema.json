@@ -247,6 +247,27 @@
         {
           "type": "object",
           "additionalProperties": false,
+          "required": ["UnknownStubShape"],
+          "properties": {
+            "UnknownStubShape": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "found"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "found": {
+                  "type": "array",
+                  "minItems": 13,
+                  "maxItems": 13,
+                  "items": { "type": "integer", "minimum": 0, "maximum": 255 }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
           "required": ["EmptyName"],
           "properties": {
             "EmptyName": {

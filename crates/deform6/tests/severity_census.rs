@@ -95,6 +95,7 @@ const fn kind_name(kind: &DefectKind) -> &'static str {
         DefectKind::CountMismatch { .. } => "CountMismatch",
         DefectKind::ModuleMarkerMismatch { .. } => "ModuleMarkerMismatch",
         DefectKind::UnreadablePointer { .. } => "UnreadablePointer",
+        DefectKind::UnknownStubShape { .. } => "UnknownStubShape",
         DefectKind::EmptyName { .. } => "EmptyName",
         DefectKind::IndexHighByteSet { .. } => "IndexHighByteSet",
         DefectKind::UnrecoverableString { .. } => "UnrecoverableString",

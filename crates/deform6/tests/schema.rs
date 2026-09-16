@@ -274,3 +274,63 @@ fn a_report_that_carries_a_module_marker_mismatch_validates() {
         errors.join("\n")
     );
 }
+
+/// A report that carries an `UnknownStubShape` defect validates, and the
+/// schema refuses the same defect with one byte too many or one byte out of
+/// range.
+///
+/// No corpus program raises this kind, for the reason the test above gives
+/// for its own kind.
+#[test]
+fn a_report_that_carries_an_unknown_stub_shape_validates() {
+    let validator = compiled_schema();
+    let exe = corpus_root().join("vb6-code/Fire-effect/Fast_Flames.exe");
+    let mut value = report_value_for(&exe);
+    let defect = Defect {
+        site: Site {
+            offset: 0x19d0,
+            rva: Some(0x19d0),
+            structure: "EventStub",
+            field: "opcode",
+        },
+        kind: DefectKind::UnknownStubShape {
+            offset: 0x19d0,
+            found: [
+                0x33, 0xC0, 0xBA, 0xD0, 0x19, 0x40, 0x00, 0x68, 0xD0, 0x19, 0x40, 0x00, 0xC3,
+            ],
+        },
+    };
+    let serialized = serde_json::to_value(&defect).expect("a defect serializes");
+    let at = value["defects"]
+        .as_array()
+        .expect("defects must be an array")
+        .len();
+    value["defects"]
+        .as_array_mut()
+        .expect("defects must be an array")
+        .push(serialized);
+
+    let errors = describe_errors(&validator, &value);
+    assert!(
+        errors.is_empty(),
+        "a report with an UnknownStubShape defect failed schema validation:\n{}",
+        errors.join("\n")
+    );
+
+    let mut too_long = value.clone();
+    too_long["defects"][at]["kind"]["UnknownStubShape"]["found"]
+        .as_array_mut()
+        .expect("found must be an array")
+        .push(serde_json::json!(0));
+    assert!(
+        !validator.is_valid(&too_long),
+        "a stub of fourteen bytes must be refused"
+    );
+
+    let mut out_of_range = value.clone();
+    out_of_range["defects"][at]["kind"]["UnknownStubShape"]["found"][0] = serde_json::json!(256);
+    assert!(
+        !validator.is_valid(&out_of_range),
+        "a byte above 255 must be refused"
+    );
+}
