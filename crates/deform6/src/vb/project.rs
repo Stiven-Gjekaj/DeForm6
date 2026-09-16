@@ -529,8 +529,10 @@ impl DeclareTable {
     ///
     /// The count is a `u32` straight out of the file. Before the loop, it is
     /// checked against the real length of the region the table's own address
-    /// resolves to: `dwExternalCount * 8` must fit inside it. A count that
-    /// does not fit is `DefectKind::ImplausibleCount` at `Recoverable`, and
+    /// resolves to: it must not be larger than the number of whole entries
+    /// that the region holds. The check multiplies nothing, so a count whose
+    /// size in bytes leaves a `u32` is checked too. A count that does not fit
+    /// is `DefectKind::ImplausibleCount` at `Recoverable`, and
     /// the loop below still bounds itself independently, one entry at a
     /// time, through [`Region::subregion`]. The largest count measured in
     /// this corpus is 9, and the whole corpus holds 249 entries.
@@ -569,9 +571,11 @@ impl DeclareTable {
             };
         };
 
-        if let Some(wanted) = info.dw_external_count.checked_mul(DECLARE_ENTRY_SIZE)
-            && wanted > table.len()
-        {
+        // The number of whole entries the region holds. The loop below bounds
+        // itself through `Region::subregion`, one entry at a time, and never
+        // reads this value. A division by a non-zero constant cannot fail.
+        let max_entries = table.len().checked_div(DECLARE_ENTRY_SIZE).unwrap_or(0);
+        if info.dw_external_count > max_entries {
             // The defect names dwExternalCount itself, which lives in
             // ProjectInfo and not in the table it bounds. ImplausibleCount
             // documents its offset as that of the count field.
@@ -579,15 +583,6 @@ impl DeclareTable {
                 .file_offset
                 .checked_add(DW_EXTERNAL_COUNT_AT)
                 .map_or(0, Off::get);
-            // The exact entry count the region can hold is one division, and
-            // it names nothing but the defect's own report field: the loop
-            // below bounds itself through `Region::subregion`, one entry at
-            // a time, and never reads this value.
-            #[allow(
-                clippy::integer_division,
-                reason = "report field only; the loop below is bounded by subregion, not by this"
-            )]
-            let max_entries = table.len() / DECLARE_ENTRY_SIZE;
             defects.push(Defect {
                 site: Site {
                     offset,
@@ -1759,6 +1754,55 @@ mod tests {
         // Site::rva is the address the offset came from. This offset did not
         // come from lpExternalTable, so the defect must not give that address.
         assert_eq!(defect.site.rva, None);
+    }
+
+    /// A count whose size in bytes leaves a `u32` is bounded and flagged
+    /// too.
+    ///
+    /// `0x2000_0000 * 8` leaves a `u32`. A check that multiplied the count
+    /// first had no size to compare, so it raised no defect, while the loop
+    /// still stopped at the end of the region.
+    #[test]
+    fn a_declare_count_whose_size_in_bytes_leaves_a_u32_is_clamped_and_flagged() {
+        let (at, holds) = {
+            let image = PeImage::parse(MANDELBROT).unwrap();
+            let window = image.region_at_va(project_data_va(MANDELBROT)).unwrap();
+            let table = image
+                .region_at_va(project_info(MANDELBROT).unwrap().lp_external_table)
+                .unwrap();
+            (
+                usize::try_from(window.file_offset(Off::new(0x238)).unwrap().get()).unwrap(),
+                table.len().checked_div(8).unwrap(),
+            )
+        };
+        let unpatched = declare_table(MANDELBROT).declarations;
+        assert_eq!(unpatched.len(), 1);
+        for count in [0x2000_0000_u32, 0xFFFF_FFFF] {
+            let mut bytes = MANDELBROT.to_vec();
+            bytes[at..at + 4].copy_from_slice(&count.to_le_bytes());
+            let table = declare_table(&bytes);
+            let clamps: Vec<_> = table
+                .defects()
+                .iter()
+                .filter(|d| matches!(d.kind, DefectKind::ImplausibleCount { .. }))
+                .collect();
+            assert_eq!(clamps.len(), 1, "count {count:#x}: {clamps:?}");
+            assert_eq!(
+                clamps[0].kind,
+                DefectKind::ImplausibleCount {
+                    offset: u32::try_from(at).unwrap(),
+                    count,
+                    max: holds,
+                }
+            );
+            assert_eq!(clamps[0].site.structure, "ProjectInfo");
+            assert_eq!(clamps[0].site.field, "dwExternalCount");
+            assert_eq!(
+                table.declarations.first(),
+                unpatched.first(),
+                "the one real entry must still resolve"
+            );
+        }
     }
 
     #[test]
