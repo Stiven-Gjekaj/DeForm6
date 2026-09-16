@@ -16,11 +16,14 @@
 //!
 //! Phase 1 reaches the object table because the project name is stored in it,
 //! so the number of objects is free and honest here and the number is
-//! reported without naming any object. Walking the objects themselves is
-//! Phase 2, plan 02-01. **Do not extend [`ObjectTableHead::read`] to follow
-//! the address at `0x30`.** Nothing here sizes an allocation from a field in
-//! the file, and SAF-04 requires the count to be checked against the real
-//! file length before anything in Phase 2 does.
+//! reported without naming any object. Walking the objects themselves is the
+//! work of [`crate::vb::object::ObjectTable::walk`]. The head keeps the
+//! address at `0x30` as [`ObjectTableHead::lp_object_array`]. **Do not extend
+//! [`ObjectTableHead::read`] to follow that address.** Nothing here sizes an
+//! allocation from a field in the file, and SAF-04 requires the count to be
+//! checked against the real file length before anything reads the array. The
+//! object walk does that check, and it reads the address again for itself.
+//! `vb/object.rs` says why.
 
 use crate::error::{Defect, DefectKind, Refusal, Site};
 use crate::read::pe::PeImage;

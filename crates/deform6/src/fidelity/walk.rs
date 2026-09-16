@@ -20,13 +20,15 @@
 //! same places, and `the_header_ledger_lands_on_the_offset_that_inspect_reports`
 //! in `tests/byte_fidelity.rs` is what proves it arrives at the same places.
 //!
-//! # `lpObjectArray` is restated here, not imported
+//! # `lpObjectArray` is read here, not taken from a reader
 //!
-//! `vb::object::object_array_va` is private, so this module reads
-//! `lpObjectArray` at `ObjectTable + 0x30` from `docs/STRUCTURES.md` section 4
-//! instead. That is the independence rule working rather than a way around a
-//! visibility problem: an emitter that shared the reader's constant would
-//! agree with the reader about a wrong one.
+//! `ObjectTableHead` keeps `lp_object_array`, and `ObjectTable::walk` reads
+//! the same field for itself. This module uses neither. It reads
+//! `lpObjectArray` at `ObjectTable + 0x30` from `docs/STRUCTURES.md` section 4.
+//! That is the rule of the section above: the walk finds every position
+//! itself. A walk that placed the array at the address a reader holds would
+//! grade the objects at the place that reader chose, so a wrong place would
+//! pass.
 
 use std::collections::BTreeSet;
 

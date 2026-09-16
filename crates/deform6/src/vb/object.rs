@@ -6,19 +6,27 @@
 //! matches the declared object count in only 29 of the 44 corpus programs.
 //! Nothing in this file reads or loops on the compiled count.
 //!
-//! # This file resolves `lpObjectArray` itself, and does not touch `vb/project.rs`
+//! # This file resolves `lpObjectArray` itself
 //!
-//! Plan 01-07 left a comment on `ObjectTableHead::read` saying it deliberately
-//! does not read `ObjectTable + 0x30`, `lpObjectArray`, so that a later phase
-//! would read it. `vb/project.rs` belongs to plan 02-06 in this wave, and two
-//! plans in the same wave must not edit the same file, so this module reads
-//! `lpObjectArray` on its own: a second, narrow window onto the same
-//! `ObjectTable` structure that [`crate::vb::project::ObjectTableHead::read`]
-//! already opened for its own three fields. That function still owns the two
-//! counts, the project name and the defect it reports; this file reads the
-//! one field it needs, independently, the same way `ProjectInfo::read` and
-//! `ObjectTableHead::read` already read two different windows onto two
-//! different structures reached through the same pointer chain.
+//! [`ObjectTableHead`] keeps the address of the array as
+//! [`ObjectTableHead::lp_object_array`], and [`ObjectTable::walk`] does not
+//! use that field. The walk opens its own narrow window onto the same
+//! `ObjectTable` structure and reads `ObjectTable + 0x30` again, for two
+//! reasons:
+//!
+//! - The walk takes `lpObjectTable`, and it refuses a table address that is
+//!   in no section and a file that ends inside the table. To take the array
+//!   address from the head would make that argument and those refusals dead,
+//!   and would change a public signature.
+//! - The change gives the walk nothing. The head reads the same four bytes of
+//!   the same table, so a head read from the same `lpObjectTable` holds the
+//!   same address.
+//!
+//! When this walk was written, the head did not keep the address, and
+//! `vb/project.rs` belonged to another plan of the same wave. Today
+//! [`ObjectTableHead::read`] owns the two counts, the array address, the
+//! project name and the defect it reports, and this file reads only the one
+//! field it needs.
 //!
 //! Each `Object` is narrowed to its own `0x30`-byte window before any field
 //! inside it is read, which is the window-before-fields discipline
@@ -41,7 +49,7 @@ const OBJECT_SIZE: u32 = 0x30;
 ///
 /// This is the same value `vb/project.rs` uses for `ObjectTableHead::read`,
 /// kept here rather than imported. See the module doc comment for why this
-/// file does not reach into that one.
+/// file reads the object table itself.
 const OBJECT_TABLE_SIZE: u32 = 0x54;
 
 /// The bound on an object name string.
@@ -213,7 +221,7 @@ impl ObjectTable {
 /// Resolves `lpObjectArray`, the address of the `Object` array.
 ///
 /// See the module doc comment for why this file reads `ObjectTable + 0x30`
-/// on its own rather than through [`ObjectTableHead`].
+/// on its own rather than through [`ObjectTableHead::lp_object_array`].
 fn object_array_va(pe: &PeImage<'_>, lp_object_table: Va) -> Result<Va, Refusal> {
     let at = pe.region_at_va(lp_object_table).ok_or(Refusal::Damaged(
         "the object table pointer is in no section",
@@ -481,11 +489,10 @@ mod tests {
     /// project declares no objects," which is a different and wrong claim
     /// about the source from "this file is damaged."
     ///
-    /// This file does not add `lp_object_array` to `ObjectTableHead`, because
-    /// `vb/project.rs` belongs to plan 02-06 in this wave. See the module doc
-    /// comment. Patching the exact byte offset this test computes is the
-    /// proof that `ObjectTable::walk` reads `ObjectTable + 0x30`, which is
-    /// what that behaviour asked to see.
+    /// The head is read from the patched bytes too. It keeps the address and
+    /// does not follow it, so the refusal comes from the walk. Patching the
+    /// exact byte offset this test computes is the proof that
+    /// `ObjectTable::walk` takes the array address from `ObjectTable + 0x30`.
     #[test]
     fn a_patched_object_array_pointer_in_no_section_is_damaged_and_not_empty() {
         let image = PeImage::parse(MANDELBROT).unwrap();
