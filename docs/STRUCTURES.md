@@ -1401,9 +1401,19 @@ signature   0x12344321   (bytes 21 43 34 12)
  +0x04      reserved, always 8
  +0x08      _ExtentX   (Long, HiMetric)
  +0x0C      _ExtentY   (Long, HiMetric)
- +0x10      reserved
+ +0x10      reserved   (not zero in the corpus, see below)
  +0x14      _Version   (Long)
 ```
+
+**What the corpus holds.** The corpus has three external controls. Each is an
+`MSWinsockLib.Winsock`, and the block of each holds the header one time. In
+all three, `+0x04` holds 8, `_ExtentX` and `_ExtentY` hold 741, `+0x10` holds
+`0x248DD892`, and `_Version` holds `0x60000`. So the field at `+0x10` is not
+empty in these files, and this document does not know what it holds. **[G]**
+A probe on 2026-09-16 read the three headers, and a second probe on
+2026-09-17 found them at the same offsets through `inspect`. The unit test
+`the_winsock_sample_gives_its_real_ocx_header_with_non_zero_extents` in
+`vb/ocx.rs` keeps the values of one header true, except the value at `+0x10`.
 
 So `_ExtentX`, `_ExtentY` and `_Version` are recoverable for every OCX control
 without instantiating it, by scanning the control's block for the signature.
