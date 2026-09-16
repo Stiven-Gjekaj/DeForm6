@@ -181,7 +181,8 @@ pub(crate) const HEADER: &str = r#"# The pinned procedure recovery ratio, one en
 # not do"). `ratio` is `recovered / declared`, rounded to two decimal
 # places and recomputed from the two counts on every run: a hand-edited
 # ratio that disagrees with its own counts fails the same as an edited
-# count does.
+# count does. A program that declares no procedure has no ratio, and its
+# `ratio` is the string "n/a".
 #
 # The totals over all 44 programs are 185 recovered and 904 declared.
 #
@@ -452,9 +453,10 @@ fn read_pinned() -> BTreeMap<String, PinnedEntry> {
     parse_ratios_toml(&text)
 }
 
-/// `recovered / declared`, rounded to two decimal places. The one place
-/// this ratio is computed, so the pinned column, the ratio-consistency
-/// check and the `MOVED UP` paste block can never disagree by accident.
+/// The text of the `ratio` value: `recovered / declared`, rounded to two
+/// decimal places. The one place this ratio is computed, so the pinned
+/// column, the ratio-consistency check and the `MOVED UP` paste block can
+/// never disagree by accident.
 ///
 /// A `declared` of zero is refused before the division, not left to `f64`
 /// division's own behaviour. `f64` division by zero does not panic in Rust;
@@ -466,9 +468,14 @@ fn read_pinned() -> BTreeMap<String, PinnedEntry> {
 /// measured ratio, and `AGENTS.md`'s own measurement rule says to give the
 /// number that can be proved, not one a division produced from an absent
 /// denominator.
+///
+/// [`format_entry`] writes this text into `tests/ratios.toml` as it is, so
+/// the text must be a TOML value. A number is one. The named result is a
+/// string, so it keeps its quotes: a bare `n/a` is not TOML, and
+/// `xtask update-ratios` refuses to write a file that does not parse.
 pub(crate) fn format_ratio(recovered: u32, declared: u32) -> String {
     if declared == 0 {
-        return "n/a".to_owned();
+        return "\"n/a\"".to_owned();
     }
     let ratio = f64::from(recovered) / f64::from(declared);
     format!("{ratio:.2}")
@@ -914,14 +921,43 @@ fn declared_mismatch_message(
 fn a_declared_of_zero_gives_the_named_result_and_not_a_division() {
     assert_eq!(
         format_ratio(0, 0),
-        "n/a",
+        "\"n/a\"",
         "a zero denominator must give a result a reader cannot mistake for a measurement"
     );
     assert_eq!(
         format_ratio(7, 0),
-        "n/a",
+        "\"n/a\"",
         "a non-zero recovered count over a zero declared count is still refused, not divided"
     );
+}
+
+#[test]
+fn a_program_that_declares_no_procedure_gives_an_entry_that_is_toml_and_passes_the_ratio_check() {
+    let block = format_entry("a/A.exe", 0, 0, 1, 1, 2, 2, 3, 4);
+    let table: toml::Table = block
+        .parse()
+        .unwrap_or_else(|err| panic!("the entry is not TOML: {err}\n{block}"));
+    assert_eq!(table["a/A.exe"]["ratio"].as_str(), Some("n/a"), "{block}");
+
+    let parsed = parse_ratios_toml(&block);
+    let failures = check_program(
+        "a/A.exe",
+        &parsed["a/A.exe"],
+        0,
+        0,
+        &[],
+        &differential::FormsControlsCounts {
+            form_declared: 1,
+            form_recovered: 1,
+            control_declared: 2,
+            control_recovered: 2,
+        },
+        &PropertyCounts {
+            declared: 3,
+            written: 4,
+        },
+    );
+    assert!(failures.is_empty(), "{failures:?}");
 }
 
 #[test]

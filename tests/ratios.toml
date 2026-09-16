@@ -23,7 +23,8 @@
 # not do"). `ratio` is `recovered / declared`, rounded to two decimal
 # places and recomputed from the two counts on every run: a hand-edited
 # ratio that disagrees with its own counts fails the same as an edited
-# count does.
+# count does. A program that declares no procedure has no ratio, and its
+# `ratio` is the string "n/a".
 #
 # The totals over all 44 programs are 185 recovered and 904 declared.
 #

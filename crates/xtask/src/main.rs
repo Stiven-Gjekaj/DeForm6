@@ -444,6 +444,27 @@ mod tests {
         );
     }
 
+    #[test]
+    fn render_gives_valid_toml_for_a_program_that_declares_no_procedure() {
+        let measured = vec![Measured {
+            key: "a/A.exe".to_owned(),
+            recovered: 0,
+            declared: 0,
+            form_declared: 0,
+            form_recovered: 0,
+            control_declared: 0,
+            control_recovered: 0,
+            property_declared: 0,
+            property_written: 0,
+        }];
+        let rendered = render(&measured);
+        assert!(
+            validate_toml(&rendered).is_ok(),
+            "render must produce valid TOML: {rendered}"
+        );
+        assert!(rendered.contains("ratio = \"n/a\"\n"), "{rendered}");
+    }
+
     /// Behaviour four ("the block the `MOVED UP` message prints is byte for
     /// byte the block the command writes for that entry"): the writer's
     /// per-entry block, sliced out of a full render, must equal
