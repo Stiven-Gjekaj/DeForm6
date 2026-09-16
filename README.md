@@ -52,7 +52,7 @@ A thing it cannot prove is reported as a thing it cannot prove.
 | A claim you can check | Each fact carries a confidence word, and the report says which byte or which assumption produced it |
 | A refusal instead of a guess | The reader stops and names the offset it did not understand, rather than printing a tree it cannot prove |
 | A limit you can read before you run it | Every open gap is a row in this file, with the safe default the tool chose |
-| A number you can recompute | Every figure below is pinned in `tests/ratios.toml` and asserted by a named test on every run |
+| A number you can recompute | Every figure below is pinned in `tests/ratios.toml`, in `tests/fidelity.toml` or in a named test, and asserted on every run |
 
 ---
 
@@ -288,20 +288,30 @@ DeForm6 writes each structure back over the place it was read from and
 compares the result with what is there.
 A byte that goes back unchanged is one the reader reproduces.
 `cargo test -p deform6 --test byte_fidelity` asserts every row.
+`tests/fidelity.toml` holds these numbers for each corpus program.
+`cargo run -p xtask -- update-fidelity` writes that file, and
+`cargo test -p deform6 --test fidelity_map` fails when a value in it moves.
 
 | Structure | Bytes reproduced | Record length | Records |
 | --------- | ---------------- | ------------- | ------- |
 | VB header | 50 | 104 | 44 |
 | `ProjectInfo` | 20 | 572 | 44 |
 | GUI table entry | 8 | 80 | 53 |
+| `GUIObjectInfo` | 4 | 93 | 53 |
 | `Object` | 20 | 48 | 105 |
 | `ObjectInfo` | 6 | 56 | 105 |
 | `PrivateObj` | 16 | 64 | 97 |
 | `OptionalObjectInfo` | 8 | 64 | 97 |
 | `ControlInfo` | 16 | 40 | 706 |
+| Event stub | 13 | 13 | 390 |
 
-No reproduced byte differs from the file in any of the 1251 records, and no two
+No reproduced byte differs from the file in any of the 1694 records, and no two
 records claim the same byte.
+
+The reader reads only 8 of the 13 bytes of an event stub.
+The emitter writes the other 5 as the opcodes of the native stub, which the
+reader assumes and does not read, so a stub of another shape cannot pass as
+native.
 
 This is a coverage figure and not a proof of correctness.
 A field that is read at one offset and written back at the same offset cannot
@@ -398,13 +408,14 @@ crates/
     src/error.rs    the defect vocabulary and its three severities
     src/journal.rs  the one place a severity decides whether a run continues
     schema/         the JSON Schema every report is validated against
-    tests/          18 integration suites, including the corpus sweep
+    tests/          22 integration suites, including the corpus sweep
   deform6-cli/      the command line: it owns the file system
   xtask/            build tasks, including the licence audit
 docs/               the reverse engineering surveys the source cites
 scripts/            the walls: each one proves a property and fails loudly
 corpus/             44 Visual Basic 6 programs, with sources, and a manifest
 tests/ratios.toml   the pinned recovery figures the gate asserts
+tests/fidelity.toml the committed fidelity map the gate asserts
 ```
 
 Two ideas carry the design.
@@ -448,10 +459,13 @@ cargo test --workspace
   untrusted bytes belongs in that sweep.
 - **The hostile corpus.** Mutated and crafted inputs, including a form count
   of `0xFFFF` in a 4096 byte file, which must allocate nothing.
-- **The byte fidelity map.** The eight structures in the table above are
+- **The byte fidelity map.** The ten structures in the table above are
   written back over the bytes they were read from and compared against them,
   over all 44 programs. The bytes the reader reproduces and the bytes no field
   of it claims are both pinned.
+- **The committed fidelity map.** The totals of each corpus program in
+  `tests/fidelity.toml` must hold unchanged. A value that moves fails the
+  gate, and the message says whether the move is a regression.
 - **The array census.** For the four arrays in the table above, the count the
   file declares is compared with the number of items the reader returns, and
   the count is read back from the file at the offset the census names.
