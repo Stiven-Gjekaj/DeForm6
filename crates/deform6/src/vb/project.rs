@@ -185,7 +185,8 @@ const NAME_MAX: u32 = 0x104;
 
 /// The head of the object table, which `STRUCTURES.md` section 4 describes.
 ///
-/// Three fields are read: the two counts and the address of the project name.
+/// Four fields are read: the two counts, the address of the object array and
+/// the address of the project name.
 ///
 /// # The two counts are not the same quantity
 ///
@@ -224,6 +225,12 @@ pub struct ObjectTableHead {
     pub w_total_objects: u16,
     /// The capacity of the object array. See the doc comment on this struct.
     pub w_compiled_objects: u16,
+    /// The address of the object array, `lpObjectArray` at `0x30`.
+    ///
+    /// This is a virtual address. The head keeps it and does not follow it,
+    /// so an address that maps nowhere is not a reason to refuse the head.
+    /// [`crate::vb::object::ObjectTable::walk`] reads the array.
+    pub lp_object_array: Va,
     /// The address of the project name string.
     ///
     /// This is a **virtual address**, which `STRUCTURES.md` section 4 marks
@@ -273,6 +280,11 @@ impl ObjectTableHead {
             0x2C,
             "the object table holds no object array capacity",
         )?;
+        let lp_object_array = va_at(
+            &window,
+            0x30,
+            "the object table holds no address for the object array",
+        )?;
         let lpsz_project_name = va_at(
             &window,
             0x40,
@@ -302,6 +314,7 @@ impl ObjectTableHead {
         Ok(Self {
             w_total_objects,
             w_compiled_objects,
+            lp_object_array,
             lpsz_project_name,
             project_name,
             defects,
@@ -1541,6 +1554,35 @@ mod tests {
             ObjectTableHead::read(&image, nowhere).unwrap_err(),
             Refusal::Damaged("the object table pointer is in no section")
         );
+    }
+
+    /// The value is read by hand at `0x30`, through the route that
+    /// `object_table_field_offset` documents, and not through the head.
+    #[test]
+    fn the_head_keeps_the_object_array_address_that_the_table_holds() {
+        let at = object_table_field_offset(MANDELBROT, 0x30);
+        let by_hand = u32::from_le_bytes(MANDELBROT[at..at + 4].try_into().unwrap());
+        let head = object_table(MANDELBROT).unwrap();
+        assert_eq!(head.lp_object_array, Va::new(by_hand));
+        // A null or unmapped value here would make the comparison above weak.
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        assert!(image.region_at_va(head.lp_object_array).is_some());
+    }
+
+    /// The head keeps the address and does not follow it, so an array
+    /// address that maps nowhere is kept as the file holds it. The object
+    /// walk is the reader that refuses it.
+    #[test]
+    fn an_object_array_address_in_no_section_is_kept_and_is_not_damage() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let nowhere = image.image_base() + 0x00F0_0000;
+        assert!(image.region_at_va(Va::new(nowhere)).is_none());
+        let bytes = with_object_table_u32(0x30, nowhere);
+        let head = object_table(&bytes).expect("the head must not follow the array address");
+        assert_eq!(head.lp_object_array, Va::new(nowhere));
+        assert_eq!(head.project_name, "Mandelbrot_Fractal_Demo");
+        assert_eq!(head.object_count(), 1);
+        assert!(head.defects().is_empty(), "{:?}", head.defects());
     }
 
     #[test]
