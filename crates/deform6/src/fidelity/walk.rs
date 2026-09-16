@@ -24,13 +24,14 @@
 use crate::error::Refusal;
 use crate::fidelity::census::{Array, Count, Evidence, Owner, outcome};
 use crate::fidelity::ledger::Ledger;
+use crate::fidelity::privateobj::PrivateObjRecord;
 use crate::fidelity::{Emit, Fault, compare};
 use crate::read::pe::PeImage;
 use crate::read::region::{Off, Region, Va};
 use crate::vb::gui::{GuiTable, GuiTableEntry};
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::object::{Object, ObjectTable};
-use crate::vb::privateobj::ObjectInfo;
+use crate::vb::privateobj::{ObjectInfo, PrivateObj};
 use crate::vb::project::{ObjectTableHead, ProjectInfo};
 
 /// `STRUCTURES.md` section 4: `lpObjectArray` sits at `ObjectTable + 0x30`.
@@ -90,6 +91,10 @@ pub struct Ungraded {
 /// Why a structure was not graded.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reason {
+    /// The file holds no such record for this owner, and that is not a fault.
+    ///
+    /// A standard module has no `PrivateObj`, for example.
+    Absent,
     /// The reader refused it. This is a fact about the file.
     Refused(Refusal),
 }
@@ -173,7 +178,9 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
 
     for (index, object) in table.objects.iter().enumerate() {
         let owner = object_owner(index)?;
-        grade_object_info(&pe, object, owner, &mut found)?;
+        if let Some(info) = grade_object_info(&pe, object, owner, &mut found)? {
+            grade_private_obj(&pe, &info, owner, &mut found)?;
+        }
     }
 
     Ok(found)
@@ -201,12 +208,14 @@ fn located<'a, T: Emit>(
 /// A refusal here concerns this one object, so it is recorded and the walk
 /// goes on. An emitter fault still stops the walk: a walk that carried on
 /// past a fault in this repository could report a result that looks clean.
+/// Gives back the `ObjectInfo` it read, because the structures below it are
+/// reached through it.
 fn grade_object_info(
     pe: &PeImage<'_>,
     object: &Object,
     owner: Owner,
     found: &mut Walk,
-) -> Result<(), WalkError> {
+) -> Result<Option<ObjectInfo>, WalkError> {
     let read = ObjectInfo::read(pe, object.lp_object_info).and_then(|info| {
         let record = located::<ObjectInfo>(
             pe,
@@ -216,12 +225,54 @@ fn grade_object_info(
         Ok((info, record))
     });
     match read {
-        Ok((info, record)) => found.ledgers.push(compare(&info, &record)?),
-        Err(reason) => found.ungraded.push(Ungraded {
-            structure: ObjectInfo::STRUCTURE,
-            owner,
-            reason: Reason::Refused(reason),
-        }),
+        Ok((info, record)) => {
+            found.ledgers.push(compare(&info, &record)?);
+            Ok(Some(info))
+        }
+        Err(reason) => {
+            found.ungraded.push(Ungraded {
+                structure: ObjectInfo::STRUCTURE,
+                owner,
+                reason: Reason::Refused(reason),
+            });
+            Ok(None)
+        }
+    }
+}
+
+/// Grades one object's `PrivateObj`, or records why it could not.
+///
+/// A standard module has no private object. That is recorded as `Absent`,
+/// which is a fact about the program and not a fault in anything.
+fn grade_private_obj(
+    pe: &PeImage<'_>,
+    info: &ObjectInfo,
+    owner: Owner,
+    found: &mut Walk,
+) -> Result<(), WalkError> {
+    let skip = |reason: Reason| Ungraded {
+        structure: PrivateObjRecord::STRUCTURE,
+        owner,
+        reason,
+    };
+    let value = match PrivateObj::read(pe, info.lp_private_object) {
+        Ok(value) => value,
+        Err(reason) => {
+            found.ungraded.push(skip(Reason::Refused(reason)));
+            return Ok(());
+        }
+    };
+    let Some(record) = PrivateObjRecord::of(&value) else {
+        found.ungraded.push(skip(Reason::Absent));
+        return Ok(());
+    };
+    match located::<PrivateObjRecord>(
+        pe,
+        Va::new(info.lp_private_object),
+        "the file ends inside a PrivateObj",
+    ) {
+        Ok(window) => found.ledgers.push(compare(&record, &window)?),
+        Err(reason) => found.ungraded.push(skip(Reason::Refused(reason))),
     }
     Ok(())
 }

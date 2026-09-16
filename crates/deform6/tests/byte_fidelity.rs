@@ -52,9 +52,13 @@ use deform6::fidelity::header;
 use deform6::fidelity::ledger::{Ledger, Verdict};
 use deform6::fidelity::object;
 use deform6::fidelity::objectinfo;
+use deform6::fidelity::privateobj;
 use deform6::fidelity::project;
+use deform6::fidelity::walk::Reason;
 use deform6::fidelity::walk::walk;
+use deform6::vb::classify::ObjectKind;
 use deform6::vb::opcodes::OpcodeTable;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 /// The number of executables the corpus vendors.
@@ -553,11 +557,18 @@ fn one_object_whose_object_info_is_unmapped_loses_its_own_records_and_nothing_el
 
     let after = walk(&patched).expect("one bad object must not stop the walk");
 
+    // Only the rows the patch added are judged. A module is Absent in every
+    // walk, patched or not, so it is not evidence about the patch.
+    let added: Vec<_> = after
+        .ungraded
+        .iter()
+        .filter(|row| !before.ungraded.contains(row))
+        .collect();
     assert!(
-        !after.ungraded.is_empty(),
+        !added.is_empty(),
         "the patched object must be reported as ungraded"
     );
-    for row in &after.ungraded {
+    for row in &added {
         assert_eq!(
             row.owner,
             Owner::Object { object: 1 },
@@ -589,4 +600,74 @@ fn one_object_whose_object_info_is_unmapped_loses_its_own_records_and_nothing_el
     };
     assert_eq!(info(&before), 3);
     assert_eq!(info(&after), 2);
+}
+
+#[test]
+fn the_corpus_grades_ninety_seven_private_obj_records() {
+    assert_eq!(graded_count("PrivateObj"), 97);
+}
+
+#[test]
+fn the_private_obj_reader_models_sixteen_of_the_sixty_four_bytes_in_every_graded_record() {
+    let failed = coverage_failures(
+        "PrivateObj",
+        64,
+        privateobj::MODELLED_BYTES,
+        privateobj::UNMODELLED,
+    );
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+#[test]
+fn no_private_obj_byte_this_reader_models_differs_from_the_file_in_any_corpus_program() {
+    let failed = difference_failures("PrivateObj");
+    assert!(
+        failed.is_empty(),
+        "{} PrivateObj byte run(s) differ from the file:\n{}",
+        failed.len(),
+        failed.join("\n")
+    );
+}
+
+#[test]
+fn the_objects_with_no_private_obj_are_exactly_the_modules_inspect_reports() {
+    // STRUCTURES.md section 5.5 settles the module test on fObjectType bit
+    // 0x2. The private object's own sentinel is an independent route to the
+    // same answer, so the two are compared as sets, in both directions.
+    let table = OpcodeTable::builtin();
+    let mut failed = Vec::new();
+    let mut modules_seen = 0_usize;
+    for path in executables() {
+        let data = std::fs::read(&path).unwrap();
+        let report = deform6::inspect(&data, &table, deform6::journal::Mode::Strict)
+            .unwrap_or_else(|err| panic!("inspecting {}: {err}", path.display()));
+        let found = walk(&data).unwrap();
+
+        let absent: BTreeSet<u32> = found
+            .ungraded
+            .iter()
+            .filter(|row| row.structure == "PrivateObj" && row.reason == Reason::Absent)
+            .filter_map(|row| match row.owner {
+                Owner::Object { object } => Some(object),
+                Owner::Program | Owner::Control { .. } => None,
+            })
+            .collect();
+        let modules: BTreeSet<u32> = report
+            .objects
+            .iter()
+            .enumerate()
+            .filter(|(_index, object)| object.kind == ObjectKind::Module)
+            .map(|(index, _object)| u32::try_from(index).unwrap())
+            .collect();
+        modules_seen += modules.len();
+
+        if absent != modules {
+            failed.push(format!(
+                "{}: objects with no PrivateObj {absent:?}, modules {modules:?}",
+                path.display()
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+    assert_eq!(modules_seen, 8, "the corpus holds eight standard modules");
 }
