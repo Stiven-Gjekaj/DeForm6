@@ -148,8 +148,8 @@ pub enum Reason {
 /// `ProjectInfo`, the GUI table, the object table, or one element of those
 /// two tables does not read. A refusal about the `GUIObjectInfo` of one form,
 /// or about the structures under one object, does not stop the walk: it
-/// becomes a row in `ungraded` or a refused census row. Returns [`WalkError::Emit`] when an emitter in this crate is at
-/// fault.
+/// becomes a row in `ungraded` or a refused census row. Returns
+/// [`WalkError::Emit`] when an emitter in this crate is at fault.
 pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
     let pe = PeImage::parse(data).map_err(Refusal::from)?;
 
