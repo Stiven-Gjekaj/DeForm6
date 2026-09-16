@@ -47,7 +47,9 @@ use gui::{GuiObjectInfo, GuiTable, GuiTableEntry, Tiling};
 use header::{VbHeader, header_region};
 use object::{Object, ObjectTable};
 use opcodes::OpcodeTable;
-use privateobj::{Gap, ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureList};
+use privateobj::{
+    Gap, LP_PRIVATE_OBJECT_AT, ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureList,
+};
 use project::{Component, ComponentTable, Declaration, DeclareTable, ObjectTableHead, ProjectInfo};
 use runtime::{Runtime, runtime_of};
 
@@ -495,6 +497,10 @@ fn compose_object(pe: &PeImage<'_>, object: &Object, defects: &mut Vec<Defect>) 
 /// Reads `ObjectInfo` and `PrivateObj` for one object, converting either
 /// pointer's failure into a defect rather than a refusal of the whole file.
 ///
+/// It also compares the two fields that each tell whether the object is a
+/// standard module, and reports a disagreement as a defect. It does not
+/// choose a side: `PrivateObj::read` still follows the pointer.
+///
 /// # No corpus program exercises this path
 ///
 /// Every one of the 105 objects across all 44 vendored programs resolves
@@ -518,6 +524,10 @@ fn read_private(pe: &PeImage<'_>, object: &Object, defects: &mut Vec<Defect>) ->
         }
     };
 
+    if !classify::agree(object.f_object_type, info.lp_private_object) {
+        defects.push(module_marker_mismatch(pe, object, info.lp_private_object));
+    }
+
     match PrivateObj::read(pe, info.lp_private_object) {
         Ok(private) => private,
         Err(_) => {
@@ -529,6 +539,39 @@ fn read_private(pe: &PeImage<'_>, object: &Object, defects: &mut Vec<Defect>) ->
             ));
             PrivateObj::Absent
         }
+    }
+}
+
+/// Builds the defect for an object whose two module markers disagree.
+///
+/// The site is `ObjectInfo.lpPrivateObject`, the field whose value
+/// contradicts `fObjectType`. `ObjectInfo` was reached through
+/// `Object.lpObjectInfo`, so the site gives that address plus the field
+/// offset as its RVA, as the object table's own count mismatch does. The
+/// caller has already read this `ObjectInfo`, so both lookups succeed for
+/// every file that reaches this function. The fallback `0` and `None` only
+/// keep this function free of a panic.
+fn module_marker_mismatch(pe: &PeImage<'_>, object: &Object, lp_private_object: u32) -> Defect {
+    let offset = pe
+        .region_at_va(object.lp_object_info)
+        .and_then(|info| info.file_offset(Off::new(LP_PRIVATE_OBJECT_AT)))
+        .map_or(0, Off::get);
+    Defect {
+        site: Site {
+            offset,
+            rva: object
+                .lp_object_info
+                .to_rva(pe.image_base())
+                .and_then(|rva| rva.checked_add(LP_PRIVATE_OBJECT_AT))
+                .map(Rva::get),
+            structure: "ObjectInfo",
+            field: "lpPrivateObject",
+        },
+        kind: DefectKind::ModuleMarkerMismatch {
+            offset,
+            pointer: lp_private_object,
+            object_type: object.f_object_type,
+        },
     }
 }
 

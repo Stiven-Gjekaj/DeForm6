@@ -78,6 +78,12 @@ const OBJECT_INFO_SIZE: u32 = 0x38;
 /// `STRUCTURES.md` section 6.1 gives `0x40` = 64 bytes.
 const PRIVATE_OBJ_SIZE: u32 = 0x40;
 
+/// `STRUCTURES.md` section 5.2: `lpPrivateObject` sits at `ObjectInfo + 0x0C`.
+///
+/// One constant for the read and for the defect that names this field, so the
+/// two cannot come apart.
+pub(crate) const LP_PRIVATE_OBJECT_AT: u32 = 0x0C;
+
 /// The width of one entry in `Object.lpProcNamesArray`.
 const PROC_NAME_PTR_SIZE: u32 = 4;
 
@@ -147,7 +153,7 @@ impl ObjectInfo {
             w_object_index: u16_at(&window, 0x02, "ObjectInfo holds no object index")?,
             lp_private_object: u32_at(
                 &window,
-                0x0C,
+                LP_PRIVATE_OBJECT_AT,
                 "ObjectInfo holds no address for its PrivateObj",
             )?,
         })

@@ -164,10 +164,11 @@ pub const fn names_no_private_object(lp_private_object: u32) -> bool {
 /// Per the ROADMAP risk on gap 2, a disagreement is reported, never
 /// resolved by picking a side. This function reports nothing itself: it
 /// carries no dependency on `error.rs`, so `classify.rs` stays a pure
-/// module with no file access and no `Defect` construction. A caller that
-/// already holds a [`crate::error::Defect`] builder decides how a `false`
-/// here becomes one; a plain `bool` is the smaller surface for a branch a
-/// script this phase's research ran found on zero of 105 corpus objects.
+/// module with no file access and no `Defect` construction. `inspect`
+/// calls it for every object whose `ObjectInfo` reads, and turns a `false`
+/// into a [`crate::error::DefectKind::ModuleMarkerMismatch`]; a plain `bool`
+/// is the smaller surface for a branch a script this phase's research ran
+/// found on zero of 105 corpus objects.
 ///
 /// A script this phase's research ran, and a second script this plan's
 /// planner ran independently, both found the two markers agreeing on all
