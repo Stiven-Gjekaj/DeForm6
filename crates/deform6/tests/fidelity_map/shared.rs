@@ -54,6 +54,7 @@ pub(crate) const STRUCTURES: &[&str] = &[
 
 /// The arrays the census counts, in the order the walk reaches them.
 pub(crate) const ARRAYS: &[Array] = &[
+    Array::DeclareEntries,
     Array::GuiTable,
     Array::Objects,
     Array::Controls,
@@ -66,6 +67,7 @@ pub(crate) const ARRAYS: &[Array] = &[
 /// here until somebody gives it a name, and the map never holds `Debug` text.
 pub(crate) const fn array_name(array: Array) -> &'static str {
     match array {
+        Array::DeclareEntries => "DeclareEntries",
         Array::GuiTable => "GuiTable",
         Array::Objects => "Objects",
         Array::Controls => "Controls",

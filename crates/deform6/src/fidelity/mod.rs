@@ -47,8 +47,8 @@
 //! stub. The reader decodes no stub of another shape, so such a stub shows as
 //! a refused record, and never as bytes that differ.
 //!
-//! The clamps on `wFormCount`, `dwControlCount` and `wEventCount` do not work
-//! that way. They only bound a loop: the reader returns fewer entries, and no
+//! The clamps on `dwExternalCount`, `wFormCount`, `dwControlCount` and
+//! `wEventCount` do not work that way. They only bound a loop: the reader returns fewer entries, and no
 //! byte it keeps changes. The byte diff cannot see such a clamp. The
 //! [`census`] can: it counts what the file declares against what the reader
 //! returns.

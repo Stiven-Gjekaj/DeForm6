@@ -359,6 +359,7 @@ const ABSENT_TOTAL: u32 = 16;
 
 /// Each array's rows, declared total and returned total across the corpus.
 const ARRAY_TOTALS: &[(&str, u32, u32, u32)] = &[
+    ("DeclareEntries", 44, 249, 249),
     ("GuiTable", 44, 53, 53),
     ("Objects", 44, 105, 105),
     ("Controls", 97, 706, 706),
@@ -366,7 +367,7 @@ const ARRAY_TOTALS: &[(&str, u32, u32, u32)] = &[
 ];
 
 /// The sum of the rows in [`ARRAY_TOTALS`].
-const ROW_TOTAL: u32 = 891;
+const ROW_TOTAL: u32 = 935;
 
 /// The program the mutation tests below change in memory.
 const HEX_SCROLL: &str = "public-domain/HexScroll/Hex Scroll.exe";
@@ -618,7 +619,7 @@ fn the_committed_map_holds_sixteen_absent_records_and_no_refused_one() {
 }
 
 #[test]
-fn the_committed_map_counts_eight_hundred_and_ninety_one_census_rows_and_none_that_is_not_whole() {
+fn the_committed_map_counts_nine_hundred_and_thirty_five_census_rows_and_none_that_is_not_whole() {
     let map = committed();
     let mut found = Vec::new();
     let mut rows = 0;

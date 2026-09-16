@@ -48,7 +48,10 @@ use crate::vb::gui::{GuiObjectInfo, GuiTable, GuiTableEntry};
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::object::{Object, ObjectTable};
 use crate::vb::privateobj::{ObjectInfo, PrivateObj};
-use crate::vb::project::{ObjectTableHead, ProjectInfo};
+use crate::vb::project::{DeclareTable, ObjectTableHead, ProjectInfo};
+
+/// `STRUCTURES.md` section 3: `dwExternalCount` sits at `ProjectInfo + 0x238`.
+const DW_EXTERNAL_COUNT: u32 = 0x238;
 
 /// `STRUCTURES.md` section 4: `lpObjectArray` sits at `ObjectTable + 0x30`.
 const LP_OBJECT_ARRAY: u32 = 0x30;
@@ -140,9 +143,10 @@ pub enum Reason {
 /// `ungraded` and no ledger. The walk does not try a `PrivateObj` for an
 /// object whose `ObjectInfo` did not read, so that object gets no row for it.
 ///
-/// The counts start with the GUI table and the object array. Then each object
-/// whose `OptionalObjectInfo` was read adds one row for its controls, and each
-/// graded `ControlInfo` adds one row for its event slots.
+/// The counts start with the `Declare` table, the GUI table and the object
+/// array. Then each object whose `OptionalObjectInfo` was read adds one row
+/// for its controls, and each graded `ControlInfo` adds one row for its event
+/// slots.
 ///
 /// # Errors
 ///
@@ -167,10 +171,13 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
     let project = pe
         .region_at_va(header.lp_project_data)
         .ok_or(Refusal::Damaged("the ProjectInfo pointer is in no section"))?;
-    found.ledgers.push(compare(
-        &info,
-        &window::<ProjectInfo>(&project, "the file ends inside ProjectInfo")?,
-    )?);
+    let project = window::<ProjectInfo>(&project, "the file ends inside ProjectInfo")?;
+    found.ledgers.push(compare(&info, &project)?);
+
+    let declares = DeclareTable::read(&pe, &info);
+    found
+        .counts
+        .push(count_declare_table(&pe, &project, &info, &declares)?);
 
     let gui_table = GuiTable::walk(&pe, &header)?;
     let gui_array = pe
@@ -652,6 +659,42 @@ fn element<'a, T: Emit>(
     array
         .subregion(Off::new(at), T::LEN)
         .ok_or(Refusal::Damaged(what))
+}
+
+/// Counts the `Declare` table entries that `ProjectInfo` declares against the
+/// entries the reader returned.
+///
+/// The reader clamps `dwExternalCount` to the entries that the table's region
+/// holds and raises a defect when it does, so this is the row where that
+/// clamp shows. The reader gives no defect for a table whose address maps
+/// nowhere, so the walk decides that for itself.
+fn count_declare_table(
+    pe: &PeImage<'_>,
+    project_window: &Region<'_>,
+    info: &ProjectInfo,
+    table: &DeclareTable,
+) -> Result<Count, WalkError> {
+    let declared_at = project_window
+        .file_offset(Off::new(DW_EXTERNAL_COUNT))
+        .ok_or(Refusal::Damaged("the Declare count has no file offset"))?;
+    let declared = info.dw_external_count;
+    let recovered = u32::try_from(table.entries.len())
+        .map_err(|_ignored| Refusal::Damaged("the Declare entry count leaves a u32"))?;
+    Ok(Count {
+        array: Array::DeclareEntries,
+        owner: Owner::Program,
+        declared_at,
+        declared,
+        recovered,
+        outcome: outcome(&Evidence {
+            array: Array::DeclareEntries,
+            declared,
+            recovered,
+            defects: table.defects(),
+            unmapped: pe.region_at_va(info.lp_external_table).is_none(),
+            unsupported_control_type: None,
+        }),
+    })
 }
 
 /// Counts the GUI table entries the header declares against the entries the

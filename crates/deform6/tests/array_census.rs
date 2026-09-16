@@ -40,10 +40,11 @@ use deform6::error::DefectKind;
 use deform6::fidelity::census::{Array, Count, Outcome, Owner};
 use deform6::fidelity::walk::walk;
 use deform6::read::pe::PeImage;
+use deform6::read::region::Va;
 use deform6::vb::controlinfo::{ControlInfoTable, read_event_table};
 use deform6::vb::header::{VbHeader, header_region};
 use deform6::vb::object::ObjectTable;
-use deform6::vb::project::{ObjectTableHead, ProjectInfo};
+use deform6::vb::project::{DeclareTable, ObjectTableHead, ProjectInfo};
 use std::path::{Path, PathBuf};
 
 /// The number of executables the corpus vendors.
@@ -172,6 +173,33 @@ fn totals(programs: &[Census], array: Array) -> (u64, u64) {
                 returned + u64::from(row.recovered),
             )
         })
+}
+
+#[test]
+fn the_census_counts_two_hundred_and_forty_nine_declare_entries_declared_and_returned() {
+    // Entries of both types. 29 of them are internal, and the reader keeps
+    // them too.
+    assert_eq!(totals(&census(), Array::DeclareEntries), (249, 249));
+}
+
+#[test]
+fn every_corpus_program_carries_one_declare_count_row_and_it_is_the_first_row() {
+    let mut failed = Vec::new();
+    for program in census() {
+        let rows = program
+            .counts
+            .iter()
+            .filter(|row| row.array == Array::DeclareEntries)
+            .count();
+        let first = program.counts.first().map(|row| row.array);
+        if rows != 1 || first != Some(Array::DeclareEntries) {
+            failed.push(format!(
+                "{}: {rows} Declare count rows, and the first row is {first:?}",
+                program.key
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
 }
 
 #[test]
@@ -548,6 +576,130 @@ fn a_clamped_event_row_and_the_readers_own_defect_name_the_same_byte() {
     assert_eq!(
         defect.site.offset,
         clamped.declared_at.get(),
+        "the reader's defect and the census name different bytes for one count"
+    );
+}
+
+/// The program whose `Declare` table the tests below change in memory. It
+/// declares nine entries.
+const GRAYSCALE: &str = "vb6-code/Grayscale-effect/Grayscale.exe";
+
+/// `STRUCTURES.md` section 3: `lpExternalTable` sits at `ProjectInfo + 0x234`.
+const LP_EXTERNAL_TABLE: u32 = 0x234;
+
+/// `STRUCTURES.md` section 3: `dwExternalCount` sits at `ProjectInfo + 0x238`.
+const DW_EXTERNAL_COUNT: u32 = 0x238;
+
+/// Gives the file offset of a field of `ProjectInfo`, from the address that
+/// the VB header holds. Nothing here asks the census where the field is.
+fn project_info_field(data: &[u8], field: u32) -> usize {
+    let pe = PeImage::parse(data).unwrap();
+    let header = VbHeader::read(&header_region(&pe).unwrap()).unwrap();
+    let start = pe.va_to_off(header.lp_project_data).unwrap().get();
+    usize::try_from(start + field).unwrap()
+}
+
+/// Grayscale with `value` written in memory over the `ProjectInfo` field at
+/// `field`.
+fn patched_grayscale(field: u32, value: u32) -> Vec<u8> {
+    let mut data = std::fs::read(corpus_root().join(GRAYSCALE)).unwrap();
+    let at = project_info_field(&data, field);
+    assert_ne!(
+        data[at..at + 4],
+        value.to_le_bytes(),
+        "the patch must change the file, or this test proves nothing"
+    );
+    data[at..at + 4].copy_from_slice(&value.to_le_bytes());
+    data
+}
+
+/// The one `Declare` row that a walk of `data` counts.
+fn declare_row(data: &[u8]) -> Count {
+    let rows: Vec<Count> = walk(data)
+        .expect("a patched Declare table must not stop the walk")
+        .counts
+        .into_iter()
+        .filter(|row| row.array == Array::DeclareEntries)
+        .collect();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    rows[0]
+}
+
+#[test]
+fn the_declare_row_of_the_unpatched_program_is_whole() {
+    let data = std::fs::read(corpus_root().join(GRAYSCALE)).unwrap();
+    let row = declare_row(&data);
+    assert_eq!(row.owner, Owner::Program);
+    assert_eq!((row.declared, row.recovered), (9, 9));
+    assert_eq!(row.outcome, Outcome::Whole);
+}
+
+#[test]
+fn a_declare_count_larger_than_the_table_can_hold_is_counted_as_clamped() {
+    let row = declare_row(&patched_grayscale(DW_EXTERNAL_COUNT, 0xFFFF));
+    assert_eq!(row.declared, 0xFFFF);
+    assert!(
+        row.recovered > 9 && row.recovered < 0xFFFF,
+        "the table must hold more than the nine real entries and fewer than the count, or \
+         this test needs a different count: {row:?}"
+    );
+    assert_eq!(row.outcome, Outcome::Clamped { max: row.recovered });
+}
+
+#[test]
+fn a_declare_count_whose_size_in_bytes_leaves_a_u32_is_counted_as_clamped() {
+    // The reader once raised no defect for such a count, and this row was
+    // unexplained.
+    let row = declare_row(&patched_grayscale(DW_EXTERNAL_COUNT, 0x2000_0000));
+    assert_eq!(row.declared, 0x2000_0000);
+    assert_eq!(row.outcome, Outcome::Clamped { max: row.recovered });
+    let smaller = declare_row(&patched_grayscale(DW_EXTERNAL_COUNT, 0xFFFF));
+    assert_eq!(
+        row.recovered, smaller.recovered,
+        "the two counts are clamped to the same table"
+    );
+}
+
+#[test]
+fn a_declare_table_whose_address_maps_nowhere_is_counted_as_unmapped() {
+    let data = patched_grayscale(LP_EXTERNAL_TABLE, 0x00F0_0000);
+    let pe = PeImage::parse(&data).unwrap();
+    assert!(pe.region_at_va(Va::new(0x00F0_0000)).is_none());
+    let row = declare_row(&data);
+    assert_eq!((row.declared, row.recovered), (9, 0));
+    assert_eq!(row.outcome, Outcome::Unmapped);
+}
+
+#[test]
+fn a_clamped_declare_row_and_the_readers_own_defect_name_the_same_byte() {
+    // Three statements of where dwExternalCount sits: this file's, the
+    // walk's and the reader's. A clamp must make all three name one byte.
+    let data = patched_grayscale(DW_EXTERNAL_COUNT, 0xFFFF);
+    let at = project_info_field(&data, DW_EXTERNAL_COUNT);
+    // Measured on 2026-09-16.
+    assert_eq!(at, 0x1FEC);
+
+    let row = declare_row(&data);
+    assert!(
+        matches!(row.outcome, Outcome::Clamped { .. }),
+        "the patch must clamp: {row:?}"
+    );
+    assert_eq!(usize::try_from(row.declared_at.get()).unwrap(), at);
+
+    let pe = PeImage::parse(&data).unwrap();
+    let header = VbHeader::read(&header_region(&pe).unwrap()).unwrap();
+    let info = ProjectInfo::read(&pe, header.lp_project_data).unwrap();
+    let table = DeclareTable::read(&pe, &info);
+    let defect = table
+        .defects()
+        .iter()
+        .find(|d| matches!(d.kind, DefectKind::ImplausibleCount { .. }))
+        .expect("the reader raises a clamp defect");
+    assert_eq!(defect.site.structure, "ProjectInfo");
+    assert_eq!(defect.site.field, "dwExternalCount");
+    assert_eq!(
+        defect.site.offset,
+        row.declared_at.get(),
         "the reader's defect and the census name different bytes for one count"
     );
 }

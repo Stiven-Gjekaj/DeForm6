@@ -32,6 +32,8 @@ use crate::read::region::Off;
 /// One array the census counts.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Array {
+    /// The `Declare` table, `ProjectInfo.dwExternalCount` entries long.
+    DeclareEntries,
     /// The GUI table, `VBHeader.wFormCount` entries long.
     GuiTable,
     /// The object array, `ObjectTable.wTotalObjects` records long.
@@ -48,6 +50,7 @@ impl Array {
     #[must_use]
     pub const fn structure(self) -> &'static str {
         match self {
+            Self::DeclareEntries => "ProjectInfo",
             Self::GuiTable => "VBHeader",
             Self::Objects => "ObjectTable",
             Self::Controls => "OptionalObjectInfo",
@@ -60,6 +63,7 @@ impl Array {
     #[must_use]
     pub const fn field(self) -> &'static str {
         match self {
+            Self::DeclareEntries => "dwExternalCount",
             Self::GuiTable => "wFormCount",
             Self::Objects => "wTotalObjects",
             Self::Controls => "dwControlCount",
@@ -72,7 +76,7 @@ impl Array {
     pub const fn width(self) -> u32 {
         match self {
             Self::GuiTable | Self::Objects | Self::EventSlots => 2,
-            Self::Controls => 4,
+            Self::DeclareEntries | Self::Controls => 4,
         }
     }
 }
@@ -261,10 +265,11 @@ mod tests {
     }
 
     #[test]
-    fn the_four_arrays_name_the_fields_the_readers_own_defects_name() {
+    fn the_five_arrays_name_the_fields_the_readers_own_defects_name() {
         // These strings are what a clamp is matched on. A one letter drift
         // would turn every real clamp into an unexplained row, and no corpus
         // program clamps, so the corpus would never show it.
+        assert_eq!(Array::DeclareEntries.field(), "dwExternalCount");
         assert_eq!(Array::GuiTable.field(), "wFormCount");
         assert_eq!(Array::Objects.field(), "wTotalObjects");
         assert_eq!(Array::Controls.field(), "dwControlCount");
@@ -273,10 +278,20 @@ mod tests {
 
     #[test]
     fn each_array_states_the_width_of_its_own_count_field() {
+        assert_eq!(Array::DeclareEntries.width(), 4);
         assert_eq!(Array::GuiTable.width(), 2);
         assert_eq!(Array::Objects.width(), 2);
         assert_eq!(Array::Controls.width(), 4);
         assert_eq!(Array::EventSlots.width(), 2);
+    }
+
+    #[test]
+    fn each_array_names_the_structure_that_holds_its_count() {
+        assert_eq!(Array::DeclareEntries.structure(), "ProjectInfo");
+        assert_eq!(Array::GuiTable.structure(), "VBHeader");
+        assert_eq!(Array::Objects.structure(), "ObjectTable");
+        assert_eq!(Array::Controls.structure(), "OptionalObjectInfo");
+        assert_eq!(Array::EventSlots.structure(), "ControlInfo");
     }
 
     #[test]
