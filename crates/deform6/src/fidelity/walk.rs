@@ -28,7 +28,7 @@ use crate::fidelity::privateobj::PrivateObjRecord;
 use crate::fidelity::{Emit, Fault, compare};
 use crate::read::pe::PeImage;
 use crate::read::region::{Off, Region, Va};
-use crate::vb::controlinfo::{ControlInfo, ControlInfoTable, OptionalObjectInfo};
+use crate::vb::controlinfo::{ControlInfo, ControlInfoTable, OptionalObjectInfo, read_event_table};
 use crate::vb::gui::{GuiTable, GuiTableEntry};
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::object::{Object, ObjectTable};
@@ -52,6 +52,9 @@ const OPTIONAL_OBJECT_INFO_AT: u32 = 0x38;
 
 /// `STRUCTURES.md` section 5.3: `dwControlCount` sits at block `+ 0x20`.
 const DW_CONTROL_COUNT: u32 = 0x20;
+
+/// `STRUCTURES.md` section 8.6: `wEventCount` sits at element `+ 0x02`.
+const W_EVENT_COUNT: u32 = 0x02;
 
 /// What stopped a walk.
 #[derive(Clone, Debug, thiserror::Error)]
@@ -380,7 +383,10 @@ fn grade_controls(
                 .map_err(|_ignored| Refusal::Damaged("the control index leaves a u32"))?,
         };
         match element::<ControlInfo>(&array, index, "the file ends inside a ControlInfo element") {
-            Ok(window) => found.ledgers.push(compare(control, &window)?),
+            Ok(window) => {
+                found.ledgers.push(compare(control, &window)?);
+                count_event_slots(pe, control, &window, control_owner, found)?;
+            }
             Err(reason) => found.ungraded.push(Ungraded {
                 structure: ControlInfo::STRUCTURE,
                 owner: control_owner,
@@ -388,6 +394,54 @@ fn grade_controls(
             }),
         }
     }
+    Ok(())
+}
+
+/// Counts the event slots one control declares against the slots the reader
+/// returned.
+///
+/// This is the census row for `controlinfo::bound_event_count`. The reader
+/// returns no slots, and says so, for a control type it knows no header
+/// layout for, and it refuses a table whose address maps nowhere; the row
+/// keeps those two apart from a clamp.
+fn count_event_slots(
+    pe: &PeImage<'_>,
+    control: &ControlInfo,
+    element: &Region<'_>,
+    owner: Owner,
+    found: &mut Walk,
+) -> Result<(), WalkError> {
+    let Some(declared_at) = element.file_offset(Off::new(W_EVENT_COUNT)) else {
+        // The count field cannot be located, so there is no row to state.
+        return Ok(());
+    };
+    let declared = u32::from(control.w_event_count);
+
+    let (recovered, decided) = match read_event_table(pe, control) {
+        Ok(table) => {
+            let recovered = u32::try_from(table.slots.len())
+                .map_err(|_ignored| Refusal::Damaged("the event slot count leaves a u32"))?;
+            let decided = outcome(&Evidence {
+                array: Array::EventSlots,
+                declared,
+                recovered,
+                defects: table.defects(),
+                unmapped: false,
+                unsupported_control_type: table.unsupported_control_type,
+            });
+            (recovered, decided)
+        }
+        Err(reason) => (0, Outcome::Refused(reason)),
+    };
+
+    found.counts.push(Count {
+        array: Array::EventSlots,
+        owner,
+        declared_at,
+        declared,
+        recovered,
+        outcome: decided,
+    });
     Ok(())
 }
 

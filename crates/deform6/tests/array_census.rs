@@ -387,3 +387,100 @@ fn the_census_returns_as_many_control_entries_as_the_walk_grades_control_info_re
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
 }
+
+#[test]
+fn the_census_counts_eleven_thousand_eight_hundred_and_sixty_two_event_slots_declared_and_returned()
+{
+    assert_eq!(totals(&census(), Array::EventSlots), (11_862, 11_862));
+}
+
+#[test]
+fn the_census_carries_seven_hundred_and_six_event_slot_rows_one_for_each_control_entry() {
+    let rows: usize = census()
+        .iter()
+        .map(|program| {
+            program
+                .counts
+                .iter()
+                .filter(|row| row.array == Array::EventSlots)
+                .count()
+        })
+        .sum();
+    assert_eq!(rows, 706);
+}
+
+/// Walks SK-Gradient with `value` written in memory at `field` bytes into the
+/// first `ControlInfo` element that declares at least one event slot, and
+/// gives back that control's row from before and from after.
+///
+/// `wEventCount` sits two bytes into the element, so the row's own
+/// `declared_at` less two is the element's first byte.
+fn patched_event_row(field: u32, value: &[u8]) -> (Count, Count) {
+    let path = corpus_root().join("public-domain/SK-Gradient-Sample__VB6/demo/Project1.exe");
+    let original = std::fs::read(&path).unwrap();
+    let before = walk(&original)
+        .unwrap()
+        .counts
+        .into_iter()
+        .find(|row| row.array == Array::EventSlots && row.declared > 0)
+        .expect("the fixture declares at least one event slot");
+
+    let element = before.declared_at.get() - 2;
+    let at = usize::try_from(element + field).unwrap();
+    let mut patched = original.clone();
+    assert_ne!(
+        &patched[at..at + value.len()],
+        value,
+        "the patch must change the file, or this test proves nothing"
+    );
+    patched[at..at + value.len()].copy_from_slice(value);
+
+    let after = walk(&patched)
+        .expect("a patched event table must not stop the walk")
+        .counts
+        .into_iter()
+        .find(|row| row.array == Array::EventSlots && row.owner == before.owner)
+        .expect("the patched control still carries its event slot row");
+    (before, after)
+}
+
+#[test]
+fn an_event_table_whose_address_maps_nowhere_is_counted_as_refused() {
+    // lpEventTable sits 0x18 bytes into the element.
+    let (before, after) = patched_event_row(0x18, &0x00F0_0000_u32.to_le_bytes());
+    assert_eq!(before.outcome, Outcome::Whole);
+    assert!(matches!(after.outcome, Outcome::Refused(_)), "{after:?}");
+    assert_eq!(after.recovered, 0);
+    assert_eq!(after.declared, before.declared);
+}
+
+#[test]
+fn an_event_count_larger_than_the_table_can_hold_is_counted_as_clamped() {
+    let (_before, after) = patched_event_row(0x02, &0xFFFF_u16.to_le_bytes());
+    assert_eq!(after.declared, 0xFFFF);
+    assert!(
+        after.recovered < 0xFFFF,
+        "the section behind this table holds room for every declared slot, so no clamp can \
+         fire here and this test needs a different fixture: {after:?}"
+    );
+    assert_eq!(
+        after.outcome,
+        Outcome::Clamped {
+            max: after.recovered
+        }
+    );
+}
+
+#[test]
+fn a_control_type_with_no_known_header_layout_is_counted_as_unsized() {
+    // fControlType sits at the first byte of the element.
+    let (before, after) = patched_event_row(0x00, &0x0041_u16.to_le_bytes());
+    assert!(before.declared > 0);
+    assert_eq!(
+        after.outcome,
+        Outcome::Unsized {
+            f_control_type: 0x41
+        }
+    );
+    assert_eq!(after.recovered, 0);
+}
