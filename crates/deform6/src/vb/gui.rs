@@ -43,10 +43,21 @@ pub const GUI_OBJECT_INFO_SIZE: u32 = 0x5D;
 /// One entry of the GUI table: the address of one form's `GUIObjectInfo`.
 ///
 /// `STRUCTURES.md` section 8.1 names several other fields in this entry as
-/// unresolved (`[G]`). Only `aFormPointer`, the one field this phase needs,
-/// is carried.
+/// unresolved (`[G]`). Two fields are carried: `lStructSize`, which the walk
+/// reads to check the entry, and `aFormPointer`, the one field the form walk
+/// needs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GuiTableEntry {
+    /// The entry's own size field, `lStructSize`, at offset `0x00`.
+    ///
+    /// [`GuiTable::walk`] refuses every entry whose value here is not
+    /// [`GUI_ENTRY_SIZE`], so every entry the walk returns carries `0x50`.
+    ///
+    /// It is kept although its value is known, because the walk reads it.
+    /// A model that reads a byte and does not keep it cannot write that byte
+    /// back, and the byte fidelity measurement then reports a field this
+    /// reader understands as one it does not.
+    pub l_struct_size: u32,
     /// The virtual address of this form's [`GuiObjectInfo`] block.
     pub a_form_pointer: Va,
 }
@@ -125,7 +136,10 @@ impl GuiTable {
             let a_form_pointer = entry.va_le(Off::new(0x48)).ok_or(Refusal::Damaged(
                 "a GUI table entry holds no address for its form",
             ))?;
-            entries.push(GuiTableEntry { a_form_pointer });
+            entries.push(GuiTableEntry {
+                l_struct_size,
+                a_form_pointer,
+            });
         }
 
         Ok(Self { entries, defects })
@@ -547,6 +561,17 @@ mod tests {
         let table = GuiTable::walk(&image, &header).unwrap();
         assert_eq!(table.entries.len(), 1);
         assert_eq!(table.entries[0].a_form_pointer, Va::new(0x0040_2000));
+        assert_eq!(table.entries[0].l_struct_size, GUI_ENTRY_SIZE);
+    }
+
+    #[test]
+    fn every_entry_the_walk_returns_keeps_the_struct_size_it_was_checked_against() {
+        let table = lock_work_station_gui_table();
+        assert!(!table.entries.is_empty());
+        for entry in &table.entries {
+            assert_eq!(entry.l_struct_size, GUI_ENTRY_SIZE);
+            assert_eq!(entry.l_struct_size, 0x50);
+        }
     }
 
     #[test]
