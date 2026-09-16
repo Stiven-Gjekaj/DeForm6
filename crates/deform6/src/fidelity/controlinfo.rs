@@ -7,7 +7,9 @@
 //! reads `fControlType` as four bytes and puts `wEventCount` at `0x04`, and
 //! three independent implementations read two bytes at `0x00` and `0x02`. The
 //! reader follows the three, and so does this emitter, from the same table.
-//! The corpus diff is the check on that choice.
+//! The corpus diff cannot check that choice, because a field read and written
+//! at the same offset cannot differ. `tests/byte_fidelity.rs` checks it
+//! against the event slots instead.
 //!
 //! # What this reader models, and what it leaves
 //!

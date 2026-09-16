@@ -8,25 +8,25 @@
     reason = "a test builds the state it needs and must fail loudly when that state is wrong"
 )]
 
-//! How many bytes of the VB header and of each `Object` this reader
+//! How many bytes of each structure the fidelity walk grades this reader
 //! reproduces, and whether the bytes it does reproduce equal the ones the
 //! compiler wrote, measured over all 44 corpus executables.
 //!
 //! # What a clean result here does and does not mean
 //!
-//! Thirteen of the fourteen header fields, and all five `Object` fields, are
-//! carried verbatim: read at an offset, written back at the same offset, with
-//! no arithmetic between. A verbatim field cannot disagree with itself, so a
-//! clean map is the expected result and **is not** a proof that the reader is
-//! correct.
+//! Thirteen of the fourteen header fields, all five `Object` fields, and
+//! every field of the other six structures are carried verbatim: read at an
+//! offset, written back at the same offset, with no arithmetic between. A
+//! verbatim field cannot disagree with itself, so a clean map is the expected
+//! result and **is not** a proof that the reader is correct.
 //!
 //! What it does prove is worth having. The coverage counts are real, and they
 //! are pinned here, so a field dropped from the reader fails this file. And
 //! the offsets in `fidelity/` were written from `docs/STRUCTURES.md`
 //! independently of the offsets in `vb/`, so a clean run is two separate
-//! statements of the layout agreeing. `fidelity::header::tests` and
-//! `fidelity::object::tests` hold the mechanism to reporting a difference
-//! when one exists; this file measures the corpus.
+//! statements of the layout agreeing. The unit tests beside each emitter hold
+//! the mechanism to reporting a difference when one exists; this file
+//! measures the corpus.
 //!
 //! # `ProcCount` is the one field that can differ, and it does not
 //!
@@ -39,6 +39,14 @@
 //! own. That is the result, not an absence of one, and
 //! `the_corpus_grades_one_hundred_and_five_objects` pins the denominator so
 //! the claim cannot quietly become a claim about fewer objects.
+//!
+//! # The disputed front of `ControlInfo` is checked another way
+//!
+//! `docs/STRUCTURES.md` section 8.6 disputes the first two `ControlInfo`
+//! fields. The reader and the emitter put both at the same offsets, so the
+//! diff cannot settle the dispute. The event slots can.
+//! `the_event_slots_fit_the_word_at_two_and_refuse_the_word_at_four_in_seven_hundred_and_six_control_info_records`
+//! reads them by hand.
 //!
 //! # This file keeps its own corpus walk
 //!
