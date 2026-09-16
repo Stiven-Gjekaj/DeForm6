@@ -191,8 +191,13 @@ to name one byte. Before the fix they named bytes 162 apart.
 
 **The corpus rejects the disputed `ControlInfo` layout.** `STRUCTURES.md`
 section 8.6 marks the first two fields `[D]`: one source puts `wEventCount` at
-`0x04`, and three put it at `0x02`. An emitter that wrote it at `0x04` differs
-from the file in all 706 records.
+`0x04`, and three put it at `0x02`. The byte diff cannot settle this, because
+the reader and the emitter put both fields at the same offsets. The event slots
+settle it. In all 706 records, the count at `0x02` covers only nulls and
+native stubs, and the word at `0x04` runs past the last slot. Section 17 of
+`STRUCTURES.md` gives the numbers, and
+`the_event_slots_fit_the_word_at_two_and_refuse_the_word_at_four_in_seven_hundred_and_six_control_info_records`
+holds them.
 
 **The presence rules agree.** The 8 objects with no `PrivateObj` are exactly
 the 8 standard modules `inspect` reports, and exactly the 8 objects with no
