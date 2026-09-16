@@ -423,6 +423,34 @@ fn the_census_returns_as_many_control_entries_as_the_walk_grades_control_info_re
 }
 
 #[test]
+fn the_census_returns_as_many_declare_entries_as_the_walk_grades_declare_table_entry_records() {
+    // Two routes to one number, as for the controls above.
+    let mut failed = Vec::new();
+    for path in executables() {
+        let data = std::fs::read(&path).unwrap();
+        let found = walk(&data).unwrap();
+        let returned: u64 = found
+            .counts
+            .iter()
+            .filter(|row| row.array == Array::DeclareEntries)
+            .map(|row| u64::from(row.recovered))
+            .sum();
+        let graded = found
+            .ledgers
+            .iter()
+            .filter(|l| l.structure == "DeclareTableEntry")
+            .count() as u64;
+        if returned != graded {
+            failed.push(format!(
+                "{}: the census says {returned} entries were returned and the walk graded {graded}",
+                path.display()
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+#[test]
 fn the_census_counts_eleven_thousand_eight_hundred_and_sixty_two_event_slots_declared_and_returned()
 {
     assert_eq!(totals(&census(), Array::EventSlots), (11_862, 11_862));

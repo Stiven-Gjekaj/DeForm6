@@ -63,6 +63,7 @@
 
 pub mod census;
 pub mod controlinfo;
+pub mod declareentry;
 pub mod eventstub;
 pub mod gui;
 pub mod guiobjectinfo;

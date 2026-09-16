@@ -86,6 +86,11 @@ impl Array {
 pub enum Owner {
     /// The program as a whole.
     Program,
+    /// One entry of the `Declare` table.
+    Declare {
+        /// The entry's index in the `Declare` table.
+        entry: u32,
+    },
     /// One form, by its index in the GUI table.
     Form {
         /// The form's index in the GUI table.

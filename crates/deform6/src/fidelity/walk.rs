@@ -5,7 +5,7 @@
 //! Most parsed structures in this crate do not keep the file offset they were
 //! read from. Three do: `VbHeader`, `ProjectInfo` and `ControlInfo` each hold
 //! a `file_offset`, because a defect about a count that one of them carries
-//! must name the byte of that count. The other eight structures this module
+//! must name the byte of that count. The other nine structures this module
 //! grades keep no offset, and to add one to each would change every reader
 //! under `vb/` to serve a measurement.
 //!
@@ -49,7 +49,7 @@ use crate::vb::gui::{GuiObjectInfo, GuiTable, GuiTableEntry};
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::object::{Object, ObjectTable};
 use crate::vb::privateobj::{ObjectInfo, PrivateObj};
-use crate::vb::project::{DeclareTable, ObjectTableHead, ProjectInfo};
+use crate::vb::project::{DeclareTable, DeclareTableEntry, ObjectTableHead, ProjectInfo};
 
 /// `STRUCTURES.md` section 3: `dwExternalCount` sits at `ProjectInfo + 0x238`.
 const DW_EXTERNAL_COUNT: u32 = 0x238;
@@ -129,8 +129,9 @@ pub enum Reason {
 /// counts every array the census knows.
 ///
 /// The ledgers come in the order the walk reaches the structures. First come
-/// the VB header, `ProjectInfo`, each GUI table entry followed by the
-/// `GUIObjectInfo` of its form, the object table, and each `Object` element.
+/// the VB header, `ProjectInfo`, each `Declare` table entry, each GUI table
+/// entry followed by the `GUIObjectInfo` of its form, the object table, and
+/// each `Object` element.
 /// Then each object adds its `ObjectInfo`, its `PrivateObj`, its
 /// `OptionalObjectInfo`, and its `ControlInfo` elements, in that order. Each
 /// `ControlInfo` is followed by the stubs that its bound event slots name, in
@@ -150,10 +151,10 @@ pub enum Reason {
 ///
 /// Returns [`WalkError::Read`] when the PE image, the VB header,
 /// `ProjectInfo`, the GUI table, the object table, or one element of those
-/// two tables does not read. A refusal about the `GUIObjectInfo` of one form,
-/// or about the structures under one object, does not stop the walk: it
-/// becomes a row in `ungraded` or a refused census row. Returns
-/// [`WalkError::Emit`] when an emitter in this crate is at fault.
+/// two tables does not read. A refusal about one `Declare` table entry, about
+/// the `GUIObjectInfo` of one form, or about the structures under one object,
+/// does not stop the walk: it becomes a row in `ungraded` or a refused census
+/// row. Returns [`WalkError::Emit`] when an emitter in this crate is at fault.
 pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
     let pe = PeImage::parse(data).map_err(Refusal::from)?;
 
@@ -176,6 +177,7 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
     found
         .counts
         .push(count_declare_table(&pe, &project, &info, &declares)?);
+    grade_declare_entries(&pe, &info, &declares, &mut found)?;
 
     let gui_table = GuiTable::walk(&pe, &header)?;
     let gui_array = pe
@@ -245,6 +247,48 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
     }
 
     Ok(found)
+}
+
+/// Grades each `Declare` table entry that the reader returned, or records why
+/// one could not be graded.
+///
+/// A table whose address maps nowhere has no entries to grade: the reader
+/// returned none, and the census row says why. The reader cut each entry out
+/// of the same region, so a cut here fails only when the walk's stride and
+/// the reader's stride disagree.
+fn grade_declare_entries(
+    pe: &PeImage<'_>,
+    info: &ProjectInfo,
+    table: &DeclareTable,
+    found: &mut Walk,
+) -> Result<(), WalkError> {
+    let Some(region) = pe.region_at_va(info.lp_external_table) else {
+        return Ok(());
+    };
+    for (index, entry) in table.entries.iter().enumerate() {
+        let owner = declare_owner(index)?;
+        match element::<DeclareTableEntry>(
+            &region,
+            index,
+            "the file ends inside a Declare table entry",
+        ) {
+            Ok(window) => found.ledgers.push(compare(entry, &window)?),
+            Err(reason) => found.ungraded.push(Ungraded {
+                structure: DeclareTableEntry::STRUCTURE,
+                owner,
+                reason: Reason::Refused(reason),
+            }),
+        }
+    }
+    Ok(())
+}
+
+/// Names one `Declare` table entry as the owner of what the walk finds under
+/// it.
+fn declare_owner(index: usize) -> Result<Owner, Refusal> {
+    let entry = u32::try_from(index)
+        .map_err(|_ignored| Refusal::Damaged("the Declare entry index leaves a u32"))?;
+    Ok(Owner::Declare { entry })
 }
 
 /// Names one form as the owner of what the walk finds under it.

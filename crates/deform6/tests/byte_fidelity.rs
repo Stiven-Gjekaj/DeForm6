@@ -15,7 +15,7 @@
 //! # What a clean result here does and does not mean
 //!
 //! Thirteen of the fourteen header fields, all five `Object` fields, every
-//! field of the other eight structures, and the `imm32` of an event stub are
+//! field of the other nine structures, and the `imm32` of an event stub are
 //! carried verbatim: read at an
 //! offset, written back at the same offset, with no arithmetic between. A
 //! verbatim field cannot disagree with itself, so a clean map is the expected
@@ -71,6 +71,7 @@
 use deform6::error::Refusal;
 use deform6::fidelity::census::{Array, Owner};
 use deform6::fidelity::controlinfo;
+use deform6::fidelity::declareentry;
 use deform6::fidelity::eventstub;
 use deform6::fidelity::gui;
 use deform6::fidelity::guiobjectinfo;
@@ -994,9 +995,11 @@ fn absent_objects(found: &deform6::fidelity::walk::Walk, structure: &str) -> BTr
         .filter(|row| row.structure == structure && row.reason == Reason::Absent)
         .filter_map(|row| match row.owner {
             Owner::Object { object } => Some(object),
-            Owner::Program | Owner::Form { .. } | Owner::Control { .. } | Owner::Slot { .. } => {
-                None
-            }
+            Owner::Program
+            | Owner::Declare { .. }
+            | Owner::Form { .. }
+            | Owner::Control { .. }
+            | Owner::Slot { .. } => None,
         })
         .collect()
 }
@@ -1185,7 +1188,7 @@ fn the_event_slots_fit_the_word_at_two_and_refuse_the_word_at_four_in_seven_hund
 
 #[test]
 fn no_two_structures_the_walk_grades_share_a_byte_in_any_corpus_program() {
-    // Measured on 2026-09-17: 1738 records across the corpus, and no two of
+    // Measured on 2026-09-17: 1987 records across the corpus, and no two of
     // them overlap. Two structures claiming the same byte would mean one of
     // them is placed wrongly.
     let mut failed = Vec::new();
@@ -1215,9 +1218,9 @@ fn no_two_structures_the_walk_grades_share_a_byte_in_any_corpus_program() {
 }
 
 #[test]
-fn the_walk_grades_one_thousand_seven_hundred_and_thirty_eight_records_across_the_corpus() {
+fn the_walk_grades_one_thousand_nine_hundred_and_eighty_seven_records_across_the_corpus() {
     let total: usize = graded().iter().map(|(_path, ledgers)| ledgers.len()).sum();
-    assert_eq!(total, 1738);
+    assert_eq!(total, 1987);
 }
 
 #[test]
@@ -1666,6 +1669,8 @@ const THUNK_CODE_AT: usize = 0x18;
 
 /// One entry of the `Declare` table, read by hand.
 struct DeclareEntry {
+    /// The file offset of the entry.
+    at: usize,
     /// `dwEntryType`.
     entry_type: u32,
     /// `lpImportDescriptor`.
@@ -1685,6 +1690,7 @@ fn declare_entries(data: &[u8], pe: &PeImage<'_>, base: usize) -> Vec<DeclareEnt
         .map(|index| {
             let at = table + index * DECLARE_ENTRY_LEN;
             DeclareEntry {
+                at,
                 entry_type: dword(at),
                 descriptor: dword(at + 4),
             }
@@ -1755,4 +1761,62 @@ fn the_thunk_code_of_each_external_declare_descriptor_starts_twenty_four_bytes_a
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
     assert_eq!(descriptors, 220);
+}
+
+#[test]
+fn the_corpus_grades_two_hundred_and_forty_nine_declare_table_entry_records() {
+    assert_eq!(graded_count("DeclareTableEntry"), 249);
+}
+
+#[test]
+fn the_declare_table_entry_reader_models_all_eight_bytes_in_every_graded_record() {
+    let failed = coverage_failures(
+        "DeclareTableEntry",
+        8,
+        declareentry::MODELLED_BYTES,
+        declareentry::UNMODELLED,
+    );
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+#[test]
+fn no_declare_table_entry_byte_this_reader_models_differs_from_the_file_in_any_corpus_program() {
+    let failed = difference_failures("DeclareTableEntry");
+    assert!(
+        failed.is_empty(),
+        "{} DeclareTableEntry byte run(s) differ from the file:\n{}",
+        failed.len(),
+        failed.join("\n")
+    );
+}
+
+#[test]
+fn the_walk_grades_each_declare_table_entry_at_its_place_in_the_table_that_project_info_names() {
+    // The table address and the count are read by hand at ProjectInfo + 0x234
+    // and + 0x238, so the places are not the walk's own statement.
+    let mut entries = 0_usize;
+    let mut failed = Vec::new();
+    for (path, ledgers) in graded() {
+        let data = std::fs::read(&path).unwrap();
+        let pe = PeImage::parse(&data).unwrap();
+        let named: Vec<usize> = declare_entries(&data, &pe, project_info_base(&ledgers))
+            .iter()
+            .map(|entry| entry.at)
+            .collect();
+        let graded: Vec<usize> = ledgers
+            .iter()
+            .filter(|l| l.structure == "DeclareTableEntry")
+            .map(|l| usize::try_from(l.base.get()).unwrap())
+            .collect();
+        entries += graded.len();
+        if named != graded {
+            failed.push(format!(
+                "{}: ProjectInfo names Declare table entries at {named:x?}, and the walk graded \
+                 DeclareTableEntry at {graded:x?}",
+                path.display()
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+    assert_eq!(entries, 249);
 }

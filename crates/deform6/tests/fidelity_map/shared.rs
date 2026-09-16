@@ -42,6 +42,7 @@ pub(crate) const EXPECTED_PROGRAM_COUNT: usize = 44;
 pub(crate) const STRUCTURES: &[&str] = &[
     "VBHeader",
     "ProjectInfo",
+    "DeclareTableEntry",
     "GuiTableEntry",
     "GuiObjectInfo",
     "ObjectTable",
