@@ -129,6 +129,108 @@ The grading is by byte and not by field, so a count that is wrong by a small
 amount shows as a one byte run rather than a whole field. A person reading the
 map needs the `emit` function open beside it.
 
+#### Segment 2, done on 2026-09-16
+
+Six more structures, and a census of four arrays. Measured over all 44 corpus
+programs.
+
+| Structure | Bytes reproduced | Record length | Records |
+|---|---|---|---|
+| `ProjectInfo` | 20 | 572 | 44 |
+| GUI table entry | 8 | 80 | 53 |
+| `ObjectInfo` | 6 | 56 | 105 |
+| `PrivateObj` | 16 | 64 | 97 |
+| `OptionalObjectInfo` | 8 | 64 | 97 |
+| `ControlInfo` | 16 | 40 | 706 |
+
+With the header and `Object` from segment 1, the walk grades 1251 records. No
+byte differs from the file in any of them, and no two claim the same byte.
+
+| Array | Declared | Returned |
+|---|---|---|
+| GUI table entries | 53 | 53 |
+| Objects | 105 | 105 |
+| `ControlInfo` entries | 706 | 706 |
+| Event slots | 11862 | 11862 |
+
+No array in the corpus comes up short. The census test changes a file in
+memory to make each kind of shortfall happen, a clamp, an unmapped array, a
+refused table and an unknown control type, and requires the census to name it.
+
+Every constant above was computed by laying a value and reading back which
+bytes the emitter wrote. None was worked out by hand, because segment 1 had
+three arithmetic slips of exactly this kind.
+
+#### What segment 2 found
+
+**Three defects named the wrong byte, and are fixed.** `ImplausibleCount`
+documents its offset as that of the count field. Three readers recorded the
+start of the table the count bounds instead, so a report pointed a person at
+the wrong byte. The first two rows were measured on corpus files patched in
+memory, before the fix:
+
+| Count | The defect named | The field is at |
+|---|---|---|
+| `wEventCount`, SK-Gradient | 6144, the event table | 5982 |
+| `dwExternalCount`, Mandelbrot | 5896, the import table | 6732 |
+| `wFormCount` | the start of the GUI table | `VBHeader + 0x44` |
+
+The third row comes from a synthetic file. No corpus program can make that
+clamp fire, for the reason given below.
+
+The cause was structural. Each reader was handed a structure that did not know
+where it sat in the file, so the table was the only offset it had.
+`VbHeader`, `ProjectInfo` and `ControlInfo` now keep the file offset of their
+own first byte. **This bends a rule segment 1 set**, that readers carry no
+provenance and the fidelity walk works positions out for itself. The walk still
+does. These three fields exist so that a defect can name its own byte.
+
+A test now compares the census, which states where `wEventCount` sits from its
+own reading of the layout, with the reader's own defect, and requires the two
+to name one byte. Before the fix they named bytes 162 apart.
+
+**The corpus rejects the disputed `ControlInfo` layout.** `STRUCTURES.md`
+section 8.6 marks the first two fields `[D]`: one source puts `wEventCount` at
+`0x04`, and three put it at `0x02`. An emitter that wrote it at `0x04` differs
+from the file in all 706 records.
+
+**The presence rules agree.** The 8 objects with no `PrivateObj` are exactly
+the 8 standard modules `inspect` reports, and exactly the 8 objects with no
+`OptionalObjectInfo`. Two structures, two independent rules, one answer.
+
+**Every class carries exactly one `ControlInfo` entry**, 44 of 44. The 706
+`ControlInfo` entries are rows of the table that binds controls to events, and
+the README's 686 controls count nodes in the control tree, which is a
+different quantity.
+
+**The GUI table clamp fires only when the table ends its section.** Anywhere
+else, a raised `wFormCount` makes the walk read past the real entries and
+refuse the table on the next `lStructSize`.
+
+**The cost is small.** The walk costs 0.435 of what both `inspect` calls cost
+over the corpus, so it caches nothing. The fuzz target ran 2045712 inputs
+through it with no fault.
+
+#### What is left of Phase 7
+
+- **The committed fidelity map.** An `xtask` subcommand that writes the
+  coverage and census into a file, and a gate that holds the tree to it, in
+  the shape `tests/ratios.toml` already has.
+- **Variable-length structures.** Component table entries, control blocks and
+  the property stream. `Emit` needs a fixed length, so these need a different
+  contract.
+- **The `FuncTypDesc` header.** It keeps flags as single bits, and a slate
+  counts coverage by the byte, so it cannot say which bits of a byte are
+  modelled. That needs coverage by the bit, and a reader that keeps the raw
+  flag bytes.
+- **The event stub.** `StubHandler.handler_address` is computed as
+  `stub + 13 + rel32`. Written back independently, it would test that
+  arithmetic. The stub's own address is kept on `EventSlot::Bound`, not on
+  the handler, so an emitter needs the two together.
+- **`GuiObjectInfo`.** The reader keeps one field of its 93 bytes,
+  `lPropertiesLength`, and the structure holds a borrowed window, so it needs
+  a record type the way `PrivateObj` did. Nothing here has graded it yet.
+
 ### Phase 8: The build gate
 
 **Goal.** DeForm6 proves its own output compiles, on the user's machine, with
