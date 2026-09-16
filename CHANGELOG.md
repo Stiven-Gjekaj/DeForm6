@@ -12,10 +12,19 @@ heading its version and its date.
 
 ### What this delivers
 
-- Byte fidelity: `deform6::fidelity::walk::walk` writes eight structures
+- Byte fidelity: `deform6::fidelity::walk::walk` writes ten structures
   back over the bytes they were read from. It grades each byte as the same,
   as different, or as not modelled. Across the 44 corpus programs it grades
-  1251 records, and no byte that a reader models differs from the file.
+  1694 records, and no byte that a reader models differs from the file.
+- The ten include `GUIObjectInfo` and the event stub. The event stub
+  emitter writes all 13 bytes. It works the jump back out of the handler
+  address that the reader keeps, and it writes the five opcode bytes that
+  the reader assumes and does not read.
+- The committed fidelity map: `tests/fidelity.toml` holds the totals of each
+  corpus program, and `cargo run -p xtask -- update-fidelity` writes it.
+  `cargo test -p deform6 --test fidelity_map` fails when a value moves. The
+  message names the value, says whether the move is a regression, and gives
+  the table to paste.
 - The array census: the same walk counts four arrays, which are the GUI
   table, the object array, the controls of each object and the event slots
   of each control. For each one it compares the count that the file
@@ -25,6 +34,9 @@ heading its version and its date.
   closed. The dispute about `fControlType` and `wEventCount` at the start of
   `ControlInfo` is settled. Sections 16 and 17 of `docs/STRUCTURES.md` give
   the numbers.
+- More corpus evidence: the single byte at `GUIObjectInfo + 0x04` is real,
+  and no event slot names a method stub. Sections 18 and 19 of
+  `docs/STRUCTURES.md` give the numbers.
 - The gap 2 cross-check runs: `inspect` compares bit `0x2` of
   `fObjectType` with `lpPrivateObject` for each object, and reports a
   disagreement as a `ModuleMarkerMismatch` defect at `ObjectInfo + 0x0C`.
@@ -39,10 +51,11 @@ is therefore 2.0.0, not 1.1.0.
 
 - New public fields: `VbHeader::file_offset`, `ProjectInfo::file_offset`,
   `ControlInfo::file_offset`, `ControlInfo::lpsz_name`,
-  `Object::lpsz_object_name` and `GuiTableEntry::l_struct_size`. Code that
-  builds one of these structures with a struct expression does not compile.
-  Code that names every field of one in a pattern does not compile.
-- These five structures and the new `OptionalObjectInfo` are now
+  `Object::lpsz_object_name`, `GuiTableEntry::l_struct_size` and
+  `StubHandler::imm32`. Code that builds one of these structures with a
+  struct expression does not compile. Code that names every field of one in
+  a pattern does not compile. `imm32` does not go into the JSON report.
+- These six structures and the new `OptionalObjectInfo` are now
   `#[non_exhaustive]`. Outside this crate, do not build them with a struct
   expression, and put `..` in each pattern that names their fields. Then a
   field that a later release adds does not break a caller again.
@@ -64,8 +77,11 @@ is therefore 2.0.0, not 1.1.0.
 
 ### What stays open
 
-- The fidelity walk grades eight structures. `docs/ROADMAP.md` names the
+- The fidelity walk grades ten structures. `docs/ROADMAP.md` names the
   work on the other structures that is left.
+- The reader does not check the opcode bytes of an event stub. A P-code stub
+  at an address in a corpus program gives an `UnreadablePointer` defect. The
+  address is readable, so the defect names the wrong fault.
 - The census does not count the `Declare` table or the type buffer. The
   clamps on those two arrays only bound a loop, so the byte diff cannot see
   them either.
