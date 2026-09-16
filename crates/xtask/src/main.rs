@@ -1,6 +1,7 @@
 //! The developer tools this workspace runs by hand, never shipped.
 //!
 //! `cargo run -p xtask -- update-ratios` rewrites `tests/ratios.toml`.
+//! `cargo run -p xtask -- update-fidelity` rewrites `tests/fidelity.toml`.
 //! `cargo run -p xtask -- derive-opcode-table` writes the opcode table
 //! `deform6::vb::opcodes::OpcodeTable::parse` reads, from a type library on
 //! a Windows host; see `opcode_table.rs`'s own doc comment for why this
@@ -48,6 +49,18 @@
 )]
 mod ratios;
 
+// `crates/deform6/tests/fidelity_map/shared.rs` gives the measurement, the
+// text and the parser of `tests/fidelity.toml`. The gate compiles the same
+// file, so the writer and the gate cannot disagree about the shape of the
+// map. The file sits in a directory that Cargo does not build as a test
+// target, so it holds no test that would run a second time here.
+#[path = "../../deform6/tests/fidelity_map/shared.rs"]
+#[allow(
+    dead_code,
+    reason = "this module is embedded in two binaries, the fidelity_map test target and this               one, and each uses a different part of it; this one calls only measure, render,               parse, changes and fidelity_toml_path"
+)]
+mod fidelity_map;
+
 mod fetch_corpus;
 mod fuzz;
 mod licences;
@@ -71,6 +84,7 @@ fn main() {
 fn run(args: Vec<String>) -> i32 {
     match args.first().map(String::as_str) {
         Some("update-ratios") => update_ratios(),
+        Some("update-fidelity") => update_fidelity(),
         Some("derive-opcode-table") => {
             opcode_table::derive_opcode_table(args.get(1..).unwrap_or(&[]))
         }
@@ -94,7 +108,7 @@ fn run(args: Vec<String>) -> i32 {
     }
 }
 
-const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | derive-opcode-table | fetch-corpus | pin-corpus <name> <url> | fuzz-pr | fuzz-cron | licences";
+const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | update-fidelity | derive-opcode-table | fetch-corpus | pin-corpus <name> <url> | fuzz-pr | fuzz-cron | licences";
 
 /// The number of corpus programs `update-ratios` refuses to write fewer
 /// than. Matches `EXPECTED_PROGRAM_COUNT` in `crates/deform6/tests/ratios.rs`
@@ -302,6 +316,61 @@ fn update_ratios_inner() -> Result<(usize, Vec<String>), String> {
     std::fs::write(&path, &rendered).map_err(|err| format!("writing {}: {err}", path.display()))?;
 
     Ok((measured.len(), changes))
+}
+
+/// Rewrites `tests/fidelity.toml`.
+fn update_fidelity() -> i32 {
+    match update_fidelity_inner() {
+        Ok((count, lines)) => {
+            for line in lines {
+                println!("{line}");
+            }
+            println!(
+                "xtask: wrote {count} programs to {}",
+                fidelity_map::fidelity_toml_path().display()
+            );
+            0
+        }
+        Err(message) => {
+            eprintln!("xtask: {message}");
+            1
+        }
+    }
+}
+
+/// Measures the map, lists every value that moved since the old file, and
+/// writes the new file.
+///
+/// The text is checked twice before it is written. It must be valid TOML,
+/// and it must parse back to the exact values it was rendered from.
+fn update_fidelity_inner() -> Result<(usize, Vec<String>), String> {
+    let measured = fidelity_map::measure()?;
+    check_minimum_program_count(measured.programs.len())?;
+
+    let path = fidelity_map::fidelity_toml_path();
+    let lines = match std::fs::read_to_string(&path) {
+        Ok(old_text) => match fidelity_map::parse(&old_text) {
+            Ok(old) => fidelity_map::changes(&old, &measured)
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            Err(err) => vec![format!(
+                "the old file does not parse, so no change is listed: {err}"
+            )],
+        },
+        Err(_) => vec!["there is no old file, so no change is listed".to_owned()],
+    };
+
+    let rendered = fidelity_map::render(&measured);
+    validate_toml(&rendered)?;
+    if fidelity_map::parse(&rendered)? != measured {
+        return Err(
+            "the rendered map does not parse back to the values it was rendered from".to_owned(),
+        );
+    }
+    std::fs::write(&path, &rendered).map_err(|err| format!("writing {}: {err}", path.display()))?;
+
+    Ok((measured.programs.len(), lines))
 }
 
 #[cfg(test)]
@@ -522,6 +591,11 @@ mod tests {
             !lines.iter().any(|l| l.contains("unchanged/B.exe")),
             "an unchanged key must produce no line: {lines:?}"
         );
+    }
+
+    #[test]
+    fn the_usage_line_names_update_fidelity() {
+        assert!(super::USAGE.contains("| update-fidelity |"));
     }
 
     #[test]

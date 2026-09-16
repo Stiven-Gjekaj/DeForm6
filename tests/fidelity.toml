@@ -1,0 +1,685 @@
+# The committed fidelity map: what the fidelity walk measures in each corpus
+# program.
+#
+# Rewrite this file with `cargo run -p xtask -- update-fidelity`. Do not edit
+# it by hand. A rewrite on a clean tree gives no diff, and
+# `cargo test -p deform6 --test fidelity_map` holds the tree to this file.
+#
+# A `layout` table describes one structure. `length` is its size in bytes.
+# `modelled` is the number of bytes that the emitter writes back.
+# `unmodelled` lists the ranges that it does not write, as [offset, length]
+# pairs from the start of the structure. Every record of a structure has the
+# same layout.
+#
+# A `program` table describes one corpus program. Its key is the path of the
+# executable, relative to `corpus/`.
+#
+# For each structure, `records` is the number of records that the walk
+# graded. `same` and `differs` count the modelled bytes that equal the file
+# and the modelled bytes that do not. `absent` counts the records that the
+# program does not have, such as the `PrivateObj` of a standard module.
+# `refused` counts the records that the reader could not read.
+#
+# For each array, `rows` is the number of arrays that the walk counted.
+# `declared` is the sum of the counts that the file declares, and `returned`
+# is the sum of the entries that the reader returned. `not_whole` counts the
+# arrays for which the two are not equal.
+#
+# A byte that is the same is coverage, not proof. A field that is read at one
+# offset and written back at the same offset cannot differ from itself.
+
+[layout.VBHeader]
+length = 104
+modelled = 50
+unmodelled = [[0x06, 38], [0x3C, 8], [0x48, 4], [0x54, 4]]
+
+[layout.ProjectInfo]
+length = 572
+modelled = 20
+unmodelled = [[0x08, 24], [0x24, 528]]
+
+[layout.GuiTableEntry]
+length = 80
+modelled = 8
+unmodelled = [[0x04, 68], [0x4C, 4]]
+
+[layout.Object]
+length = 48
+modelled = 20
+unmodelled = [[0x04, 20], [0x24, 4], [0x2C, 4]]
+
+[layout.ObjectInfo]
+length = 56
+modelled = 6
+unmodelled = [[0x00, 2], [0x04, 8], [0x10, 40]]
+
+[layout.PrivateObj]
+length = 64
+modelled = 16
+unmodelled = [[0x00, 16], [0x14, 4], [0x1C, 4], [0x28, 24]]
+
+[layout.OptionalObjectInfo]
+length = 64
+modelled = 8
+unmodelled = [[0x00, 32], [0x28, 24]]
+
+[layout.ControlInfo]
+length = 40
+modelled = 16
+unmodelled = [[0x04, 4], [0x0C, 12], [0x1C, 4], [0x24, 4]]
+
+[program."public-domain/HexScroll/Hex Scroll.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 2, same = 40, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 23, same = 368, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
+array.Objects = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
+array.Controls = { rows = 2, declared = 23, returned = 23, not_whole = 0 }
+array.EventSlots = { rows = 23, declared = 325, returned = 325, not_whole = 0 }
+
+[program."public-domain/LockWorkStation/LockWorkStation.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Controls = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.EventSlots = { rows = 1, declared = 31, returned = 31, not_whole = 0 }
+
+[program."public-domain/PassGen/PassGen.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 4, same = 32, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 4, same = 80, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 4, same = 24, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 4, same = 64, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 4, same = 32, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 90, same = 1440, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 4, returned = 4, not_whole = 0 }
+array.Objects = { rows = 1, declared = 4, returned = 4, not_whole = 0 }
+array.Controls = { rows = 4, declared = 90, returned = 90, not_whole = 0 }
+array.EventSlots = { rows = 90, declared = 1377, returned = 1377, not_whole = 0 }
+
+[program."public-domain/SK-Gradient-Sample__VB6/demo/Project1.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 2, same = 40, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 1, refused = 0 }
+structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 1, refused = 0 }
+structure.ControlInfo = { records = 4, same = 64, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
+array.Controls = { rows = 1, declared = 4, returned = 4, not_whole = 0 }
+array.EventSlots = { rows = 4, declared = 92, returned = 92, not_whole = 0 }
+
+[program."public-domain/SK-MCI-Sample__VB6/demo/Project1.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 31, same = 496, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Controls = { rows = 1, declared = 31, returned = 31, not_whole = 0 }
+array.EventSlots = { rows = 31, declared = 579, returned = 579, not_whole = 0 }
+
+[program."public-domain/SK-TFTP-Sample__VB6/Client/demo/TFTPClient.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 13, same = 208, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Controls = { rows = 1, declared = 13, returned = 13, not_whole = 0 }
+array.EventSlots = { rows = 13, declared = 253, returned = 253, not_whole = 0 }
+
+[program."public-domain/SK-TFTP-Sample__VB6/Server/demo/Server.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 5, same = 80, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Controls = { rows = 1, declared = 5, returned = 5, not_whole = 0 }
+array.EventSlots = { rows = 5, declared = 101, returned = 101, not_whole = 0 }
+
+[program."public-domain/SK-Winsock-Sample__VB6/demo/SubReality_WinsockSample.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 10, same = 160, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Controls = { rows = 1, declared = 10, returned = 10, not_whole = 0 }
+array.EventSlots = { rows = 10, declared = 203, returned = 203, not_whole = 0 }
+
+[program."public-domain/UUID2/VB6/UUID2.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 2, same = 40, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 27, same = 432, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
+array.Objects = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
+array.Controls = { rows = 2, declared = 27, returned = 27, not_whole = 0 }
+array.EventSlots = { rows = 27, declared = 335, returned = 335, not_whole = 0 }
+
+[program."public-domain/dump/VB6/rot47/Rot47.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 8, same = 128, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Controls = { rows = 1, declared = 8, returned = 8, not_whole = 0 }
+array.EventSlots = { rows = 8, declared = 116, returned = 116, not_whole = 0 }
+
+[program."public-domain/machineLanguageConversion/ASCII/Ascii.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 5, same = 80, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Controls = { rows = 1, declared = 5, returned = 5, not_whole = 0 }
+array.EventSlots = { rows = 5, declared = 114, returned = 114, not_whole = 0 }
+
+[program."public-domain/machineLanguageConversion/Hex/Hex.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 6, same = 96, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Controls = { rows = 1, declared = 6, returned = 6, not_whole = 0 }
+array.EventSlots = { rows = 6, declared = 132, returned = 132, not_whole = 0 }
+
+[program."public-domain/machineLanguageConversion/Octal/Octal.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 5, same = 80, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Controls = { rows = 1, declared = 5, returned = 5, not_whole = 0 }
+array.EventSlots = { rows = 5, declared = 114, returned = 114, not_whole = 0 }
+
+[program."vb6-code/Artificial-life/Artificial Life.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 4, same = 80, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 4, same = 24, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 1, refused = 0 }
+structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 1, refused = 0 }
+structure.ControlInfo = { records = 32, same = 512, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 4, returned = 4, not_whole = 0 }
+array.Controls = { rows = 3, declared = 32, returned = 32, not_whole = 0 }
+array.EventSlots = { rows = 32, declared = 623, returned = 623, not_whole = 0 }
+
+[program."vb6-code/Blacklight-effect/Blacklight.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 10, same = 160, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
+array.Controls = { rows = 3, declared = 10, returned = 10, not_whole = 0 }
+array.EventSlots = { rows = 10, declared = 135, returned = 135, not_whole = 0 }
+
+[program."vb6-code/Brightness-effect/Part 1 - Pure VB6/vbBrightness.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 6, same = 96, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Controls = { rows = 1, declared = 6, returned = 6, not_whole = 0 }
+array.EventSlots = { rows = 6, declared = 134, returned = 134, not_whole = 0 }
+
+[program."vb6-code/Brightness-effect/Part 2 - API - GetPixel and SetPixel/apiBrightness.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 6, same = 96, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Controls = { rows = 1, declared = 6, returned = 6, not_whole = 0 }
+array.EventSlots = { rows = 6, declared = 134, returned = 134, not_whole = 0 }
+
+[program."vb6-code/Brightness-effect/Part 4 - Even faster DIBs/Realtime_Brightness.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 2, same = 40, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 7, same = 112, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
+array.Controls = { rows = 2, declared = 7, returned = 7, not_whole = 0 }
+array.EventSlots = { rows = 7, declared = 131, returned = 131, not_whole = 0 }
+
+[program."vb6-code/Color-shift-effect/ColorShift.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 9, same = 144, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
+array.Controls = { rows = 3, declared = 9, returned = 9, not_whole = 0 }
+array.EventSlots = { rows = 9, declared = 123, returned = 123, not_whole = 0 }
+
+[program."vb6-code/Colorize-effect/Colorize.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 15, same = 240, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
+array.Controls = { rows = 3, declared = 15, returned = 15, not_whole = 0 }
+array.EventSlots = { rows = 15, declared = 226, returned = 226, not_whole = 0 }
+
+[program."vb6-code/Contrast-effect/Contrast.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 10, same = 160, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
+array.Controls = { rows = 3, declared = 10, returned = 10, not_whole = 0 }
+array.EventSlots = { rows = 10, declared = 135, returned = 135, not_whole = 0 }
+
+[program."vb6-code/Curves-effect/Curves.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 9, same = 144, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
+array.Controls = { rows = 3, declared = 9, returned = 9, not_whole = 0 }
+array.EventSlots = { rows = 9, declared = 139, returned = 139, not_whole = 0 }
+
+[program."vb6-code/Custom-image-filters/Custom_Filters.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 16, same = 256, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
+array.Controls = { rows = 3, declared = 16, returned = 16, not_whole = 0 }
+array.EventSlots = { rows = 16, declared = 268, returned = 268, not_whole = 0 }
+
+[program."vb6-code/Diffuse-effect/Diffuse.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 16, same = 256, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
+array.Controls = { rows = 3, declared = 16, returned = 16, not_whole = 0 }
+array.EventSlots = { rows = 16, declared = 233, returned = 233, not_whole = 0 }
+
+[program."vb6-code/Edge-detection/Edge_Detection.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 4, same = 80, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 4, same = 24, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 4, same = 64, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 4, same = 32, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 12, same = 192, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 4, returned = 4, not_whole = 0 }
+array.Controls = { rows = 4, declared = 12, returned = 12, not_whole = 0 }
+array.EventSlots = { rows = 12, declared = 160, returned = 160, not_whole = 0 }
+
+[program."vb6-code/Emboss-engrave-effect/Emboss_Engrave.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 4, same = 80, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 4, same = 24, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 4, same = 64, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 4, same = 32, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 14, same = 224, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 4, returned = 4, not_whole = 0 }
+array.Controls = { rows = 4, declared = 14, returned = 14, not_whole = 0 }
+array.EventSlots = { rows = 14, declared = 209, returned = 209, not_whole = 0 }
+
+[program."vb6-code/Fill-image-region/Filling.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Controls = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
+array.EventSlots = { rows = 3, declared = 75, returned = 75, not_whole = 0 }
+
+[program."vb6-code/Fire-effect/Fast_Flames.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 2, same = 40, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 19, same = 304, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
+array.Controls = { rows = 2, declared = 19, returned = 19, not_whole = 0 }
+array.EventSlots = { rows = 19, declared = 325, returned = 325, not_whole = 0 }
+
+[program."vb6-code/Game-physics-basic/Physics_Demo.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 2, same = 40, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 1, refused = 0 }
+structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 1, refused = 0 }
+structure.ControlInfo = { records = 19, same = 304, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
+array.Controls = { rows = 1, declared = 19, returned = 19, not_whole = 0 }
+array.EventSlots = { rows = 19, declared = 450, returned = 450, not_whole = 0 }
+
+[program."vb6-code/Gradient-2D/Gradient.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 2, same = 40, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 6, same = 96, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
+array.Controls = { rows = 2, declared = 6, returned = 6, not_whole = 0 }
+array.EventSlots = { rows = 6, declared = 122, returned = 122, not_whole = 0 }
+
+[program."vb6-code/Grayscale-effect/Grayscale.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 17, same = 272, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
+array.Controls = { rows = 3, declared = 17, returned = 17, not_whole = 0 }
+array.EventSlots = { rows = 17, declared = 250, returned = 250, not_whole = 0 }
+
+[program."vb6-code/Hidden-Markov-model/HMM.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 2, same = 40, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 41, same = 656, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
+array.Controls = { rows = 2, declared = 41, returned = 41, not_whole = 0 }
+array.EventSlots = { rows = 41, declared = 742, returned = 742, not_whole = 0 }
+
+[program."vb6-code/Histograms-advanced/Advanced Histogram Viewer.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 5, same = 100, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 5, same = 30, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 4, same = 64, differs = 0, absent = 1, refused = 0 }
+structure.OptionalObjectInfo = { records = 4, same = 32, differs = 0, absent = 1, refused = 0 }
+structure.ControlInfo = { records = 31, same = 496, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
+array.Objects = { rows = 1, declared = 5, returned = 5, not_whole = 0 }
+array.Controls = { rows = 4, declared = 31, returned = 31, not_whole = 0 }
+array.EventSlots = { rows = 31, declared = 537, returned = 537, not_whole = 0 }
+
+[program."vb6-code/Histograms-basic/Basic Histogram Viewer.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 5, same = 100, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 5, same = 30, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 4, same = 64, differs = 0, absent = 1, refused = 0 }
+structure.OptionalObjectInfo = { records = 4, same = 32, differs = 0, absent = 1, refused = 0 }
+structure.ControlInfo = { records = 23, same = 368, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
+array.Objects = { rows = 1, declared = 5, returned = 5, not_whole = 0 }
+array.Controls = { rows = 4, declared = 23, returned = 23, not_whole = 0 }
+array.EventSlots = { rows = 23, declared = 402, returned = 402, not_whole = 0 }
+
+[program."vb6-code/Levels-effect/Image Levels.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 5, same = 100, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 5, same = 30, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 4, same = 64, differs = 0, absent = 1, refused = 0 }
+structure.OptionalObjectInfo = { records = 4, same = 32, differs = 0, absent = 1, refused = 0 }
+structure.ControlInfo = { records = 44, same = 704, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
+array.Objects = { rows = 1, declared = 5, returned = 5, not_whole = 0 }
+array.Controls = { rows = 4, declared = 44, returned = 44, not_whole = 0 }
+array.EventSlots = { rows = 44, declared = 734, returned = 734, not_whole = 0 }
+
+[program."vb6-code/Mandelbrot/Mandelbrot.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 16, same = 256, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Controls = { rows = 1, declared = 16, returned = 16, not_whole = 0 }
+array.EventSlots = { rows = 16, declared = 323, returned = 323, not_whole = 0 }
+
+[program."vb6-code/Map-editor-2D/Map Editor.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 5, same = 100, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 5, same = 30, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 2, refused = 0 }
+structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 2, refused = 0 }
+structure.ControlInfo = { records = 32, same = 512, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
+array.Objects = { rows = 1, declared = 5, returned = 5, not_whole = 0 }
+array.Controls = { rows = 3, declared = 32, returned = 32, not_whole = 0 }
+array.EventSlots = { rows = 32, declared = 409, returned = 409, not_whole = 0 }
+
+[program."vb6-code/Nature-effects/Nature_Filters.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 9, same = 144, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
+array.Controls = { rows = 3, declared = 9, returned = 9, not_whole = 0 }
+array.EventSlots = { rows = 9, declared = 127, returned = 127, not_whole = 0 }
+
+[program."vb6-code/Randomize-effects/RandomizationFX.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 14, same = 224, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
+array.Controls = { rows = 3, declared = 14, returned = 14, not_whole = 0 }
+array.EventSlots = { rows = 14, declared = 224, returned = 224, not_whole = 0 }
+
+[program."vb6-code/Scanner-TWAIN/VB_Scanner_Support.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 9, same = 144, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Controls = { rows = 1, declared = 9, returned = 9, not_whole = 0 }
+array.EventSlots = { rows = 9, declared = 185, returned = 185, not_whole = 0 }
+
+[program."vb6-code/Screen-capture/ScreenCapture.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 1, same = 6, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 1, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Controls = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
+array.EventSlots = { rows = 3, declared = 67, returned = 67, not_whole = 0 }
+
+[program."vb6-code/Sepia-effect/Sepia.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 9, same = 144, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
+array.Controls = { rows = 3, declared = 9, returned = 9, not_whole = 0 }
+array.EventSlots = { rows = 9, declared = 123, returned = 123, not_whole = 0 }
+
+[program."vb6-code/Threshold-effect/Threshold.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 3, same = 60, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 3, same = 18, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 3, same = 48, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 3, same = 24, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 13, same = 208, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 3, returned = 3, not_whole = 0 }
+array.Controls = { rows = 3, declared = 13, returned = 13, not_whole = 0 }
+array.EventSlots = { rows = 13, declared = 188, returned = 188, not_whole = 0 }
+
+[program."vb6-code/Transparency-2D/Transparency.exe"]
+structure.VBHeader = { records = 1, same = 50, differs = 0, absent = 0, refused = 0 }
+structure.ProjectInfo = { records = 1, same = 20, differs = 0, absent = 0, refused = 0 }
+structure.GuiTableEntry = { records = 1, same = 8, differs = 0, absent = 0, refused = 0 }
+structure.Object = { records = 2, same = 40, differs = 0, absent = 0, refused = 0 }
+structure.ObjectInfo = { records = 2, same = 12, differs = 0, absent = 0, refused = 0 }
+structure.PrivateObj = { records = 2, same = 32, differs = 0, absent = 0, refused = 0 }
+structure.OptionalObjectInfo = { records = 2, same = 16, differs = 0, absent = 0, refused = 0 }
+structure.ControlInfo = { records = 8, same = 128, differs = 0, absent = 0, refused = 0 }
+array.GuiTable = { rows = 1, declared = 1, returned = 1, not_whole = 0 }
+array.Objects = { rows = 1, declared = 2, returned = 2, not_whole = 0 }
+array.Controls = { rows = 2, declared = 8, returned = 8, not_whole = 0 }
+array.EventSlots = { rows = 8, declared = 157, returned = 157, not_whole = 0 }
