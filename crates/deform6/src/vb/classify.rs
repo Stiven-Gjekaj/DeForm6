@@ -138,7 +138,8 @@ const NO_PRIVATE_OBJECT: u32 = 0xFFFF_FFFF;
 /// sentinel, and no corpus object holds `0`.
 ///
 /// This is the one statement of the rule. `PrivateObj::read` asks it before
-/// it builds an address from the value.
+/// it builds an address from the value, and [`agree`] asks it for the
+/// cross-check.
 #[must_use]
 pub const fn names_no_private_object(lp_private_object: u32) -> bool {
     lp_private_object == 0 || lp_private_object == NO_PRIVATE_OBJECT
@@ -147,6 +148,17 @@ pub const fn names_no_private_object(lp_private_object: u32) -> bool {
 /// Cross-checks the `0x2` bit against `ObjectInfo.lpPrivateObject`
 /// (`STRUCTURES.md` section 5.2, offset `0x0C`), which SVBD notes is `-1`
 /// for a standard module and something else for everything else.
+///
+/// # The pointer side uses the reader's own rule
+///
+/// [`names_no_private_object`] decides the pointer side, and it treats a
+/// plain `0` as the sentinel does. `PrivateObj::read` uses the same rule, so
+/// this function compares the two decisions the reader really makes: whether
+/// the object has an `OptionalObjectInfo` block, from the bit, and whether it
+/// has a `PrivateObj`, from the pointer. A rule that knew only the sentinel
+/// would report a module whose pointer is `0`, although the reader finds no
+/// `PrivateObj` there either. It would also miss a form whose pointer is
+/// `0`, although the reader then finds no `PrivateObj` for a COM object.
 ///
 /// Returns `true` when the two markers agree, `false` when they disagree.
 /// Per the ROADMAP risk on gap 2, a disagreement is reported, never
@@ -166,7 +178,7 @@ pub const fn names_no_private_object(lp_private_object: u32) -> bool {
 /// pair of values, never by a corpus fixture.
 #[must_use]
 pub const fn agree(f_object_type: u32, lp_private_object: u32) -> bool {
-    has_optional_info(f_object_type) == (lp_private_object != 0xFFFF_FFFF)
+    has_optional_info(f_object_type) != names_no_private_object(lp_private_object)
 }
 
 #[cfg(test)]
@@ -332,6 +344,13 @@ mod tests {
         // A form whose private-object address is the module sentinel: the
         // bit says "has one", the pointer says "does not".
         assert!(!agree(0x0001_8083, 0xFFFF_FFFF));
+        // A plain zero names no private object, as the sentinel does. A
+        // module that holds one agrees, and a form that holds one does not.
+        assert!(agree(0x0001_8001, 0));
+        assert!(!agree(0x0001_8083, 0));
+        // A module whose pointer is an address: the bit says "has none",
+        // the pointer says "has one".
+        assert!(!agree(0x0001_8001, 0x0040_1000));
     }
 
     /// The synthetic case named in the plan: no corpus file produces a
