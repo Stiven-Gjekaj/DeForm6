@@ -53,6 +53,7 @@ pub const GUI_OBJECT_INFO_SIZE: u32 = 0x5D;
 /// reads to check the entry, and `aFormPointer`, the one field the form walk
 /// needs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct GuiTableEntry {
     /// The entry's own size field, `lStructSize`, at offset `0x00`.
     ///

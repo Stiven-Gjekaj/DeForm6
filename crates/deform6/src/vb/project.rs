@@ -82,6 +82,7 @@ pub enum CompileMode {
 /// [`crate::vb::runtime::runtime_of`] decides before this structure is
 /// reached.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[non_exhaustive]
 pub struct ProjectInfo {
     /// The absolute file offset of the structure's first byte.
     ///

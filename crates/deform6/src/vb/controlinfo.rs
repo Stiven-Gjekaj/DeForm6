@@ -101,6 +101,7 @@ const NAME_MAX: u32 = 0x104;
 /// file never invents a name, matching `vb/object.rs::Object::name`'s own
 /// contract.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ControlInfo {
     /// The absolute file offset of this element's first byte.
     ///
@@ -143,6 +144,7 @@ pub struct ControlInfo {
 /// The block sits at `Object.lpObjectInfo` plus `0x38` and is `0x40` bytes.
 /// A standard module has no block at all.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct OptionalObjectInfo {
     /// `dwControlCount` at `0x20`, exactly as the file holds it.
     ///

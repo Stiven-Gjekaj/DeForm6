@@ -62,6 +62,7 @@ const PROC_NAME_PTR_SIZE: u32 = 4;
 /// strength of it. `proc_count` and `lp_proc_names_array` are carried raw as
 /// well, and plan 02-03 resolves them.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Object {
     /// The address of this object's `ObjectInfo`.
     pub lp_object_info: Va,

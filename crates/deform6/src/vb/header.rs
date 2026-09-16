@@ -141,6 +141,7 @@ pub fn header_region<'a>(pe: &PeImage<'a>) -> Result<Region<'a>, Refusal> {
 /// [`Va`]: crate::read::region::Va
 /// [`PeImage::region_at_va`]: crate::read::pe::PeImage::region_at_va
 #[derive(Clone, PartialEq, Eq, Debug)]
+#[non_exhaustive]
 pub struct VbHeader {
     /// The absolute file offset of the header's first byte.
     ///
