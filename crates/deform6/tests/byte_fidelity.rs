@@ -1162,6 +1162,50 @@ fn bound_slots(data: &[u8], pe: &PeImage<'_>, base: usize) -> Vec<BoundSlot> {
         .collect()
 }
 
+#[test]
+fn the_walk_grades_one_event_stub_at_each_address_a_bound_slot_names() {
+    // The slots are read by hand from each control's event table, and each
+    // stub address is resolved through the PE image, so the place is not the
+    // walk's own statement. The walk visits the controls in the order of their
+    // ledgers and the slots in index order, and it grades a stub the first
+    // time a slot names it. The list read by hand follows the same rule.
+    let mut stubs = 0_usize;
+    let mut failed = Vec::new();
+    for (path, ledgers) in graded() {
+        let data = std::fs::read(&path).unwrap();
+        let pe = PeImage::parse(&data).unwrap();
+        let mut seen = BTreeSet::new();
+        let named: Vec<u32> = ledgers
+            .iter()
+            .filter(|l| l.structure == "ControlInfo")
+            .flat_map(|control| {
+                bound_slots(&data, &pe, usize::try_from(control.base.get()).unwrap())
+            })
+            .map(|slot| {
+                pe.region_at_va(Va::new(slot.stub))
+                    .and_then(|region| region.file_offset(Off::new(0)))
+                    .unwrap()
+                    .get()
+            })
+            .filter(|at| seen.insert(*at))
+            .collect();
+        let graded: Vec<u32> = ledgers
+            .iter()
+            .filter(|l| l.structure == "EventStub")
+            .map(|l| l.base.get())
+            .collect();
+        stubs += graded.len();
+        if named != graded {
+            failed.push(format!(
+                "{}: the bound slots name {named:x?}, and the walk graded EventStub at {graded:x?}",
+                path.display()
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+    assert_eq!(stubs, 390);
+}
+
 fn sk_gradient() -> Vec<u8> {
     std::fs::read(corpus_root().join("public-domain/SK-Gradient-Sample__VB6/demo/Project1.exe"))
         .unwrap()
