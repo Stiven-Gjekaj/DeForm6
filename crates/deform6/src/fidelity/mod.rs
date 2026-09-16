@@ -20,8 +20,9 @@
 //! both sides place at the wrong offset. Two independent statements of the
 //! layout are what make a clean diff mean anything at all.
 //!
-//! This is also why nothing under `vb/` or `read/` changes when a structure
-//! joins this module.
+//! This is also why a commit that adds an emitter changes nothing under `vb/`
+//! or `read/`. When an emitter needs a field that a reader drops, a separate
+//! commit first makes the reader keep that field.
 //!
 //! # A verbatim field cannot differ
 //!
@@ -38,6 +39,12 @@
 //! `crate::vb::object::Object::proc_count` is the first: the reader clamps it
 //! to what the file can hold, so it differs in exactly the programs where the
 //! clamp fires.
+//!
+//! The clamps on `wFormCount`, `dwControlCount` and `wEventCount` do not work
+//! that way. They only bound a loop: the reader returns fewer entries, and no
+//! byte it keeps changes. The byte diff cannot see such a clamp. The
+//! [`census`] can: it counts what the file declares against what the reader
+//! returns.
 //!
 //! # `Fault` is this repository's mistake, never the file's
 //!

@@ -2,10 +2,17 @@
 //!
 //! # Why a second walk and not provenance on the readers
 //!
-//! Almost no parsed structure in this crate keeps the file offset it was read
-//! from. Threading one through every reader would touch every file under
-//! `vb/` to serve a measurement, and it would put a field on a public struct
-//! that nothing outside this module reads.
+//! Most parsed structures in this crate do not keep the file offset they were
+//! read from. Three do: `VbHeader`, `ProjectInfo` and `ControlInfo` each hold
+//! a `file_offset`, because a defect about a count that one of them carries
+//! must name the byte of that count. The other five structures this module
+//! grades keep no offset, and to add one to each would change every reader
+//! under `vb/` to serve a measurement.
+//!
+//! The walk does not use the three offsets that exist. It finds every
+//! position itself. If it used them, a reader that read a record from the
+//! wrong place and kept that place would be graded against the same wrong
+//! bytes, and the record would pass.
 //!
 //! The readers do keep the addresses, though. `VbHeader` holds
 //! `lp_project_data`, `ProjectInfo` holds `lp_object_table`, and so on down.
@@ -109,15 +116,30 @@ pub enum Reason {
     Refused(Refusal),
 }
 
-/// Grades every structure this module knows how to emit, in one file.
+/// Grades every structure this module knows how to emit in one file, and
+/// counts every array the census knows.
 ///
-/// The ledgers hold one entry for the VB header, then one per object in array
-/// order.
+/// The ledgers come in the order the walk reaches the structures. First come
+/// the VB header, `ProjectInfo`, each GUI table entry, and each `Object`
+/// element. Then each object adds its `ObjectInfo`, its `PrivateObj`, its
+/// `OptionalObjectInfo`, and its `ControlInfo` elements, in that order.
+///
+/// A structure that the walk reaches and cannot grade gets a row in
+/// `ungraded` and no ledger. The walk does not try a `PrivateObj` for an
+/// object whose `ObjectInfo` did not read, so that object gets no row for it.
+///
+/// The counts start with the GUI table and the object array. Then each object
+/// whose `OptionalObjectInfo` was read adds one row for its controls, and each
+/// graded `ControlInfo` adds one row for its event slots.
 ///
 /// # Errors
 ///
-/// Returns [`WalkError::Read`] when the file does not resolve, and
-/// [`WalkError::Emit`] when an emitter in this crate is at fault.
+/// Returns [`WalkError::Read`] when the PE image, the VB header,
+/// `ProjectInfo`, the GUI table, the object table, or one element of those
+/// two tables does not read. A refusal about the structures under one object
+/// does not stop the walk: it becomes a row in `ungraded` or a refused census
+/// row. Returns [`WalkError::Emit`] when an emitter in this crate is at
+/// fault.
 pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
     let pe = PeImage::parse(data).map_err(Refusal::from)?;
 
