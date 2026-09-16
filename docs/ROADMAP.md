@@ -30,8 +30,9 @@ typing.
 ## A note on the numbers below
 
 Every effort figure in this file is an estimate. It is not a measurement.
-The measured numbers in this project live in `tests/ratios.toml` and in the
-README, and each one names the test that asserts it. Nothing here does.
+The measured numbers in this project live in `tests/ratios.toml`, in
+`tests/fidelity.toml` and in the README, and each one names the test that
+asserts it. Nothing here does.
 
 ## Phases
 
@@ -220,25 +221,107 @@ commit `dee22c0`, seeded as the scheduled job seeds it, reached coverage 5982.
 An earlier run of 2045712 inputs is not evidence for the walk: its corpus was
 not seeded, so almost no input got past the PE header.
 
-#### What is left of Phase 7
+#### Segment 3, done on 2026-09-16
 
-- **The committed fidelity map.** An `xtask` subcommand that writes the
-  coverage and census into a file, and a gate that holds the tree to it, in
-  the shape `tests/ratios.toml` already has.
-- **Variable-length structures.** Component table entries, control blocks and
-  the property stream. `Emit` needs a fixed length, so these need a different
-  contract.
+The committed fidelity map, and two more structures. Measured over all 44
+corpus programs.
+
+**The map.** `tests/fidelity.toml` holds one table for each corpus program.
+The table gives the totals of each graded structure and of each counted
+array. The file also holds one layout table for each structure.
+`cargo run -p xtask -- update-fidelity` writes the file, and
+`cargo test -p deform6 --test fidelity_map` holds the tree to it. When a
+value moves, the test names the value, says whether the move is a
+regression, and gives the new table to paste. A rewrite on a clean tree
+gives no diff.
+
+| Structure | Bytes reproduced | Record length | Records |
+|---|---|---|---|
+| `GUIObjectInfo` | 4 | 93 | 53 |
+| Event stub | 13 | 13 | 390 |
+
+With the eight structures of segments 1 and 2, the walk grades 1694 records.
+No byte differs from the file in any of them, and no two claim the same byte.
+16 records are absent: the `PrivateObj` and the `OptionalObjectInfo` of each
+of the 8 standard modules. The reader refuses no record.
+
+The event stub is the second structure in which a byte can differ. The reader
+keeps the handler address, and the emitter works the jump back out of that
+address. The emitter also writes the five opcode bytes, which the reader
+assumes and does not read. All 13 bytes agree in all 390 stubs, so the
+handler arithmetic is correct and every stub has the native shape.
+
+`GUIObjectInfo` needs a record type, as `PrivateObj` does, but for a
+different reason. Its `window` field is private, so a test outside `vb::gui`
+cannot build the value that the reader gives.
+
+#### What segment 3 found
+
+**The single byte at `GUIObjectInfo` + 0x04 is real.** In all 53 forms, the
+GUID of the GUI table entry is at 0x05. In no form is it at the aligned 0x04.
+Section 18 of `STRUCTURES.md` gives the numbers.
+
+**No event slot names a method stub.** No stub that a slot names holds
+`0xFFFF`. The native stub bytes occur at 311 more places. Each of them holds
+`0xFFFF`, and no four bytes of its file hold its address. So the reader's
+`is_method` flag is never true on the corpus.
+
+**`imm32` is one less than the word at `ControlInfo` + 0x04**, in all 390
+stubs. Section 17 of `STRUCTURES.md` could not name that word, and it still
+cannot. Section 19 gives the numbers.
+
+**A P-code stub does not give a wrong handler address.** The reader does not
+read the opcodes. At the addresses of a corpus program, the last byte of a
+P-code stub makes the jump go below address 0. The reader then keeps no
+handler and reports an `UnreadablePointer` defect, and the walk records the
+stub as refused. A test patches a P-code stub into a corpus program in memory
+and requires this. The defect names the wrong fault: the address is readable,
+and the stub has another shape.
+
+**`lObjectID` gives the object of each form.** In all 44 programs, the
+`lObjectID` values of the GUI table entries, in order, are the indexes of the
+form objects.
+
+**The reader keeps `imm32`.** `StubHandler` has a new field for it. The
+struct is now `#[non_exhaustive]`, so a later field does not break a caller.
+
+**The fuzz target found no fault.** Two campaigns ran on commit `69b5618`,
+seeded as `.github/workflows/fuzz.yml` seeds them. The campaign of 60
+seconds ran 90592 inputs and reached coverage 5934. The campaign of 500000
+runs reached coverage 6234, and its highest `rss:` was 979 MiB, below the
+1159 MiB of the campaign on `dee22c0`. `crates/xtask/src/fuzz.rs` records
+it.
+
+**The walk does not make the fuzz target slower.** The campaign of 500000
+runs took 1936 seconds, and the one on `dee22c0` took 537, but other work
+ran on the machine at the same time. So the two fuzz targets were timed
+again over the 1551 inputs of the final corpus, one after the other, two
+times each. The target of `1298a46` took 23.5 and 21.3 seconds. The target
+of `77663e6`, before this segment, took 22.6 and 21.6 seconds.
+
+#### Did Phase 7 reach its exit
+
+**The exit, as written, is met.** The fidelity map is committed, and it
+covers all 44 corpus programs. It holds no byte that differs, so no
+difference needs a closed gap or a named limit.
+
+**The goal is not met.** The goal asks for an emitter for every structure
+that the reader parses. These structures have none yet:
+
+- **Fixed-length structures.** The object table (84 bytes), the `Declare`
+  entries and their descriptors (8 bytes each), and the OCX header (24
+  bytes). The OCX header sits inside the property stream, so the walk can
+  reach it only through the stream.
+- **Arrays of pointers.** The procedure name array, the event descriptor
+  array, and the event slots. The census counts the event slots, but no
+  emitter writes back the bytes of any of the three arrays.
 - **The `FuncTypDesc` header.** It keeps flags as single bits, and a slate
   counts coverage by the byte, so it cannot say which bits of a byte are
   modelled. That needs coverage by the bit, and a reader that keeps the raw
   flag bytes.
-- **The event stub.** `StubHandler.handler_address` is computed as
-  `stub + 13 + rel32`. Written back independently, it would test that
-  arithmetic. The stub's own address is kept on `EventSlot::Bound`, not on
-  the handler, so an emitter needs the two together.
-- **`GuiObjectInfo`.** The reader keeps one field of its 93 bytes,
-  `lPropertiesLength`, and the structure holds a borrowed window, so it needs
-  a record type the way `PrivateObj` did. Nothing here has graded it yet.
+- **Variable-length structures.** Component table entries, control blocks
+  and the property stream. `Emit` needs a fixed length, so these need a
+  different contract.
 
 ### Phase 8: The build gate
 
