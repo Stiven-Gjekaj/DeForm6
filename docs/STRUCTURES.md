@@ -327,11 +327,11 @@ PVB `ObjectTable`.)
 | Offset | Size | Name | Meaning | Conf |
 |---|---|---|---|---|
 | 0x00 | 4 | `lpHeapLink` | Always 0 after compilation. | **[C]** |
-| 0x04 | 4 | `lpExecProj` | Pointer to the in-memory project exec COM object. Zero on disk. | **[C]** |
+| 0x04 | 4 | `lpExecProj` | Pointer to the in-memory project exec COM object. The sources say that it is zero on disk. In the corpus it holds an address in `.data` (§20). | **[C]** |
 | 0x08 | 4 | `lpProjectInfo2` | VA of ProjectInfo2 (§3.1). | **[C]** |
 | 0x0C | 4 | `dwReserved` | `-1` after compilation. | **[C]** |
 | 0x10 | 4 | `dwNull` | Unused in compiled mode. | **[C]** |
-| 0x14 | 4 | `lpProjectObject` | In-memory only. | **[C]** |
+| 0x14 | 4 | `lpProjectObject` | The sources say that it is used only in memory. In the corpus it holds an address in `.data` (§20). | **[C]** |
 | 0x18 | 16 | `uuidObject` | GUID of the object table. AI, PVB, IDC read it as a GUID; SVBD reads the same 16 bytes as four opaque dwords. Same bytes either way. | **[C]** |
 | 0x28 | 2 | `fCompileState` | Internal compile flag. | **[C]** |
 | 0x2A | 2 | `wTotalObjects` | Total objects in the project. | **[C]** |
@@ -2181,10 +2181,11 @@ the 44 corpus programs.
 | 0x4C | `lpIdeData3` | 0 in 44 |
 | 0x50 | `dwIdentifier` | 2 in 44 |
 
-**Two rows of section 4 do not agree with these files.** Section 4 says that
-`lpExecProj` is zero on disk, and that `lpProjectObject` is used only in
-memory. In all 44 programs, each of the two holds an address in `.data`. This
-document does not know what is at those addresses.
+**Two rows of section 4 do not agree with these files.** The sources of
+section 4 say that `lpExecProj` is zero on disk, and that `lpProjectObject` is
+used only in memory. In all 44 programs, each of the two holds an address in
+`.data`. The two rows of section 4 now say so. This document does not know
+what is at those addresses.
 
 **The object array follows the table.** In all 44 programs, `lpObjectArray`
 holds the address of the byte after the 84 bytes of the table. A longer table
