@@ -544,6 +544,9 @@ modules from everything else across all seventeen observed values. Cross-check
 it against `ObjectInfo.lpPrivateObject != -1` (SVBD's module marker) and report
 a disagreement. **[L]**
 
+Measured on all 105 corpus objects, 2026-09-16: the two rules agree on every
+object. Method and numbers in §16.
+
 **MDIForm is missing from SVBD's table.** **[G]** An MDI parent form's
 `fObjectType` value is not recorded in any source found. A parser must not
 refuse an object whose type value is unknown; classify it as `Unknown`, fall
@@ -1264,12 +1267,13 @@ array reached through `OptionalObjectInfo.lpControls` (§5.3) gives the control'
 **GUID and event handler addresses**. The two are joined by control name.
 
 `ControlInfo`, stride `0x28` = 40 bytes. **[D]** AI's layout is wrong at the
-front; three independent implementations agree against him.
+front; three independent implementations agree against him. The corpus
+agrees with the three as well (§17).
 
 | Offset | Size | Name | Meaning | Conf |
 |---|---|---|---|---|
-| 0x00 | 2 | `fControlType` | Control kind. `0x40` = an intrinsic control with a plain event sink; `0x2E` = a COM control with an `IDispatch` sink. AI reads this as a **dword**; SVBD, PVB and IDC all read it as a **word**. Prefer word. | **[D]** |
-| 0x02 | 2 | `wEventCount` | **Number of event slots.** AI puts this at 0x04. | **[D]** |
+| 0x00 | 2 | `fControlType` | Control kind. `0x40` = an intrinsic control with a plain event sink; `0x2E` = a COM control with an `IDispatch` sink. AI reads this as a **dword**; SVBD, PVB and IDC all read it as a **word**. Prefer word. | **[D]**, settled in §17 |
+| 0x02 | 2 | `wEventCount` | **Number of event slots.** AI puts this at 0x04. | **[D]**, settled in §17 |
 | 0x04 | 2 | unknown | IDC: `wFlagIndexRef` | **[G]** |
 | 0x06 | 2 | `bWEventsOffset` | Offset into the memory struct to copy events | **[C]** |
 | 0x08 | 4 | `lpGuid` | **VA of this control's 16-byte CLSID.** | **[C]** |
@@ -1635,7 +1639,7 @@ answer stated confidently would be worse than no answer.
 | # | Gap | Blocks | Resolution path |
 |---|---|---|---|
 | 1 | `VBHeader` 0x58 / 0x5C meaning (§2.3) | `.vbp` `Title=` / `ExeName32=` | CLOSED 2026-09-07, 44 of 44 corpus binaries. 0x58 is the EXE name, 0x5C is the title. Method and worked example in §13. |
-| 2 | `OptionalObjectInfo` presence test (§5.5) | reading controls off a class | Use `fObjectType & 2`, validate on corpus |
+| 2 | `OptionalObjectInfo` presence test (§5.5) | reading controls off a class | CLOSED 2026-09-16, 105 of 105 corpus objects. `fObjectType & 2` is clear on exactly the 8 objects whose `lpPrivateObject` is `-1`, and those are the 8 standard modules. Method and numbers in §16. |
 | 3 | MDIForm `fObjectType` value (§5.5) | classifying MDI parents | Corpus scan for `cType == 20` forms |
 | 4 | `ParamArray` type encoding (§6.5) | correct `.bas`/`.cls` signatures | Compile a `ParamArray` sample, diff |
 | 5 | Type codes 0x00-0x02, 0x04, 0x07, 0x09, 0x0E, 0x11, 0x12, 0x14-0x1A (§6.5) | full prototype coverage | Compile variations, diff |
@@ -1951,3 +1955,87 @@ finding for this program, open. `corpus/vb6-code/Map-editor-2D/Map Editor.exe`'s
 that is not there, at file offset `0x170e`) and is tracked separately too;
 this session's own measurement did not explain it.
 
+---
+
+## 16. Gap 2 closed: the `OptionalObjectInfo` presence test, 2026-09-16
+
+Section 5.5 recommends `fObjectType & 0x2` as the test for an
+`OptionalObjectInfo` block. It also asks for a cross-check against
+`ObjectInfo.lpPrivateObject`, which is `-1` for a standard module. The 105
+objects in the 44 corpus programs hold three `fObjectType` values:
+
+| `fObjectType` | Objects | Kind in the §5.5 table | Bit `0x2` | `lpPrivateObject` is `-1` |
+|---|---|---|---|---|
+| `0x18001` | 8 | Standard module | clear | 8 of 8 |
+| `0x18083` | 53 | Form | set | 0 of 53 |
+| `0x118003` | 44 | Class | set | 0 of 44 |
+
+**The two rules agree on all 105 objects.** Bit `0x2` is clear on exactly the
+8 objects whose `lpPrivateObject` is `-1`. These are also the 8 objects that
+the §5.5 value table names as standard modules. **[C]** for the three values
+in the table above.
+
+Two tests in `tests/byte_fidelity.rs` keep this true in each of the 44
+programs:
+`the_objects_with_no_private_obj_are_exactly_the_modules_inspect_reports` and
+`the_objects_with_no_optional_object_info_are_exactly_the_objects_with_no_private_obj`.
+Each one compares two sets of objects in both directions.
+
+**What the measurement did not settle.**
+
+1. The corpus holds no UserControl, PropertyPage or UserDocument, and no
+   `fObjectType` value other than the three above. The other fourteen values
+   in the §5.5 table are not measured. Whether an MDI form has a value of its
+   own is still gap 3.
+2. `vb::classify::agree` states the cross-check, but no production code calls
+   it. A file whose two markers disagree is not reported today.
+
+---
+
+## 17. The front of `ControlInfo`, settled on the corpus, 2026-09-16
+
+Section 8.6 marks `fControlType` and `wEventCount` **[D]**. AI reads a four
+byte `fControlType` at 0x00 and puts `wEventCount` at 0x04. SVBD, PVB and IDC
+read a two byte `fControlType` at 0x00 and put `wEventCount` at 0x02.
+
+A byte diff cannot settle this. A reader and an emitter that use the same
+offsets always agree, whichever layout they use. The event slots can settle
+it.
+
+**The method.** For each `ControlInfo` record, read the event table at the VA
+in `lpEventTable` (0x18). For kind `0x40` the table header is `0x18` bytes.
+Each slot after the header holds a null, for an event with no handler, or the
+VA of a native stub, `81 6C 24 04 <imm32> E9 <rel32>` (§8.6). A correct count
+covers only such slots. A count that is too large reaches a slot that is not
+a null and not a native stub. A slot that cannot be read counts as such a
+slot.
+
+**The numbers.** 706 records in the 44 corpus programs:
+
+| Check | Records |
+|---|---|
+| The word at 0x00 is `0x40` | 706 of 706 |
+| The four byte value at 0x00 is `0x40` or `0x2E` | 0 of 706 |
+| The word at 0x02 is not zero | 706 of 706 |
+| Every slot below the word at 0x02 is a null or a native stub | 706 of 706 |
+| The slot at the index that the word at 0x02 gives is a native stub | 0 of 706 |
+| The word at 0x04 is larger than the word at 0x02 | 706 of 706 |
+| The slots that the word at 0x04 adds include one that is not a null or a native stub | 706 of 706 |
+
+The slots below the word at 0x02 hold 390 stubs, and all 390 have the native
+stub bytes. In every record, the word at 0x04 is a multiple of four from
+`0x34` to `0x150`. This document does not know what that value is, so the
+0x04 row of §8.6 stays **[G]**.
+
+**So the word layout is correct for kind `0x40`.** **[C]** Read
+`fControlType` as a word at 0x00. Read `wEventCount` as a word at 0x02.
+
+`tests/byte_fidelity.rs` keeps this true with
+`the_event_slots_fit_the_word_at_two_and_refuse_the_word_at_four_in_seven_hundred_and_six_control_info_records`.
+That test reads every byte by hand. It fails in all 706 records when the two
+words change places.
+
+**What the measurement did not settle.** Every corpus record is kind `0x40`.
+The corpus holds no COM control (`0x2E`), so the `0x28` byte header of §8.6
+stays **[L]**. All 390 stubs are native, so the P-code stub shapes of §8.6
+are not measured.
