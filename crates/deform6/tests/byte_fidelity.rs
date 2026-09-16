@@ -1329,18 +1329,13 @@ fn sk_gradient() -> Vec<u8> {
 }
 
 #[test]
-fn a_stub_whose_first_opcode_byte_is_changed_differs_at_that_byte_and_nowhere_else() {
-    // Patched in memory only. The reader decodes the stub all the same,
-    // because it never reads that byte.
+fn a_stub_whose_first_opcode_byte_is_changed_is_refused_and_owned_by_its_slot() {
+    // Patched in memory only. The reader checks the opcodes, so one changed
+    // byte is enough to make it keep no handler.
     let original = sk_gradient();
     let before = walk(&original).unwrap();
-    let stub = before
-        .ledgers
-        .iter()
-        .find(|l| l.structure == "EventStub")
-        .unwrap()
-        .clone();
-    let at = usize::try_from(stub.base.get()).unwrap();
+    let (slot, owner) = first_bound_slot(&original, &before);
+    let at = file_offset_of(&PeImage::parse(&original).unwrap(), slot.stub);
     let mut patched = original.clone();
     assert_eq!(
         patched[at], 0x81,
@@ -1348,20 +1343,14 @@ fn a_stub_whose_first_opcode_byte_is_changed_differs_at_that_byte_and_nowhere_el
     );
     patched[at] = 0x80;
 
-    let after = walk(&patched).unwrap();
-    assert_eq!(after.ledgers.len(), before.ledgers.len());
-    let changed: Vec<&Ledger> = after
-        .ledgers
-        .iter()
-        .filter(|l| !before.ledgers.contains(l))
-        .collect();
-    assert_eq!(changed.len(), 1, "{changed:?}");
-    assert_eq!(changed[0].base, stub.base);
-    let differs: Vec<(u32, u32)> = changed[0]
-        .runs_with(Verdict::Differs)
-        .map(|run| (run.span.at.get(), run.span.len))
-        .collect();
-    assert_eq!(differs, vec![(stub.base.get(), 1)]);
+    let after = walk(&patched).expect("one changed opcode must not stop the walk");
+    assert_one_refused_stub(
+        &before,
+        &after,
+        at,
+        owner,
+        "an event stub does not have the native shape",
+    );
 }
 
 /// The first bound slot of SK-Gradient, read by hand, and the owner that the
@@ -1447,10 +1436,8 @@ fn a_bound_slot_whose_stub_maps_nowhere_is_ungraded_and_owned_by_its_slot() {
 #[test]
 fn a_p_code_stub_that_a_bound_slot_names_is_refused_and_owned_by_its_slot() {
     // STRUCTURES.md section 8.6 gives the P-code stub as 13 bytes:
-    // xor eax,eax / mov edx,<addr> / push <addr> / ret. The reader does not
-    // read the opcodes, so it takes the bytes at 0x09 as a jump. The last of
-    // them is the ret, 0xC3, so the jump goes back more than 0x3C000000
-    // bytes, past address 0, and the reader keeps no handler. The stub then
+    // xor eax,eax / mov edx,<addr> / push <addr> / ret. The reader checks
+    // the opcodes, finds another shape, and keeps no handler. The stub then
     // shows as a refused record, not as bytes that differ. The walk looks at
     // the stub itself to give the reason.
     let original = sk_gradient();

@@ -512,16 +512,22 @@ pub fn join_by_name(tree: &ControlTree, table: &ControlInfoTable) -> ControlJoin
 // `STRUCTURES.md` section 8.6 gives two header shapes, selected by
 // `fControlType`, and a 13-byte native stub. This session decoded one real
 // corpus stub byte for byte (`SK-Gradient-Sample__VB6`'s own `Command1`,
-// event slot 0): `81 6c 24 04 3f 00 00 00 e9 23 04 00`, confirming every
+// event slot 0): `81 6c 24 04 3f 00 00 00 e9 23 04 00 00`, confirming every
 // field this section reads: the `sub`/`jmp` opcode bytes, the immediate
 // value at `+0x04` (`0x3F`, which AG's own sample also gives, per
 // `STRUCTURES.md`), and the relative jump at `+0x09`.
 //
 // This module reads the **native** stub shape only. `STRUCTURES.md` section
-// 10.2 names a second, P-code stub shape (`xor eax,eax / mov edx,<addr> /
+// 8.6 names a second, P-code stub shape (`xor eax,eax / mov edx,<addr> /
 // push <addr> / ret`); this corpus is 44 native programs and holds no P-code
 // sample (`STATE.md`'s own standing blocker), so the P-code branch is not
 // implemented here. It is a declared absence, not an oversight.
+//
+// `decode_stub` checks the two opcodes before it reads a value. A stub of any
+// other shape gets a `DefectKind::UnknownStubShape` and no handler. Without
+// the check, the bytes of a P-code stub decode as a jump: at a low address
+// the handler arithmetic leaves the `u32` range, and at a high address it
+// gives a handler address that no stub names.
 
 /// The event table header length for `fControlType == 0x40`
 /// (`STRUCTURES.md` section 8.6): 6 four-byte values.
@@ -540,6 +546,16 @@ const EVENT_SLOT_SIZE: u32 = 4;
 /// imm32` opcode, 4 bytes of `imm32`, 1 byte of `jmp rel32` opcode, 4 bytes
 /// of `rel32`.
 const STUB_LEN: u32 = 13;
+
+/// The opcode of `sub dword ptr [esp+4], imm32`, the first four bytes of a
+/// native stub (`STRUCTURES.md` section 8.6).
+const SUB_OPCODE: [u8; 4] = [0x81, 0x6C, 0x24, 0x04];
+
+/// Where the `jmp rel32` opcode sits in a native stub.
+const JMP_OPCODE_AT: u32 = 0x08;
+
+/// The opcode of `jmp rel32` (`STRUCTURES.md` section 8.6).
+const JMP_OPCODE: u8 = 0xE9;
 
 /// The `imm32` value a stub gives for a method. Any smaller value marks an
 /// event.
@@ -578,12 +594,12 @@ pub enum EventSlot {
         index: u16,
         /// The stub's own address, as the file gives it.
         stub: Va,
-        /// The decoded handler, when the stub itself resolved and its own
-        /// 13 bytes could be read. `None` when it could not;
-        /// [`EventTable::defects`] carries the reason. The slot still
-        /// reports as bound either way: a slot whose handler this module
-        /// cannot decode is not the same fact as a slot with no handler at
-        /// all.
+        /// The decoded handler, when the stub itself resolved, its own 13
+        /// bytes could be read, and they have the native shape. `None` when
+        /// one of these fails; [`EventTable::defects`] carries the reason.
+        /// The slot still reports as bound either way: a slot whose handler
+        /// this module cannot decode is not the same fact as a slot with no
+        /// handler at all.
         handler: Option<StubHandler>,
     },
 }
@@ -624,8 +640,8 @@ pub struct EventTable {
 
 impl EventTable {
     /// Gives the defects the walk found: a stub address that resolved
-    /// nowhere or held too few bytes to decode, or a `wEventCount` too large
-    /// for the file to hold.
+    /// nowhere or held too few bytes to decode, a stub that does not have the
+    /// native shape, or a `wEventCount` too large for the file to hold.
     #[must_use]
     pub fn defects(&self) -> &[Defect] {
         &self.defects
@@ -762,9 +778,15 @@ fn bound_event_count(
 /// [`read_name`] follows for a `ControlInfo`'s own name.
 ///
 /// Gives `(None, Some(defect))` when the stub address resolves to no
-/// section, when its own [`STUB_LEN`] bytes cannot be read in full, or when
-/// the handler address computation overflows. Every one of these keeps the
-/// slot itself bound; only the decoded handler is lost.
+/// section, when its own [`STUB_LEN`] bytes cannot be read in full, when
+/// those bytes do not hold the two opcodes of the native stub, or when the
+/// handler address computation overflows. Every one of these keeps the slot
+/// itself bound; only the decoded handler is lost.
+///
+/// The defect for a stub of another shape is
+/// [`DefectKind::UnknownStubShape`]. It names the stub's own first byte,
+/// because the fault is in the stub and not in the slot. Every other defect
+/// here names the slot.
 fn decode_stub(
     pe: &PeImage<'_>,
     stub_va: Va,
@@ -786,6 +808,24 @@ fn decode_stub(
     let Some(stub) = pe.region_at_va(stub_va) else {
         return (None, Some(unreadable()));
     };
+    let Some(Ok(found)) = stub.take(Off::new(0), STUB_LEN).map(<[u8; 13]>::try_from) else {
+        return (None, Some(unreadable()));
+    };
+    let native = stub.take(Off::new(0), 4) == Some(SUB_OPCODE.as_slice())
+        && stub.u8(Off::new(JMP_OPCODE_AT)) == Some(JMP_OPCODE);
+    if !native {
+        let offset = stub.file_offset(Off::new(0)).map_or(0, Off::get);
+        let defect = Defect {
+            site: Site {
+                offset,
+                rva: stub_va.to_rva(pe.image_base()).map(Rva::get),
+                structure: "EventStub",
+                field: "opcode",
+            },
+            kind: DefectKind::UnknownStubShape { offset, found },
+        };
+        return (None, Some(defect));
+    }
     let Some(imm32) = stub.u32_le(Off::new(0x04)) else {
         return (None, Some(unreadable()));
     };
@@ -883,8 +923,9 @@ pub enum EventReport {
         /// The bound handler's own native address, taken from
         /// [`EventSlot::Bound`]'s own decoded `handler` unchanged. `None`
         /// when `decode_stub` gave no handler: the stub address resolved to
-        /// no section, or held too few bytes to decode. The slot still
-        /// reports as bound either way; only the address is missing.
+        /// no section, held too few bytes to decode, or held a stub that
+        /// does not have the native shape. The slot still reports as bound
+        /// either way; only the address is missing.
         handler_address: Option<u32>,
     },
     /// A bound slot with no name available.
@@ -1003,6 +1044,7 @@ mod tests {
     };
     use crate::error::DefectKind;
     use crate::error::Refusal;
+    use crate::error::{Defect, Site};
     use crate::read::pe::PeImage;
     use crate::read::region::{Off, Region, Va};
     use crate::vb::classify::{self, ObjectKind};
@@ -1062,6 +1104,11 @@ mod tests {
     /// fail independently, and a shared fixture module would let a change to
     /// one break the other silently.
     fn synthetic_image(extra: &[u8]) -> Vec<u8> {
+        synthetic_image_at(extra, 0x0040_0000)
+    }
+
+    /// [`synthetic_image`], with `image_base` as the image base.
+    fn synthetic_image_at(extra: &[u8], image_base: u32) -> Vec<u8> {
         const LFANEW: usize = 0x40;
         const OPTIONAL: usize = LFANEW + 24;
         const SECTION: usize = OPTIONAL + 224;
@@ -1082,7 +1129,7 @@ mod tests {
         out[LFANEW + 22..LFANEW + 24].copy_from_slice(&0x0102_u16.to_le_bytes());
 
         out[OPTIONAL..OPTIONAL + 2].copy_from_slice(&0x010b_u16.to_le_bytes());
-        out[OPTIONAL + 0x1c..OPTIONAL + 0x20].copy_from_slice(&0x0040_0000_u32.to_le_bytes());
+        out[OPTIONAL + 0x1c..OPTIONAL + 0x20].copy_from_slice(&image_base.to_le_bytes());
 
         out[SECTION..SECTION + 8].copy_from_slice(b".text\0\0\0");
         out[SECTION + 8..SECTION + 12].copy_from_slice(&mapped_len.to_le_bytes());
@@ -1751,6 +1798,128 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// Builds one P-code stub (`STRUCTURES.md` section 8.6): `xor eax,eax`,
+    /// `mov edx,<addr>`, `push <addr>`, `ret`, 13 bytes total.
+    fn p_code_stub_bytes(addr: u32) -> [u8; 13] {
+        let mut buf = [0_u8; 13];
+        buf[0x00..0x03].copy_from_slice(&[0x33, 0xC0, 0xBA]);
+        buf[0x03..0x07].copy_from_slice(&addr.to_le_bytes());
+        buf[0x07] = 0x68;
+        buf[0x08..0x0C].copy_from_slice(&addr.to_le_bytes());
+        buf[0x0C] = 0xC3;
+        buf
+    }
+
+    /// Reads the one event slot of a table at `table_va` whose slot 0 names
+    /// a stub at `table_va + 0x100` that holds `stub`, in an image based at
+    /// `image_base`.
+    fn table_with_one_stub(image_base: u32, table_va: u32, stub: [u8; 13]) -> super::EventTable {
+        let mut extra = vec![0_u8; 0x120];
+        extra[0x18..0x1C].copy_from_slice(&(table_va + 0x100).to_le_bytes());
+        extra[0x100..0x10D].copy_from_slice(&stub);
+        let bytes = synthetic_image_at(&extra, image_base);
+        let image = PeImage::parse(&bytes).unwrap();
+        read_event_table(&image, &synthetic_control_info(0x0040, 1, table_va)).unwrap()
+    }
+
+    /// The one defect a stub of another shape at extra offset `0x100` must
+    /// give: file offset `0x500` and RVA `0x1100` in every synthetic image.
+    fn unknown_shape_at_the_stub(found: [u8; 13]) -> Defect {
+        Defect {
+            site: Site {
+                offset: 0x500,
+                rva: Some(0x1100),
+                structure: "EventStub",
+                field: "opcode",
+            },
+            kind: DefectKind::UnknownStubShape {
+                offset: 0x500,
+                found,
+            },
+        }
+    }
+
+    #[test]
+    fn a_p_code_stub_at_a_low_address_gives_an_unknown_shape_at_the_stub_and_no_handler() {
+        let stub = p_code_stub_bytes(0x0040_1234);
+        // Read as a jump from this stub, the bytes at 0x09 go below address
+        // 0. A reader with no shape check refuses the arithmetic, and it
+        // names the slot's pointer as the fault.
+        let rel32 = i32::from_le_bytes(stub[0x09..0x0D].try_into().unwrap());
+        assert!(0x0040_110D_u32.checked_add_signed(rel32).is_none());
+
+        let table = table_with_one_stub(0x0040_0000, 0x0040_1000, stub);
+        assert_eq!(
+            table.slots,
+            vec![EventSlot::Bound {
+                index: 0,
+                stub: Va::new(0x0040_1100),
+                handler: None,
+            }]
+        );
+        assert_eq!(
+            table.defects().to_vec(),
+            vec![unknown_shape_at_the_stub(stub)]
+        );
+    }
+
+    #[test]
+    fn a_p_code_stub_at_a_high_address_gives_an_unknown_shape_at_the_stub_and_no_handler() {
+        let stub = p_code_stub_bytes(0x6000_1234);
+        // Read as a jump from this stub, the same bytes stay inside the u32
+        // range. A reader with no shape check keeps a handler address that
+        // no stub gives, and it reports nothing.
+        let rel32 = i32::from_le_bytes(stub[0x09..0x0D].try_into().unwrap());
+        assert!(0x6000_110D_u32.checked_add_signed(rel32).is_some());
+
+        let table = table_with_one_stub(0x6000_0000, 0x6000_1000, stub);
+        assert_eq!(
+            table.slots,
+            vec![EventSlot::Bound {
+                index: 0,
+                stub: Va::new(0x6000_1100),
+                handler: None,
+            }]
+        );
+        assert_eq!(
+            table.defects().to_vec(),
+            vec![unknown_shape_at_the_stub(stub)]
+        );
+    }
+
+    #[test]
+    fn each_of_the_five_opcode_bytes_is_checked_and_no_other_byte_is() {
+        let native = stub_bytes(0x3F, 0x10);
+        let unchanged = table_with_one_stub(0x0040_0000, 0x0040_1000, native);
+        assert!(unchanged.defects().is_empty());
+        for at in 0..13 {
+            let mut stub = native;
+            stub[at] ^= 0x01;
+            let table = table_with_one_stub(0x0040_0000, 0x0040_1000, stub);
+            let decoded = matches!(
+                table.slots[0],
+                EventSlot::Bound {
+                    handler: Some(_),
+                    ..
+                }
+            );
+            if [0x00, 0x01, 0x02, 0x03, 0x08].contains(&at) {
+                assert!(!decoded, "byte {at:#x} is an opcode, and the stub decoded");
+                assert_eq!(
+                    table.defects().to_vec(),
+                    vec![unknown_shape_at_the_stub(stub)],
+                    "byte {at:#x}"
+                );
+            } else {
+                assert!(
+                    decoded,
+                    "byte {at:#x} is not an opcode, and the stub did not decode"
+                );
+                assert!(table.defects().is_empty(), "byte {at:#x}");
+            }
+        }
     }
 
     #[test]
