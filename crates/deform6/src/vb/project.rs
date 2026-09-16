@@ -32,6 +32,12 @@ use crate::read::region::{Off, Region, Rva, Va};
 /// agree.
 const PROJECT_INFO_SIZE: u32 = 0x23C;
 
+/// `STRUCTURES.md` section 3: `dwExternalCount` sits at `ProjectInfo + 0x238`.
+///
+/// One constant for the read and for the defect that names this field, so the
+/// two cannot come apart.
+const DW_EXTERNAL_COUNT_AT: u32 = 0x238;
+
 /// How the program was compiled.
 ///
 /// `ProjectInfo.lpNativeCode` decides this and nothing else does. Non-zero is
@@ -77,6 +83,12 @@ pub enum CompileMode {
 /// reached.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ProjectInfo {
+    /// The absolute file offset of the structure's first byte.
+    ///
+    /// Kept so a defect about a field in this structure can name that field's
+    /// own byte. [`DeclareTable::read`] is handed only this value, not the
+    /// window it came from, and has no other way to know where it sits.
+    pub file_offset: Off,
     /// The template version of the structure. Nothing branches on it.
     pub dw_version: u32,
     /// The address of the object table, which holds the project name.
@@ -120,7 +132,11 @@ impl ProjectInfo {
             .ok_or(Refusal::Damaged(
                 "the file ends inside the ProjectInfo structure",
             ))?;
+        let file_offset = window.file_offset(Off::new(0)).ok_or(Refusal::Damaged(
+            "the ProjectInfo window has no file offset",
+        ))?;
         Ok(Self {
+            file_offset,
             dw_version: u32_at(&window, 0x00, "ProjectInfo holds no template version")?,
             lp_object_table: va_at(
                 &window,
@@ -133,7 +149,11 @@ impl ProjectInfo {
                 0x234,
                 "ProjectInfo holds no address for the import table",
             )?,
-            dw_external_count: u32_at(&window, 0x238, "ProjectInfo holds no import count")?,
+            dw_external_count: u32_at(
+                &window,
+                DW_EXTERNAL_COUNT_AT,
+                "ProjectInfo holds no import count",
+            )?,
         })
     }
 
@@ -551,7 +571,13 @@ impl DeclareTable {
         if let Some(wanted) = info.dw_external_count.checked_mul(DECLARE_ENTRY_SIZE)
             && wanted > table.len()
         {
-            let offset = table.file_offset(Off::new(0)).map_or(0, Off::get);
+            // The defect names dwExternalCount itself, which lives in
+            // ProjectInfo and not in the table it bounds. ImplausibleCount
+            // documents its offset as that of the count field.
+            let offset = info
+                .file_offset
+                .checked_add(DW_EXTERNAL_COUNT_AT)
+                .map_or(0, Off::get);
             // The exact entry count the region can hold is one division, and
             // it names nothing but the defect's own report field: the loop
             // below bounds itself through `Region::subregion`, one entry at
@@ -1715,6 +1741,25 @@ mod tests {
                 .iter()
                 .any(|d| matches!(d.kind, DefectKind::ImplausibleCount { count: 0xFFFF, .. }))
         );
+
+        // The defect must name the byte this test patched, which is
+        // dwExternalCount itself, and not the start of the import table.
+        let defect = table
+            .defects()
+            .iter()
+            .find(|d| matches!(d.kind, DefectKind::ImplausibleCount { .. }))
+            .unwrap();
+        assert_eq!(defect.site.structure, "ProjectInfo");
+        assert_eq!(defect.site.field, "dwExternalCount");
+        assert_eq!(usize::try_from(defect.site.offset).unwrap(), at);
+    }
+
+    #[test]
+    fn project_info_keeps_the_file_offset_of_its_own_first_byte() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let window = image.region_at_va(project_data_va(MANDELBROT)).unwrap();
+        let info = ProjectInfo::read(&image, project_data_va(MANDELBROT)).unwrap();
+        assert_eq!(Some(info.file_offset), window.file_offset(Off::new(0)));
     }
 
     #[test]
