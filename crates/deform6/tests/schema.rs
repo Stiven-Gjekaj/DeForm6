@@ -26,6 +26,7 @@
 
 use std::path::{Path, PathBuf};
 
+use deform6::error::{Defect, DefectKind, Site};
 use deform6::vb::opcodes::OpcodeTable;
 use jsonschema::Validator;
 
@@ -234,5 +235,42 @@ fn the_schema_refuses_a_doctored_report() {
     assert!(
         !validator.is_valid(&kind_doctored),
         "a defect kind renamed to a variant the schema does not name must be refused"
+    );
+}
+
+/// A report that carries a `ModuleMarkerMismatch` defect validates.
+///
+/// No corpus program raises this kind, so the sweep above never shows its
+/// shape to the schema. The defect here is the serializer's own output for a
+/// value this test builds, added to a real report. The schema is still the
+/// committed file.
+#[test]
+fn a_report_that_carries_a_module_marker_mismatch_validates() {
+    let validator = compiled_schema();
+    let exe = corpus_root().join("vb6-code/Fire-effect/Fast_Flames.exe");
+    let mut value = report_value_for(&exe);
+    let defect = Defect {
+        site: Site {
+            offset: 0x1a3c,
+            rva: Some(0x2a3c),
+            structure: "ObjectInfo",
+            field: "lpPrivateObject",
+        },
+        kind: DefectKind::ModuleMarkerMismatch {
+            offset: 0x1a3c,
+            pointer: 0xFFFF_FFFF,
+            object_type: 0x0001_8083,
+        },
+    };
+    value["defects"]
+        .as_array_mut()
+        .expect("defects must be an array")
+        .push(serde_json::to_value(&defect).expect("a defect serializes"));
+
+    let errors = describe_errors(&validator, &value);
+    assert!(
+        errors.is_empty(),
+        "a report with a ModuleMarkerMismatch defect failed schema validation:\n{}",
+        errors.join("\n")
     );
 }

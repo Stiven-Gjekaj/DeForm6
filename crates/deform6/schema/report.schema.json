@@ -214,6 +214,23 @@
         {
           "type": "object",
           "additionalProperties": false,
+          "required": ["ModuleMarkerMismatch"],
+          "properties": {
+            "ModuleMarkerMismatch": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "pointer", "object_type"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "pointer": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "object_type": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
           "required": ["UnreadablePointer"],
           "properties": {
             "UnreadablePointer": {

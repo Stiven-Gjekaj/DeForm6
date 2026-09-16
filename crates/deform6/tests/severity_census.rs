@@ -93,6 +93,7 @@ const fn kind_name(kind: &DefectKind) -> &'static str {
         DefectKind::SectionOverlap { .. } => "SectionOverlap",
         DefectKind::NoNulTerminator { .. } => "NoNulTerminator",
         DefectKind::CountMismatch { .. } => "CountMismatch",
+        DefectKind::ModuleMarkerMismatch { .. } => "ModuleMarkerMismatch",
         DefectKind::UnreadablePointer { .. } => "UnreadablePointer",
         DefectKind::EmptyName { .. } => "EmptyName",
         DefectKind::IndexHighByteSet { .. } => "IndexHighByteSet",

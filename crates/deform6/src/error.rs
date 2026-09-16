@@ -134,6 +134,26 @@ pub enum DefectKind {
         other_field: &'static str,
     },
 
+    /// Two fields that each tell whether an object is a standard module do
+    /// not agree.
+    ///
+    /// Bit `0x2` of `Object.fObjectType` tells whether the object has an
+    /// `OptionalObjectInfo` block. `ObjectInfo.lpPrivateObject` tells whether
+    /// it has a `PrivateObj`. A standard module has neither, and in the
+    /// corpus every other object has both. `STRUCTURES.md` section 5.5 asks
+    /// for a disagreement to be reported, and not resolved.
+    #[error(
+        "the private object address {pointer:#x} at offset {offset:#x} disagrees with fObjectType {object_type:#x} about whether the object is a standard module"
+    )]
+    ModuleMarkerMismatch {
+        /// The absolute file offset of `ObjectInfo.lpPrivateObject`.
+        offset: u32,
+        /// The value `ObjectInfo.lpPrivateObject` holds.
+        pointer: u32,
+        /// The value `Object.fObjectType` holds.
+        object_type: u32,
+    },
+
     /// A pointer inside one item resolves to nothing.
     ///
     /// This is not the one spine pointer that reaches the item, which
@@ -378,6 +398,12 @@ impl DefectKind {
             // The reader takes the smaller of two disagreeing counts, a
             // choice the file does not state.
             Self::CountMismatch { .. } => Severity::Recoverable,
+            // Each reader still follows its own field, and the check chooses
+            // nothing: the object loses what one of the two fields withholds,
+            // an optional block or a private object, and nothing is invented
+            // in its place. An fObjectType value nobody has measured is never
+            // a refusal (D-08), so its bit is not one either.
+            Self::ModuleMarkerMismatch { .. } => Severity::Tolerated,
             // The item keeps its other fields, and the pointer's target is
             // simply absent: nothing is invented in its place.
             Self::UnreadablePointer { .. } => Severity::Tolerated,
@@ -654,6 +680,14 @@ mod tests {
                 0x88,
             ),
             (
+                DefectKind::ModuleMarkerMismatch {
+                    offset: 0x8c,
+                    pointer: 0xffff_ffff,
+                    object_type: 0x0001_8083,
+                },
+                0x8c,
+            ),
+            (
                 DefectKind::UnreadablePointer {
                     offset: 0x99,
                     va: 0x0040_2000,
@@ -687,6 +721,21 @@ mod tests {
                 "the message of {kind:?} does not name its offset {wanted}: {message}"
             );
         }
+    }
+
+    #[test]
+    fn a_module_marker_mismatch_message_names_both_values_and_both_fields() {
+        let kind = DefectKind::ModuleMarkerMismatch {
+            offset: 0x1a3c,
+            pointer: 0xffff_ffff,
+            object_type: 0x0001_8083,
+        };
+        let message = format!("{kind}");
+        assert!(message.contains("0x1a3c"), "{message}");
+        assert!(message.contains("0xffffffff"), "{message}");
+        assert!(message.contains("0x18083"), "{message}");
+        assert!(message.contains("fObjectType"), "{message}");
+        assert!(message.contains("private object address"), "{message}");
     }
 
     #[test]
@@ -782,6 +831,11 @@ mod tests {
             DefectKind::StructureUnreadable {
                 offset: 0,
                 reason: String::new(),
+            },
+            DefectKind::ModuleMarkerMismatch {
+                offset: 0,
+                pointer: 0,
+                object_type: 0,
             },
         ];
         for kind in tolerated {
