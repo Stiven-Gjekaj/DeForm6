@@ -590,6 +590,7 @@ pub enum EventSlot {
 
 /// A native stub, decoded.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StubHandler {
     /// `true` when the stub's own `imm32` is `METHOD_MARKER` (`0xFFFF`), a
     /// method. A smaller value marks an event.
