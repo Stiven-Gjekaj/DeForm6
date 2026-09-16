@@ -1688,38 +1688,6 @@ answer on the first run:
 
 ---
 
-## 12. Practical parse order for DeForm6
-
-1. Parse the PE. Reject anything that is not 32-bit x86. Record `ImageBase` and
-   build the RVA-to-file-offset map from the section table.
-2. Read the import directory. Require a VB runtime import. Refuse
-   `MSVBVM50.DLL` by name (§10.1). Refuse `VB40032.DLL` by name.
-3. Locate the VB header (§1). Validate `"VB5!"`.
-4. Read `VBHeader` (§2). Everything downstream is bounded by `wFormCount`,
-   `wExternalCount`, and the two pointers `lpProjectData` and `lpGuiTable`.
-5. Read `ProjectInfo` (§3). Record `lpNativeCode` for the mode report. Read the
-   `Declare` table (§7.1).
-6. Read `ObjectTable` (§4), then the `Object` array (§5.1). This yields the
-   project's object names and kinds (§5.5).
-7. For each object: `ObjectInfo` (§5.2), then `PrivateObj` (§6.1) for
-   prototypes, then `OptionalObjectInfo` (§5.3) for controls if
-   `fObjectType & 2`.
-8. Read the external component table (§7.3) so OCX class names can be resolved
-   to CLSIDs later.
-9. Walk the GUI table (§8.1) and, for each form, the form stream (§8.2-§8.9),
-   emitting `.frm` and `.frx` from one cursor.
-10. Join controls to event handlers by name (§8.6).
-
-**Two invariants to check at every step, because DeForm6 must not panic:**
-
-- Every VA must resolve inside a mapped section before it is dereferenced.
-- Every count (`wFormCount`, `wCompiledObjects`, `ProcCount`, `dwControlCount`,
-  `wEventCount`, `dwExternalCount`, every `Length`) must be bounds-checked
-  against the real file size **before** any allocation is sized from it. Several
-  of these are `u32` fields read straight from attacker-controlled bytes.
-
----
-
 ## 12. What this document's spine was verified against, 2026-09-07
 
 A script walked the full pointer chain on **all 44 corpus executables**. It is
@@ -2177,3 +2145,35 @@ opcode bytes, and put a P-code stub at a low and at a high address.
 
 **What the measurement did not settle.** All 390 stubs are native, so the
 P-code stub shapes of §8.6 stay **[L]**.
+
+---
+
+## 20. Practical parse order for DeForm6
+
+1. Parse the PE. Reject anything that is not 32-bit x86. Record `ImageBase` and
+   build the RVA-to-file-offset map from the section table.
+2. Read the import directory. Require a VB runtime import. Refuse
+   `MSVBVM50.DLL` by name (§10.1). Refuse `VB40032.DLL` by name.
+3. Locate the VB header (§1). Validate `"VB5!"`.
+4. Read `VBHeader` (§2). Everything downstream is bounded by `wFormCount`,
+   `wExternalCount`, and the two pointers `lpProjectData` and `lpGuiTable`.
+5. Read `ProjectInfo` (§3). Record `lpNativeCode` for the mode report. Read the
+   `Declare` table (§7.1).
+6. Read `ObjectTable` (§4), then the `Object` array (§5.1). This yields the
+   project's object names and kinds (§5.5).
+7. For each object: `ObjectInfo` (§5.2), then `PrivateObj` (§6.1) for
+   prototypes, then `OptionalObjectInfo` (§5.3) for controls if
+   `fObjectType & 2`.
+8. Read the external component table (§7.3) so OCX class names can be resolved
+   to CLSIDs later.
+9. Walk the GUI table (§8.1) and, for each form, the form stream (§8.2-§8.9),
+   emitting `.frm` and `.frx` from one cursor.
+10. Join controls to event handlers by name (§8.6).
+
+**Two invariants to check at every step, because DeForm6 must not panic:**
+
+- Every VA must resolve inside a mapped section before it is dereferenced.
+- Every count (`wFormCount`, `wCompiledObjects`, `ProcCount`, `dwControlCount`,
+  `wEventCount`, `dwExternalCount`, every `Length`) must be bounds-checked
+  against the real file size **before** any allocation is sized from it. Several
+  of these are `u32` fields read straight from attacker-controlled bytes.
