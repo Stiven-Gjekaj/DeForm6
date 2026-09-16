@@ -100,6 +100,17 @@ pub struct ControlInfo {
     pub lp_guid: Va,
     /// The address of the event handler table [`read_event_table`] reads.
     pub lp_event_table: Va,
+    /// The address the control's name was read from, `lpszName` at `0x20`.
+    ///
+    /// Carried as well as the resolved [`ControlInfo::name`], because the
+    /// address is the evidence and the string is the reading of it. A report
+    /// that names a byte a run actually read can point at this; a report that
+    /// holds only the string cannot say where it came from.
+    ///
+    /// It is carried whether or not the name resolved. When
+    /// [`ControlInfo::name`] is empty this is the address that did not
+    /// resolve, which is the address a person needs in a hex editor.
+    pub lpsz_name: Va,
     /// The control's name, the join key back to
     /// [`crate::vb::controltree::ControlNode`].
     pub name: String,
@@ -216,6 +227,7 @@ impl ControlInfoTable {
                 w_event_count: raw.w_event_count,
                 lp_guid: raw.lp_guid,
                 lp_event_table: raw.lp_event_table,
+                lpsz_name: raw.lpsz_name,
                 name,
             });
         }
@@ -1059,6 +1071,9 @@ mod tests {
         let table = ControlInfoTable::read(&image, &synthetic_form_object()).unwrap();
         assert_eq!(table.entries.len(), 1);
         assert_eq!(table.entries[0].name, "");
+        // The name did not resolve, and the address that did not resolve is
+        // still carried: it is the one a person needs.
+        assert_eq!(table.entries[0].lpsz_name, Va::new(0x00F0_0000));
         assert_eq!(table.defects().len(), 1);
         assert!(matches!(
             table.defects()[0].kind,
@@ -1091,8 +1106,10 @@ mod tests {
         assert_eq!(table.entries.len(), 2);
         assert_eq!(table.entries[0].f_control_type, 0x0040);
         assert_eq!(table.entries[0].name, "Cmd1");
+        assert_eq!(table.entries[0].lpsz_name, Va::new(0x0040_1180));
         assert_eq!(table.entries[1].f_control_type, 0x002E);
         assert_eq!(table.entries[1].name, "Cmd2");
+        assert_eq!(table.entries[1].lpsz_name, Va::new(0x0040_1190));
         assert!(table.defects().is_empty());
     }
 
@@ -1171,6 +1188,28 @@ mod tests {
     }
 
     #[test]
+    fn every_sk_gradient_control_name_reads_back_from_the_address_it_carries() {
+        // The synthetic tests prove the address is copied. This one proves it
+        // is the right address: the bytes at it, read with the reader's own
+        // bound and decoded one byte to one character as the reader decodes
+        // them, give back the name the reader returned.
+        let image = PeImage::parse(SK_GRADIENT_SAMPLE).unwrap();
+        let object = first_form_object(SK_GRADIENT_SAMPLE);
+        let table = ControlInfoTable::read(&image, &object).unwrap();
+        assert!(!table.entries.is_empty());
+        for control in &table.entries {
+            let at = image
+                .region_at_va(control.lpsz_name)
+                .unwrap_or_else(|| panic!("{}: its name address maps nowhere", control.name));
+            let bytes = at
+                .cstr(Off::new(0), super::NAME_MAX)
+                .unwrap_or_else(|| panic!("{}: no NUL within the bound", control.name));
+            let read_back: String = bytes.iter().map(|byte| char::from(*byte)).collect();
+            assert_eq!(read_back, control.name);
+        }
+    }
+
+    #[test]
     fn sk_gradient_sample_joins_both_directions_with_no_unmatched_entry() {
         let image = PeImage::parse(SK_GRADIENT_SAMPLE).unwrap();
         let object = first_form_object(SK_GRADIENT_SAMPLE);
@@ -1237,6 +1276,7 @@ mod tests {
                 w_event_count: 0,
                 lp_guid: Va::new(0),
                 lp_event_table: Va::new(0),
+                lpsz_name: Va::new(0),
                 name: "GhostControl".to_owned(),
             }],
             defects: Vec::new(),
@@ -1259,6 +1299,7 @@ mod tests {
             w_event_count,
             lp_guid: Va::new(0),
             lp_event_table: Va::new(lp_event_table),
+            lpsz_name: Va::new(0),
             name: "Synthetic".to_owned(),
         }
     }
