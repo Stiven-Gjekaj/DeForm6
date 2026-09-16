@@ -262,8 +262,8 @@ it.
 
 The numbers below are measured, not estimated.
 Each one is the number a pinned file or a pinned constant states, and the gate
-test named beside it asserts on every run, never a single derived figure
-calculated from a part.
+test named beside it, or above its table, asserts it on every run, never a
+single derived figure calculated from a part.
 
 | Measured | Against | Asserted by |
 | -------- | ------- | ----------- |
@@ -272,8 +272,6 @@ calculated from a part.
 | 52 forms recovered | 53 declared | `cargo test -p deform6 --test ratios` |
 | 686 controls recovered | 686 declared | `cargo test -p deform6 --test ratios` |
 | 807 property records recovered, of which 136 written lines reach the `.frm` | | `cargo test -p deform6 --test ratios` |
-| 50 header bytes written back unchanged | 104 in the header record | `cargo test -p deform6 --test byte_fidelity` |
-| 20 object bytes written back unchanged | 48 in each of the 105 object records | `cargo test -p deform6 --test byte_fidelity` |
 
 One corpus form refuses.
 The refusal names the byte offset and the byte the code expected to find
@@ -284,18 +282,58 @@ A single recovered `Position` record becomes four written lines and a single
 `Font` record becomes seven, so the property pair is a coverage count for
 DeForm6's own writer, not a recovery count against source.
 
-The last two rows measure the reader against the bytes of the original file.
+### What the reader reproduces
+
 DeForm6 writes each structure back over the place it was read from and
 compares the result with what is there.
 A byte that goes back unchanged is one the reader reproduces.
+`cargo test -p deform6 --test byte_fidelity` asserts every row.
+
+| Structure | Bytes reproduced | Record length | Records |
+| --------- | ---------------- | ------------- | ------- |
+| VB header | 50 | 104 | 44 |
+| `ProjectInfo` | 20 | 572 | 44 |
+| GUI table entry | 8 | 80 | 53 |
+| `Object` | 20 | 48 | 105 |
+| `ObjectInfo` | 6 | 56 | 105 |
+| `PrivateObj` | 16 | 64 | 97 |
+| `OptionalObjectInfo` | 8 | 64 | 97 |
+| `ControlInfo` | 16 | 40 | 706 |
+
+No reproduced byte differs from the file in any of the 1251 records, and no two
+records claim the same byte.
 
 This is a coverage figure and not a proof of correctness.
 A field that is read at one offset and written back at the same offset cannot
 disagree with itself.
-The half that carries the information is the other half: the 54 header bytes
-and the 28 object bytes that no field of the model claims at all.
-`docs/STRUCTURES.md` names every one of them, so they are work not yet done
-rather than unknowns.
+The information is in the bytes that no field of the model claims at all.
+`docs/STRUCTURES.md` names most of them, so they are mostly work not yet done.
+Some are real unknowns: the GUI table entry holds several words that no
+source names.
+
+### What the reader returns against what the file declares
+
+Most of the reader's clamps bound a loop and change no byte, so the table
+above cannot see them.
+A clamp makes the reader return fewer items than the file declares, so a
+second measurement counts both.
+`cargo test -p deform6 --test array_census` asserts every row.
+
+| Array | Declared | Returned |
+| ----- | -------- | -------- |
+| GUI table entries | 53 | 53 |
+| Objects | 105 | 105 |
+| `ControlInfo` entries | 706 | 706 |
+| Event slots | 11862 | 11862 |
+
+No array in any corpus program comes up short.
+The same test changes a file in memory to make each kind of shortfall happen,
+and requires the count to name it.
+
+The 706 `ControlInfo` entries are not controls.
+`ControlInfo` is the table that binds controls to their events, and the 686 in
+the first table count the nodes in the control tree, which is a different
+quantity.
 
 ---
 
@@ -395,7 +433,7 @@ collected.
 cargo test --workspace
 ```
 
-1037 tests run. The suite includes:
+1131 tests run. The suite includes:
 
 - **The corpus sweep.** All 44 programs are read and report what they hold.
 - **The structural check.** Every extracted project is checked against the
@@ -413,6 +451,9 @@ cargo test --workspace
 - **The byte fidelity map.** Each structure is written back over the bytes it
   was read from and compared against them, over all 44 programs. The bytes the
   reader reproduces and the bytes no field of it claims are both pinned.
+- **The array census.** For every array the reader walks, the count the file
+  declares is compared with the number of items the reader returns, and the
+  count is read back from the file at the offset the census names.
 - **The walls.** `scripts/prove-*.sh` each prove one property, by planting a
   violation and requiring the check to catch it.
 
