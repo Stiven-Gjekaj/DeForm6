@@ -52,6 +52,7 @@ pub mod gui;
 pub mod header;
 pub mod ledger;
 pub mod object;
+pub mod objectinfo;
 pub mod project;
 pub mod slate;
 pub mod walk;

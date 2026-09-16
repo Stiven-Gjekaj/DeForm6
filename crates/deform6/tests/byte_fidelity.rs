@@ -46,10 +46,12 @@
 //! that file and `tests/differential.rs` both give: two corpus tests must be
 //! able to fail independently.
 
+use deform6::fidelity::census::Owner;
 use deform6::fidelity::gui;
 use deform6::fidelity::header;
 use deform6::fidelity::ledger::{Ledger, Verdict};
 use deform6::fidelity::object;
+use deform6::fidelity::objectinfo;
 use deform6::fidelity::project;
 use deform6::fidelity::walk::walk;
 use deform6::vb::opcodes::OpcodeTable;
@@ -463,4 +465,128 @@ fn the_walk_grades_one_gui_table_entry_for_each_form_inspect_reports() {
         }
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+#[test]
+fn the_corpus_grades_one_hundred_and_five_object_info_records() {
+    assert_eq!(graded_count("ObjectInfo"), 105);
+}
+
+#[test]
+fn the_object_info_reader_models_six_of_the_fifty_six_bytes_in_every_graded_record() {
+    let failed = coverage_failures(
+        "ObjectInfo",
+        56,
+        objectinfo::MODELLED_BYTES,
+        objectinfo::UNMODELLED,
+    );
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+#[test]
+fn no_object_info_byte_this_reader_models_differs_from_the_file_in_any_corpus_program() {
+    let failed = difference_failures("ObjectInfo");
+    assert!(
+        failed.is_empty(),
+        "{} ObjectInfo byte run(s) differ from the file:\n{}",
+        failed.len(),
+        failed.join("\n")
+    );
+}
+
+#[test]
+fn every_object_inspect_reports_has_one_object_info_ledger() {
+    let table = OpcodeTable::builtin();
+    let mut failed = Vec::new();
+    for path in executables() {
+        let data = std::fs::read(&path).unwrap();
+        let report = deform6::inspect(&data, &table, deform6::journal::Mode::Strict)
+            .unwrap_or_else(|err| panic!("inspecting {}: {err}", path.display()));
+        let found = walk(&data).unwrap();
+        let graded = found
+            .ledgers
+            .iter()
+            .filter(|l| l.structure == "ObjectInfo")
+            .count();
+        let skipped = found
+            .ungraded
+            .iter()
+            .filter(|u| u.structure == "ObjectInfo")
+            .count();
+        if graded + skipped != report.objects.len() || skipped != 0 {
+            failed.push(format!(
+                "{}: inspect reports {} objects; the walk graded {graded} ObjectInfo records and \
+                 left {skipped} ungraded",
+                path.display(),
+                report.objects.len()
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+#[test]
+fn one_object_whose_object_info_is_unmapped_loses_its_own_records_and_nothing_else() {
+    // Patched in memory only. AGENTS.md bars committing a patched program.
+    let path = corpus_root().join("vb6-code/Grayscale-effect/Grayscale.exe");
+    let original = std::fs::read(&path).unwrap();
+    let before = walk(&original).unwrap();
+
+    // lpObjectInfo is the first field of an Object record, and the walk's own
+    // Object ledger names where that record starts.
+    let objects: Vec<&Ledger> = before
+        .ledgers
+        .iter()
+        .filter(|l| l.structure == "Object")
+        .collect();
+    assert_eq!(objects.len(), 3, "the fixture holds three objects");
+    let at = usize::try_from(objects[1].base.get()).unwrap();
+
+    let unmapped = 0x00F0_0000_u32.to_le_bytes();
+    let mut patched = original.clone();
+    assert_ne!(
+        patched[at..at + 4],
+        unmapped,
+        "the patch must change the file, or this test proves nothing"
+    );
+    patched[at..at + 4].copy_from_slice(&unmapped);
+
+    let after = walk(&patched).expect("one bad object must not stop the walk");
+
+    assert!(
+        !after.ungraded.is_empty(),
+        "the patched object must be reported as ungraded"
+    );
+    for row in &after.ungraded {
+        assert_eq!(
+            row.owner,
+            Owner::Object { object: 1 },
+            "an ungraded row belongs to an object that was not patched: {row:?}"
+        );
+    }
+    assert!(
+        after
+            .ungraded
+            .iter()
+            .any(|row| row.structure == "ObjectInfo"),
+        "the patched object's ObjectInfo must be the row that was not graded"
+    );
+
+    // Every ledger that survives is byte for byte one that existed before.
+    for ledger in &after.ledgers {
+        assert!(
+            before.ledgers.contains(ledger),
+            "the patch changed a ledger it should not have touched: {} at {:#x}",
+            ledger.structure,
+            ledger.base.get()
+        );
+    }
+    let info = |walk: &deform6::fidelity::walk::Walk| {
+        walk.ledgers
+            .iter()
+            .filter(|l| l.structure == "ObjectInfo")
+            .count()
+    };
+    assert_eq!(info(&before), 3);
+    assert_eq!(info(&after), 2);
 }

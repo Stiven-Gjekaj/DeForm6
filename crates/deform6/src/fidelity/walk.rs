@@ -26,10 +26,11 @@ use crate::fidelity::census::{Array, Count, Evidence, Owner, outcome};
 use crate::fidelity::ledger::Ledger;
 use crate::fidelity::{Emit, Fault, compare};
 use crate::read::pe::PeImage;
-use crate::read::region::{Off, Region};
+use crate::read::region::{Off, Region, Va};
 use crate::vb::gui::{GuiTable, GuiTableEntry};
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::object::{Object, ObjectTable};
+use crate::vb::privateobj::ObjectInfo;
 use crate::vb::project::{ObjectTableHead, ProjectInfo};
 
 /// `STRUCTURES.md` section 4: `lpObjectArray` sits at `ObjectTable + 0x30`.
@@ -64,8 +65,33 @@ pub enum WalkError {
 pub struct Walk {
     /// One ledger per structure graded, in the order the walk reached them.
     pub ledgers: Vec<Ledger>,
+    /// One row per structure the walk reached and could not grade.
+    pub ungraded: Vec<Ungraded>,
     /// One row per array counted, in the order the walk reached them.
     pub counts: Vec<Count>,
+}
+
+/// A structure the walk reached and could not grade.
+///
+/// A refusal that concerns one object is recorded here and the walk goes on,
+/// because the census exists to show where the reader returns less than the
+/// file declares, and a walk that stopped at the first such object would hide
+/// every object after it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ungraded {
+    /// The structure that was not graded.
+    pub structure: &'static str,
+    /// What it belongs to.
+    pub owner: Owner,
+    /// Why it was not graded.
+    pub reason: Reason,
+}
+
+/// Why a structure was not graded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reason {
+    /// The reader refused it. This is a fact about the file.
+    Refused(Refusal),
 }
 
 /// Grades every structure this module knows how to emit, in one file.
@@ -136,12 +162,68 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
         ledgers.push(compare(object, &element)?);
     }
 
-    let counts = vec![
-        count_gui_table(&hdr, &header, &gui_table)?,
-        count_objects(&object_table, &head, &table)?,
-    ];
+    let mut found = Walk {
+        ledgers,
+        ungraded: Vec::new(),
+        counts: vec![
+            count_gui_table(&hdr, &header, &gui_table)?,
+            count_objects(&object_table, &head, &table)?,
+        ],
+    };
 
-    Ok(Walk { ledgers, counts })
+    for (index, object) in table.objects.iter().enumerate() {
+        let owner = object_owner(index)?;
+        grade_object_info(&pe, object, owner, &mut found)?;
+    }
+
+    Ok(found)
+}
+
+/// Names one object as the owner of what the walk finds under it.
+fn object_owner(index: usize) -> Result<Owner, Refusal> {
+    let object = u32::try_from(index)
+        .map_err(|_ignored| Refusal::Damaged("the object array index leaves a u32"))?;
+    Ok(Owner::Object { object })
+}
+
+/// Resolves `va` and cuts the window to exactly the length of `T`.
+fn located<'a, T: Emit>(
+    pe: &PeImage<'a>,
+    va: Va,
+    what: &'static str,
+) -> Result<Region<'a>, Refusal> {
+    let region = pe.region_at_va(va).ok_or(Refusal::Damaged(what))?;
+    window::<T>(&region, what)
+}
+
+/// Grades one object's `ObjectInfo`, or records why it could not.
+///
+/// A refusal here concerns this one object, so it is recorded and the walk
+/// goes on. An emitter fault still stops the walk: a walk that carried on
+/// past a fault in this repository could report a result that looks clean.
+fn grade_object_info(
+    pe: &PeImage<'_>,
+    object: &Object,
+    owner: Owner,
+    found: &mut Walk,
+) -> Result<(), WalkError> {
+    let read = ObjectInfo::read(pe, object.lp_object_info).and_then(|info| {
+        let record = located::<ObjectInfo>(
+            pe,
+            object.lp_object_info,
+            "the file ends inside an ObjectInfo",
+        )?;
+        Ok((info, record))
+    });
+    match read {
+        Ok((info, record)) => found.ledgers.push(compare(&info, &record)?),
+        Err(reason) => found.ungraded.push(Ungraded {
+            structure: ObjectInfo::STRUCTURE,
+            owner,
+            reason: Reason::Refused(reason),
+        }),
+    }
+    Ok(())
 }
 
 /// Cuts `region` to exactly the length of `T`.
