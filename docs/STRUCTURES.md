@@ -1013,7 +1013,7 @@ SVBD reads the array with the same stride).
 | 0x00 | 4 | `lStructSize` | `0x50`. AG confirms; a useful validation gate. | **[C]** |
 | 0x04 | 16 | `uuidObjectGUI` | GUID of the object GUI | **[L]** |
 | 0x14 | 16 | unknown (4 dwords) | | **[G]** |
-| 0x24 | 4 | `lObjectID` | Object ID within the project | **[L]** |
+| 0x24 | 4 | `lObjectID` | Object ID within the project. On the corpus, the index of the form's object in the object array (§18). | **[L]** |
 | 0x28 | 4 | unknown | | **[G]** |
 | 0x2C | 4 | `fOLEMisc` | OLEMISC flags | **[L]** |
 | 0x30 | 16 | `uuidObject` | GUID of the object | **[L]** |
@@ -1047,7 +1047,8 @@ At `tGuiTable.aFormPointer`. Size `0x5D` = 93 bytes. **[L]** (SVBD
 Note the structure is **not** 4-byte aligned internally: a single byte at 0x04
 throws every following field onto an odd offset. That is unusual enough to be
 worth double-checking on the first real sample; if the read produces garbage,
-the most likely error is a missing or extra byte around 0x04.
+the most likely error is a missing or extra byte around 0x04. The corpus
+confirms the single byte at 0x04 (§18).
 
 For VB4 files SVBD seeks to `aFormPointer + 9` instead. Out of scope. **[L]**
 
@@ -1275,7 +1276,7 @@ agrees with the three as well (§17).
 |---|---|---|---|---|
 | 0x00 | 2 | `fControlType` | Control kind. `0x40` = an intrinsic control with a plain event sink; `0x2E` = a COM control with an `IDispatch` sink. AI reads this as a **dword**; SVBD, PVB and IDC all read it as a **word**. Prefer word. | **[D]**, settled in §17 |
 | 0x02 | 2 | `wEventCount` | **Number of event slots.** AI puts this at 0x04. | **[D]**, settled in §17 |
-| 0x04 | 2 | unknown | IDC: `wFlagIndexRef` | **[G]** |
+| 0x04 | 2 | unknown | IDC: `wFlagIndexRef`. On the corpus, one more than the `imm32` of each stub of the control (§19). | **[G]** |
 | 0x06 | 2 | `bWEventsOffset` | Offset into the memory struct to copy events | **[C]** |
 | 0x08 | 4 | `lpGuid` | **VA of this control's 16-byte CLSID.** | **[C]** |
 | 0x0C | 2 | `wIndex` | Control index. AI reads a dword at 0x0C. | **[D]** |
@@ -1322,7 +1323,9 @@ E9 <rel32>              jmp  <handler>
 `imm32` is `0xFFFF` for a method and a smaller value for an event (AG's sample
 shows `0x3F`). PVB reads it as `wProcType` and treats `0xFFFF` as "method". The
 handler address is at stub + 0x8 as a `jmp rel32`. IDC computes it as
-`stub + 0x0D + dword(stub + 0x09)`.
+`stub + 0x0D + dword(stub + 0x09)`. The corpus agrees with this shape and
+this arithmetic in all 390 of its event stubs. It also has 311 native stubs
+that hold `0xFFFF` and that no slot names (§19).
 
 In a **P-code** build the stub is a 13-byte sequence
 `xor eax,eax / mov edx,<addr> / push <addr> / ret` (SVBD `MethodLinkPCode`), and
@@ -2033,7 +2036,8 @@ slot.
 The slots below the word at 0x02 hold 390 stubs, and all 390 have the native
 stub bytes. In every record, the word at 0x04 is a multiple of four from
 `0x34` to `0x150`. This document does not know what that value is, so the
-0x04 row of §8.6 stays **[G]**.
+0x04 row of §8.6 stays **[G]**. Section 19 finds that the word is one more
+than the `imm32` of each stub of the record.
 
 **So the word layout is correct for kind `0x40`.** **[C]** Read
 `fControlType` as a word at 0x00. Read `wEventCount` as a word at 0x02.
@@ -2047,3 +2051,122 @@ words change places.
 The corpus holds no COM control (`0x2E`), so the `0x28` byte header of §8.6
 stays **[L]**. All 390 stubs are native, so the P-code stub shapes of §8.6
 are not measured.
+
+---
+
+## 18. The `GUIObjectInfo` alignment, checked on the corpus, 2026-09-16
+
+Section 8.2 rates the `GUIObjectInfo` layout **[L]**. It says that a single
+byte at 0x04 moves every later field to an odd offset, and it asks for a check
+on a real file.
+
+**The method.** The GUI table entry (§8.1) holds `uuidObjectGUI` at 0x04.
+Section 8.2 puts the same GUID, `guidObjectGUI`, at `GUIObjectInfo` + 0x05.
+For each entry, read `aFormPointer` (0x48), and go to that `GUIObjectInfo`.
+Compare the 16 bytes at 0x05, and the 16 bytes at the aligned 0x04, with the
+GUID in the entry.
+
+**The numbers.** 53 forms in the 44 corpus programs:
+
+| Check | Forms |
+|---|---|
+| The 16 bytes at 0x05 are the GUID of the entry | 53 of 53 |
+| The 16 bytes at 0x04 are the GUID of the entry | 0 of 53 |
+| The dword at 0x00 is `0x0031CCFF` | 53 of 53 |
+
+**So the single byte at 0x04 is real, and `guidObjectGUI` starts at 0x05.**
+**[C]** for the offsets and the sizes of the first three rows of the §8.2
+table. The byte at 0x04 is not padding. It has 24 different values, from
+`0x00` to `0x27`.
+
+`tests/byte_fidelity.rs` keeps this true with
+`the_object_gui_guid_sits_at_five_and_never_at_four_in_fifty_three_gui_object_info_records`.
+That test reads every byte by hand.
+
+**What the byte at 0x04 can be.** In 47 of the 53 forms, the byte is one less
+than the `dwControlCount` (§5.3) of the form's own object. In the other 6
+forms, the byte is equal to that count or larger. The entry's `lObjectID`
+(0x24) gives the form's object. In all 44 programs, the `lObjectID` values,
+in GUI table order, are the indexes of the form objects in the object array,
+in the same order. These two facts were measured one time. No test keeps them
+true. This document does not know what the byte is.
+
+**What the measurement did not settle.** Nothing after `guidObjectGUI` was
+compared with a second source. The reader reads only `lPropertiesLength` at
+0x59.
+
+---
+
+## 19. The event stubs, measured on the corpus, 2026-09-16
+
+Section 8.6 gives the native stub: `81 6C 24 04 <imm32>`, then `E9 <rel32>`,
+13 bytes. It says that `imm32` is `0xFFFF` for a method and a smaller value
+for an event. The fidelity walk grades each stub that a bound event slot
+names.
+
+**The stubs that the slots name.** The 706 `ControlInfo` records of the 44
+corpus programs have 390 bound slots (§17). The 390 slots name 390 different
+stubs, so no two slots share a stub. The address of each stub occurs one
+time in its file, in its slot.
+
+| Check | Stubs |
+|---|---|
+| All 13 bytes agree with the native shape and with the handler address that the reader keeps | 390 of 390 |
+| `imm32` is `0xFFFF` | 0 of 390 |
+| `imm32` is one less than the word at `ControlInfo` + 0x04 | 390 of 390 |
+
+`imm32` goes from `0x33` to `0x14B`, and it has 50 different values. 309
+records have one or more stubs. All the stubs of one record hold the same
+`imm32`, because the word at 0x04 has one value in each record. This document
+does not know what the two values are, so the 0x04 row of §8.6 stays
+**[G]**.
+
+**No slot names a method stub.** The reader sets `is_method` when `imm32` is
+`0xFFFF`. It is false for all 390 stubs, so no corpus program sets it.
+
+**The stubs that no slot names.** The native stub bytes (`81 6C 24 04`, four
+bytes, then `E9`) start at 701 places in the 44 files, all in `.text`. The
+slots name 390 of them. Each of the other 311:
+
+- holds `imm32` `0xFFFF`, the value that §8.6 gives for a method;
+- has no four bytes in its file that hold its virtual address.
+
+A scan on 2026-09-16 also found no `E8` or `E9` byte whose `rel32` lands on
+one of the 311. This document does not know what reaches them.
+
+**The layout.** The 701 stubs sit in 99 runs. In a run, each stub starts 13
+bytes after the stub before it. In 17 of the 44 programs, all the stubs are
+in one run. In 17 programs, a method stub sits between two event stubs.
+
+The `imm32` range, the 309 records, the `.text` section, the `E8` and `E9`
+scan and the runs were measured one time. No test keeps them true. Four tests
+in `tests/byte_fidelity.rs` keep the other facts of this section true:
+
+- `no_event_stub_byte_differs_from_the_file_in_any_corpus_program`, for the
+  first row of the table;
+- `each_stub_a_slot_names_holds_one_less_than_the_word_at_four_of_its_control`,
+  for the third row and for the 390 slots;
+- `the_walk_grades_one_event_stub_at_each_address_a_bound_slot_names`, for
+  the 390 different stubs;
+- `the_three_hundred_and_eleven_native_stubs_no_slot_names_hold_the_method_value_and_no_four_bytes_name_them`,
+  for the second row, for the one address of each stub, and for the 311
+  stubs that no slot names.
+
+**A stub of another shape.** The reader does not read the two opcodes, so it
+decodes every stub as native. The emitter writes the native opcodes, so a
+stub of another shape cannot hide in the fidelity map:
+
+- If the handler arithmetic of §8.6 stays inside the `u32` range, the reader
+  keeps a wrong handler address, and the opcode bytes show as bytes that
+  differ.
+- If the arithmetic leaves the range, the reader keeps no handler and
+  reports an `UnreadablePointer` defect at the slot. The walk records the
+  stub as refused.
+
+A P-code stub (§8.6) at an address in a corpus program takes the second
+path. Its last byte, `0xC3`, is the high byte of `rel32`, so `rel32` is a
+large negative number. A check that patched one corpus program in memory, on
+2026-09-16, showed this. The check is not in the repository.
+
+**What the measurement did not settle.** All 390 stubs are native, so the
+P-code stub shapes of §8.6 stay **[L]**.
