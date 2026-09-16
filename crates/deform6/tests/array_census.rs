@@ -358,3 +358,32 @@ fn a_control_count_larger_than_the_file_can_hold_is_counted_as_clamped() {
     assert_eq!(row.outcome, Outcome::Clamped { max: row.recovered });
     assert!(row.recovered < row.declared);
 }
+
+#[test]
+fn the_census_returns_as_many_control_entries_as_the_walk_grades_control_info_records() {
+    // Two routes to one number: the entries the census says the reader
+    // returned, and the ControlInfo records the walk graded one by one.
+    let mut failed = Vec::new();
+    for path in executables() {
+        let data = std::fs::read(&path).unwrap();
+        let found = walk(&data).unwrap();
+        let returned: u64 = found
+            .counts
+            .iter()
+            .filter(|row| row.array == Array::Controls)
+            .map(|row| u64::from(row.recovered))
+            .sum();
+        let graded = found
+            .ledgers
+            .iter()
+            .filter(|l| l.structure == "ControlInfo")
+            .count() as u64;
+        if returned != graded {
+            failed.push(format!(
+                "{}: the census says {returned} entries were returned and the walk graded {graded}",
+                path.display()
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}

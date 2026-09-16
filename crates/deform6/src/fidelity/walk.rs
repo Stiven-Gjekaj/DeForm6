@@ -28,7 +28,7 @@ use crate::fidelity::privateobj::PrivateObjRecord;
 use crate::fidelity::{Emit, Fault, compare};
 use crate::read::pe::PeImage;
 use crate::read::region::{Off, Region, Va};
-use crate::vb::controlinfo::{ControlInfoTable, OptionalObjectInfo};
+use crate::vb::controlinfo::{ControlInfo, ControlInfoTable, OptionalObjectInfo};
 use crate::vb::gui::{GuiTable, GuiTableEntry};
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::object::{Object, ObjectTable};
@@ -188,8 +188,10 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
         if let Some(info) = grade_object_info(&pe, object, owner, &mut found)? {
             grade_private_obj(&pe, &info, owner, &mut found)?;
         }
-        if let Some(optional) = grade_optional_object_info(&pe, object, owner, &mut found)? {
-            count_controls(&pe, object, &optional, owner, &mut found)?;
+        if let Some(optional) = grade_optional_object_info(&pe, object, owner, &mut found)?
+            && let Some(table) = count_controls(&pe, object, &optional, owner, &mut found)?
+        {
+            grade_controls(&pe, &optional, &table, owner, &mut found)?;
         }
     }
 
@@ -351,6 +353,42 @@ fn count_controls(
         outcome: decided,
     });
     Ok(table)
+}
+
+/// Grades every `ControlInfo` entry the reader returned for one object, or
+/// records why one could not be graded.
+///
+/// An array whose address maps nowhere has no entries to grade: the reader
+/// already returned none, and the census row says why.
+fn grade_controls(
+    pe: &PeImage<'_>,
+    optional: &OptionalObjectInfo,
+    table: &ControlInfoTable,
+    owner: Owner,
+    found: &mut Walk,
+) -> Result<(), WalkError> {
+    let Owner::Object { object } = owner else {
+        return Ok(());
+    };
+    let Some(array) = pe.region_at_va(optional.lp_controls) else {
+        return Ok(());
+    };
+    for (index, control) in table.entries.iter().enumerate() {
+        let control_owner = Owner::Control {
+            object,
+            control: u32::try_from(index)
+                .map_err(|_ignored| Refusal::Damaged("the control index leaves a u32"))?,
+        };
+        match element::<ControlInfo>(&array, index, "the file ends inside a ControlInfo element") {
+            Ok(window) => found.ledgers.push(compare(control, &window)?),
+            Err(reason) => found.ungraded.push(Ungraded {
+                structure: ControlInfo::STRUCTURE,
+                owner: control_owner,
+                reason: Reason::Refused(reason),
+            }),
+        }
+    }
+    Ok(())
 }
 
 /// Grades one object's `PrivateObj`, or records why it could not.

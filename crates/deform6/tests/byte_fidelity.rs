@@ -47,6 +47,7 @@
 //! able to fail independently.
 
 use deform6::fidelity::census::Owner;
+use deform6::fidelity::controlinfo;
 use deform6::fidelity::gui;
 use deform6::fidelity::header;
 use deform6::fidelity::ledger::{Ledger, Verdict};
@@ -725,4 +726,71 @@ fn the_objects_with_no_optional_object_info_are_exactly_the_objects_with_no_priv
         }
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+#[test]
+fn the_corpus_grades_seven_hundred_and_six_control_info_records() {
+    assert_eq!(graded_count("ControlInfo"), 706);
+}
+
+#[test]
+fn the_control_info_reader_models_sixteen_of_the_forty_bytes_in_every_graded_record() {
+    let failed = coverage_failures(
+        "ControlInfo",
+        40,
+        controlinfo::MODELLED_BYTES,
+        controlinfo::UNMODELLED,
+    );
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+#[test]
+fn no_control_info_byte_this_reader_models_differs_from_the_file_in_any_corpus_program() {
+    // The first two fields are the disputed ones in STRUCTURES.md section
+    // 8.6. A clean result here is the corpus agreeing with the word based
+    // layout the reader chose.
+    let failed = difference_failures("ControlInfo");
+    assert!(
+        failed.is_empty(),
+        "{} ControlInfo byte run(s) differ from the file:\n{}",
+        failed.len(),
+        failed.join("\n")
+    );
+}
+
+#[test]
+fn no_two_structures_the_walk_grades_share_a_byte_in_any_corpus_program() {
+    // Measured on 2026-09-16 before this was asserted: 1251 records across
+    // the corpus, and no two of them overlap. Two structures claiming the
+    // same byte would mean one of them is placed wrongly.
+    let mut failed = Vec::new();
+    for (path, ledgers) in graded() {
+        let mut spans: Vec<(u32, u32, &str)> = ledgers
+            .iter()
+            .map(|l| (l.base.get(), l.base.get() + l.len, l.structure))
+            .collect();
+        spans.sort_unstable();
+        for pair in spans.windows(2) {
+            let (first, second) = (pair[0], pair[1]);
+            if second.0 < first.1 {
+                failed.push(format!(
+                    "{}: {} at [{:#x}, {:#x}) overlaps {} at [{:#x}, {:#x})",
+                    path.display(),
+                    first.2,
+                    first.0,
+                    first.1,
+                    second.2,
+                    second.0,
+                    second.1
+                ));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+#[test]
+fn the_walk_grades_one_thousand_two_hundred_and_fifty_one_records_across_the_corpus() {
+    let total: usize = graded().iter().map(|(_path, ledgers)| ledgers.len()).sum();
+    assert_eq!(total, 1251);
 }
