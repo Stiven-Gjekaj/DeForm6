@@ -520,6 +520,39 @@ fn parse_export_name(name: String) -> ExportName {
     ExportName::Name(name)
 }
 
+/// One entry of the `Declare` import table, as the file holds it.
+///
+/// `STRUCTURES.md` section 7.1 gives an entry as two dwords: the entry type
+/// and the address of a descriptor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct DeclareTableEntry {
+    /// `dwEntryType` at `0x00`. The runtime resolves an entry of type 6, and
+    /// an entry of type 7 names a library and an export.
+    pub dw_entry_type: u32,
+    /// `lpImportDescriptor` at `0x04`, the address of the descriptor.
+    pub lp_import_descriptor: Va,
+    /// The start of the descriptor, for an entry of type 7.
+    ///
+    /// `None` for an entry of any other type, because only type 7 names a
+    /// descriptor of this shape. `None` also for an entry of type 7 whose
+    /// descriptor address is in no section, or whose file ends inside the
+    /// bytes that this reader reads. The value is kept when a name that it
+    /// points at does not resolve.
+    pub descriptor: Option<DeclareDescriptor>,
+}
+
+/// The two addresses at the start of the descriptor that an entry of type 7
+/// names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct DeclareDescriptor {
+    /// `lpDllName` at `0x00`, the address of the library name.
+    pub lp_dll_name: Va,
+    /// `lpApiName` at `0x04`, the address of the export name.
+    pub lp_api_name: Va,
+}
+
 /// The `Declare` import table, reached from [`ProjectInfo::lp_external_table`].
 ///
 /// Read the doc comment above `DECLARE_ENTRY_SIZE` before reaching for this
@@ -529,13 +562,20 @@ fn parse_export_name(name: String) -> ExportName {
 pub struct DeclareTable {
     /// Every `dwEntryType == 7` entry the walk resolved, in table order.
     pub declarations: Vec<Declaration>,
+    /// Every entry the walk read, of every type, in table order.
+    ///
+    /// The position of an entry in this list is its index in the table. The
+    /// walk skips no entry that it read, so an entry that gives a defect is
+    /// here too. When the count is larger than the table can hold, this list
+    /// holds each whole entry that the table holds.
+    pub entries: Vec<DeclareTableEntry>,
     defects: Vec<Defect>,
 }
 
 impl DeclareTable {
     /// Walks the `Declare` import table.
     ///
-    /// This never refuses. A zero count gives an empty list without touching
+    /// This never refuses. A zero count gives empty lists without touching
     /// [`ProjectInfo::lp_external_table`] at all, which is what
     /// `LockWorkStation.exe` needs: this corpus's smallest program declares no
     /// external table, and there is no reason to dereference a pointer this
@@ -571,11 +611,13 @@ impl DeclareTable {
     #[must_use]
     pub fn read(pe: &PeImage<'_>, info: &ProjectInfo) -> Self {
         let mut declarations = Vec::new();
+        let mut entries = Vec::new();
         let mut defects = Vec::new();
 
         if info.dw_external_count == 0 {
             return Self {
                 declarations,
+                entries,
                 defects,
             };
         }
@@ -583,6 +625,7 @@ impl DeclareTable {
         let Some(table) = pe.region_at_va(info.lp_external_table) else {
             return Self {
                 declarations,
+                entries,
                 defects,
             };
         };
@@ -637,6 +680,19 @@ impl DeclareTable {
                 break;
             };
 
+            // Only an entry of type 7 names a descriptor of this shape. The
+            // arm for type 6 below says what the other shape is.
+            let descriptor = if entry_type == 7 {
+                read_declare_descriptor(pe, descriptor_va)
+            } else {
+                None
+            };
+            entries.push(DeclareTableEntry {
+                dw_entry_type: entry_type,
+                lp_import_descriptor: descriptor_va,
+                descriptor,
+            });
+
             match entry_type {
                 // Resolved inside the runtime. Its descriptor points at a
                 // different shape entirely: a pair of addresses whose first
@@ -647,7 +703,10 @@ impl DeclareTable {
                 // of the 249 entries in this corpus are this type, so this
                 // is a path every third program takes. `[VERIFIED: local]`
                 6 => {}
-                7 => match read_declare_descriptor(pe, descriptor_va) {
+                7 => match descriptor
+                    .ok_or(DeclareDescriptorFailure::Descriptor)
+                    .and_then(|pair| read_declare_names(pe, pair))
+                {
                     Ok((library, export)) => declarations.push(Declaration {
                         library,
                         export: parse_export_name(export),
@@ -679,6 +738,7 @@ impl DeclareTable {
 
         Self {
             declarations,
+            entries,
             defects,
         }
     }
@@ -725,26 +785,34 @@ impl DeclareDescriptorFailure {
     }
 }
 
-/// Reads the library name and the export name a `dwEntryType == 7` entry
-/// names.
+/// Reads the two addresses at the start of the descriptor that a
+/// `dwEntryType == 7` entry names.
 ///
 /// The third word `STRUCTURES.md` section 7.1 records after these two is
 /// runtime scratch, a module handle and a resolved address that hold
 /// nothing before the loader runs. It is not read.
-fn read_declare_descriptor(
-    pe: &PeImage<'_>,
-    descriptor_va: Va,
-) -> Result<(String, String), DeclareDescriptorFailure> {
+///
+/// `None` when the address is in no section, or when the file ends inside
+/// the `DECLARE_DESCRIPTOR_SIZE` bytes that this function reads.
+fn read_declare_descriptor(pe: &PeImage<'_>, descriptor_va: Va) -> Option<DeclareDescriptor> {
     let descriptor = pe
-        .region_at_va(descriptor_va)
-        .and_then(|r| r.subregion(Off::new(0), DECLARE_DESCRIPTOR_SIZE))
-        .ok_or(DeclareDescriptorFailure::Descriptor)?;
-    let lp_dll_name = descriptor
-        .va_le(Off::new(0x00))
-        .ok_or(DeclareDescriptorFailure::Descriptor)?;
-    let lp_api_name = descriptor
-        .va_le(Off::new(0x04))
-        .ok_or(DeclareDescriptorFailure::Descriptor)?;
+        .region_at_va(descriptor_va)?
+        .subregion(Off::new(0), DECLARE_DESCRIPTOR_SIZE)?;
+    Some(DeclareDescriptor {
+        lp_dll_name: descriptor.va_le(Off::new(0x00))?,
+        lp_api_name: descriptor.va_le(Off::new(0x04))?,
+    })
+}
+
+/// Reads the library name and the export name that a descriptor names.
+fn read_declare_names(
+    pe: &PeImage<'_>,
+    descriptor: DeclareDescriptor,
+) -> Result<(String, String), DeclareDescriptorFailure> {
+    let DeclareDescriptor {
+        lp_dll_name,
+        lp_api_name,
+    } = descriptor;
     let library =
         read_latin1_cstr(pe, lp_dll_name).ok_or(DeclareDescriptorFailure::DllName(lp_dll_name))?;
     let export =
@@ -1663,6 +1731,7 @@ mod tests {
     fn the_smallest_corpus_program_declares_no_external_import_and_is_not_refused() {
         let table = declare_table(LOCK_WORK_STATION);
         assert!(table.declarations.is_empty());
+        assert!(table.entries.is_empty());
         assert!(table.defects().is_empty());
     }
 
@@ -1758,6 +1827,144 @@ mod tests {
         assert_eq!(defect.site.field, "lpImportDescriptor");
     }
 
+    /// The two addresses at the start of a descriptor: the library name,
+    /// then the export name.
+    type Pair = (u32, u32);
+
+    /// Reads a `u32` at an absolute file offset, by hand.
+    fn u32_at_offset(data: &[u8], at: usize) -> u32 {
+        u32::from_le_bytes(data[at..at + 4].try_into().unwrap())
+    }
+
+    /// Gives the file offset of a descriptor, by hand from its address.
+    fn descriptor_offset(data: &[u8], descriptor: u32) -> usize {
+        let image = PeImage::parse(data).unwrap();
+        usize::try_from(image.va_to_off(Va::new(descriptor)).unwrap().get()).unwrap()
+    }
+
+    /// Gives the entry type and the descriptor address of one entry, and the
+    /// two addresses at the start of its descriptor, all read by hand.
+    fn entry_by_hand(data: &[u8], index: u32) -> (u32, u32, Pair) {
+        let entry_type = u32_at_offset(data, declare_entry_field_offset(data, index, 0x00));
+        let descriptor = u32_at_offset(data, declare_entry_field_offset(data, index, 0x04));
+        let at = descriptor_offset(data, descriptor);
+        (
+            entry_type,
+            descriptor,
+            (u32_at_offset(data, at), u32_at_offset(data, at + 4)),
+        )
+    }
+
+    /// Gives the two addresses that the reader kept for one entry.
+    fn kept_pair(table: &DeclareTable, index: usize) -> Option<Pair> {
+        table.entries[index]
+            .descriptor
+            .map(|pair| (pair.lp_dll_name.get(), pair.lp_api_name.get()))
+    }
+
+    /// Every entry is kept in table order, of every type. Entry 0 is the
+    /// internal one, so it keeps no descriptor.
+    ///
+    /// The literal values were measured on 2026-09-16, and the test reads
+    /// each of them again by hand.
+    #[test]
+    fn grayscale_keeps_its_nine_entries_in_table_order_and_the_descriptor_of_each_external_one() {
+        let measured: [(u32, u32, Option<Pair>); 9] = [
+            (6, 0x0040_3758, None),
+            (7, 0x0040_35FC, Some((0x0040_350C, 0x0040_35EC))),
+            (7, 0x0040_35B4, Some((0x0040_350C, 0x0040_35A8))),
+            (7, 0x0040_3570, Some((0x0040_350C, 0x0040_355C))),
+            (7, 0x0040_3524, Some((0x0040_350C, 0x0040_3518))),
+            (7, 0x0040_329C, Some((0x0040_3280, 0x0040_3290))),
+            (7, 0x0040_3248, Some((0x0040_3188, 0x0040_3230))),
+            (7, 0x0040_31F8, Some((0x0040_3188, 0x0040_31E4))),
+            (7, 0x0040_31AC, Some((0x0040_3188, 0x0040_3198))),
+        ];
+        let table = declare_table(GRAYSCALE);
+        assert_eq!(table.entries.len(), measured.len());
+        for (index, (entry_type, descriptor, pair)) in measured.into_iter().enumerate() {
+            let (type_by_hand, descriptor_by_hand, pair_by_hand) =
+                entry_by_hand(GRAYSCALE, u32::try_from(index).unwrap());
+            assert_eq!(
+                (type_by_hand, descriptor_by_hand),
+                (entry_type, descriptor),
+                "entry {index}"
+            );
+            if let Some(pair) = pair {
+                assert_eq!(pair_by_hand, pair, "entry {index}");
+            }
+
+            let entry = table.entries[index];
+            assert_eq!(entry.dw_entry_type, entry_type, "entry {index}");
+            assert_eq!(
+                entry.lp_import_descriptor,
+                Va::new(descriptor),
+                "entry {index}"
+            );
+            assert_eq!(kept_pair(&table, index), pair, "entry {index}");
+        }
+    }
+
+    #[test]
+    fn mandelbrot_keeps_its_one_external_entry_and_its_descriptor() {
+        let (entry_type, descriptor, pair) = entry_by_hand(MANDELBROT, 0);
+        assert_eq!(
+            (entry_type, descriptor, pair),
+            (7, 0x0040_1CDC, (0x0040_1CC4, 0x0040_1CD0))
+        );
+        let table = declare_table(MANDELBROT);
+        assert_eq!(table.entries.len(), 1);
+        assert_eq!(table.entries[0].dw_entry_type, 7);
+        assert_eq!(table.entries[0].lp_import_descriptor, Va::new(descriptor));
+        assert_eq!(kept_pair(&table, 0), Some(pair));
+    }
+
+    /// The entry is kept although its descriptor is not.
+    #[test]
+    fn an_external_entry_whose_descriptor_is_in_no_section_is_kept_with_no_descriptor() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let nowhere = image.image_base() + 0x00F0_0000;
+        let bytes = with_mandelbrot_entry_u32(0x04, nowhere);
+        let table = declare_table(&bytes);
+        assert_eq!(table.entries.len(), 1);
+        assert_eq!(table.entries[0].dw_entry_type, 7);
+        assert_eq!(table.entries[0].lp_import_descriptor, Va::new(nowhere));
+        assert_eq!(table.entries[0].descriptor, None);
+    }
+
+    /// The descriptor keeps both addresses as the file holds them, although
+    /// the declaration is lost.
+    #[test]
+    fn an_external_entry_whose_library_name_is_in_no_section_keeps_both_addresses() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let nowhere = image.image_base() + 0x00F0_0000;
+        let (_type, descriptor, (dll_name, api_name)) = entry_by_hand(MANDELBROT, 0);
+        assert_ne!(dll_name, nowhere);
+        let at = descriptor_offset(MANDELBROT, descriptor);
+        let mut bytes = MANDELBROT.to_vec();
+        bytes[at..at + 4].copy_from_slice(&nowhere.to_le_bytes());
+
+        let table = declare_table(&bytes);
+        assert!(table.declarations.is_empty());
+        assert_eq!(table.defects().len(), 1);
+        assert_eq!(table.defects()[0].site.field, "lpDllName");
+        assert_eq!(table.entries.len(), 1);
+        assert_eq!(kept_pair(&table, 0), Some((nowhere, api_name)));
+    }
+
+    /// Only an entry of type 7 names a descriptor of the shape that this
+    /// reader reads, so an undocumented type keeps no descriptor.
+    #[test]
+    fn an_entry_of_an_undocumented_type_is_kept_with_no_descriptor() {
+        let (_type, descriptor, _pair) = entry_by_hand(MANDELBROT, 0);
+        let bytes = with_mandelbrot_entry_u32(0x00, 99);
+        let table = declare_table(&bytes);
+        assert_eq!(table.entries.len(), 1);
+        assert_eq!(table.entries[0].dw_entry_type, 99);
+        assert_eq!(table.entries[0].lp_import_descriptor, Va::new(descriptor));
+        assert_eq!(table.entries[0].descriptor, None);
+    }
+
     /// A bound `dwExternalCount` still resolves every entry the region can
     /// hold, and it does not panic on the ones it cannot.
     ///
@@ -1796,6 +2003,14 @@ mod tests {
         assert_eq!(defect.site.structure, "ProjectInfo");
         assert_eq!(defect.site.field, "dwExternalCount");
         assert_eq!(usize::try_from(defect.site.offset).unwrap(), at);
+        let DefectKind::ImplausibleCount { max, .. } = defect.kind else {
+            panic!("the defect found above is an ImplausibleCount");
+        };
+        assert_eq!(
+            u32::try_from(table.entries.len()).unwrap(),
+            max,
+            "the table keeps each whole entry that its region holds"
+        );
         // Site::rva is the address the offset came from. This offset did not
         // come from lpExternalTable, so the defect must not give that address.
         assert_eq!(defect.site.rva, None);
@@ -1842,6 +2057,7 @@ mod tests {
             );
             assert_eq!(clamps[0].site.structure, "ProjectInfo");
             assert_eq!(clamps[0].site.field, "dwExternalCount");
+            assert_eq!(u32::try_from(table.entries.len()).unwrap(), holds);
             assert_eq!(
                 table.declarations.first(),
                 unpatched.first(),
