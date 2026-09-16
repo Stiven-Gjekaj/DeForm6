@@ -58,7 +58,7 @@ pub const PR_MAX_TOTAL_TIME: u32 = 60;
 /// grows: libFuzzer keeps its whole corpus in memory. So the bound is
 /// measured, not calculated.
 ///
-/// This is the highest `rss:` value that libFuzzer printed in four
+/// This is the highest `rss:` value that libFuzzer printed in five
 /// campaigns of 500_000 runs. Each campaign was seeded the way
 /// `.github/workflows/fuzz.yml` seeds the scheduled job.
 ///
@@ -68,15 +68,17 @@ pub const PR_MAX_TOTAL_TIME: u32 = 60;
 /// | scheduled run 34946876517, 2026-09-15 | CI, Linux x86_64 | 710 MiB |
 /// | scheduled run 35073097537, 2026-09-16 | CI, Linux x86_64 | 953 MiB |
 /// | commit `dee22c0`, 2026-09-16 | macOS arm64 | 1159 MiB |
+/// | commit `69b5618`, 2026-09-16 | macOS arm64 | 979 MiB |
 ///
 /// The first two campaigns ran no fidelity walk. The third ran the walk
-/// before it counted arrays. The last ran the walk with the census.
+/// before it counted arrays. The fourth ran the walk with the census. The
+/// fifth ran the walk that also grades `GUIObjectInfo` and each event stub.
 ///
 /// The highest peak, 1159 MiB, is a little more than half of
 /// `RSS_LIMIT_MB`. Most of each rise came in the first 100_000 runs, but
-/// the local campaign still grew by 377 MiB between run 199_986 and run
-/// 500_000. A change that raises this number, or that makes one input leak
-/// more, must measure again and record the result here.
+/// the campaign on `dee22c0` still grew by 377 MiB between run 199_986 and
+/// run 500_000. A change that raises this number, or that makes one input
+/// leak more, must measure again and record the result here.
 /// `cron_runs_is_no_larger_than_the_run_count_the_peak_was_measured_at`
 /// fails when this number grows past the measured count.
 pub const CRON_RUNS: u32 = 500_000;
