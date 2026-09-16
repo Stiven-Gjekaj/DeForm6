@@ -448,12 +448,13 @@ cargo test --workspace
   untrusted bytes belongs in that sweep.
 - **The hostile corpus.** Mutated and crafted inputs, including a form count
   of `0xFFFF` in a 4096 byte file, which must allocate nothing.
-- **The byte fidelity map.** Each structure is written back over the bytes it
-  was read from and compared against them, over all 44 programs. The bytes the
-  reader reproduces and the bytes no field of it claims are both pinned.
-- **The array census.** For every array the reader walks, the count the file
-  declares is compared with the number of items the reader returns, and the
-  count is read back from the file at the offset the census names.
+- **The byte fidelity map.** The eight structures in the table above are
+  written back over the bytes they were read from and compared against them,
+  over all 44 programs. The bytes the reader reproduces and the bytes no field
+  of it claims are both pinned.
+- **The array census.** For the four arrays in the table above, the count the
+  file declares is compared with the number of items the reader returns, and
+  the count is read back from the file at the offset the census names.
 - **The walls.** `scripts/prove-*.sh` each prove one property, by planting a
   violation and requiring the check to catch it.
 
