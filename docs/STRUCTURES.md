@@ -955,7 +955,7 @@ to its CLSID. This table is what produces the `Object=` lines of the `.vbp`.
 `.vbp` reconstruction. Gap 17 (§11) tracks them; plan 03-16 did not measure
 any of them, and none is closed.
 
-### 7.3.1 Neither `oUuid` nor `GUIDoffset` holds the CLSID a project file declares, 2026-09-11
+#### 7.3.1 Neither `oUuid` nor `GUIDoffset` holds the CLSID a project file declares, 2026-09-11
 
 Plan 03-08 read `GUIDoffset`/`GUIDlength` as a third-party control's CLSID.
 Phase 3's own verification found the value it decodes for
