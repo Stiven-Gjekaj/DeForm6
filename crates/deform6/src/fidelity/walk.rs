@@ -145,13 +145,17 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
 
     let hdr = header_region(&pe)?;
     let header = VbHeader::read(&hdr)?;
-    let mut ledgers = vec![compare(&header, &hdr)?];
+    let mut found = Walk {
+        ledgers: vec![compare(&header, &hdr)?],
+        ungraded: Vec::new(),
+        counts: Vec::new(),
+    };
 
     let info = ProjectInfo::read(&pe, header.lp_project_data)?;
     let project = pe
         .region_at_va(header.lp_project_data)
         .ok_or(Refusal::Damaged("the ProjectInfo pointer is in no section"))?;
-    ledgers.push(compare(
+    found.ledgers.push(compare(
         &info,
         &window::<ProjectInfo>(&project, "the file ends inside ProjectInfo")?,
     )?);
@@ -163,7 +167,7 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
     for (index, entry) in gui_table.entries.iter().enumerate() {
         let at =
             element::<GuiTableEntry>(&gui_array, index, "the file ends inside a GUI table entry")?;
-        ledgers.push(compare(entry, &at)?);
+        found.ledgers.push(compare(entry, &at)?);
     }
 
     let head = ObjectTableHead::read(&pe, info.lp_object_table)?;
@@ -196,17 +200,15 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
         let element = array
             .subregion(Off::new(at), Object::LEN)
             .ok_or(Refusal::Damaged("the file ends inside an Object element"))?;
-        ledgers.push(compare(object, &element)?);
+        found.ledgers.push(compare(object, &element)?);
     }
 
-    let mut found = Walk {
-        ledgers,
-        ungraded: Vec::new(),
-        counts: vec![
-            count_gui_table(&hdr, &header, &gui_table)?,
-            count_objects(&object_table, &head, &table)?,
-        ],
-    };
+    found
+        .counts
+        .push(count_gui_table(&hdr, &header, &gui_table)?);
+    found
+        .counts
+        .push(count_objects(&object_table, &head, &table)?);
 
     for (index, object) in table.objects.iter().enumerate() {
         let owner = object_owner(index)?;
