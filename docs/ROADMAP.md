@@ -300,6 +300,91 @@ again over the 1551 inputs of the final corpus, one after the other, two
 times each. The target of `1298a46` took 23.5 and 21.3 seconds. The target
 of `77663e6`, before this segment, took 22.6 and 21.6 seconds.
 
+#### Segment 4, done on 2026-09-17
+
+The object table and the `Declare` table, and a census row for the
+`Declare` table. Measured over all 44 corpus programs.
+
+| Structure | Bytes reproduced | Record length | Records |
+|---|---|---|---|
+| Object table | 12 | 84 | 44 |
+| `Declare` table entry | 8 | 8 | 249 |
+| `Declare` descriptor | 8 | 24 | 220 |
+
+With the ten structures of segments 1 to 3, the walk grades 2207 records.
+No byte differs from the file in any of them, and no two claim the same byte.
+The reader refuses no record.
+
+| Array | Declared | Returned |
+|---|---|---|
+| `Declare` table entries | 249 | 249 |
+
+The census now counts five arrays in 935 rows, and no row comes up short.
+
+The walk grades a descriptor only for an entry of type 7, and it grades each
+descriptor one time. An entry of type 6 names a pair of a different shape,
+so it gets no row. An entry of a different type gets a refused row.
+
+Two reader changes came first, each in its own commit. The head of the
+object table keeps `lpObjectArray`, and the `Declare` table keeps each entry
+that it reads, of every type, with the two addresses at the start of each
+descriptor. Each change is additive, because each of the two structures
+already has a private field.
+
+#### What segment 4 found
+
+**A `Declare` count could fail its check and give no defect.** The reader
+multiplied `dwExternalCount` by 8 before it compared the count with the
+table. For a count of `0x2000_0000` or more, the product left a `u32`, and
+the check raised no defect. The loop still stopped at the end of the
+table's region, so the reader read fewer entries than the file declared and
+said nothing. The census would have called that row unexplained. On
+Mandelbrot patched in memory, counts of `0xFFFF` and `0x1FFF_FFFF` gave a
+defect, and `0x2000_0000` and `0xFFFF_FFFF` did not. The reader now divides
+the length of the region by 8, so each count that is larger than the table
+can hold gives the defect. A unit test requires it for `0x2000_0000` and
+`0xFFFF_FFFF`, and the census test requires a clamped row for `0x2000_0000`.
+
+**The descriptor of an external `Declare` entry is 24 bytes.**
+`STRUCTURES.md` section 7.1 names 8. In all 220 descriptors, machine code
+starts at 0x18. Its first instruction loads from the address at 0x0C plus 8,
+and a later instruction pushes the address of the descriptor. The bytes at
+0x08, 0x10 and 0x14 hold the same values in all 220, and no source names
+them. Section 21 of `STRUCTURES.md` gives the numbers.
+
+**Two rows of `STRUCTURES.md` section 4 were wrong for the corpus.** The
+sources say that `lpExecProj` is zero on disk, and that `lpProjectObject` is
+used only in memory. In all 44 programs, each holds an address in `.data`.
+Section 20 of `STRUCTURES.md` gives the values of all the fields. The object
+array starts where the 84 bytes of the table end, in all 44.
+
+**29 entries are internal, one in each of 29 programs.** It is entry 0 in 28
+programs and entry 17 in `Edge_Detection.exe`. The reader comments said that
+the largest count is 9 and that every third program takes the internal path.
+The largest count is 26, and 29 of the 44 programs have an internal entry.
+
+**The OCX header holds `0x248DD892` at `+0x10`** in all three corpus
+headers. `STRUCTURES.md` section 8.7 calls that field reserved.
+
+**Three `Declare` defects name the wrong byte.** A defect about
+`lpImportDescriptor`, `lpDllName` or `lpApiName` gives the first byte of the
+entry. The first field is at `+0x04` of the entry, and the other two are in
+the descriptor. This segment did not change them.
+
+**The fuzz target found no fault.** Two campaigns ran on commit `ce7df1f`,
+seeded as `.github/workflows/fuzz.yml` seeds them. The campaign of 60
+seconds ran 91428 inputs and reached coverage 6198. The campaign of 500000
+runs took 467 seconds and reached coverage 6575. Its highest `rss:` was
+977 MiB, below the 1159 MiB of the campaign on `dee22c0`.
+`crates/xtask/src/fuzz.rs` records it.
+
+**The walk does not make the fuzz target slower.** A hostile input can make
+the walk grade one `Declare` entry for each 8 bytes of a section, so the two
+fuzz targets were timed over the 1538 files of the final corpus, one after
+the other, two times each. The target of `ce7df1f` took 6.5 and 6.5
+seconds. The target of `09c3cfe`, before this segment, took 8.0 and 6.5
+seconds.
+
 #### Did Phase 7 reach its exit
 
 **The exit, as written, is met.** The fidelity map is committed, and it
@@ -309,10 +394,9 @@ difference needs a closed gap or a named limit.
 **The goal is not met.** The goal asks for an emitter for every structure
 that the reader parses. These structures have none yet:
 
-- **Fixed-length structures.** The object table (84 bytes), the `Declare`
-  entries and their descriptors (8 bytes each), and the OCX header (24
-  bytes). The OCX header sits inside the property stream, so the walk can
-  reach it only through the stream.
+- **Fixed-length structures.** The OCX header (24 bytes) sits inside the
+  property stream, so the walk can reach it only through the stream. The
+  pair that an internal `Declare` entry names has no reader.
 - **Arrays of pointers.** The procedure name array, the event descriptor
   array, and the event slots. The census counts the event slots, but no
   emitter writes back the bytes of any of the three arrays.
