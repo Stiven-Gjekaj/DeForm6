@@ -218,10 +218,11 @@ jobs:
       # iteration count is the same amount of work everywhere, regardless
       # of the runner.
       #
-      # The count itself is bounded by arithmetic against the resident set
-      # limit, stated in CRON_RUNS's own doc comment in
-      # crates/xtask/src/fuzz.rs, because crate::error::damaged leaks one
-      # short string per refusal by design.
+      # The count itself is held to a measured peak resident set, recorded
+      # in CRON_RUNS's own doc comment in crates/xtask/src/fuzz.rs, because
+      # crate::error::damaged leaks one short string per refusal by design
+      # and one input can refuse more than once. Each run of this job
+      # prints its own peak as the last rss: value in its log.
       - name: Run the iteration bounded fuzz campaign
         run: cargo run -p xtask -- fuzz-cron
 
