@@ -49,18 +49,36 @@ pub const PR_MAX_TOTAL_TIME: u32 = 60;
 /// covers less ground than a fast one for the same minute. An iteration
 /// count is machine independent, so the scheduled campaign takes one.
 ///
-/// The number is chosen against the leak `DETECT_LEAKS` turns off, not
-/// picked first and justified after. `crate::error::damaged`'s own doc
-/// comment measures the longest message this crate's `Box::leak` call
-/// sites can produce at 237 bytes (the control tree walk's own unexplained
-/// tail message, `vb/controltree.rs`, with every numeric field at its
-/// widest). At `RSS_LIMIT_MB` mebibytes (2048 * 1024 * 1024 =
-/// 2_147_483_648 bytes), the leak alone would reach the resident set limit
-/// at 2_147_483_648 / 237 = 9_058_166 iterations. `CRON_RUNS` is set at
-/// least ten times below that number: 9_058_166 / 500_000 is close to 18,
-/// so this run stops with the leak at roughly a nineteenth of the bound it
-/// would otherwise reach, leaving room for whatever else the process holds
-/// at the same time.
+/// The number must keep the whole process below `RSS_LIMIT_MB`, and no
+/// bound follows from the size of the leak that `DETECT_LEAKS` stops
+/// reporting. One input can leak more than once. Each input runs `inspect`
+/// twice, each run can refuse in each form it composes, and the fidelity
+/// walk can refuse once more. Each refusal that `crate::error::damaged`
+/// builds leaks its message. The leak is also not the only thing that
+/// grows: libFuzzer keeps its whole corpus in memory. So the bound is
+/// measured, not calculated.
+///
+/// This is the highest `rss:` value that libFuzzer printed in four
+/// campaigns of 500_000 runs. Each campaign was seeded the way
+/// `.github/workflows/fuzz.yml` seeds the scheduled job.
+///
+/// | Campaign | Machine | Peak |
+/// |---|---|---|
+/// | scheduled run 34823551578, 2026-09-14 | CI, Linux x86_64 | 1056 MiB |
+/// | scheduled run 34946876517, 2026-09-15 | CI, Linux x86_64 | 710 MiB |
+/// | scheduled run 35073097537, 2026-09-16 | CI, Linux x86_64 | 953 MiB |
+/// | commit `dee22c0`, 2026-09-16 | macOS arm64 | 1159 MiB |
+///
+/// The first two campaigns ran no fidelity walk. The third ran the walk
+/// before it counted arrays. The last ran the walk with the census.
+///
+/// The highest peak, 1159 MiB, is a little more than half of
+/// `RSS_LIMIT_MB`. Most of each rise came in the first 100_000 runs, but
+/// the local campaign still grew by 377 MiB between run 199_986 and run
+/// 500_000. A change that raises this number, or that makes one input leak
+/// more, must measure again and record the result here.
+/// `cron_runs_is_no_larger_than_the_run_count_the_peak_was_measured_at`
+/// fails when this number grows past the measured count.
 pub const CRON_RUNS: u32 = 500_000;
 
 /// Whether libFuzzer's own leak detector runs. `0` means it does not.
@@ -73,8 +91,8 @@ pub const CRON_RUNS: u32 = 500_000;
 /// input it generates and would otherwise report this deliberate leak as a
 /// crash on nearly every iteration. Turning the detector off is a stated,
 /// reasoned choice, recorded as an open finding in `docs/WINDOWS.md`,
-/// not a silent flag: `CRON_RUNS` is the number that keeps the leak this
-/// flag stops reporting below `RSS_LIMIT_MB` on its own.
+/// not a silent flag: `CRON_RUNS` is held to a run count at which the
+/// whole process, this leak included, was measured below `RSS_LIMIT_MB`.
 ///
 /// This number reaches the run twice, and both are needed. It goes on the
 /// libFuzzer command line as `-detect_leaks`, which stops libFuzzer
@@ -207,20 +225,38 @@ mod tests {
 
     use super::{CRON_RUNS, DETECT_LEAKS, FUZZ_DIR, PR_MAX_TOTAL_TIME, RSS_LIMIT_MB, asan_options};
 
-    /// `CRON_RUNS` must keep the leak `DETECT_LEAKS` stops reporting below
-    /// `RSS_LIMIT_MB` on its own, using the same 237 byte measured
-    /// worst case message `CRON_RUNS`'s own doc comment names, with a
-    /// safety factor of at least ten.
+    /// The run count of the four campaigns that `CRON_RUNS`'s doc comment
+    /// records.
+    const MEASURED_RUNS: u32 = 500_000;
+
+    /// The highest peak resident set, in mebibytes, that `CRON_RUNS`'s doc
+    /// comment records.
+    const MEASURED_PEAK_RSS_MB: u32 = 1159;
+
+    /// A model of the leak gives no bound, because one input can leak more
+    /// than once. The bound is a measurement. This test holds `CRON_RUNS`
+    /// to the run count that was measured. It does not run a campaign.
     #[test]
-    fn cron_runs_keeps_the_leak_at_least_ten_times_below_the_resident_set_limit() {
-        const LONGEST_LEAKED_MESSAGE_BYTES: u64 = 237;
-        let limit_bytes = u64::from(RSS_LIMIT_MB) * 1024 * 1024;
-        let iterations_to_reach_limit = limit_bytes / LONGEST_LEAKED_MESSAGE_BYTES;
+    fn cron_runs_is_no_larger_than_the_run_count_the_peak_was_measured_at() {
         assert!(
-            u64::from(CRON_RUNS) * 10 <= iterations_to_reach_limit,
-            "CRON_RUNS ({CRON_RUNS}) must sit at least ten times below the iteration \
-             count ({iterations_to_reach_limit}) at which the leak alone would reach \
-             the resident set limit"
+            u64::from(CRON_RUNS) <= u64::from(MEASURED_RUNS),
+            "CRON_RUNS ({CRON_RUNS}) is above the {MEASURED_RUNS} runs at which the peak \
+             resident set was measured. Run the scheduled campaign at the new count, \
+             read the highest rss: value it prints, and record it in the doc comment \
+             of CRON_RUNS and in MEASURED_PEAK_RSS_MB."
+        );
+    }
+
+    /// The measured peak must leave at least a third of the limit free. A
+    /// campaign that finds its inputs in a different order grows by a
+    /// different amount: the four measured peaks are 710, 953, 1056 and
+    /// 1159 MiB.
+    #[test]
+    fn the_measured_peak_leaves_at_least_a_third_of_the_resident_set_limit_free() {
+        assert!(
+            u64::from(MEASURED_PEAK_RSS_MB) * 3 <= u64::from(RSS_LIMIT_MB) * 2,
+            "the measured peak ({MEASURED_PEAK_RSS_MB} MiB) leaves less than a third of \
+             RSS_LIMIT_MB ({RSS_LIMIT_MB} MiB) free"
         );
     }
 
