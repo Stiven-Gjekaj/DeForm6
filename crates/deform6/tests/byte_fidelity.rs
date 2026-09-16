@@ -58,6 +58,8 @@ use deform6::fidelity::privateobj;
 use deform6::fidelity::project;
 use deform6::fidelity::walk::Reason;
 use deform6::fidelity::walk::walk;
+use deform6::read::pe::PeImage;
+use deform6::read::region::{Off, Va};
 use deform6::vb::classify::ObjectKind;
 use deform6::vb::opcodes::OpcodeTable;
 use std::collections::BTreeSet;
@@ -747,8 +749,9 @@ fn the_control_info_reader_models_sixteen_of_the_forty_bytes_in_every_graded_rec
 #[test]
 fn no_control_info_byte_this_reader_models_differs_from_the_file_in_any_corpus_program() {
     // The first two fields are the disputed ones in STRUCTURES.md section
-    // 8.6. A clean result here is the corpus agreeing with the word based
-    // layout the reader chose.
+    // 8.6. A clean result here does not settle that dispute: the reader and
+    // the emitter put both fields at the same offsets, so they cannot differ.
+    // The next test settles it from the event slots.
     let failed = difference_failures("ControlInfo");
     assert!(
         failed.is_empty(),
@@ -756,6 +759,104 @@ fn no_control_info_byte_this_reader_models_differs_from_the_file_in_any_corpus_p
         failed.len(),
         failed.join("\n")
     );
+}
+
+/// `STRUCTURES.md` section 8.6: the event table of a control whose
+/// `fControlType` is `0x40` has a header of six dwords.
+const NATIVE_EVENT_HEADER_LEN: u32 = 0x18;
+
+/// `STRUCTURES.md` section 8.6: the two control kinds the format names.
+const KNOWN_CONTROL_KINDS: [u32; 2] = [0x40, 0x2E];
+
+/// Reads slot `index` of the native event table at `table`, by hand.
+fn event_slot(pe: &PeImage<'_>, table: Va, index: u32) -> Option<Va> {
+    pe.region_at_va(table)?
+        .va_le(Off::new(NATIVE_EVENT_HEADER_LEN + index * 4))
+}
+
+/// Tells whether `va` holds the native stub section 8.6 shows:
+/// `81 6C 24 04 <imm32>`, then `E9 <rel32>`.
+///
+/// Read by hand, so this file does not take the reader's word for what a
+/// stub is.
+fn is_native_stub(pe: &PeImage<'_>, va: Va) -> bool {
+    pe.region_at_va(va)
+        .and_then(|stub| stub.take(Off::new(0), 13))
+        .is_some_and(|bytes| bytes[..4] == [0x81, 0x6C, 0x24, 0x04] && bytes[8] == 0xE9)
+}
+
+/// Tells whether a slot holds what a slot may hold: a null for an event with
+/// no handler, or a native stub.
+fn is_null_or_stub(pe: &PeImage<'_>, slot: Option<Va>) -> bool {
+    slot.is_some_and(|va| va.is_null() || is_native_stub(pe, va))
+}
+
+#[test]
+fn the_event_slots_fit_the_word_at_two_and_refuse_the_word_at_four_in_seven_hundred_and_six_control_info_records()
+ {
+    // STRUCTURES.md section 8.6: one source reads a four byte fControlType
+    // and puts wEventCount at 0x04. Three read a two byte fControlType and
+    // put wEventCount at 0x02. The event slots tell the two apart.
+    //
+    // Measured on 2026-09-16: every record is a 0x40 control. Its first four
+    // bytes never read as a known kind. Every slot below the word at 0x02 is
+    // a null or a stub, and the slot at that index is not a stub. The word
+    // at 0x04 is always larger, and the slots it adds always include one that
+    // is neither.
+    let mut records = 0_usize;
+    let mut failed = Vec::new();
+    for (path, ledgers) in graded() {
+        let data = std::fs::read(&path).unwrap();
+        let pe = PeImage::parse(&data).unwrap();
+        for ledger in ledgers.iter().filter(|l| l.structure == "ControlInfo") {
+            records += 1;
+            let at = usize::try_from(ledger.base.get()).unwrap();
+            let word =
+                |offset: usize| u16::from_le_bytes([data[at + offset], data[at + offset + 1]]);
+            let dword = |offset: usize| {
+                u32::from_le_bytes(data[at + offset..at + offset + 4].try_into().unwrap())
+            };
+            let place = format!("{}: ControlInfo at file offset {at:#x}", path.display());
+            let (kind, word_at_two, word_at_four) = (word(0x00), word(0x02), word(0x04));
+            let table = Va::new(dword(0x18));
+
+            if kind != 0x40 {
+                failed.push(format!(
+                    "{place}: kind {kind:#x}, and this test knows only the header of kind 0x40"
+                ));
+                continue;
+            }
+            if KNOWN_CONTROL_KINDS.contains(&dword(0x00)) {
+                failed.push(format!(
+                    "{place}: the four byte kind {:#x} is a known kind",
+                    dword(0x00)
+                ));
+            }
+            if !(0..u32::from(word_at_two)).all(|i| is_null_or_stub(&pe, event_slot(&pe, table, i)))
+            {
+                failed.push(format!(
+                    "{place}: a slot below the word at 0x02 ({word_at_two}) is not a null or a stub"
+                ));
+            }
+            if event_slot(&pe, table, u32::from(word_at_two))
+                .is_some_and(|va| !va.is_null() && is_native_stub(&pe, va))
+            {
+                failed.push(format!(
+                    "{place}: slot {word_at_two} is a stub, so the word at 0x02 stops short"
+                ));
+            }
+            if word_at_four <= word_at_two
+                || (u32::from(word_at_two)..u32::from(word_at_four))
+                    .all(|i| is_null_or_stub(&pe, event_slot(&pe, table, i)))
+            {
+                failed.push(format!(
+                    "{place}: the word at 0x04 ({word_at_four}) adds no slot that is neither a null nor a stub"
+                ));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+    assert_eq!(records, 706);
 }
 
 #[test]
