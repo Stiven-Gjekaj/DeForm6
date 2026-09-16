@@ -27,7 +27,7 @@ use crate::fidelity::ledger::Ledger;
 use crate::fidelity::{Emit, Fault, compare};
 use crate::read::pe::PeImage;
 use crate::read::region::{Off, Region};
-use crate::vb::gui::GuiTable;
+use crate::vb::gui::{GuiTable, GuiTableEntry};
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::object::{Object, ObjectTable};
 use crate::vb::project::{ObjectTableHead, ProjectInfo};
@@ -94,6 +94,14 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
     )?);
 
     let gui_table = GuiTable::walk(&pe, &header)?;
+    let gui_array = pe
+        .region_at_va(header.lp_gui_table)
+        .ok_or(Refusal::Damaged("the GUI table pointer is in no section"))?;
+    for (index, entry) in gui_table.entries.iter().enumerate() {
+        let at =
+            element::<GuiTableEntry>(&gui_array, index, "the file ends inside a GUI table entry")?;
+        ledgers.push(compare(entry, &at)?);
+    }
 
     let head = ObjectTableHead::read(&pe, info.lp_object_table)?;
     let table = ObjectTable::walk(&pe, info.lp_object_table, &head)?;
@@ -145,6 +153,22 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
 fn window<'a, T: Emit>(region: &Region<'a>, what: &'static str) -> Result<Region<'a>, Refusal> {
     region
         .subregion(Off::new(0), T::LEN)
+        .ok_or(Refusal::Damaged(what))
+}
+
+/// Cuts element `index` out of an array of `T`, at a stride of `T::LEN`.
+///
+/// The stride is the emitter's own length, restated from the format
+/// document, and never the reader's constant.
+fn element<'a, T: Emit>(
+    array: &Region<'a>,
+    index: usize,
+    what: &'static str,
+) -> Result<Region<'a>, Refusal> {
+    let ordinal = u32::try_from(index).map_err(|_ignored| Refusal::Damaged(what))?;
+    let at = ordinal.checked_mul(T::LEN).ok_or(Refusal::Damaged(what))?;
+    array
+        .subregion(Off::new(at), T::LEN)
         .ok_or(Refusal::Damaged(what))
 }
 

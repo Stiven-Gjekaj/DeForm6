@@ -46,6 +46,7 @@
 //! that file and `tests/differential.rs` both give: two corpus tests must be
 //! able to fail independently.
 
+use deform6::fidelity::gui;
 use deform6::fidelity::header;
 use deform6::fidelity::ledger::{Ledger, Verdict};
 use deform6::fidelity::object;
@@ -415,4 +416,51 @@ fn no_project_info_byte_this_reader_models_differs_from_the_file_in_any_corpus_p
         failed.len(),
         failed.join("\n")
     );
+}
+
+#[test]
+fn the_corpus_grades_fifty_three_gui_table_entry_records() {
+    assert_eq!(graded_count("GuiTableEntry"), 53);
+}
+
+#[test]
+fn the_gui_table_entry_reader_models_eight_of_the_eighty_bytes_in_every_graded_record() {
+    let failed = coverage_failures("GuiTableEntry", 80, gui::MODELLED_BYTES, gui::UNMODELLED);
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+#[test]
+fn no_gui_table_entry_byte_this_reader_models_differs_from_the_file_in_any_corpus_program() {
+    let failed = difference_failures("GuiTableEntry");
+    assert!(
+        failed.is_empty(),
+        "{} GUI table entry byte run(s) differ from the file:\n{}",
+        failed.len(),
+        failed.join("\n")
+    );
+}
+
+#[test]
+fn the_walk_grades_one_gui_table_entry_for_each_form_inspect_reports() {
+    // Two independent routes to the same number: the walk's own ledgers, and
+    // the forms inspect composes from the GUI table.
+    let table = OpcodeTable::builtin();
+    let mut failed = Vec::new();
+    for (path, ledgers) in graded() {
+        let data = std::fs::read(&path).unwrap();
+        let report = deform6::inspect(&data, &table, deform6::journal::Mode::Strict)
+            .unwrap_or_else(|err| panic!("inspecting {}: {err}", path.display()));
+        let graded = ledgers
+            .iter()
+            .filter(|l| l.structure == "GuiTableEntry")
+            .count();
+        if graded != report.forms.len() {
+            failed.push(format!(
+                "{}: the walk graded {graded} GUI table entries and inspect reports {} forms",
+                path.display(),
+                report.forms.len()
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
 }

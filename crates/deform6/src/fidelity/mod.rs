@@ -48,6 +48,7 @@
 //! crate wrote the same byte twice would be a lie about someone's file.
 
 pub mod census;
+pub mod gui;
 pub mod header;
 pub mod ledger;
 pub mod object;
