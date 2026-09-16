@@ -2278,6 +2278,11 @@ that section 7.1 gives from AG, and the code at 0x18 reads through it.
 **No import is by ordinal.** No `lpApiName` of the 220 descriptors starts
 with `#`, so the corpus cannot close gap 10 (§7.2, §11).
 
+**What the reader keeps.** The reader keeps both fields of each entry, and
+the first 8 bytes of each descriptor of type 7. The fidelity walk writes them
+back over the file. In the 44 programs, no byte of them differs from the
+file.
+
 These tests keep facts of this section true:
 
 - `the_census_counts_two_hundred_and_forty_nine_declare_entries_declared_and_returned`
@@ -2285,8 +2290,21 @@ These tests keep facts of this section true:
 - `every_count_the_census_carries_is_the_count_the_file_holds_at_the_offset_it_names`
   in `tests/array_census.rs`, for `dwExternalCount` at 0x238;
 - `the_thunk_code_of_each_external_declare_descriptor_starts_twenty_four_bytes_after_it`
-  in `tests/byte_fidelity.rs`, for the 220 descriptors, the values from 0x08
-  to 0x14, and the two instructions;
+  in `tests/byte_fidelity.rs`, for the 220 entries of type 7, the values
+  from 0x08 to 0x14, and the two instructions;
+- `the_twenty_nine_internal_declare_entries_name_no_graded_descriptor_and_no_refused_row`
+  in `tests/byte_fidelity.rs`, for the 29 entries of type 6. With the two
+  counts above, it also keeps true that no entry has a different type;
+- `the_walk_grades_one_declare_descriptor_at_the_address_each_external_entry_names`
+  in `tests/byte_fidelity.rs`, which counts 220 descriptors that the walk
+  grades one time each. So no two entries of type 7 name the same
+  descriptor;
+- `no_two_structures_the_walk_grades_share_a_byte_in_any_corpus_program` in
+  `tests/byte_fidelity.rs`, for the 24 bytes of each descriptor;
+- `no_declare_table_entry_byte_this_reader_models_differs_from_the_file_in_any_corpus_program`
+  and
+  `no_declare_descriptor_byte_this_reader_models_differs_from_the_file_in_any_corpus_program`
+  in `tests/byte_fidelity.rs`, for the fields that the reader keeps;
 - `grayscale_keeps_its_nine_entries_in_table_order_and_the_descriptor_of_each_external_one`
   in `vb/project.rs`, which reads the 9 entries of `Grayscale.exe` by hand.
 
