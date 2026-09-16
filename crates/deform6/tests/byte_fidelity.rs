@@ -68,6 +68,7 @@
 //! that file and `tests/differential.rs` both give: two corpus tests must be
 //! able to fail independently.
 
+use deform6::error::Refusal;
 use deform6::fidelity::census::{Array, Owner};
 use deform6::fidelity::controlinfo;
 use deform6::fidelity::eventstub;
@@ -81,6 +82,7 @@ use deform6::fidelity::optionalobjectinfo;
 use deform6::fidelity::privateobj;
 use deform6::fidelity::project;
 use deform6::fidelity::walk::Reason;
+use deform6::fidelity::walk::Walk;
 use deform6::fidelity::walk::walk;
 use deform6::read::pe::PeImage;
 use deform6::read::region::{Off, Va};
@@ -1362,18 +1364,17 @@ fn a_stub_whose_first_opcode_byte_is_changed_differs_at_that_byte_and_nowhere_el
     assert_eq!(differs, vec![(stub.base.get(), 1)]);
 }
 
-#[test]
-fn a_bound_slot_whose_stub_maps_nowhere_is_ungraded_and_owned_by_its_slot() {
-    let original = sk_gradient();
-    let before = walk(&original).unwrap();
-    let pe = PeImage::parse(&original).unwrap();
+/// The first bound slot of SK-Gradient, read by hand, and the owner that the
+/// walk gives a refused stub of that slot.
+fn first_bound_slot(original: &[u8], before: &Walk) -> (BoundSlot, Owner) {
+    let pe = PeImage::parse(original).unwrap();
     let (control_base, slot) = before
         .ledgers
         .iter()
         .filter(|l| l.structure == "ControlInfo")
         .find_map(|l| {
             let base = usize::try_from(l.base.get()).unwrap();
-            bound_slots(&original, &pe, base)
+            bound_slots(original, &pe, base)
                 .into_iter()
                 .next()
                 .map(|slot| (l.base.get(), slot))
@@ -1388,13 +1389,24 @@ fn a_bound_slot_whose_stub_maps_nowhere_is_ungraded_and_owned_by_its_slot() {
     let Owner::Control { object, control } = row.owner else {
         panic!("an event slot row must belong to a control: {row:?}");
     };
+    let owner = Owner::Slot {
+        object,
+        control,
+        slot: slot.index,
+    };
+    (slot, owner)
+}
 
-    let unmapped = 0x00F0_0000_u32.to_le_bytes();
-    let mut patched = original.clone();
-    assert_ne!(patched[slot.at..slot.at + 4], unmapped);
-    patched[slot.at..slot.at + 4].copy_from_slice(&unmapped);
-
-    let after = walk(&patched).expect("one bad stub must not stop the walk");
+/// Requires `after` to hold one refused `EventStub` row more than `before`,
+/// owned by `owner` and refused for `reason`, and no ledger at file offset
+/// `stub_at`. Nothing else may change.
+fn assert_one_refused_stub(
+    before: &Walk,
+    after: &Walk,
+    stub_at: usize,
+    owner: Owner,
+    reason: &'static str,
+) {
     let added: Vec<_> = after
         .ungraded
         .iter()
@@ -1402,17 +1414,34 @@ fn a_bound_slot_whose_stub_maps_nowhere_is_ungraded_and_owned_by_its_slot() {
         .collect();
     assert_eq!(added.len(), 1, "{added:?}");
     assert_eq!(added[0].structure, "EventStub");
-    assert_eq!(
-        added[0].owner,
-        Owner::Slot {
-            object,
-            control,
-            slot: slot.index
-        }
-    );
-    assert!(matches!(added[0].reason, Reason::Refused(_)));
+    assert_eq!(added[0].owner, owner);
+    assert_eq!(added[0].reason, Reason::Refused(Refusal::Damaged(reason)));
     assert_eq!(after.ledgers.len() + 1, before.ledgers.len());
+    let stub_at = u32::try_from(stub_at).unwrap();
+    assert!(after.ledgers.iter().all(|l| l.base.get() != stub_at));
     assert_eq!(after.counts, before.counts);
+}
+
+#[test]
+fn a_bound_slot_whose_stub_maps_nowhere_is_ungraded_and_owned_by_its_slot() {
+    let original = sk_gradient();
+    let before = walk(&original).unwrap();
+    let (slot, owner) = first_bound_slot(&original, &before);
+    let stub_at = file_offset_of(&PeImage::parse(&original).unwrap(), slot.stub);
+
+    let unmapped = 0x00F0_0000_u32.to_le_bytes();
+    let mut patched = original.clone();
+    assert_ne!(patched[slot.at..slot.at + 4], unmapped);
+    patched[slot.at..slot.at + 4].copy_from_slice(&unmapped);
+
+    let after = walk(&patched).expect("one bad stub must not stop the walk");
+    assert_one_refused_stub(
+        &before,
+        &after,
+        stub_at,
+        owner,
+        "an event stub address is in no section",
+    );
 }
 
 #[test]
@@ -1422,32 +1451,13 @@ fn a_p_code_stub_that_a_bound_slot_names_is_refused_and_owned_by_its_slot() {
     // read the opcodes, so it takes the bytes at 0x09 as a jump. The last of
     // them is the ret, 0xC3, so the jump goes back more than 0x3C000000
     // bytes, past address 0, and the reader keeps no handler. The stub then
-    // shows as a refused record, not as bytes that differ.
+    // shows as a refused record, not as bytes that differ. The walk looks at
+    // the stub itself to give the reason.
     let original = sk_gradient();
     let before = walk(&original).unwrap();
-    let pe = PeImage::parse(&original).unwrap();
-    let (control_base, slot) = before
-        .ledgers
-        .iter()
-        .filter(|l| l.structure == "ControlInfo")
-        .find_map(|l| {
-            let base = usize::try_from(l.base.get()).unwrap();
-            bound_slots(&original, &pe, base)
-                .into_iter()
-                .next()
-                .map(|slot| (l.base.get(), slot))
-        })
-        .unwrap();
-    let row = before
-        .counts
-        .iter()
-        .find(|c| c.array == Array::EventSlots && c.declared_at.get() == control_base + 2)
-        .unwrap();
-    let Owner::Control { object, control } = row.owner else {
-        panic!("an event slot row must belong to a control: {row:?}");
-    };
+    let (slot, owner) = first_bound_slot(&original, &before);
+    let at = file_offset_of(&PeImage::parse(&original).unwrap(), slot.stub);
 
-    let at = file_offset_of(&pe, slot.stub);
     let mut p_code = vec![0x33, 0xC0, 0xBA];
     p_code.extend_from_slice(&slot.stub.to_le_bytes());
     p_code.push(0x68);
@@ -1460,26 +1470,40 @@ fn a_p_code_stub_that_a_bound_slot_names_is_refused_and_owned_by_its_slot() {
     assert!(!opens_a_native_stub(&patched[at..]));
 
     let after = walk(&patched).expect("one P-code stub must not stop the walk");
-    let added: Vec<_> = after
-        .ungraded
-        .iter()
-        .filter(|row| !before.ungraded.contains(row))
-        .collect();
-    assert_eq!(added.len(), 1, "{added:?}");
-    assert_eq!(added[0].structure, "EventStub");
-    assert_eq!(
-        added[0].owner,
-        Owner::Slot {
-            object,
-            control,
-            slot: slot.index
-        }
+    assert_one_refused_stub(
+        &before,
+        &after,
+        at,
+        owner,
+        "an event stub does not have the native shape",
     );
-    assert!(matches!(added[0].reason, Reason::Refused(_)));
-    assert_eq!(after.ledgers.len() + 1, before.ledgers.len());
-    let at = u32::try_from(at).unwrap();
-    assert!(after.ledgers.iter().all(|l| l.base.get() != at));
-    assert_eq!(after.counts, before.counts);
+}
+
+#[test]
+fn a_native_stub_whose_jump_leaves_the_address_space_is_refused_and_owned_by_its_slot() {
+    // The most negative jump takes a stub below address 0x80000000 below
+    // address 0, so the reader keeps no handler. The stub keeps the native
+    // shape, so the walk gives the handler arithmetic as the reason.
+    let original = sk_gradient();
+    let before = walk(&original).unwrap();
+    let (slot, owner) = first_bound_slot(&original, &before);
+    assert!(slot.stub < 0x8000_0000, "{:#x}", slot.stub);
+    let at = file_offset_of(&PeImage::parse(&original).unwrap(), slot.stub);
+
+    let jump = i32::MIN.to_le_bytes();
+    let mut patched = original.clone();
+    assert_ne!(patched[at + 9..at + 13], jump);
+    patched[at + 9..at + 13].copy_from_slice(&jump);
+    assert!(opens_a_native_stub(&patched[at..]));
+
+    let after = walk(&patched).expect("one bad jump must not stop the walk");
+    assert_one_refused_stub(
+        &before,
+        &after,
+        at,
+        owner,
+        "the handler address of an event stub leaves a u32",
+    );
 }
 
 #[test]

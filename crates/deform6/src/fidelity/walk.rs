@@ -32,7 +32,7 @@ use std::collections::BTreeSet;
 
 use crate::error::Refusal;
 use crate::fidelity::census::{Array, Count, Evidence, Outcome, Owner, outcome};
-use crate::fidelity::eventstub::EventStubRecord;
+use crate::fidelity::eventstub::{EventStubRecord, has_native_shape};
 use crate::fidelity::guiobjectinfo::GuiObjectInfoRecord;
 use crate::fidelity::ledger::Ledger;
 use crate::fidelity::privateobj::PrivateObjRecord;
@@ -534,6 +534,12 @@ fn count_event_slots(
 /// stub address already in `stubs` is not graded again. The set also bounds
 /// what a hostile file can make the walk keep: one ledger or one row for each
 /// address, never one for each slot.
+///
+/// A refused stub gets one of four reasons: its address is in no section,
+/// the file ends inside it, it does not have the native shape, or its handler
+/// address leaves the `u32` range. The reader keeps no handler in the last two
+/// cases and does not say which check failed, so the walk looks at the opcode
+/// bytes of the stub itself.
 fn grade_event_stubs(
     pe: &PeImage<'_>,
     table: &EventTable,
@@ -549,10 +555,19 @@ fn grade_event_stubs(
         if !stubs.insert(stub) {
             continue;
         }
-        let graded = located::<EventStubRecord>(pe, stub, "the file ends inside an event stub")
+        let graded = pe
+            .region_at_va(stub)
+            .ok_or(Refusal::Damaged("an event stub address is in no section"))
+            .and_then(|region| {
+                window::<EventStubRecord>(&region, "the file ends inside an event stub")
+            })
             .and_then(|window| {
                 let record = EventStubRecord::of(slot).ok_or(Refusal::Damaged(
-                    "the handler address of an event stub leaves a u32",
+                    if has_native_shape(&window) {
+                        "the handler address of an event stub leaves a u32"
+                    } else {
+                        "an event stub does not have the native shape"
+                    },
                 ))?;
                 Ok((record, window))
             });

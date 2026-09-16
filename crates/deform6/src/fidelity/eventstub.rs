@@ -44,7 +44,7 @@
 //! someone decides whether this emitter models it.
 
 use crate::fidelity::{Emit, Slate};
-use crate::read::region::{Off, Va};
+use crate::read::region::{Off, Region, Va};
 use crate::vb::controlinfo::{EventSlot, StubHandler};
 
 /// `STRUCTURES.md` section 8.6: the opcode of `sub dword ptr [esp+4], imm32`.
@@ -113,6 +113,17 @@ impl Emit for EventStubRecord {
     }
 }
 
+/// Tells whether `window`, the 13 bytes of one stub, holds the two opcodes of
+/// the native stub.
+///
+/// The fidelity walk asks this only to say why a stub that a slot names has
+/// no record.
+#[must_use]
+pub(crate) fn has_native_shape(window: &Region<'_>) -> bool {
+    window.take(Off::new(0x00), 4) == Some(SUB_ESP4.as_slice())
+        && window.u8(Off::new(0x08)) == Some(JMP_REL32)
+}
+
 /// The bytes of an event stub that no field of [`EventStubRecord`]
 /// reproduces, as `(structure relative offset, length)` pairs.
 ///
@@ -135,7 +146,7 @@ mod tests {
         reason = "a test builds the state it needs and must fail loudly when that state is wrong"
     )]
 
-    use super::{EventStubRecord, MODELLED_BYTES, UNMODELLED};
+    use super::{EventStubRecord, MODELLED_BYTES, UNMODELLED, has_native_shape};
     use crate::fidelity::ledger::{Span, Verdict};
     use crate::fidelity::{Emit, compare, lay};
     use crate::read::region::{Off, Region, Va};
@@ -264,6 +275,26 @@ mod tests {
             vec![Span::new(Off::new(0x00), 4), Span::new(Off::new(0x08), 1)]
         );
         assert_eq!(ledger.bytes_with(Verdict::Same), 8);
+    }
+
+    #[test]
+    fn a_window_has_the_native_shape_only_when_all_five_opcode_bytes_are_there() {
+        let raw = native(0x3F, 0x0430);
+        assert!(has_native_shape(&Region::new(&raw, Off::new(0))));
+        for at in 0..13 {
+            let mut changed = raw.clone();
+            changed[at] ^= 0x01;
+            let opcode = [0x00, 0x01, 0x02, 0x03, 0x08].contains(&at);
+            assert_eq!(
+                has_native_shape(&Region::new(&changed, Off::new(0))),
+                !opcode,
+                "byte {at:#x}"
+            );
+        }
+        assert!(
+            !has_native_shape(&Region::new(&raw[..0x08], Off::new(0))),
+            "a window that ends before the jmp opcode"
+        );
     }
 
     #[test]
