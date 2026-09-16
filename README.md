@@ -349,7 +349,7 @@ list.
 
 | Limit | What is not known | What the tool does instead |
 |---|---|---|
-| S-02 | Which bit of `fObjectType` reliably marks that the optional half of `ObjectInfo` is present. Two published tests disagree with the corpus. | The tool tests bit `0x2`, the only bit that separates a standard module from every other kind across all seventeen tabulated values. |
+| S-02 | Which bit of `fObjectType` reliably marks that the optional half of `ObjectInfo` is present. Two published tests disagree with the corpus. | The tool tests bit `0x2`, the only bit that separates a standard module from every other kind across all seventeen tabulated values. It reports an object whose bit disagrees with its private object address. |
 | S-03 | No source names the raw `fObjectType` value an MDIForm carries. | The tool classifies any value outside the three the corpus proves as `Unknown`, and carries the raw number forward in the report instead of guessing a name. |
 | S-04 | How a `ParamArray` argument modifier is encoded. No corpus source declares one. | The tool never emits the `ParamArray` modifier. The argument decodes under its ordinary type code, because the documented modifier bits are indistinguishable from a plain `ByRef Variant` argument. |
 | S-05 | What Visual Basic type sixteen of the type code positions name: `0x00`-`0x02`, `0x04`, `0x07`, `0x09`, `0x0E`, `0x11`, `0x12`, `0x14`-`0x1A`. None occurs in the corpus. | The tool reports the type as `Unknown` and carries the raw byte forward, rather than guessing a name. |

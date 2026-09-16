@@ -545,7 +545,8 @@ it against `ObjectInfo.lpPrivateObject != -1` (SVBD's module marker) and report
 a disagreement. **[L]**
 
 Measured on all 105 corpus objects, 2026-09-16: the two rules agree on every
-object. Method and numbers in §16.
+object. `inspect` reports an object on which they disagree. Method and numbers
+in §16.
 
 **MDIForm is missing from SVBD's table.** **[G]** An MDI parent form's
 `fObjectType` value is not recorded in any source found. A parser must not
@@ -1981,14 +1982,21 @@ programs:
 `the_objects_with_no_optional_object_info_are_exactly_the_objects_with_no_private_obj`.
 Each one compares two sets of objects in both directions.
 
-**What the measurement did not settle.**
+**The cross-check runs on every file.** `inspect` compares the two markers
+for each object whose `ObjectInfo` reads. A disagreement becomes a
+`ModuleMarkerMismatch` defect at `ObjectInfo + 0x0C`, and the defect names
+both values. On the pointer side, `0` counts as the sentinel does, because
+`PrivateObj::read` finds no `PrivateObj` for either value. The defect is
+`Tolerated`: each reader still follows its own field and nothing is
+invented, so a strict run reports the defect and continues.
+`tests/module_markers.rs` patches a form and a module of one corpus program
+in memory, and finds the defect at the patched byte. It finds no such defect
+in the 44 corpus programs.
 
-1. The corpus holds no UserControl, PropertyPage or UserDocument, and no
-   `fObjectType` value other than the three above. The other fourteen values
-   in the §5.5 table are not measured. Whether an MDI form has a value of its
-   own is still gap 3.
-2. `vb::classify::agree` states the cross-check, but no production code calls
-   it. A file whose two markers disagree is not reported today.
+**What the measurement did not settle.** The corpus holds no UserControl,
+PropertyPage or UserDocument, and no `fObjectType` value other than the
+three above. The other fourteen values in the §5.5 table are not measured.
+Whether an MDI form has a value of its own is still gap 3.
 
 ---
 

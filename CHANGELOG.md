@@ -25,6 +25,11 @@ heading its version and its date.
   closed. The dispute about `fControlType` and `wEventCount` at the start of
   `ControlInfo` is settled. Sections 16 and 17 of `docs/STRUCTURES.md` give
   the numbers.
+- The gap 2 cross-check runs: `inspect` compares bit `0x2` of
+  `fObjectType` with `lpPrivateObject` for each object, and reports a
+  disagreement as a `ModuleMarkerMismatch` defect at `ObjectInfo + 0x0C`.
+  The defect is `Tolerated`, so a strict run reports it and continues. No
+  corpus program raises it.
 - `sh scripts/gate.sh` runs the whole gate on a local machine.
 
 ### What changes for a caller
@@ -49,6 +54,13 @@ is therefore 2.0.0, not 1.1.0.
   gives `ProjectInfo + 0x238`, and its `rva` is now `null`, because that
   byte was not reached through the address of the `Declare` table that
   1.0.0 gave.
+- `DefectKind` has a new variant, `ModuleMarkerMismatch`, and
+  `schema/report.schema.json` accepts it. A `match` on `DefectKind` with no
+  wildcard arm does not compile until it names the new variant.
+- `vb::classify::agree` now treats an `lpPrivateObject` of `0` as no private
+  object, as `PrivateObj::read` already did. It now gives `false` for a form
+  whose pointer is `0`, and `true` for a module whose pointer is `0`. The new
+  `vb::classify::names_no_private_object` states that rule for both.
 
 ### What stays open
 
@@ -57,8 +69,6 @@ is therefore 2.0.0, not 1.1.0.
 - The census does not count the `Declare` table or the type buffer. The
   clamps on those two arrays only bound a loop, so the byte diff cannot see
   them either.
-- `vb::classify::agree` states the gap 2 cross-check, but no production
-  code calls it. A file whose two markers disagree is not reported.
 - The internal `damaged` helper still leaks one message for each refusal.
   The scheduled fuzz job is held to a measured peak resident set, not to a
   model of the leak.
