@@ -4,7 +4,68 @@ This file has no format precedent in this repository, so this note states
 the one it uses. Every release gets one level two heading in the form
 `## [X.Y.Z] - YYYY-MM-DD`. The newest release comes first. Each section
 states what the release delivers, what stays open, and what the release
-does not do.
+does not do. A change that no release holds yet goes under one
+`## [Unreleased]` heading above the newest release. A release gives that
+heading its version and its date.
+
+## [Unreleased]
+
+### What this delivers
+
+- Byte fidelity: `deform6::fidelity::walk::walk` writes eight structures
+  back over the bytes they were read from. It grades each byte as the same,
+  as different, or as not modelled. Across the 44 corpus programs it grades
+  1251 records, and no byte that a reader models differs from the file.
+- The array census: the same walk counts four arrays, which are the GUI
+  table, the object array, the controls of each object and the event slots
+  of each control. For each one it compares the count that the file
+  declares with the number of entries that the reader returns. No array in
+  the corpus comes up short.
+- Corpus evidence: gap 2, the `OptionalObjectInfo` presence test, is
+  closed. The dispute about `fControlType` and `wEventCount` at the start of
+  `ControlInfo` is settled. Sections 16 and 17 of `docs/STRUCTURES.md` give
+  the numbers.
+- `sh scripts/gate.sh` runs the whole gate on a local machine.
+
+### What changes for a caller
+
+These changes break code that was written against 1.0.0. The next release
+is therefore 2.0.0, not 1.1.0.
+
+- New public fields: `VbHeader::file_offset`, `ProjectInfo::file_offset`,
+  `ControlInfo::file_offset`, `ControlInfo::lpsz_name`,
+  `Object::lpsz_object_name` and `GuiTableEntry::l_struct_size`. Code that
+  builds one of these structures with a struct expression does not compile.
+  Code that names every field of one in a pattern does not compile.
+- These five structures and the new `OptionalObjectInfo` are now
+  `#[non_exhaustive]`. Outside this crate, do not build them with a struct
+  expression, and put `..` in each pattern that names their fields. Then a
+  field that a later release adds does not break a caller again.
+- Three defects in the JSON report now give the offset of the count that
+  was clamped, not the offset of the table that the count bounds. A clamped
+  `wFormCount` names the structure `VBHeader`, at `VBHeader + 0x44`, where
+  1.0.0 named `GuiTable`, at the start of the GUI table. A clamped
+  `wEventCount` gives `ControlInfo + 0x02`. A clamped `dwExternalCount`
+  gives `ProjectInfo + 0x238`, and its `rva` is now `null`, because that
+  byte was not reached through the address of the `Declare` table that
+  1.0.0 gave.
+
+### What stays open
+
+- The fidelity walk grades eight structures. `docs/ROADMAP.md` names the
+  work on the other structures that is left.
+- The census does not count the `Declare` table or the type buffer. The
+  clamps on those two arrays only bound a loop, so the byte diff cannot see
+  them either.
+- `vb::classify::agree` states the gap 2 cross-check, but no production
+  code calls it. A file whose two markers disagree is not reported.
+- The internal `damaged` helper still leaks one message for each refusal.
+  The scheduled fuzz job is held to a measured peak resident set, not to a
+  model of the leak.
+
+### What this does not do
+
+- It does not change the version in `Cargo.toml`, and it has no tag.
 
 ## [1.0.0] - 2026-09-14
 
