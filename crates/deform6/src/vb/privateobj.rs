@@ -65,6 +65,7 @@
 use crate::error::{Defect, DefectKind, Refusal, Site};
 use crate::read::pe::PeImage;
 use crate::read::region::{Off, Region, Rva, Va};
+use crate::vb::classify::names_no_private_object;
 use crate::vb::object::Object;
 
 /// The size of the `ObjectInfo` structure.
@@ -76,14 +77,6 @@ const OBJECT_INFO_SIZE: u32 = 0x38;
 ///
 /// `STRUCTURES.md` section 6.1 gives `0x40` = 64 bytes.
 const PRIVATE_OBJ_SIZE: u32 = 0x40;
-
-/// The sentinel `ObjectInfo.lpPrivateObject` carries for a standard module.
-///
-/// `STRUCTURES.md` section 5.2 cites Semi VB Decompiler's note that this
-/// field is `-1` for a `.bas`. Measured: it is also plainly `0` in a
-/// synthetic value nothing in the corpus needs, and `PrivateObj::read` treats
-/// both as the same fact, per the plan's own instruction.
-const NO_PRIVATE_OBJECT: u32 = 0xFFFF_FFFF;
 
 /// The width of one entry in `Object.lpProcNamesArray`.
 const PROC_NAME_PTR_SIZE: u32 = 4;
@@ -253,16 +246,17 @@ impl PrivateObj {
     ///
     /// `lp_private_object` is the raw value [`ObjectInfo::lp_private_object`]
     /// carries. A plain `0` and the sentinel `0xFFFF_FFFF` both mean the
-    /// object has no private object, per the doc comment on [`PrivateObj`],
-    /// and neither is dereferenced: the sentinel check happens before this
-    /// function builds a [`Va`] from anything.
+    /// object has no private object, per the doc comment on [`PrivateObj`]
+    /// and [`names_no_private_object`], and neither is dereferenced: the
+    /// sentinel check happens before this function builds a [`Va`] from
+    /// anything.
     ///
     /// # Errors
     ///
     /// Returns [`Refusal::Damaged`] when the address is a real address but it
     /// is in no section, and when the file holds fewer than 64 bytes there.
     pub fn read(pe: &PeImage<'_>, lp_private_object: u32) -> Result<Self, Refusal> {
-        if lp_private_object == 0 || lp_private_object == NO_PRIVATE_OBJECT {
+        if names_no_private_object(lp_private_object) {
             return Ok(Self::Absent);
         }
 

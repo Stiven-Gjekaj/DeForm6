@@ -125,6 +125,25 @@ pub const fn has_optional_info(f_object_type: u32) -> bool {
     f_object_type & 0x2 != 0
 }
 
+/// The sentinel `ObjectInfo.lpPrivateObject` carries for a standard module.
+///
+/// `STRUCTURES.md` section 5.2 cites Semi VB Decompiler's note that this
+/// field is `-1` for a `.bas`.
+const NO_PRIVATE_OBJECT: u32 = 0xFFFF_FFFF;
+
+/// Tells whether an `ObjectInfo.lpPrivateObject` value names no `PrivateObj`.
+///
+/// The sentinel `0xFFFF_FFFF` names none, and so does a plain `0`, which is
+/// not an address either. All 8 standard modules in the corpus hold the
+/// sentinel, and no corpus object holds `0`.
+///
+/// This is the one statement of the rule. `PrivateObj::read` asks it before
+/// it builds an address from the value.
+#[must_use]
+pub const fn names_no_private_object(lp_private_object: u32) -> bool {
+    lp_private_object == 0 || lp_private_object == NO_PRIVATE_OBJECT
+}
+
 /// Cross-checks the `0x2` bit against `ObjectInfo.lpPrivateObject`
 /// (`STRUCTURES.md` section 5.2, offset `0x0C`), which SVBD notes is `-1`
 /// for a standard module and something else for everything else.
@@ -157,7 +176,7 @@ pub const fn agree(f_object_type: u32, lp_private_object: u32) -> bool {
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{ObjectKind, agree, classify, has_optional_info};
+    use super::{ObjectKind, agree, classify, has_optional_info, names_no_private_object};
     use crate::read::pe::PeImage;
     use crate::read::region::{Off, Va};
     use crate::vb::header::{VbHeader, header_region};
@@ -290,6 +309,18 @@ mod tests {
         assert!(has_optional_info(0x0001_8083), "a form has one");
         assert!(has_optional_info(0x0011_8003), "a class has one");
         assert!(!has_optional_info(0x0001_8001), "a module does not");
+    }
+
+    #[test]
+    fn the_sentinel_and_a_plain_zero_name_no_private_object_and_an_address_does() {
+        assert!(names_no_private_object(0xFFFF_FFFF), "the module sentinel");
+        assert!(names_no_private_object(0), "a plain zero");
+        assert!(!names_no_private_object(0x0040_1000), "an address");
+        assert!(!names_no_private_object(1), "the value after zero");
+        assert!(
+            !names_no_private_object(0xFFFF_FFFE),
+            "the value before the sentinel"
+        );
     }
 
     #[test]
