@@ -594,6 +594,11 @@ pub struct StubHandler {
     /// `true` when the stub's own `imm32` is `METHOD_MARKER` (`0xFFFF`), a
     /// method. A smaller value marks an event.
     pub is_method: bool,
+    /// The stub's own `imm32`, as the file holds it.
+    ///
+    /// Kept so that the fidelity walk can write the stub back. `is_method` is
+    /// a reading of this value.
+    pub imm32: u32,
     /// The handler's own address: the stub start plus `STUB_LEN` plus the
     /// signed four-byte value at the stub start plus `0x09`. Computed with
     /// checked arithmetic over the whole signed range, so a negative
@@ -797,6 +802,7 @@ fn decode_stub(
     (
         Some(StubHandler {
             is_method: imm32 == METHOD_MARKER,
+            imm32,
             handler_address,
         }),
         None,
@@ -1668,6 +1674,29 @@ mod tests {
     }
 
     #[test]
+    fn the_stub_keeps_its_immediate_value_as_the_file_holds_it() {
+        let mut extra = vec![0_u8; 0x120];
+        extra[0x18..0x1C].copy_from_slice(&0x0040_1100_u32.to_le_bytes());
+        extra[0x100..0x10D].copy_from_slice(&stub_bytes(0x123, 0));
+        let bytes = synthetic_image(&extra);
+        let image = PeImage::parse(&bytes).unwrap();
+        let control = synthetic_control_info(0x0040, 1, 0x0040_1000);
+        let table = read_event_table(&image, &control).unwrap();
+        let EventSlot::Bound {
+            handler: Some(handler),
+            ..
+        } = &table.slots[0]
+        else {
+            panic!(
+                "expected a bound slot with a decoded handler: {:?}",
+                table.slots[0]
+            );
+        };
+        assert_eq!(handler.imm32, 0x123);
+        assert!(!handler.is_method);
+    }
+
+    #[test]
     fn an_immediate_value_of_0xffff_marks_a_method_and_a_smaller_value_marks_an_event() {
         let mut extra = vec![0_u8; 0x160];
         extra[0x18..0x1C].copy_from_slice(&0x0040_1100_u32.to_le_bytes());
@@ -1762,6 +1791,7 @@ mod tests {
             !handler.is_method,
             "imm32 0x3F marks an event, not a method"
         );
+        assert_eq!(handler.imm32, 0x3F);
         assert_eq!(handler.handler_address, 4_201_984);
         assert!(
             event_table.slots[1..]
@@ -1837,6 +1867,7 @@ mod tests {
     fn a_bound_slot_with_a_decoded_handler_carries_its_address_in_both_no_name_states() {
         let handler = Some(super::StubHandler {
             is_method: false,
+            imm32: 0x3F,
             handler_address: 0x0040_10ED,
         });
         let table = super::EventTable {
