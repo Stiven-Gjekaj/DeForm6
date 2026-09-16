@@ -1412,6 +1412,73 @@ fn a_bound_slot_whose_stub_maps_nowhere_is_ungraded_and_owned_by_its_slot() {
 }
 
 #[test]
+fn a_p_code_stub_that_a_bound_slot_names_is_refused_and_owned_by_its_slot() {
+    // STRUCTURES.md section 8.6 gives the P-code stub as 13 bytes:
+    // xor eax,eax / mov edx,<addr> / push <addr> / ret. The reader does not
+    // read the opcodes, so it takes the bytes at 0x09 as a jump. The last of
+    // them is the ret, 0xC3, so the jump goes back more than 0x3C000000
+    // bytes, past address 0, and the reader keeps no handler. The stub then
+    // shows as a refused record, not as bytes that differ.
+    let original = sk_gradient();
+    let before = walk(&original).unwrap();
+    let pe = PeImage::parse(&original).unwrap();
+    let (control_base, slot) = before
+        .ledgers
+        .iter()
+        .filter(|l| l.structure == "ControlInfo")
+        .find_map(|l| {
+            let base = usize::try_from(l.base.get()).unwrap();
+            bound_slots(&original, &pe, base)
+                .into_iter()
+                .next()
+                .map(|slot| (l.base.get(), slot))
+        })
+        .unwrap();
+    let row = before
+        .counts
+        .iter()
+        .find(|c| c.array == Array::EventSlots && c.declared_at.get() == control_base + 2)
+        .unwrap();
+    let Owner::Control { object, control } = row.owner else {
+        panic!("an event slot row must belong to a control: {row:?}");
+    };
+
+    let at = file_offset_of(&pe, slot.stub);
+    let mut p_code = vec![0x33, 0xC0, 0xBA];
+    p_code.extend_from_slice(&slot.stub.to_le_bytes());
+    p_code.push(0x68);
+    p_code.extend_from_slice(&slot.stub.to_le_bytes());
+    p_code.push(0xC3);
+    assert_eq!(p_code.len(), 13);
+    let mut patched = original.clone();
+    assert!(opens_a_native_stub(&patched[at..]));
+    patched[at..at + 13].copy_from_slice(&p_code);
+    assert!(!opens_a_native_stub(&patched[at..]));
+
+    let after = walk(&patched).expect("one P-code stub must not stop the walk");
+    let added: Vec<_> = after
+        .ungraded
+        .iter()
+        .filter(|row| !before.ungraded.contains(row))
+        .collect();
+    assert_eq!(added.len(), 1, "{added:?}");
+    assert_eq!(added[0].structure, "EventStub");
+    assert_eq!(
+        added[0].owner,
+        Owner::Slot {
+            object,
+            control,
+            slot: slot.index
+        }
+    );
+    assert!(matches!(added[0].reason, Reason::Refused(_)));
+    assert_eq!(after.ledgers.len() + 1, before.ledgers.len());
+    let at = u32::try_from(at).unwrap();
+    assert!(after.ledgers.iter().all(|l| l.base.get() != at));
+    assert_eq!(after.counts, before.counts);
+}
+
+#[test]
 fn a_stub_that_two_slots_name_is_graded_once() {
     // No corpus control names one stub twice, so the first control with two
     // bound slots is patched in memory: its second slot takes the first
