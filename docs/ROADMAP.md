@@ -213,8 +213,12 @@ else, a raised `wFormCount` makes the walk read past the real entries and
 refuse the table on the next `lStructSize`.
 
 **The cost is small.** The walk costs 0.435 of what both `inspect` calls cost
-over the corpus, so it caches nothing. The fuzz target ran 2045712 inputs
-through it with no fault.
+over the corpus, so it caches nothing.
+
+**The fuzz target found no fault in the walk.** A campaign of 500000 runs on
+commit `dee22c0`, seeded as the scheduled job seeds it, reached coverage 5982.
+An earlier run of 2045712 inputs is not evidence for the walk: its corpus was
+not seeded, so almost no input got past the PE header.
 
 #### What is left of Phase 7
 
