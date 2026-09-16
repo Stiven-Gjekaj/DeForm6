@@ -12,8 +12,15 @@
 //! The reader reads `imm32` at `0x04` and `rel32` at `0x09`. It never reads
 //! the two opcodes, so it decodes every stub as if the stub had the native
 //! shape. This emitter writes that shape: the opcode bytes at `0x00` and at
-//! `0x08`. A stub of another shape, such as a P-code stub, therefore shows as
-//! bytes that differ, which is the fault that the assumption would hide.
+//! `0x08`. A stub of another shape therefore shows as bytes that differ,
+//! which is the fault that the assumption would hide.
+//!
+//! That is true only when the reader can work out a handler address from the
+//! stub. A P-code stub at an address in a corpus program ends with `0xC3`,
+//! which is the high byte of what the reader takes as `rel32`. The handler
+//! address then goes below 0, and the reader keeps no handler.
+//! [`EventStubRecord::of`] gives `None`, and the walk records the stub as
+//! refused.
 //!
 //! # `rel32` is not verbatim
 //!

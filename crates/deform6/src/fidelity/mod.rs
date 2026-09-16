@@ -44,7 +44,9 @@
 //!
 //! An emitter can also write bytes that the reader assumes and never reads.
 //! The event stub emitter writes the opcode bytes of the native stub, so a
-//! stub of another shape shows as bytes that differ.
+//! stub of another shape cannot pass as native. It shows as bytes that
+//! differ when the reader still works out a handler address from it, and as
+//! a refused record when the reader cannot.
 //!
 //! The clamps on `wFormCount`, `dwControlCount` and `wEventCount` do not work
 //! that way. They only bound a loop: the reader returns fewer entries, and no

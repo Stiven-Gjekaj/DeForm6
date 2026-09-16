@@ -109,7 +109,8 @@ pub(crate) const HEADER: &str = r#"# The committed fidelity map: what the fideli
 # reads only 8 of them: `imm32`, and the jump, from which it keeps the handler
 # address. The emitter works the jump back out of that address. The other 5
 # bytes are the opcodes of the native stub, which the reader assumes and does
-# not read, so a stub of another shape shows as bytes that differ.
+# not read. A stub of another shape shows as bytes that differ, or as a
+# refused record when the reader cannot work out its handler address.
 "#;
 
 /// The ranges of one structure that the emitter does not write, and the
