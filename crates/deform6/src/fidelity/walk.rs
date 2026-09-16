@@ -515,9 +515,9 @@ fn element<'a, T: Emit>(
 ///
 /// The GUI table walk clamps `wFormCount` to the entries the file can hold and
 /// raises a defect when it does, so this is the row where that clamp would
-/// show. It cannot be triggered on a real file layout: raising `wFormCount`
-/// makes the walk read past the real entries, and it refuses the whole table
-/// on the next `lStructSize` before any clamp could matter.
+/// show. It fires only when the GUI table ends its section. Anywhere else,
+/// raising `wFormCount` makes the walk read past the real entries and refuse
+/// the whole table on the next `lStructSize` before any clamp could matter.
 fn count_gui_table(
     header_window: &Region<'_>,
     header: &VbHeader,

@@ -142,6 +142,12 @@ pub fn header_region<'a>(pe: &PeImage<'a>) -> Result<Region<'a>, Refusal> {
 /// [`PeImage::region_at_va`]: crate::read::pe::PeImage::region_at_va
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct VbHeader {
+    /// The absolute file offset of the header's first byte.
+    ///
+    /// Kept so a defect about a field in this record can name that field's
+    /// own byte. A reader that is handed only this value, and not the window
+    /// it came from, has no other way to know where the record sits.
+    pub file_offset: Off,
     /// The four magic bytes at offset 0, as the file holds them.
     ///
     /// [`header_region`] has already refused the file when these are not
@@ -222,7 +228,11 @@ impl VbHeader {
         let o_project_title = off_at(hdr, 0x5C, "the VB header holds no project title offset")?;
         let o_help_file = off_at(hdr, 0x60, "the VB header holds no help file offset")?;
         let o_project_name = off_at(hdr, 0x64, "the VB header holds no project name offset")?;
+        let file_offset = hdr
+            .file_offset(Off::new(0))
+            .ok_or(Refusal::Damaged("the VB header window has no file offset"))?;
         Ok(Self {
+            file_offset,
             signature,
             runtime_build: hdr
                 .u16_le(Off::new(0x04))
@@ -452,6 +462,17 @@ mod tests {
         let image = PeImage::parse(MANDELBROT).unwrap();
         let hdr = header_region(&image).unwrap();
         VbHeader::read(&hdr).unwrap()
+    }
+
+    #[test]
+    fn the_header_keeps_the_file_offset_of_its_own_first_byte() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let hdr = header_region(&image).unwrap();
+        let header = VbHeader::read(&hdr).unwrap();
+        assert_eq!(Some(header.file_offset), hdr.file_offset(Off::new(0)));
+        // And that byte is where the signature the header carries was read.
+        let at = usize::try_from(header.file_offset.get()).unwrap();
+        assert_eq!(&MANDELBROT[at..at + 4], b"VB5!");
     }
 
     /// The `.vbp` beside `Mandelbrot.exe` declares these four values.

@@ -36,6 +36,12 @@ use crate::vb::header::VbHeader;
 /// entry's own offset `0x00` must equal this value.
 pub const GUI_ENTRY_SIZE: u32 = 0x50;
 
+/// `STRUCTURES.md` section 2: `wFormCount` sits at `VBHeader + 0x44`.
+///
+/// The clamp defect names this byte, which is where the count it bounds was
+/// read from.
+const W_FORM_COUNT_AT: u32 = 0x44;
+
 /// The size of the fixed `GUIObjectInfo` header, before the property stream
 /// that follows it. `STRUCTURES.md` section 8.2: `0x5D` bytes.
 pub const GUI_OBJECT_INFO_SIZE: u32 = 0x5D;
@@ -107,7 +113,12 @@ impl GuiTable {
             .region_at_va(header.lp_gui_table)
             .ok_or(Refusal::Damaged("the GUI table pointer is in no section"))?;
 
-        let (form_count, count_defect) = bound_form_count(&array, u32::from(header.w_form_count));
+        let count_at = header
+            .file_offset
+            .checked_add(W_FORM_COUNT_AT)
+            .map_or(0, Off::get);
+        let (form_count, count_defect) =
+            bound_form_count(&array, u32::from(header.w_form_count), count_at);
         let mut defects = Vec::new();
         if let Some(defect) = count_defect {
             defects.push(defect);
@@ -162,18 +173,27 @@ impl GuiTable {
 /// declared count above zero raises the defect with a maximum of `0`. A
 /// declared count of zero always gives no defect, matching the plan's own
 /// stated behaviour for a count field of zero: no allocation, no defect.
-fn bound_form_count(array: &Region<'_>, raw_form_count: u32) -> (u32, Option<Defect>) {
+///
+/// `count_at` is the absolute file offset of `wFormCount` itself, which lives
+/// in the VB header and not in the table. `ImplausibleCount` documents its
+/// offset as that of the count field, so the defect names the header and this
+/// offset, never the start of the table the count bounds.
+fn bound_form_count(
+    array: &Region<'_>,
+    raw_form_count: u32,
+    count_at: u32,
+) -> (u32, Option<Defect>) {
     let max_entries = array.len().checked_div(GUI_ENTRY_SIZE).unwrap_or(0);
     if raw_form_count <= max_entries {
         return (raw_form_count, None);
     }
 
-    let offset = array.file_offset(Off::new(0x00)).map_or(0, Off::get);
+    let offset = count_at;
     let defect = Defect {
         site: Site {
             offset,
             rva: None,
-            structure: "GuiTable",
+            structure: "VBHeader",
             field: "wFormCount",
         },
         kind: DefectKind::ImplausibleCount {
@@ -445,6 +465,7 @@ mod tests {
     /// empty: this file's tests do not read them.
     fn header_with_gui_table(lp_gui_table: Va, w_form_count: u16) -> VbHeader {
         VbHeader {
+            file_offset: crate::read::region::Off::new(0x0000_0100),
             signature: *b"VB5!",
             runtime_build: 0,
             lp_sub_main: Va::new(0),
@@ -641,6 +662,19 @@ mod tests {
         let message = defect.kind.to_string();
         assert!(message.contains("65535"), "{message}");
         assert!(message.contains('1'), "{message}");
+
+        // The count lives in the VB header, at 0x44 into it. The defect must
+        // name that byte and that structure, not the start of the GUI table.
+        assert_eq!(defect.site.structure, "VBHeader");
+        assert_eq!(defect.site.field, "wFormCount");
+        assert_eq!(defect.site.offset, 0x0000_0100 + 0x44);
+        assert!(matches!(
+            defect.kind,
+            DefectKind::ImplausibleCount {
+                offset: 0x0000_0144,
+                ..
+            }
+        ));
     }
 
     /// A declared count of zero allocates nothing and raises no defect,
