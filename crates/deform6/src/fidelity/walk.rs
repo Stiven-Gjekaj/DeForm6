@@ -81,6 +81,14 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
     let mut ledgers = vec![compare(&header, &hdr)?];
 
     let info = ProjectInfo::read(&pe, header.lp_project_data)?;
+    let project = pe
+        .region_at_va(header.lp_project_data)
+        .ok_or(Refusal::Damaged("the ProjectInfo pointer is in no section"))?;
+    ledgers.push(compare(
+        &info,
+        &window::<ProjectInfo>(&project, "the file ends inside ProjectInfo")?,
+    )?);
+
     let head = ObjectTableHead::read(&pe, info.lp_object_table)?;
     let table = ObjectTable::walk(&pe, info.lp_object_table, &head)?;
 
@@ -117,6 +125,18 @@ pub fn walk(data: &[u8]) -> Result<Walk, WalkError> {
     let counts = vec![count_objects(&object_table, &head, &table)?];
 
     Ok(Walk { ledgers, counts })
+}
+
+/// Cuts `region` to exactly the length of `T`.
+///
+/// A window shorter than the structure is a fact about the file, so it is a
+/// refusal here. Passing a short window to `compare` would report it as
+/// `Fault::Short`, which says this repository's emitter was wrong, and it was
+/// not.
+fn window<'a, T: Emit>(region: &Region<'a>, what: &'static str) -> Result<Region<'a>, Refusal> {
+    region
+        .subregion(Off::new(0), T::LEN)
+        .ok_or(Refusal::Damaged(what))
 }
 
 /// Counts the objects the object table declares against the objects the

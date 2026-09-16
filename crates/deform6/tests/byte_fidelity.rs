@@ -49,6 +49,7 @@
 use deform6::fidelity::header;
 use deform6::fidelity::ledger::{Ledger, Verdict};
 use deform6::fidelity::object;
+use deform6::fidelity::project;
 use deform6::fidelity::walk::walk;
 use deform6::vb::opcodes::OpcodeTable;
 use std::path::{Path, PathBuf};
@@ -320,6 +321,97 @@ fn no_object_byte_this_reader_models_differs_from_the_file_in_any_corpus_program
         failed.is_empty(),
         "{} object byte run(s) differ from the file. A run at structure offset 0x1C is \
          ProcCount, which vb::object::bound_proc_count clamps:\n{}",
+        failed.len(),
+        failed.join("\n")
+    );
+}
+
+// --- Segment 2: shared checks, one call per structure ------------------------
+
+/// Gives every program's failure for one structure's coverage: the modelled
+/// byte count, the record length, and the exact unmodelled ranges.
+fn coverage_failures(structure: &str, len: u32, modelled: u32, gaps: &[(u32, u32)]) -> Vec<String> {
+    let mut failed = Vec::new();
+    for (path, ledgers) in graded() {
+        for (index, ledger) in ledgers
+            .iter()
+            .filter(|l| l.structure == structure)
+            .enumerate()
+        {
+            let got = ledger.bytes_with(Verdict::Same) + ledger.bytes_with(Verdict::Differs);
+            if got != modelled || ledger.len != len {
+                failed.push(format!(
+                    "{} {structure} {index}: models {got} of {} bytes, wanted {modelled} of {len}",
+                    path.display(),
+                    ledger.len
+                ));
+            }
+            let measured: Vec<(u32, u32)> = ledger
+                .runs_with(Verdict::Unmodelled)
+                .map(|run| (run.span.at.get() - ledger.base.get(), run.span.len))
+                .collect();
+            if measured.as_slice() != gaps {
+                failed.push(format!(
+                    "{} {structure} {index}: the unmodelled ranges are {measured:x?}, wanted {gaps:x?}",
+                    path.display()
+                ));
+            }
+        }
+    }
+    failed
+}
+
+/// Gives every run of one structure whose bytes differ from the file.
+fn difference_failures(structure: &str) -> Vec<String> {
+    let mut failed = Vec::new();
+    for (path, ledgers) in graded() {
+        let data = std::fs::read(&path).unwrap();
+        for ledger in ledgers.iter().filter(|l| l.structure == structure) {
+            for run in ledger.runs_with(Verdict::Differs) {
+                failed.push(describe(
+                    &path,
+                    ledger,
+                    run.span.at.get(),
+                    run.span.len,
+                    &data,
+                ));
+            }
+        }
+    }
+    failed
+}
+
+/// Gives the number of records of one structure the walk graded, corpus wide.
+fn graded_count(structure: &str) -> usize {
+    graded()
+        .iter()
+        .map(|(_path, ledgers)| ledgers.iter().filter(|l| l.structure == structure).count())
+        .sum()
+}
+
+#[test]
+fn the_corpus_grades_forty_four_project_info_records() {
+    assert_eq!(graded_count("ProjectInfo"), 44);
+}
+
+#[test]
+fn the_project_info_reader_models_twenty_of_the_five_hundred_and_seventy_two_bytes_in_every_graded_record()
+ {
+    let failed = coverage_failures(
+        "ProjectInfo",
+        572,
+        project::MODELLED_BYTES,
+        project::UNMODELLED,
+    );
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+#[test]
+fn no_project_info_byte_this_reader_models_differs_from_the_file_in_any_corpus_program() {
+    let failed = difference_failures("ProjectInfo");
+    assert!(
+        failed.is_empty(),
+        "{} ProjectInfo byte run(s) differ from the file:\n{}",
         failed.len(),
         failed.join("\n")
     );

@@ -51,6 +51,7 @@ pub mod census;
 pub mod header;
 pub mod ledger;
 pub mod object;
+pub mod project;
 pub mod slate;
 pub mod walk;
 
