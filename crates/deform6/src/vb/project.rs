@@ -643,8 +643,9 @@ impl DeclareTable {
         let Some(table) = pe.region_at_va(info.lp_external_table) else {
             // The count says that the table holds entries, and the table's
             // address maps nowhere. The defect names lpExternalTable, which
-            // lives in ProjectInfo. As in the other pointer defects of this
-            // crate, the site's `rva` is the address that the pointer holds.
+            // lives in ProjectInfo. The reader knows where ProjectInfo sits
+            // in the file and not its address, so the site gives no address.
+            // The kind carries the address that the pointer holds.
             let offset = info
                 .file_offset
                 .checked_add(LP_EXTERNAL_TABLE_AT)
@@ -652,7 +653,7 @@ impl DeclareTable {
             defects.push(Defect {
                 site: Site {
                     offset,
-                    rva: info.lp_external_table.to_rva(pe.image_base()).map(Rva::get),
+                    rva: None,
                     structure: "ProjectInfo",
                     field: "lpExternalTable",
                 },
@@ -849,32 +850,37 @@ impl DeclareDescriptorFailure {
     /// searched.
     /// `lpImportDescriptor` is at `0x04` of the entry. `lpDllName` and
     /// `lpApiName` are at `0x00` and `0x04` of the descriptor, which is a
-    /// different structure. As in the other pointer defects of this crate,
-    /// the site's `rva` is the address that the pointer holds.
+    /// different structure. The site's `rva` is the address of the pointer's
+    /// own byte, and the kind carries the address that the pointer holds.
     fn into_defect(self, pe: &PeImage<'_>, entry: &Region<'_>, descriptor_va: Va) -> Defect {
-        let in_descriptor = |at: u32| {
-            pe.region_at_va(descriptor_va)
-                .and_then(|descriptor| descriptor.file_offset(Off::new(at)))
+        // The file offset and the address of the byte at `at` of `window`.
+        let place = |window: Option<Region<'_>>, at: u32| {
+            let at = Off::new(at);
+            (
+                window.and_then(|w| w.file_offset(at)),
+                window.and_then(|w| w.rva(at)),
+            )
         };
-        let (structure, field, at, va, miss) = match self {
+        let descriptor = pe.region_at_va(descriptor_va);
+        let (structure, field, (at, rva), va, miss) = match self {
             Self::Descriptor(miss) => (
                 "DeclareTableEntry",
                 "lpImportDescriptor",
-                entry.file_offset(Off::new(0x04)),
+                place(Some(*entry), 0x04),
                 descriptor_va,
                 miss,
             ),
             Self::DllName(va, miss) => (
                 "DeclareDescriptor",
                 "lpDllName",
-                in_descriptor(0x00),
+                place(descriptor, 0x00),
                 va,
                 miss,
             ),
             Self::ApiName(va, miss) => (
                 "DeclareDescriptor",
                 "lpApiName",
-                in_descriptor(0x04),
+                place(descriptor, 0x04),
                 va,
                 miss,
             ),
@@ -902,7 +908,7 @@ impl DeclareDescriptorFailure {
         Defect {
             site: Site {
                 offset,
-                rva: va.to_rva(pe.image_base()).map(Rva::get),
+                rva: rva.map(Rva::get),
                 structure,
                 field,
             },
@@ -1975,6 +1981,18 @@ mod tests {
         usize::try_from(image.va_to_off(Va::new(descriptor)).unwrap().get()).unwrap()
     }
 
+    /// Gives the relative virtual address of `va`, by hand.
+    fn rva_of(data: &[u8], va: u32) -> u32 {
+        va - PeImage::parse(data).unwrap().image_base()
+    }
+
+    /// Gives the relative virtual address of a field inside one `Declare`
+    /// table entry, by hand from the table address that `ProjectInfo` holds.
+    fn declare_entry_field_rva(data: &[u8], entry_index: u32, field: u32) -> u32 {
+        let table = project_info(data).unwrap().lp_external_table.get();
+        rva_of(data, table) + entry_index * 8 + field
+    }
+
     /// Gives the entry type and the descriptor address of one entry, and the
     /// two addresses at the start of its descriptor, all read by hand.
     fn entry_by_hand(data: &[u8], index: u32) -> (u32, u32, Pair) {
@@ -2121,9 +2139,12 @@ mod tests {
         assert_eq!(defect.site.offset, at);
         assert_eq!(defect.site.structure, "DeclareTableEntry");
         assert_eq!(defect.site.field, "lpImportDescriptor");
-        // As in the other pointer defects, the site gives the address that
-        // the pointer holds.
-        assert_eq!(defect.site.rva, Some(0x00F0_0000));
+        // The site gives the address of the pointer's own byte. The kind
+        // gives the address that the pointer holds.
+        assert_eq!(
+            defect.site.rva,
+            Some(declare_entry_field_rva(MANDELBROT, 0, 0x04))
+        );
     }
 
     /// Gives the virtual address where the mapped bytes of the section that
@@ -2163,6 +2184,10 @@ mod tests {
         );
         assert_eq!(defect.kind.severity(), Severity::Recoverable);
         assert_eq!(defect.site.offset, at);
+        assert_eq!(
+            defect.site.rva,
+            Some(declare_entry_field_rva(MANDELBROT, 0, 0x04))
+        );
         assert_eq!(defect.site.structure, "DeclareTableEntry");
         assert_eq!(defect.site.field, "lpImportDescriptor");
     }
@@ -2201,6 +2226,7 @@ mod tests {
         );
         assert_eq!(defect.kind.severity(), Severity::Recoverable);
         assert_eq!(defect.site.offset, u32::try_from(pointer_at).unwrap());
+        assert_eq!(defect.site.rva, Some(rva_of(MANDELBROT, descriptor)));
         assert_eq!(defect.site.structure, "DeclareDescriptor");
         assert_eq!(defect.site.field, "lpDllName");
     }
@@ -2231,6 +2257,7 @@ mod tests {
         );
         assert_eq!(NAME_MAX, 260);
         assert_eq!(defect.site.offset, u32::try_from(pointer_at).unwrap());
+        assert_eq!(defect.site.rva, Some(rva_of(MANDELBROT, descriptor) + 4));
         assert_eq!(defect.site.structure, "DeclareDescriptor");
         assert_eq!(defect.site.field, "lpApiName");
     }
@@ -2255,7 +2282,7 @@ mod tests {
         assert_eq!(defect.site.offset, at);
         assert_eq!(defect.site.structure, "DeclareDescriptor");
         assert_eq!(defect.site.field, "lpDllName");
-        assert_eq!(defect.site.rva, Some(0x00F0_0000));
+        assert_eq!(defect.site.rva, Some(rva_of(MANDELBROT, descriptor)));
     }
 
     /// `lpApiName` is at `0x04` of the descriptor.
@@ -2278,7 +2305,7 @@ mod tests {
         assert_eq!(defect.site.offset, at);
         assert_eq!(defect.site.structure, "DeclareDescriptor");
         assert_eq!(defect.site.field, "lpApiName");
-        assert_eq!(defect.site.rva, Some(0x00F0_0000));
+        assert_eq!(defect.site.rva, Some(rva_of(MANDELBROT, descriptor) + 4));
     }
 
     /// Only an entry of type 7 names a descriptor of the shape that this
@@ -2310,6 +2337,9 @@ mod tests {
     /// The count says that the table holds one entry, and the table maps
     /// nowhere. The whole table is lost, and the defect says so at
     /// `lpExternalTable`.
+    ///
+    /// `ProjectInfo` keeps its file offset and not its address, so the site
+    /// gives no address. The address that the pointer holds is in the kind.
     #[test]
     fn a_declare_table_whose_address_maps_nowhere_gives_one_defect_at_lp_external_table() {
         let image = PeImage::parse(MANDELBROT).unwrap();
@@ -2325,7 +2355,7 @@ mod tests {
             [Defect {
                 site: Site {
                     offset: at,
-                    rva: Some(0x00F0_0000),
+                    rva: None,
                     structure: "ProjectInfo",
                     field: "lpExternalTable",
                 },
@@ -2336,6 +2366,79 @@ mod tests {
             }]
         );
         assert_eq!(table.defects()[0].kind.severity(), Severity::Recoverable);
+    }
+
+    /// Each `Declare` table of this corpus sits at an address that is equal
+    /// to its file offset, so a corpus test cannot tell the two apart. Here
+    /// the table starts at file offset `0x400` and at address `0x1000`.
+    ///
+    /// Each case writes an address in no section into one pointer. The site
+    /// gives the file offset and the address of that pointer. The kind gives
+    /// the address that the pointer holds.
+    #[test]
+    fn a_declare_defect_gives_the_address_of_its_pointer_and_not_its_file_offset() {
+        const NOWHERE: u32 = 0x0130_0000;
+        const DESCRIPTOR: u32 = 0x0040_1008;
+        const DLL_NAME: u32 = 0x0040_1020;
+        const API_NAME: u32 = 0x0040_1028;
+        // One entry of type 7 at 0x00, its descriptor at 0x08, and the two
+        // names after the 24 bytes of the descriptor.
+        let payload = |descriptor: u32, dll_name: u32, api_name: u32| {
+            let mut out = vec![0_u8; 0x30];
+            out[0x00..0x04].copy_from_slice(&7_u32.to_le_bytes());
+            out[0x04..0x08].copy_from_slice(&descriptor.to_le_bytes());
+            out[0x08..0x0C].copy_from_slice(&dll_name.to_le_bytes());
+            out[0x0C..0x10].copy_from_slice(&api_name.to_le_bytes());
+            out[0x20..0x24].copy_from_slice(b"Lib\0");
+            out[0x28..0x2C].copy_from_slice(b"Api\0");
+            out
+        };
+        let read = |payload: &[u8]| {
+            let (bytes, table) = a_synthetic_pe_image(payload);
+            assert_eq!(table, Va::new(0x0040_1000));
+            let image = PeImage::parse(&bytes).unwrap();
+            assert_eq!(image.va_to_off(table), Some(Off::new(0x400)));
+            let info = ProjectInfo {
+                file_offset: Off::new(0),
+                dw_version: 0,
+                lp_object_table: Va::new(0),
+                lp_native_code: 0,
+                lp_external_table: table,
+                dw_external_count: 1,
+            };
+            DeclareTable::read(&image, &info)
+        };
+
+        let whole = read(&payload(DESCRIPTOR, DLL_NAME, API_NAME));
+        assert!(whole.defects().is_empty(), "{:?}", whole.defects());
+        assert_eq!(as_pairs(&whole), [("Lib", "Api")]);
+
+        let cases = [
+            (
+                payload(NOWHERE, DLL_NAME, API_NAME),
+                "lpImportDescriptor",
+                0x04,
+            ),
+            (payload(DESCRIPTOR, NOWHERE, API_NAME), "lpDllName", 0x08),
+            (payload(DESCRIPTOR, DLL_NAME, NOWHERE), "lpApiName", 0x0C),
+        ];
+        for (bytes, field, at) in cases {
+            let table = read(&bytes);
+            assert!(table.declarations.is_empty(), "{field}");
+            assert_eq!(table.defects().len(), 1, "{field}");
+            let defect = &table.defects()[0];
+            assert_eq!(defect.site.field, field);
+            assert_eq!(defect.site.offset, 0x400 + at, "{field}");
+            assert_eq!(defect.site.rva, Some(0x1000 + at), "{field}");
+            assert_eq!(
+                defect.kind,
+                DefectKind::ItemAddressUnmapped {
+                    offset: 0x400 + at,
+                    va: NOWHERE,
+                },
+                "{field}"
+            );
+        }
     }
 
     /// A zero count never reads the table address, so an address that maps

@@ -253,7 +253,7 @@ fn read_name(
     let offset = element.file_offset(Off::new(0x18)).map_or(0, Off::get);
     let site = Site {
         offset,
-        rva: lpsz_object_name.to_rva(pe.image_base()).map(Rva::get),
+        rva: element.rva(Off::new(0x18)).map(Rva::get),
         structure: "Object",
         field: "lpszObjectName",
     };
@@ -622,6 +622,13 @@ mod tests {
             DefectKind::UnreadablePointer { va, .. } if va == nowhere
         ));
         assert_eq!(defect.site.offset, u32::try_from(at).unwrap());
+        // The site gives the address of the pointer, which is element 1 of
+        // the array plus 0x18. The kind gives the address that it holds.
+        let array = object_array_va(GRAYSCALE).get();
+        assert_eq!(
+            defect.site.rva,
+            Some(array + 0x30 + 0x18 - image.image_base())
+        );
     }
 
     /// `fObjectType` is carried raw. Plan 02-02 classifies it; this file does

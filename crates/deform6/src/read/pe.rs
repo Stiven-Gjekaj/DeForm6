@@ -469,10 +469,10 @@ fn section_header_offset(table_at: u32, index: usize) -> u32 {
 /// reported rather than resolved in silence: a file with overlapping sections
 /// is either damaged or built to make two parsers see different bytes.
 ///
-/// **This rule is untested by construction.** All 44 corpus executables have
-/// exactly 3 sections, `.text`, `.data` and `.rsrc`, ascending, so no corpus
-/// file reaches this branch. A fuzz input or a hand made regression file has
-/// to exercise it, in the same way the P-code branch is called out.
+/// **No corpus file reaches this rule.** All 44 corpus executables have
+/// exactly 3 sections, `.text`, `.data` and `.rsrc`, ascending. A unit test
+/// gives this function a section list that overlaps, and no parsed file in
+/// the tests does.
 ///
 /// A section whose mapped length is zero claims no byte, so it overlaps
 /// nothing. An end that leaves a `u32` is reported as an overlap rather than
@@ -498,9 +498,11 @@ fn overlap_defects(sections: &[SectionInfo], table_at: u32) -> Vec<Defect> {
             if overlaps {
                 let offset = section_header_offset(table_at, j);
                 out.push(Defect {
+                    // The section table is in no section, so this reader
+                    // knows no address for the header byte.
                     site: Site {
                         offset,
-                        rva: Some(b_start),
+                        rva: None,
                         structure: "ImageSectionHeader",
                         field: "VirtualAddress",
                     },
@@ -526,8 +528,8 @@ fn overlap_defects(sections: &[SectionInfo], table_at: u32) -> Vec<Defect> {
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{PeImage, PeReject, SectionInfo};
-    use crate::error::Refusal;
+    use super::{PeImage, PeReject, SectionInfo, overlap_defects};
+    use crate::error::{Defect, DefectKind, Refusal, Site};
     use crate::read::region::{Off, Rva, Va};
 
     /// The general purpose corpus file.
@@ -947,6 +949,43 @@ mod tests {
         let half = &MANDELBROT[..MANDELBROT.len() / 2];
         let image = PeImage::parse(half).unwrap();
         assert!(image.imported_dlls().is_err());
+    }
+
+    #[test]
+    fn two_sections_that_claim_the_same_addresses_give_one_defect_at_the_second_header() {
+        let section = |name: &[u8; 8], rva: u32, raw: u32| SectionInfo {
+            name: *name,
+            virtual_address: Rva::new(rva),
+            virtual_size: 0x1000,
+            pointer_to_raw_data: Off::new(raw),
+            size_of_raw_data: 0x1000,
+        };
+        let text = section(b".text\0\0\0", 0x1000, 0x400);
+        let rsrc = section(b".rsrc\0\0\0", 0x3000, 0x2400);
+
+        // Sections that touch and do not overlap give nothing.
+        let touching = [text, section(b".data\0\0\0", 0x2000, 0x1400), rsrc];
+        assert!(overlap_defects(&touching, 0x178).is_empty());
+
+        // `.data` starts inside `.text`. Its header is the second one, 40
+        // bytes after the table start. The section table is in no section,
+        // so the site gives no address.
+        let overlapping = [text, section(b".data\0\0\0", 0x1800, 0x1400), rsrc];
+        assert_eq!(
+            overlap_defects(&overlapping, 0x178),
+            [Defect {
+                site: Site {
+                    offset: 0x1A0,
+                    rva: None,
+                    structure: "ImageSectionHeader",
+                    field: "VirtualAddress",
+                },
+                kind: DefectKind::SectionOverlap {
+                    offset: 0x1A0,
+                    other: 0x400,
+                },
+            }]
+        );
     }
 
     #[test]

@@ -583,7 +583,7 @@ fn resolve_entry(pe: &PeImage<'_>, window: &Region<'_>, index: u32) -> (Procedur
     let offset = window.file_offset(Off::new(entry_off)).map_or(0, Off::get);
     let site = Site {
         offset,
-        rva: va.to_rva(pe.image_base()).map(Rva::get),
+        rva: window.rva(Off::new(entry_off)).map(Rva::get),
         structure: "Object",
         field: "lpProcNamesArray",
     };
@@ -758,7 +758,7 @@ mod tests {
         Gap, OBJECT_INFO_SIZE, ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureCounts,
         ProcedureList, event_descriptor_addresses, is_plausible_identifier,
     };
-    use crate::error::Refusal;
+    use crate::error::{Defect, DefectKind, Refusal, Site};
     use crate::read::pe::PeImage;
     use crate::read::region::{Off, Va};
     use crate::vb::header::{VbHeader, header_region};
@@ -1038,6 +1038,53 @@ mod tests {
                 Procedure::Public("GetImageData2D".to_owned()),
                 Procedure::Public("SetImageData2D".to_owned()),
             ])
+        );
+    }
+
+    /// A name address in no section makes its slot private and gives one
+    /// defect. The site is the slot of the name array, and the kind gives
+    /// the address that the slot holds.
+    #[test]
+    fn a_procedure_name_address_in_no_section_gives_a_private_slot_and_one_defect() {
+        let image = PeImage::parse(GRAYSCALE).unwrap();
+        let fast_drawing = &objects(GRAYSCALE)[2];
+        assert_eq!(fast_drawing.name, "FastDrawing");
+        let array = fast_drawing.lp_proc_names_array;
+        // `GetImageWidth` is slot 4.
+        let at = image
+            .region_at_va(array)
+            .unwrap()
+            .file_offset(Off::new(4 * 4))
+            .unwrap()
+            .get();
+        let nowhere = image.image_base() + 0x00F0_0000;
+        assert!(image.region_at_va(Va::new(nowhere)).is_none());
+        let slot = usize::try_from(at).unwrap();
+        let mut bytes = GRAYSCALE.to_vec();
+        assert_ne!(bytes[slot..slot + 4], nowhere.to_le_bytes());
+        bytes[slot..slot + 4].copy_from_slice(&nowhere.to_le_bytes());
+
+        let patched = PeImage::parse(&bytes).unwrap();
+        let list = ProcedureList::read(&patched, &objects(&bytes)[2]);
+        let ProcNames::Slots(slots) = &list.procs else {
+            panic!("FastDrawing carries a name array");
+        };
+        assert_eq!(slots[4], Procedure::Private);
+        assert_eq!(slots[5], Procedure::Public("GetImageHeight".to_owned()));
+        assert_eq!(
+            list.defects(),
+            [Defect {
+                site: Site {
+                    offset: at,
+                    rva: Some(array.get() + 4 * 4 - image.image_base()),
+                    structure: "Object",
+                    field: "lpProcNamesArray",
+                },
+                kind: DefectKind::UnreadablePointer {
+                    offset: at,
+                    va: nowhere,
+                },
+            }]
         );
     }
 

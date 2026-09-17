@@ -414,7 +414,7 @@ fn read_name(pe: &PeImage<'_>, element: &Region<'_>, lpsz_name: Va) -> (String, 
     let offset = element.file_offset(Off::new(0x20)).map_or(0, Off::get);
     let site = Site {
         offset,
-        rva: lpsz_name.to_rva(pe.image_base()).map(Rva::get),
+        rva: element.rva(Off::new(0x20)).map(Rva::get),
         structure: "ControlInfo",
         field: "lpszName",
     };
@@ -713,7 +713,8 @@ pub fn read_event_table(pe: &PeImage<'_>, control: &ControlInfo) -> Result<Event
         }
 
         let slot_offset = table.file_offset(Off::new(slot_off)).map_or(0, Off::get);
-        let (handler, stub_defect) = decode_stub(pe, slot_va, slot_offset);
+        let slot_rva = table.rva(Off::new(slot_off)).map(Rva::get);
+        let (handler, stub_defect) = decode_stub(pe, slot_va, slot_offset, slot_rva);
         if let Some(defect) = stub_defect {
             defects.push(defect);
         }
@@ -775,7 +776,8 @@ fn bound_event_count(
 /// `slot_offset` is the byte offset of the event slot itself (not the
 /// stub), used to build the defect a caller reports when the stub cannot be
 /// decoded, the same "name where the pointer was read from" contract
-/// [`read_name`] follows for a `ControlInfo`'s own name.
+/// [`read_name`] follows for a `ControlInfo`'s own name. `slot_rva` is the
+/// address of the same byte, when the reader knows it.
 ///
 /// Gives `(None, Some(defect))` when the stub address resolves to no
 /// section, when its own [`STUB_LEN`] bytes cannot be read in full, when
@@ -791,11 +793,12 @@ fn decode_stub(
     pe: &PeImage<'_>,
     stub_va: Va,
     slot_offset: u32,
+    slot_rva: Option<u32>,
 ) -> (Option<StubHandler>, Option<Defect>) {
     let unreadable = || Defect {
         site: Site {
             offset: slot_offset,
-            rva: stub_va.to_rva(pe.image_base()).map(Rva::get),
+            rva: slot_rva,
             structure: "EventSlot",
             field: "stub",
         },
@@ -818,7 +821,7 @@ fn decode_stub(
         let defect = Defect {
             site: Site {
                 offset,
-                rva: stub_va.to_rva(pe.image_base()).map(Rva::get),
+                rva: stub.rva(Off::new(0)).map(Rva::get),
                 structure: "EventStub",
                 field: "opcode",
             },
@@ -1334,6 +1337,17 @@ mod tests {
                 ..
             }
         ));
+        // The site is the pointer at extra offset 0xA0: file offset 0x4A0
+        // and address 0x10A0. The kind gives the address that it holds.
+        assert_eq!(
+            table.defects()[0].site,
+            Site {
+                offset: 0x4A0,
+                rva: Some(0x10A0),
+                structure: "ControlInfo",
+                field: "lpszName",
+            }
+        );
     }
 
     #[test]
@@ -1798,6 +1812,17 @@ mod tests {
                 ..
             }
         ));
+        // The site is the slot at extra offset 0x18: file offset 0x418 and
+        // address 0x1018. The kind gives the address that it holds.
+        assert_eq!(
+            table.defects()[0].site,
+            Site {
+                offset: 0x418,
+                rva: Some(0x1018),
+                structure: "EventSlot",
+                field: "stub",
+            }
+        );
     }
 
     /// Builds one P-code stub (`STRUCTURES.md` section 8.6): `xor eax,eax`,

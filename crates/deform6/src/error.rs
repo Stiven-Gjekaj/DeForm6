@@ -28,7 +28,12 @@
 pub struct Site {
     /// The absolute file offset. `Region::file_offset` gives this value.
     pub offset: u32,
-    /// The address the offset came from, when it came from one.
+    /// The address of the byte at `offset`, as a relative virtual address,
+    /// or `None`.
+    ///
+    /// This field never holds an address that the byte points at: a defect
+    /// about a pointer carries the address that the pointer holds in its
+    /// [`DefectKind`].
     pub rva: Option<u32>,
     /// The structure that is being read, such as `"VbHeader"`.
     pub structure: &'static str,

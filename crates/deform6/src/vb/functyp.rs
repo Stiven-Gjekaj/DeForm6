@@ -468,7 +468,7 @@ impl FuncTypeWalk {
             let offset = window.file_offset(Off::new(entry_off)).map_or(0, Off::get);
             let site = Site {
                 offset,
-                rva: va.to_rva(pe.image_base()).map(Rva::get),
+                rva: window.rva(Off::new(entry_off)).map(Rva::get),
                 structure: "PrivateObj",
                 field: "lpFuncTypeInfo",
             };
@@ -735,7 +735,7 @@ fn resolve_arg_names(
         let offset = window.file_offset(Off::new(entry_off)).map_or(0, Off::get);
         let site = Site {
             offset,
-            rva: va.to_rva(pe.image_base()).map(Rva::get),
+            rva: window.rva(Off::new(entry_off)).map(Rva::get),
             structure: "FuncTypDesc",
             field: "lpAryArgNames",
         };
@@ -856,19 +856,21 @@ const MAX_OPTIONAL_VALS_STEPS: u32 = 4096;
 /// `cbValues` bytes of value records starting at `+8`.
 ///
 /// `field_offset` is the absolute file offset of the `optionalVals` field
-/// itself inside the `FuncTypDesc` header, used for every defect this
-/// function produces: there is no per-value-record offset that names
+/// itself inside the `FuncTypDesc` header, and `field_rva` is the address of
+/// the same byte when the reader knows it. They are used for every defect
+/// this function produces: there is no per-value-record offset that names
 /// anything a person could open the file at more precisely than the field
 /// that pointed here, matching `vb/object.rs`'s own choice of the
 /// `ProcCount` field's offset for its "implausible count" defect.
 fn walk_optional_vals(
     pe: &PeImage<'_>,
     field_offset: u32,
+    field_rva: Option<u32>,
     optional_vals: Va,
 ) -> (OptionalValsWalk, Option<Defect>) {
     let site = Site {
         offset: field_offset,
-        rva: optional_vals.to_rva(pe.image_base()).map(Rva::get),
+        rva: field_rva,
         structure: "FuncTypDesc",
         field: "optionalVals",
     };
@@ -981,12 +983,12 @@ fn read_one(
     functype_va: Va,
     base: Region<'_>,
 ) -> (Option<Prototype>, Vec<Defect>) {
-    let rva = functype_va.to_rva(pe.image_base()).map(Rva::get);
     let self_offset = base.file_offset(Off::new(0)).map_or(0, Off::get);
-    let unrecoverable_here = |offset: u32, field: &'static str| {
+    let unrecoverable_here = |at: Off, field: &'static str| {
+        let offset = base.file_offset(at).map_or(self_offset, Off::get);
         let site = Site {
             offset,
-            rva,
+            rva: base.rva(at).map(Rva::get),
             structure: "FuncTypDesc",
             field,
         };
@@ -1000,7 +1002,7 @@ fn read_one(
     };
 
     let Some(header) = base.subregion(Off::new(0), HEADER_SIZE) else {
-        return (None, unrecoverable_here(self_offset, "argSize"));
+        return (None, unrecoverable_here(Off::new(0x00), "argSize"));
     };
 
     // `header` is exactly `HEADER_SIZE` bytes, and every field
@@ -1008,19 +1010,16 @@ fn read_one(
     // infallible accessor, so this check stays; no test covers it and none
     // can.
     let Some(raw) = read_raw_header(&header) else {
-        return (None, unrecoverable_here(self_offset, "argSize"));
+        return (None, unrecoverable_here(Off::new(0x00), "argSize"));
     };
 
     if raw.const_ffff != 0xFFFF {
-        let offset = header
-            .file_offset(Off::new(0x04))
-            .map_or(self_offset, Off::get);
-        return (None, unrecoverable_here(offset, "constFFFF"));
+        return (None, unrecoverable_here(Off::new(0x04), "constFFFF"));
     }
 
     let buffer_len = base.len().saturating_sub(HEADER_SIZE);
     let Some(buffer) = base.subregion(Off::new(HEADER_SIZE), buffer_len) else {
-        return (None, unrecoverable_here(self_offset, "argSize"));
+        return (None, unrecoverable_here(Off::new(0x00), "argSize"));
     };
 
     let walk = walk_type_buffer(&buffer, raw.arg_size);
@@ -1030,7 +1029,7 @@ fn read_one(
             .map_or(self_offset, Off::get);
         let site = Site {
             offset,
-            rva,
+            rva: header.rva(Off::new(0x00)).map(Rva::get),
             structure: "FuncTypDesc",
             field: "argSize",
         };
@@ -1083,7 +1082,8 @@ fn read_one(
         let field_offset = header
             .file_offset(Off::new(0x08))
             .map_or(self_offset, Off::get);
-        let (outcome, defect) = walk_optional_vals(pe, field_offset, raw.optional_vals);
+        let field_rva = header.rva(Off::new(0x08)).map(Rva::get);
+        let (outcome, defect) = walk_optional_vals(pe, field_offset, field_rva, raw.optional_vals);
         if let Some(defect) = defect {
             defects.push(defect);
         }
@@ -1397,7 +1397,14 @@ mod tests {
         assert_eq!(walk.defects().len(), 1);
         let defect = &walk.defects()[0];
         assert_eq!(defect.kind.severity(), Severity::Tolerated);
+        assert_eq!(defect.site.field, "constFFFF");
         assert_eq!(defect.site.offset, u32::try_from(at).unwrap());
+        // The site gives the address of the same byte, and not the address
+        // where the record starts.
+        assert_eq!(
+            defect.site.rva,
+            Some(entry_va.get() - image.image_base() + 0x04)
+        );
     }
 
     /// With the descriptor pointer patched to an address in no section, the
@@ -1448,6 +1455,82 @@ mod tests {
             defect.kind,
             crate::error::DefectKind::UnreadablePointer { va, .. } if va == nowhere
         ));
+        // The site is slot 4 of the array. The kind gives the address that
+        // the slot holds.
+        assert_eq!(defect.site.field, "lpFuncTypeInfo");
+        assert_eq!(defect.site.offset, u32::try_from(at).unwrap());
+        assert_eq!(
+            defect.site.rva,
+            Some(lp_func_type_info.get() - image.image_base() + 4 * 4)
+        );
+    }
+
+    /// An argument name address in no section loses that name and keeps the
+    /// prototype. The site is the slot of the name array, and the kind
+    /// gives the address that the slot holds.
+    #[test]
+    fn an_argument_name_address_in_no_section_loses_the_name_and_keeps_the_prototype() {
+        let image = PeImage::parse(GRAYSCALE).unwrap();
+        let object = find_object(GRAYSCALE, "FastDrawing");
+        let PrivateObj::Present {
+            lp_func_type_info, ..
+        } = private_obj_of(&image, &object)
+        else {
+            panic!("FastDrawing is a class, not a module");
+        };
+
+        // `GetImageWidth` is index 4, and it has one argument.
+        let entry_va = image
+            .region_at_va(lp_func_type_info)
+            .unwrap()
+            .va_le(Off::new(4 * 4))
+            .unwrap();
+        let names_va = image
+            .region_at_va(entry_va)
+            .unwrap()
+            .va_le(Off::new(0x10))
+            .unwrap();
+        let at = image
+            .region_at_va(names_va)
+            .unwrap()
+            .file_offset(Off::new(0))
+            .unwrap()
+            .get();
+        let nowhere = image.image_base() + 0x00F0_0000;
+        assert!(image.region_at_va(Va::new(nowhere)).is_none());
+        let slot = usize::try_from(at).unwrap();
+        let mut bytes = GRAYSCALE.to_vec();
+        assert_ne!(bytes[slot..slot + 4], nowhere.to_le_bytes());
+        bytes[slot..slot + 4].copy_from_slice(&nowhere.to_le_bytes());
+
+        let patched = PeImage::parse(&bytes).unwrap();
+        let object = find_object(&bytes, "FastDrawing");
+        let private = private_obj_of(&patched, &object);
+        let walk = FuncTypeWalk::read(&patched, &object, &private);
+        let PrototypeList::Slots(slots) = &walk.signatures else {
+            panic!("FastDrawing carries no FuncTypDesc array");
+        };
+        let ProcedureSignature::Prototype(prototype) = &slots[4] else {
+            panic!("the prototype must survive: {:?}", slots[4]);
+        };
+        assert_eq!(prototype.arguments.len(), 1);
+        assert_eq!(prototype.arguments[0].name, "");
+
+        assert_eq!(
+            walk.defects(),
+            [crate::error::Defect {
+                site: crate::error::Site {
+                    offset: at,
+                    rva: Some(names_va.get() - image.image_base()),
+                    structure: "FuncTypDesc",
+                    field: "lpAryArgNames",
+                },
+                kind: crate::error::DefectKind::UnreadablePointer {
+                    offset: at,
+                    va: nowhere,
+                },
+            }]
+        );
     }
 
     // Task 1's fifth deliberate breakage (`member_id` read from `0x0A`
@@ -1823,10 +1906,27 @@ mod tests {
             }
             other => panic!("expected a prototype with unrecoverable defaults, got {other:?}"),
         }
-        assert!(walk.defects().iter().any(|d| matches!(
-            d.kind,
-            crate::error::DefectKind::CountMismatch { count: 99, .. }
-        )));
+        let defect = walk
+            .defects()
+            .iter()
+            .find(|d| {
+                matches!(
+                    d.kind,
+                    crate::error::DefectKind::CountMismatch { count: 99, .. }
+                )
+            })
+            .unwrap();
+        // The site is the optionalVals field of the header, and not the
+        // records that the field points at.
+        assert_eq!(defect.site.field, "optionalVals");
+        assert_eq!(
+            defect.site.offset,
+            header_region.file_offset(Off::new(0x08)).unwrap().get()
+        );
+        assert_eq!(
+            defect.site.rva,
+            Some(entry_va.get() - image.image_base() + 0x08)
+        );
     }
 
     /// `read_raw_header` and `walk_type_buffer` are reachable from the test

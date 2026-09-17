@@ -515,7 +515,6 @@ fn read_private(pe: &PeImage<'_>, object: &Object, defects: &mut Vec<Defect>) ->
         Ok(info) => info,
         Err(_) => {
             defects.push(unreadable_pointer(
-                pe,
                 object.lp_object_info,
                 "Object",
                 "lpObjectInfo",
@@ -532,7 +531,6 @@ fn read_private(pe: &PeImage<'_>, object: &Object, defects: &mut Vec<Defect>) ->
         Ok(private) => private,
         Err(_) => {
             defects.push(unreadable_pointer(
-                pe,
                 Va::new(info.lp_private_object),
                 "ObjectInfo",
                 "lpPrivateObject",
@@ -580,19 +578,15 @@ fn module_marker_mismatch(pe: &PeImage<'_>, object: &Object, lp_private_object: 
 /// `offset` is `0`: the byte position the pointer itself was read from is
 /// not carried by [`Object`] or [`ObjectInfo`] once composition reaches this
 /// function. This is the same fallback `vb/object.rs`'s own `read_name` uses
-/// (`.map_or(0, Off::get)`) whenever a file offset is unavailable; the
-/// virtual address, in both `kind.va` and `site.rva`, is what a reader uses
-/// to find the byte in question.
-fn unreadable_pointer(
-    pe: &PeImage<'_>,
-    va: Va,
-    structure: &'static str,
-    field: &'static str,
-) -> Defect {
+/// (`.map_or(0, Off::get)`) whenever a file offset is unavailable. The site
+/// gives no address for the same reason, because `site.rva` is the address
+/// of the byte at `offset`. The address that the pointer holds is in
+/// `kind.va`, and a reader uses it to find the structure in question.
+const fn unreadable_pointer(va: Va, structure: &'static str, field: &'static str) -> Defect {
     Defect {
         site: Site {
             offset: 0,
-            rva: va.to_rva(pe.image_base()).map(Rva::get),
+            rva: None,
             structure,
             field,
         },
@@ -1326,6 +1320,10 @@ mod tests {
             defect.kind,
             DefectKind::UnreadablePointer { va, .. } if va == nowhere
         ));
+        // This reader does not give the place of the pointer, so the site
+        // gives offset 0 and no address. The address that the pointer holds
+        // is in the kind only.
+        assert_eq!((defect.site.offset, defect.site.rva), (0, None));
     }
 
     /// On `Grayscale.exe`, `inspect` gives three objects with the right
