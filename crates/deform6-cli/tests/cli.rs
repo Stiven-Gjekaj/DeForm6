@@ -818,7 +818,7 @@ fn the_real_joined_winsock_sample_never_prints_the_unjoined_reason_wording() {
 /// file proves the library behaviour, this one proves the command line
 /// surface, and the two never diverge because both learn the offset from
 /// the same call rather than a literal each keeps separately.
-fn patched_fast_flames_missing_a_nul_terminator() -> Vec<u8> {
+fn patched_fast_flames_with_a_phantom_component() -> Vec<u8> {
     let data = fs::read(fast_flames_path()).unwrap();
     let table = deform6::vb::opcodes::OpcodeTable::builtin();
     let unpatched = deform6::inspect(&data, &table, deform6::journal::Mode::Salvage)
@@ -837,7 +837,7 @@ fn patched_fast_flames_missing_a_nul_terminator() -> Vec<u8> {
 /// third party fixture `AGENTS.md` bars from the repository.
 #[test]
 fn inspect_on_a_patched_file_exits_four_and_names_the_offset() {
-    let patched = patched_fast_flames_missing_a_nul_terminator();
+    let patched = patched_fast_flames_with_a_phantom_component();
     let path = std::env::temp_dir().join(format!(
         "deform6-cli-test-patched-fast-flames-{}.exe",
         std::process::id()
@@ -857,7 +857,7 @@ fn inspect_on_a_patched_file_exits_four_and_names_the_offset() {
 /// With `--salvage`, the same patched file produces its report and exits 0.
 #[test]
 fn inspect_with_salvage_on_the_same_patched_file_exits_zero_and_prints_the_report() {
-    let patched = patched_fast_flames_missing_a_nul_terminator();
+    let patched = patched_fast_flames_with_a_phantom_component();
     let path = std::env::temp_dir().join(format!(
         "deform6-cli-test-patched-fast-flames-salvage-{}.exe",
         std::process::id()
@@ -882,7 +882,7 @@ fn inspect_with_salvage_on_the_same_patched_file_exits_zero_and_prints_the_repor
 /// `run_extract` refuses before `resolve_output_dir` ever runs.
 #[test]
 fn extract_on_a_patched_file_without_salvage_exits_four_and_writes_nothing() {
-    let patched = patched_fast_flames_missing_a_nul_terminator();
+    let patched = patched_fast_flames_with_a_phantom_component();
     let path = std::env::temp_dir().join(format!(
         "deform6-cli-test-extract-patched-fast-flames-{}.exe",
         std::process::id()
@@ -913,7 +913,7 @@ fn extract_on_a_patched_file_without_salvage_exits_four_and_writes_nothing() {
 /// whose limits array names the one assumption the run made.
 #[test]
 fn extract_with_salvage_on_a_patched_file_writes_the_project_and_the_assumption() {
-    let patched = patched_fast_flames_missing_a_nul_terminator();
+    let patched = patched_fast_flames_with_a_phantom_component();
     let path = std::env::temp_dir().join(format!(
         "deform6-cli-test-extract-patched-fast-flames-salvage-{}.exe",
         std::process::id()
