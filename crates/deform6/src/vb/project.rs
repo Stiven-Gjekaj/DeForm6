@@ -717,7 +717,7 @@ impl DeclareTable {
                         export: parse_export_name(export),
                     }),
                     Err(failure) => {
-                        defects.push(failure.into_defect(pe, entry_offset, descriptor_va));
+                        defects.push(failure.into_defect(pe, &entry, descriptor_va));
                     }
                 },
                 // No source describes any value but 6 and 7. A value found
@@ -769,21 +769,42 @@ enum DeclareDescriptorFailure {
 
 impl DeclareDescriptorFailure {
     /// Builds the defect a caller records for this failure.
-    fn into_defect(self, pe: &PeImage<'_>, entry_offset: u32, descriptor_va: Va) -> Defect {
-        let (field, va) = match self {
-            Self::Descriptor => ("lpImportDescriptor", descriptor_va),
-            Self::DllName(va) => ("lpDllName", va),
-            Self::ApiName(va) => ("lpApiName", va),
+    ///
+    /// The defect names the pointer that held the address, which is the
+    /// offset that [`DefectKind::ItemAddressUnmapped`] documents.
+    /// `lpImportDescriptor` is at `0x04` of the entry. `lpDllName` and
+    /// `lpApiName` are at `0x00` and `0x04` of the descriptor, which is a
+    /// different structure. As in the other pointer defects of this crate,
+    /// the site's `rva` is the address that the pointer holds.
+    fn into_defect(self, pe: &PeImage<'_>, entry: &Region<'_>, descriptor_va: Va) -> Defect {
+        let in_descriptor = |at: u32| {
+            pe.region_at_va(descriptor_va)
+                .and_then(|descriptor| descriptor.file_offset(Off::new(at)))
         };
+        let (structure, field, at, va) = match self {
+            Self::Descriptor => (
+                "DeclareTableEntry",
+                "lpImportDescriptor",
+                entry.file_offset(Off::new(0x04)),
+                descriptor_va,
+            ),
+            Self::DllName(va) => ("DeclareDescriptor", "lpDllName", in_descriptor(0x00), va),
+            Self::ApiName(va) => ("DeclareDescriptor", "lpApiName", in_descriptor(0x04), va),
+        };
+        // Each pointer lies inside a window that the reader already read, so
+        // it has a file offset. `Region` has no infallible accessor, so the
+        // fallback is written out. It names offset 0, which is visibly not
+        // the site of a field.
+        let offset = at.map_or(0, Off::get);
         Defect {
             site: Site {
-                offset: entry_offset,
+                offset,
                 rva: va.to_rva(pe.image_base()).map(Rva::get),
-                structure: "DeclareTableEntry",
+                structure,
                 field,
             },
             kind: DefectKind::ItemAddressUnmapped {
-                offset: entry_offset,
+                offset,
                 va: va.get(),
             },
         }
@@ -1955,6 +1976,93 @@ mod tests {
         assert_eq!(table.defects()[0].site.field, "lpDllName");
         assert_eq!(table.entries.len(), 1);
         assert_eq!(kept_pair(&table, 0), Some((nowhere, api_name)));
+    }
+
+    /// Copies `MANDELBROT` and writes a `u32` into the descriptor that its
+    /// one `Declare` entry names.
+    fn with_mandelbrot_descriptor_u32(field: usize, value: u32) -> Vec<u8> {
+        let (_type, descriptor, _pair) = entry_by_hand(MANDELBROT, 0);
+        let at = descriptor_offset(MANDELBROT, descriptor) + field;
+        let mut out = MANDELBROT.to_vec();
+        assert_ne!(
+            out[at..at + 4],
+            value.to_le_bytes(),
+            "the fixture writes the value the field already holds, so it proves nothing"
+        );
+        out[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        out
+    }
+
+    /// The defect names the pointer that held the address, as
+    /// `ItemAddressUnmapped` documents. For `lpImportDescriptor`, that is
+    /// `0x04` of the entry, and not the first byte of the entry.
+    #[test]
+    fn an_unmapped_descriptor_address_is_reported_at_lp_import_descriptor_in_the_entry() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let nowhere = image.image_base() + 0x00F0_0000;
+        let at = u32::try_from(declare_entry_field_offset(MANDELBROT, 0, 0x04)).unwrap();
+        let table = declare_table(&with_mandelbrot_entry_u32(0x04, nowhere));
+        assert_eq!(table.defects().len(), 1);
+        let defect = &table.defects()[0];
+        assert_eq!(
+            defect.kind,
+            DefectKind::ItemAddressUnmapped {
+                offset: at,
+                va: nowhere,
+            }
+        );
+        assert_eq!(defect.site.offset, at);
+        assert_eq!(defect.site.structure, "DeclareTableEntry");
+        assert_eq!(defect.site.field, "lpImportDescriptor");
+        // As in the other pointer defects, the site gives the address that
+        // the pointer holds.
+        assert_eq!(defect.site.rva, Some(0x00F0_0000));
+    }
+
+    /// `lpDllName` is in the descriptor, so the defect names the descriptor.
+    #[test]
+    fn an_unmapped_library_name_is_reported_at_lp_dll_name_in_the_descriptor() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let nowhere = image.image_base() + 0x00F0_0000;
+        let (_type, descriptor, _pair) = entry_by_hand(MANDELBROT, 0);
+        let at = u32::try_from(descriptor_offset(MANDELBROT, descriptor)).unwrap();
+        let table = declare_table(&with_mandelbrot_descriptor_u32(0x00, nowhere));
+        assert_eq!(table.defects().len(), 1);
+        let defect = &table.defects()[0];
+        assert_eq!(
+            defect.kind,
+            DefectKind::ItemAddressUnmapped {
+                offset: at,
+                va: nowhere,
+            }
+        );
+        assert_eq!(defect.site.offset, at);
+        assert_eq!(defect.site.structure, "DeclareDescriptor");
+        assert_eq!(defect.site.field, "lpDllName");
+        assert_eq!(defect.site.rva, Some(0x00F0_0000));
+    }
+
+    /// `lpApiName` is at `0x04` of the descriptor.
+    #[test]
+    fn an_unmapped_export_name_is_reported_at_lp_api_name_in_the_descriptor() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let nowhere = image.image_base() + 0x00F0_0000;
+        let (_type, descriptor, _pair) = entry_by_hand(MANDELBROT, 0);
+        let at = u32::try_from(descriptor_offset(MANDELBROT, descriptor) + 4).unwrap();
+        let table = declare_table(&with_mandelbrot_descriptor_u32(0x04, nowhere));
+        assert_eq!(table.defects().len(), 1);
+        let defect = &table.defects()[0];
+        assert_eq!(
+            defect.kind,
+            DefectKind::ItemAddressUnmapped {
+                offset: at,
+                va: nowhere,
+            }
+        );
+        assert_eq!(defect.site.offset, at);
+        assert_eq!(defect.site.structure, "DeclareDescriptor");
+        assert_eq!(defect.site.field, "lpApiName");
+        assert_eq!(defect.site.rva, Some(0x00F0_0000));
     }
 
     /// Only an entry of type 7 names a descriptor of the shape that this
