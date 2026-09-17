@@ -309,7 +309,7 @@ impl<'a> PeImage<'a> {
         // `get` gives nothing when the section declares more bytes than the
         // file holds. The window is then everything that is left.
         let bytes = rest.get(..want).unwrap_or(rest);
-        Some(Region::new(bytes, offset))
+        Some(Region::mapped(bytes, offset, rva))
     }
 
     /// Gives a bounded window that starts at a virtual address.
@@ -756,6 +756,22 @@ mod tests {
         let region = image.region_at(rva).unwrap();
         assert_eq!(region.file_offset(Off::new(0)), image.rva_to_off(rva));
         assert_eq!(region.u8(Off::new(0)), Some(0x68));
+    }
+
+    /// The section of this image is at address `0x1000` and at file offset
+    /// `0x400`, so the window cannot give one number for the other.
+    #[test]
+    fn a_region_gives_the_address_and_the_file_offset_of_each_byte() {
+        let data = a_small_image(false);
+        let image = PeImage::parse(&data).unwrap();
+        let region = image.region_at(Rva::new(0x1010)).unwrap();
+        assert_eq!(region.file_offset(Off::new(0)), Some(Off::new(0x410)));
+        assert_eq!(region.rva(Off::new(0)), Some(Rva::new(0x1010)));
+        assert_eq!(region.rva(Off::new(4)), Some(Rva::new(0x1014)));
+        let sub = region.subregion(Off::new(0x30), 4).unwrap();
+        assert_eq!(sub.file_offset(Off::new(0)), Some(Off::new(0x440)));
+        assert_eq!(sub.rva(Off::new(0)), Some(Rva::new(0x1040)));
+        assert_eq!(sub.take(Off::new(0), 4), Some(&b"some"[..]));
     }
 
     #[test]

@@ -172,13 +172,33 @@ impl Va {
 pub struct Region<'a> {
     bytes: &'a [u8],
     base: Off,
+    rva: Option<Rva>,
 }
 
 impl<'a> Region<'a> {
     /// Builds a window over `bytes` whose first byte is at file offset `base`.
+    ///
+    /// The window knows no address, so [`Region::rva`] gives nothing.
+    /// [`crate::read::pe::PeImage::region_at`] builds the windows that know
+    /// one.
     #[must_use]
     pub const fn new(bytes: &'a [u8], base: Off) -> Self {
-        Self { bytes, base }
+        Self {
+            bytes,
+            base,
+            rva: None,
+        }
+    }
+
+    /// Builds a window over `bytes` whose first byte is at file offset
+    /// `base` and at the relative virtual address `rva`.
+    #[must_use]
+    pub(crate) const fn mapped(bytes: &'a [u8], base: Off, rva: Rva) -> Self {
+        Self {
+            bytes,
+            base,
+            rva: Some(rva),
+        }
     }
 
     /// Gives the length of the window in bytes.
@@ -207,6 +227,16 @@ impl<'a> Region<'a> {
         self.base.checked_add(at.get())
     }
 
+    /// Converts a window-relative offset into a relative virtual address.
+    ///
+    /// A defect uses this to give the address of the byte at the offset that
+    /// [`Region::file_offset`] gives. It returns `None` when the window knows
+    /// no address, and when the sum leaves a `u32`.
+    #[must_use]
+    pub fn rva(&self, at: Off) -> Option<Rva> {
+        self.rva?.checked_add(at.get())
+    }
+
     /// Takes `len` bytes at `at`.
     ///
     /// This is the only route out of a `Region`. It returns `None` when the
@@ -223,13 +253,16 @@ impl<'a> Region<'a> {
     /// Takes a window of `len` bytes at `at`.
     ///
     /// The new window carries its own base, so `file_offset` on it still
-    /// gives an absolute file offset.
+    /// gives an absolute file offset. It also carries its own address, when
+    /// this window knows one, so `rva` on it still gives the address of the
+    /// same byte.
     #[must_use]
     pub fn subregion(&self, at: Off, len: u32) -> Option<Region<'a>> {
         let bytes = self.take(at, len)?;
         Some(Region {
             bytes,
             base: self.file_offset(at)?,
+            rva: self.rva(at),
         })
     }
 
@@ -365,6 +398,35 @@ mod tests {
     #[test]
     fn rva_checked_add_refuses_a_sum_that_leaves_a_u32() {
         assert_eq!(Rva::new(u32::MAX).checked_add(1), None);
+    }
+
+    #[test]
+    fn a_window_built_from_bytes_knows_no_address() {
+        assert_eq!(region().rva(Off::new(0)), None);
+        assert_eq!(
+            region().subregion(Off::new(2), 2).unwrap().rva(Off::new(0)),
+            None
+        );
+    }
+
+    #[test]
+    fn a_mapped_window_gives_the_address_of_each_byte_and_a_subregion_keeps_it() {
+        let r = Region::mapped(&BUF, Off::new(0x400), Rva::new(0x1000));
+        assert_eq!(r.rva(Off::new(0)), Some(Rva::new(0x1000)));
+        assert_eq!(r.rva(Off::new(4)), Some(Rva::new(0x1004)));
+        let sub = r.subregion(Off::new(4), 2).unwrap();
+        assert_eq!(sub.file_offset(Off::new(1)), Some(Off::new(0x405)));
+        assert_eq!(sub.rva(Off::new(1)), Some(Rva::new(0x1005)));
+    }
+
+    #[test]
+    fn an_address_that_leaves_a_u32_gives_nothing() {
+        let r = Region::mapped(&BUF, Off::new(0), Rva::new(u32::MAX));
+        assert_eq!(r.rva(Off::new(0)), Some(Rva::new(u32::MAX)));
+        assert_eq!(r.rva(Off::new(1)), None);
+        let sub = r.subregion(Off::new(1), 1).unwrap();
+        assert_eq!(sub.rva(Off::new(0)), None);
+        assert_eq!(sub.u8(Off::new(0)), Some(0x02));
     }
 
     #[test]
