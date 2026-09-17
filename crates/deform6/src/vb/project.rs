@@ -792,15 +792,35 @@ impl DeclareTable {
 
 /// Why a `dwEntryType == 7` entry did not resolve to a declaration.
 enum DeclareDescriptorFailure {
-    /// `lpImportDescriptor` itself is in no section.
-    DescriptorUnmapped,
-    /// `lpImportDescriptor` is in a section, and the file holds fewer than
-    /// the `DECLARE_DESCRIPTOR_SIZE` bytes that the reader reads there.
-    DescriptorCutShort,
-    /// `lpDllName` resolves to no bounded string.
-    DllName(Va),
-    /// `lpApiName` resolves to no bounded string.
-    ApiName(Va),
+    /// The reader could not use the descriptor that `lpImportDescriptor`
+    /// names.
+    Descriptor(Miss),
+    /// The reader could not use the library name at this address, which
+    /// `lpDllName` holds.
+    DllName(Va, Miss),
+    /// The reader could not use the export name at this address, which
+    /// `lpApiName` holds.
+    ApiName(Va, Miss),
+}
+
+/// What the reader found at an address that it could not use.
+enum Miss {
+    /// The address is in no section.
+    Unmapped,
+    /// The address is in a section, and the file holds fewer than `len`
+    /// bytes there.
+    CutShort {
+        /// The number of bytes that the reader must read.
+        len: u32,
+    },
+    /// The address is in a section, and no NUL comes in the bytes that the
+    /// reader searched.
+    Unterminated {
+        /// The absolute file offset of the text.
+        at: Option<Off>,
+        /// The number of bytes that the reader searched.
+        searched: u32,
+    },
 }
 
 impl DeclareDescriptorFailure {
@@ -811,17 +831,22 @@ impl DeclareDescriptorFailure {
     /// descriptor that the file cuts short.
     fn no_descriptor(pe: &PeImage<'_>, descriptor_va: Va) -> Self {
         if pe.region_at_va(descriptor_va).is_some() {
-            Self::DescriptorCutShort
+            Self::Descriptor(Miss::CutShort {
+                len: DECLARE_DESCRIPTOR_SIZE,
+            })
         } else {
-            Self::DescriptorUnmapped
+            Self::Descriptor(Miss::Unmapped)
         }
     }
 
     /// Builds the defect a caller records for this failure.
     ///
-    /// The defect names the pointer that held the address, which is the
+    /// The site names the pointer that held the address, which is the
     /// offset that [`DefectKind::ItemAddressUnmapped`] and
-    /// [`DefectKind::ItemCutShort`] document.
+    /// [`DefectKind::ItemCutShort`] document. A
+    /// [`DefectKind::NoNulTerminator`] gives the offset of the text itself,
+    /// as its own doc comment says, and the number of bytes that the reader
+    /// searched.
     /// `lpImportDescriptor` is at `0x04` of the entry. `lpDllName` and
     /// `lpApiName` are at `0x00` and `0x04` of the descriptor, which is a
     /// different structure. As in the other pointer defects of this crate,
@@ -831,33 +856,48 @@ impl DeclareDescriptorFailure {
             pe.region_at_va(descriptor_va)
                 .and_then(|descriptor| descriptor.file_offset(Off::new(at)))
         };
-        let cut_short = matches!(self, Self::DescriptorCutShort);
-        let (structure, field, at, va) = match self {
-            Self::DescriptorUnmapped | Self::DescriptorCutShort => (
+        let (structure, field, at, va, miss) = match self {
+            Self::Descriptor(miss) => (
                 "DeclareTableEntry",
                 "lpImportDescriptor",
                 entry.file_offset(Off::new(0x04)),
                 descriptor_va,
+                miss,
             ),
-            Self::DllName(va) => ("DeclareDescriptor", "lpDllName", in_descriptor(0x00), va),
-            Self::ApiName(va) => ("DeclareDescriptor", "lpApiName", in_descriptor(0x04), va),
+            Self::DllName(va, miss) => (
+                "DeclareDescriptor",
+                "lpDllName",
+                in_descriptor(0x00),
+                va,
+                miss,
+            ),
+            Self::ApiName(va, miss) => (
+                "DeclareDescriptor",
+                "lpApiName",
+                in_descriptor(0x04),
+                va,
+                miss,
+            ),
         };
         // Each pointer lies inside a window that the reader already read, so
         // it has a file offset. `Region` has no infallible accessor, so the
         // fallback is written out. It names offset 0, which is visibly not
         // the site of a field.
         let offset = at.map_or(0, Off::get);
-        let kind = if cut_short {
-            DefectKind::ItemCutShort {
+        let kind = match miss {
+            Miss::Unmapped => DefectKind::ItemAddressUnmapped {
                 offset,
                 va: va.get(),
-                len: DECLARE_DESCRIPTOR_SIZE,
-            }
-        } else {
-            DefectKind::ItemAddressUnmapped {
+            },
+            Miss::CutShort { len } => DefectKind::ItemCutShort {
                 offset,
                 va: va.get(),
-            }
+                len,
+            },
+            Miss::Unterminated { at, searched } => DefectKind::NoNulTerminator {
+                offset: at.map_or(0, Off::get),
+                limit: searched,
+            },
         };
         Defect {
             site: Site {
@@ -898,10 +938,10 @@ fn read_declare_names(
         lp_dll_name,
         lp_api_name,
     } = descriptor;
-    let library =
-        read_latin1_cstr(pe, lp_dll_name).ok_or(DeclareDescriptorFailure::DllName(lp_dll_name))?;
-    let export =
-        read_latin1_cstr(pe, lp_api_name).ok_or(DeclareDescriptorFailure::ApiName(lp_api_name))?;
+    let library = read_declare_name(pe, lp_dll_name)
+        .map_err(|miss| DeclareDescriptorFailure::DllName(lp_dll_name, miss))?;
+    let export = read_declare_name(pe, lp_api_name)
+        .map_err(|miss| DeclareDescriptorFailure::ApiName(lp_api_name, miss))?;
     Ok((library, export))
 }
 
@@ -912,10 +952,17 @@ fn read_declare_names(
 /// `char::from(byte)` gives the Latin-1 code point. `String::from_utf8_lossy`
 /// is wrong here, because a byte in `0x80` to `0xFF` would become the
 /// replacement character and the name would be lost.
-fn read_latin1_cstr(pe: &PeImage<'_>, va: Va) -> Option<String> {
-    let region = pe.region_at_va(va)?;
-    let bytes = region.cstr(Off::new(0), NAME_MAX)?;
-    Some(bytes.iter().copied().map(char::from).collect())
+fn read_declare_name(pe: &PeImage<'_>, va: Va) -> Result<String, Miss> {
+    let region = pe.region_at_va(va).ok_or(Miss::Unmapped)?;
+    let bytes = region
+        .cstr(Off::new(0), NAME_MAX)
+        .ok_or_else(|| Miss::Unterminated {
+            at: region.file_offset(Off::new(0)),
+            // `Region::cstr` searches `NAME_MAX` bytes, or the whole window
+            // when the window is shorter.
+            searched: region.len().min(NAME_MAX),
+        })?;
+    Ok(bytes.iter().copied().map(char::from).collect())
 }
 
 /// One entry of the external component table: an OCX or type library
@@ -1392,7 +1439,7 @@ fn component_cstr(entry: &Region<'_>, at: Off) -> Option<String> {
 )]
 mod tests {
     use super::{
-        CompileMode, Component, ComponentTable, Declaration, DeclareTable, ExportName,
+        CompileMode, Component, ComponentTable, Declaration, DeclareTable, ExportName, NAME_MAX,
         ObjectTableHead, PROJECT_INFO_SIZE, ProjectInfo, parse_export_name,
     };
     use crate::error::Refusal;
@@ -2118,6 +2165,74 @@ mod tests {
         assert_eq!(defect.site.offset, at);
         assert_eq!(defect.site.structure, "DeclareTableEntry");
         assert_eq!(defect.site.field, "lpImportDescriptor");
+    }
+
+    /// Copies `data` and writes `bytes` at the virtual address `va`.
+    fn with_bytes_at_va(data: &[u8], va: u32, bytes: &[u8]) -> Vec<u8> {
+        let at = descriptor_offset(data, va);
+        let mut out = data.to_vec();
+        out[at..at + bytes.len()].copy_from_slice(bytes);
+        out
+    }
+
+    /// The library name address maps 4 bytes before the end of its section,
+    /// and those 4 bytes hold no NUL. The defect gives the text and the 4
+    /// bytes that the reader searched, and its site is `lpDllName`.
+    #[test]
+    fn a_library_name_that_its_section_ends_before_a_nul_is_reported_as_unterminated_text() {
+        let (_type, descriptor, (dll_name, _api_name)) = entry_by_hand(MANDELBROT, 0);
+        let text = section_end(MANDELBROT, dll_name) - 4;
+        let text_at = descriptor_offset(MANDELBROT, text);
+        assert!(text_at > descriptor_offset(MANDELBROT, descriptor) + 24);
+        let mut bytes = with_bytes_at_va(MANDELBROT, text, b"AAAA");
+        let pointer_at = descriptor_offset(MANDELBROT, descriptor);
+        bytes[pointer_at..pointer_at + 4].copy_from_slice(&text.to_le_bytes());
+
+        let table = declare_table(&bytes);
+        assert!(table.declarations.is_empty());
+        assert_eq!(table.defects().len(), 1);
+        let defect = &table.defects()[0];
+        assert_eq!(
+            defect.kind,
+            DefectKind::NoNulTerminator {
+                offset: u32::try_from(text_at).unwrap(),
+                limit: 4,
+            }
+        );
+        assert_eq!(defect.kind.severity(), Severity::Recoverable);
+        assert_eq!(defect.site.offset, u32::try_from(pointer_at).unwrap());
+        assert_eq!(defect.site.structure, "DeclareDescriptor");
+        assert_eq!(defect.site.field, "lpDllName");
+    }
+
+    /// The export name address maps well before the end of its section, and
+    /// no NUL comes in the next `NAME_MAX` bytes. The reader searched all
+    /// `NAME_MAX` of them.
+    #[test]
+    fn an_export_name_with_no_nul_in_the_bytes_searched_is_reported_as_unterminated_text() {
+        let (_type, descriptor, (_dll_name, api_name)) = entry_by_hand(MANDELBROT, 0);
+        let text = section_end(MANDELBROT, api_name) - 300;
+        let text_at = descriptor_offset(MANDELBROT, text);
+        assert!(text_at > descriptor_offset(MANDELBROT, descriptor) + 24);
+        let mut bytes = with_bytes_at_va(MANDELBROT, text, &[b'A'; 300]);
+        let pointer_at = descriptor_offset(MANDELBROT, descriptor) + 4;
+        bytes[pointer_at..pointer_at + 4].copy_from_slice(&text.to_le_bytes());
+
+        let table = declare_table(&bytes);
+        assert!(table.declarations.is_empty());
+        assert_eq!(table.defects().len(), 1);
+        let defect = &table.defects()[0];
+        assert_eq!(
+            defect.kind,
+            DefectKind::NoNulTerminator {
+                offset: u32::try_from(text_at).unwrap(),
+                limit: NAME_MAX,
+            }
+        );
+        assert_eq!(NAME_MAX, 260);
+        assert_eq!(defect.site.offset, u32::try_from(pointer_at).unwrap());
+        assert_eq!(defect.site.structure, "DeclareDescriptor");
+        assert_eq!(defect.site.field, "lpApiName");
     }
 
     /// `lpDllName` is in the descriptor, so the defect names the descriptor.
