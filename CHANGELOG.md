@@ -86,6 +86,11 @@ is therefore 2.0.0, not 1.1.0.
   `lpDllName` or `lpApiName` gives `+ 0x00` or `+ 0x04` of the descriptor,
   and names the structure `DeclareDescriptor`. 1.0.0 gave the first byte of
   the entry for all three, and named the structure `DeclareTableEntry`.
+- A `Declare` table whose address is in no section, while
+  `dwExternalCount` is not zero, now gives `ItemAddressUnmapped` at
+  `ProjectInfo + 0x234`. 1.0.0 gave an empty list and no defect, which said
+  that the project declares nothing. A strict run now refuses such a file,
+  and a salvage run reports no `Declare` statement and the defect.
 - New public fields that break no caller: `ObjectTableHead::lp_object_array`
   and `DeclareTable::entries`. Each of the two structures already has a
   private field, so no code outside this crate builds one or names every
