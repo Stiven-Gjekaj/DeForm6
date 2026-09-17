@@ -80,6 +80,12 @@ is therefore 2.0.0, not 1.1.0.
   gives `ProjectInfo + 0x238`, and its `rva` is now `null`, because that
   byte was not reached through the address of the `Declare` table that
   1.0.0 gave.
+- Three `Declare` defects now give the offset of the pointer that held the
+  address, as `ItemAddressUnmapped` documents. A defect about
+  `lpImportDescriptor` gives `+ 0x04` of the entry. A defect about
+  `lpDllName` or `lpApiName` gives `+ 0x00` or `+ 0x04` of the descriptor,
+  and names the structure `DeclareDescriptor`. 1.0.0 gave the first byte of
+  the entry for all three, and named the structure `DeclareTableEntry`.
 - New public fields that break no caller: `ObjectTableHead::lp_object_array`
   and `DeclareTable::entries`. Each of the two structures already has a
   private field, so no code outside this crate builds one or names every
@@ -114,10 +120,6 @@ is therefore 2.0.0, not 1.1.0.
   the work on the other structures that is left.
 - The census does not count the type buffer. The clamp on that array only
   bounds a loop, so the byte diff cannot see it either.
-- Three `Declare` defects give the offset of the first byte of the entry. A
-  defect about `lpImportDescriptor` does not give the byte of that field,
-  and a defect about `lpDllName` or `lpApiName` names the entry, not the
-  descriptor that holds the field.
 - The internal `damaged` helper still leaks one message for each refusal.
   The scheduled fuzz job is held to a measured peak resident set, not to a
   model of the leak.

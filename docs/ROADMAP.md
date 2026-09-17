@@ -369,7 +369,8 @@ headers. `STRUCTURES.md` section 8.7 calls that field reserved.
 **Three `Declare` defects name the wrong byte.** A defect about
 `lpImportDescriptor`, `lpDllName` or `lpApiName` gives the first byte of the
 entry. The first field is at `+0x04` of the entry, and the other two are in
-the descriptor. This segment did not change them.
+the descriptor. This segment did not change them. A later commit makes each
+of the three give the byte of its own pointer.
 
 **The fuzz target found no fault.** Two campaigns ran on commit `ce7df1f`,
 seeded as `.github/workflows/fuzz.yml` seeds them. The campaign of 60
