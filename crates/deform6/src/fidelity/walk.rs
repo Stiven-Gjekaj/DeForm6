@@ -785,8 +785,9 @@ fn element<'a, T: Emit>(
 ///
 /// The reader clamps `dwExternalCount` to the entries that the table's region
 /// holds and raises a defect when it does, so this is the row where that
-/// clamp shows. The reader gives no defect for a table whose address maps
-/// nowhere, so the walk decides that for itself.
+/// clamp shows. The walk decides for itself whether the table's address maps
+/// anywhere, so an unmapped table is told apart from a clamp without asking
+/// the reader.
 fn count_declare_table(
     pe: &PeImage<'_>,
     project_window: &Region<'_>,

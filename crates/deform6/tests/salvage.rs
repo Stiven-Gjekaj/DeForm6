@@ -347,3 +347,80 @@ fn an_unresolvable_declare_descriptor_succeeds_in_salvage_mode_losing_only_that_
         salvaged.defects
     );
 }
+
+// --- A Declare table whose own address maps nowhere loses the table, and
+// nothing else ----------------------------------------------------------------
+
+/// Copies `data` and writes an address that resolves to no section into
+/// `ProjectInfo.lpExternalTable` (offset `0x234`), reached through the header
+/// and the address of `ProjectInfo`, as the parser reaches it. The count
+/// stays as the file holds it, so the file still declares one entry.
+fn with_declare_table_unresolved(data: &[u8]) -> Vec<u8> {
+    let image = PeImage::parse(data).expect("Mandelbrot.exe must parse as a PE image");
+    let header = header_region(&image).expect("Mandelbrot.exe must hold a VB header");
+    let vb_header = VbHeader::read(&header).expect("Mandelbrot.exe must hold a valid VB header");
+    let project = image
+        .region_at_va(vb_header.lp_project_data)
+        .expect("Mandelbrot.exe's ProjectInfo address must resolve");
+    let at = project
+        .file_offset(Off::new(0x234))
+        .expect("lpExternalTable must resolve to a file offset");
+    let at = usize::try_from(at.get()).expect("a file offset must fit a usize on every host");
+
+    let nowhere = image.image_base().wrapping_add(0x00F0_0000);
+    let mut patched = data.to_vec();
+    assert_ne!(
+        &patched[at..at + 4],
+        nowhere.to_le_bytes(),
+        "the fixture writes the value the field already holds, so it proves nothing"
+    );
+    patched[at..at + 4].copy_from_slice(&nowhere.to_le_bytes());
+    patched
+}
+
+#[test]
+fn an_unresolvable_declare_table_refuses_in_strict_mode() {
+    let table = OpcodeTable::builtin();
+    let patched = with_declare_table_unresolved(MANDELBROT);
+
+    let refusal = inspect(&patched, &table, Mode::Strict).expect_err(
+        "a Declare table whose address resolves to no section must refuse in strict mode",
+    );
+    let message = format!("{refusal}");
+    assert!(
+        message.contains("is in no section"),
+        "the refusal must name what the parser expected there: {message}"
+    );
+}
+
+#[test]
+fn an_unresolvable_declare_table_succeeds_in_salvage_mode_losing_only_the_declarations() {
+    let table = OpcodeTable::builtin();
+    let unpatched = inspect(MANDELBROT, &table, Mode::Salvage)
+        .expect("the shipped file must inspect cleanly in salvage mode");
+    assert_eq!(unpatched.declarations.len(), 1);
+
+    let patched = with_declare_table_unresolved(MANDELBROT);
+    let salvaged = inspect(&patched, &table, Mode::Salvage)
+        .expect("salvage mode must continue past the recoverable defect");
+
+    assert!(
+        salvaged.declarations.is_empty(),
+        "the table that resolves nowhere must be lost, not invented: {:?}",
+        salvaged.declarations
+    );
+    assert_eq!(salvaged.object_count, unpatched.object_count);
+    assert_eq!(salvaged.project_name, unpatched.project_name);
+
+    let reported: Vec<_> = salvaged
+        .defects
+        .iter()
+        .filter(|defect| defect.site.field == "lpExternalTable")
+        .collect();
+    assert_eq!(reported.len(), 1, "{:?}", salvaged.defects);
+    assert_eq!(reported[0].site.structure, "ProjectInfo");
+    assert_eq!(
+        reported[0].kind.severity(),
+        deform6::error::Severity::Recoverable
+    );
+}

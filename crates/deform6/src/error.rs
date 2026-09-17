@@ -329,7 +329,9 @@ pub enum DefectKind {
     /// belongs to one item only: `vb/project.rs::DeclareTable::read` loses
     /// one `Declare` entry and keeps walking the rest of the table. Nothing
     /// downstream of this item rests on the value this pointer would have
-    /// named.
+    /// named. The same reader loses the whole `Declare` table when the
+    /// table's own address maps nowhere, and the rest of the program still
+    /// reads.
     #[error("address {va:#x} at offset {offset:#x} is in no section, and the item is skipped")]
     ItemAddressUnmapped {
         /// The absolute file offset of the pointer that held the address.

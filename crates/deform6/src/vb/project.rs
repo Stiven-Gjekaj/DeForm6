@@ -35,6 +35,12 @@ use crate::read::region::{Off, Region, Rva, Va};
 /// agree.
 const PROJECT_INFO_SIZE: u32 = 0x23C;
 
+/// `STRUCTURES.md` section 3: `lpExternalTable` sits at `ProjectInfo + 0x234`.
+///
+/// One constant for the read and for the defect that names this field, so the
+/// two cannot come apart.
+const LP_EXTERNAL_TABLE_AT: u32 = 0x234;
+
 /// `STRUCTURES.md` section 3: `dwExternalCount` sits at `ProjectInfo + 0x238`.
 ///
 /// One constant for the read and for the defect that names this field, so the
@@ -150,7 +156,7 @@ impl ProjectInfo {
             lp_native_code: u32_at(&window, 0x20, "ProjectInfo holds no native code address")?,
             lp_external_table: va_at(
                 &window,
-                0x234,
+                LP_EXTERNAL_TABLE_AT,
                 "ProjectInfo holds no address for the import table",
             )?,
             dw_external_count: u32_at(
@@ -584,6 +590,12 @@ impl DeclareTable {
     /// external table, and there is no reason to dereference a pointer this
     /// walk will not use.
     ///
+    /// A count that is not zero, with a table address in no section, gives
+    /// empty lists and one [`DefectKind::ItemAddressUnmapped`] at
+    /// `lpExternalTable`. The whole table is the item that is lost. Empty
+    /// lists with no defect would say that the project declares nothing,
+    /// which is a different claim.
+    ///
     /// # Bounding `dwExternalCount`
     ///
     /// The count is a `u32` straight out of the file. Before the loop, it is
@@ -611,7 +623,9 @@ impl DeclareTable {
     /// `Mode::Salvage`. These three outcomes now build
     /// [`DefectKind::ItemAddressUnmapped`] instead, which `severity()` marks
     /// `Recoverable`: `Mode::Strict` still refuses, and `Mode::Salvage`
-    /// loses the one entry and keeps walking the rest of the table.
+    /// loses the one entry and keeps walking the rest of the table. A table
+    /// whose own address maps nowhere gives the same variant, because the
+    /// rest of the program still resolves without it.
     #[must_use]
     pub fn read(pe: &PeImage<'_>, info: &ProjectInfo) -> Self {
         let mut declarations = Vec::new();
@@ -627,6 +641,26 @@ impl DeclareTable {
         }
 
         let Some(table) = pe.region_at_va(info.lp_external_table) else {
+            // The count says that the table holds entries, and the table's
+            // address maps nowhere. The defect names lpExternalTable, which
+            // lives in ProjectInfo. As in the other pointer defects of this
+            // crate, the site's `rva` is the address that the pointer holds.
+            let offset = info
+                .file_offset
+                .checked_add(LP_EXTERNAL_TABLE_AT)
+                .map_or(0, Off::get);
+            defects.push(Defect {
+                site: Site {
+                    offset,
+                    rva: info.lp_external_table.to_rva(pe.image_base()).map(Rva::get),
+                    structure: "ProjectInfo",
+                    field: "lpExternalTable",
+                },
+                kind: DefectKind::ItemAddressUnmapped {
+                    offset,
+                    va: info.lp_external_table.get(),
+                },
+            });
             return Self {
                 declarations,
                 entries,
@@ -1336,7 +1370,7 @@ mod tests {
         ObjectTableHead, PROJECT_INFO_SIZE, ProjectInfo, parse_export_name,
     };
     use crate::error::Refusal;
-    use crate::error::{DefectKind, Severity};
+    use crate::error::{Defect, DefectKind, Severity, Site};
     use crate::read::pe::PeImage;
     use crate::read::region::{Off, Va};
     use crate::vb::header::{VbHeader, header_region};
@@ -2076,6 +2110,65 @@ mod tests {
         assert_eq!(table.entries[0].dw_entry_type, 99);
         assert_eq!(table.entries[0].lp_import_descriptor, Va::new(descriptor));
         assert_eq!(table.entries[0].descriptor, None);
+    }
+
+    /// Copies `MANDELBROT` and writes a `u32` into its `ProjectInfo`.
+    fn with_mandelbrot_project_info_u32(data: &[u8], field: u32, value: u32) -> Vec<u8> {
+        let at = project_info_field_offset(MANDELBROT, field);
+        let mut out = data.to_vec();
+        assert_ne!(
+            out[at..at + 4],
+            value.to_le_bytes(),
+            "the fixture writes the value the field already holds, so it proves nothing"
+        );
+        out[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        out
+    }
+
+    /// The count says that the table holds one entry, and the table maps
+    /// nowhere. The whole table is lost, and the defect says so at
+    /// `lpExternalTable`.
+    #[test]
+    fn a_declare_table_whose_address_maps_nowhere_gives_one_defect_at_lp_external_table() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let nowhere = image.image_base() + 0x00F0_0000;
+        let bytes = with_mandelbrot_project_info_u32(MANDELBROT, 0x234, nowhere);
+        let at = u32::try_from(project_info_field_offset(MANDELBROT, 0x234)).unwrap();
+
+        let table = declare_table(&bytes);
+        assert!(table.declarations.is_empty());
+        assert!(table.entries.is_empty());
+        assert_eq!(
+            table.defects(),
+            [Defect {
+                site: Site {
+                    offset: at,
+                    rva: Some(0x00F0_0000),
+                    structure: "ProjectInfo",
+                    field: "lpExternalTable",
+                },
+                kind: DefectKind::ItemAddressUnmapped {
+                    offset: at,
+                    va: nowhere,
+                },
+            }]
+        );
+        assert_eq!(table.defects()[0].kind.severity(), Severity::Recoverable);
+    }
+
+    /// A zero count never reads the table address, so an address that maps
+    /// nowhere is not a defect.
+    #[test]
+    fn a_zero_count_gives_no_defect_whatever_the_table_address_holds() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let nowhere = image.image_base() + 0x00F0_0000;
+        let bytes = with_mandelbrot_project_info_u32(MANDELBROT, 0x238, 0);
+        let bytes = with_mandelbrot_project_info_u32(&bytes, 0x234, nowhere);
+
+        let table = declare_table(&bytes);
+        assert!(table.declarations.is_empty());
+        assert!(table.entries.is_empty());
+        assert!(table.defects().is_empty(), "{:?}", table.defects());
     }
 
     /// A bound `dwExternalCount` still resolves every entry the region can
