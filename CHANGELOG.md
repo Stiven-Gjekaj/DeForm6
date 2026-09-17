@@ -99,6 +99,36 @@ is therefore 2.0.0, not 1.1.0.
   `ItemAddressUnmapped` for both, and its message says that the address is
   in no section. All three kinds are `Recoverable`, so a strict run refuses
   these files as before.
+- `Site::rva` is now the address of the byte at `Site::offset`, or `null`.
+  It never holds an address that the byte points at. At each pointer
+  defect, 1.0.0 gave the address that the pointer holds: at
+  `lpszObjectName`, `lpszName`, an event slot, `lpProcNamesArray`,
+  `lpFuncTypeInfo`, `lpAryArgNames`, `optionalVals`, `lpObjectInfo`,
+  `lpPrivateObject` and the three `Declare` pointers. The kind of each of
+  these defects still gives that address. A `constFFFF` defect gave the
+  address where its `FuncTypDesc` starts, and a section overlap gave the
+  address where the other section starts. A section overlap, an unreadable
+  `lpObjectInfo` or `lpPrivateObject`, and a `Declare` table in no section
+  now give `null`, because the reader does not know the address of that
+  byte.
+- Each `NoNulTerminator` defect now gives the file offset where the text
+  starts, and the number of bytes that the search read, as the kind
+  documents. For the names of objects, controls, procedures and arguments,
+  1.0.0 gave the offset of the pointer and the bound. A search reads fewer
+  bytes than the bound when the section ends first. The site of each of
+  these defects is still the pointer.
+- A component entry that gives no component now gives a defect that names
+  the failure. An entry shorter than its `0x34` bytes of fixed fields gives
+  `CountMismatch` at `StructLength`. A string with no NUL gives
+  `NoNulTerminator` at the offset field that names it, which is
+  `FileNameOffset`, `SourceOffset` or `NameOffset`. 1.0.0 gave
+  `NoNulTerminator` at the first byte of the entry, named `NameOffset`, for
+  each of these. Both kinds are `Recoverable`, so a strict run refuses these
+  files as before.
+- New public methods that break no caller: `Region::rva` gives the address
+  of a byte in a window that `PeImage::region_at` built, and
+  `Region::cstr_span` gives the number of bytes that `Region::cstr`
+  searches.
 - New public fields that break no caller: `ObjectTableHead::lp_object_array`
   and `DeclareTable::entries`. Each of the two structures already has a
   private field, so no code outside this crate builds one or names every
