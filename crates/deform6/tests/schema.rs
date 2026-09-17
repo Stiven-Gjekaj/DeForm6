@@ -334,3 +334,56 @@ fn a_report_that_carries_an_unknown_stub_shape_validates() {
         "a byte above 255 must be refused"
     );
 }
+
+/// A report that carries an `ItemCutShort` defect validates, and the schema
+/// refuses the same defect when one of its three fields is missing.
+///
+/// No corpus program raises this kind, for the reason the tests above give
+/// for their own kinds.
+#[test]
+fn a_report_that_carries_an_item_cut_short_validates() {
+    let validator = compiled_schema();
+    let exe = corpus_root().join("vb6-code/Mandelbrot/Mandelbrot.exe");
+    let mut value = report_value_for(&exe);
+    let defect = Defect {
+        site: Site {
+            offset: 0x1ae0,
+            rva: Some(0x1ae0),
+            structure: "DeclareTableEntry",
+            field: "lpImportDescriptor",
+        },
+        kind: DefectKind::ItemCutShort {
+            offset: 0x1ae0,
+            va: 0x0040_3FFC,
+            len: 8,
+        },
+    };
+    let serialized = serde_json::to_value(&defect).expect("a defect serializes");
+    let at = value["defects"]
+        .as_array()
+        .expect("defects must be an array")
+        .len();
+    value["defects"]
+        .as_array_mut()
+        .expect("defects must be an array")
+        .push(serialized);
+
+    let errors = describe_errors(&validator, &value);
+    assert!(
+        errors.is_empty(),
+        "a report with an ItemCutShort defect failed schema validation:\n{}",
+        errors.join("\n")
+    );
+
+    for field in ["offset", "va", "len"] {
+        let mut missing = value.clone();
+        missing["defects"][at]["kind"]["ItemCutShort"]
+            .as_object_mut()
+            .expect("the kind must be an object")
+            .remove(field);
+        assert!(
+            !validator.is_valid(&missing),
+            "a defect with no {field} must be refused"
+        );
+    }
+}

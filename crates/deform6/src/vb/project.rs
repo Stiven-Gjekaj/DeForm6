@@ -743,7 +743,7 @@ impl DeclareTable {
                 // path. `[VERIFIED: local]`
                 6 => {}
                 7 => match descriptor
-                    .ok_or(DeclareDescriptorFailure::Descriptor)
+                    .ok_or_else(|| DeclareDescriptorFailure::no_descriptor(pe, descriptor_va))
                     .and_then(|pair| read_declare_names(pe, pair))
                 {
                     Ok((library, export)) => declarations.push(Declaration {
@@ -792,9 +792,11 @@ impl DeclareTable {
 
 /// Why a `dwEntryType == 7` entry did not resolve to a declaration.
 enum DeclareDescriptorFailure {
-    /// `lpImportDescriptor` itself is in no section, or the file ends inside
-    /// the eight bytes it names.
-    Descriptor,
+    /// `lpImportDescriptor` itself is in no section.
+    DescriptorUnmapped,
+    /// `lpImportDescriptor` is in a section, and the file holds fewer than
+    /// the `DECLARE_DESCRIPTOR_SIZE` bytes that the reader reads there.
+    DescriptorCutShort,
     /// `lpDllName` resolves to no bounded string.
     DllName(Va),
     /// `lpApiName` resolves to no bounded string.
@@ -802,10 +804,24 @@ enum DeclareDescriptorFailure {
 }
 
 impl DeclareDescriptorFailure {
+    /// Tells why `read_declare_descriptor` gave nothing for `descriptor_va`.
+    ///
+    /// That function gives nothing only when the address is in no section,
+    /// or when its window is too short. So an address that maps is a
+    /// descriptor that the file cuts short.
+    fn no_descriptor(pe: &PeImage<'_>, descriptor_va: Va) -> Self {
+        if pe.region_at_va(descriptor_va).is_some() {
+            Self::DescriptorCutShort
+        } else {
+            Self::DescriptorUnmapped
+        }
+    }
+
     /// Builds the defect a caller records for this failure.
     ///
     /// The defect names the pointer that held the address, which is the
-    /// offset that [`DefectKind::ItemAddressUnmapped`] documents.
+    /// offset that [`DefectKind::ItemAddressUnmapped`] and
+    /// [`DefectKind::ItemCutShort`] document.
     /// `lpImportDescriptor` is at `0x04` of the entry. `lpDllName` and
     /// `lpApiName` are at `0x00` and `0x04` of the descriptor, which is a
     /// different structure. As in the other pointer defects of this crate,
@@ -815,8 +831,9 @@ impl DeclareDescriptorFailure {
             pe.region_at_va(descriptor_va)
                 .and_then(|descriptor| descriptor.file_offset(Off::new(at)))
         };
+        let cut_short = matches!(self, Self::DescriptorCutShort);
         let (structure, field, at, va) = match self {
-            Self::Descriptor => (
+            Self::DescriptorUnmapped | Self::DescriptorCutShort => (
                 "DeclareTableEntry",
                 "lpImportDescriptor",
                 entry.file_offset(Off::new(0x04)),
@@ -830,6 +847,18 @@ impl DeclareDescriptorFailure {
         // fallback is written out. It names offset 0, which is visibly not
         // the site of a field.
         let offset = at.map_or(0, Off::get);
+        let kind = if cut_short {
+            DefectKind::ItemCutShort {
+                offset,
+                va: va.get(),
+                len: DECLARE_DESCRIPTOR_SIZE,
+            }
+        } else {
+            DefectKind::ItemAddressUnmapped {
+                offset,
+                va: va.get(),
+            }
+        };
         Defect {
             site: Site {
                 offset,
@@ -837,10 +866,7 @@ impl DeclareDescriptorFailure {
                 structure,
                 field,
             },
-            kind: DefectKind::ItemAddressUnmapped {
-                offset,
-                va: va.get(),
-            },
+            kind,
         }
     }
 }
@@ -1372,7 +1398,7 @@ mod tests {
     use crate::error::Refusal;
     use crate::error::{Defect, DefectKind, Severity, Site};
     use crate::read::pe::PeImage;
-    use crate::read::region::{Off, Va};
+    use crate::read::region::{Off, Rva, Va};
     use crate::vb::header::{VbHeader, header_region};
 
     /// The corpus program the whole phase is worked against.
@@ -2051,6 +2077,47 @@ mod tests {
         // As in the other pointer defects, the site gives the address that
         // the pointer holds.
         assert_eq!(defect.site.rva, Some(0x00F0_0000));
+    }
+
+    /// Gives the virtual address where the mapped bytes of the section that
+    /// holds `va` end.
+    fn section_end(data: &[u8], va: u32) -> u32 {
+        let image = PeImage::parse(data).unwrap();
+        let section = image
+            .section_for(Rva::new(va - image.image_base()))
+            .unwrap();
+        image.image_base() + section.virtual_address.get() + section.mapped_len()
+    }
+
+    /// The descriptor address maps, and its section ends 4 bytes later. The
+    /// file holds 4 of the 8 bytes that the reader reads, so the address is
+    /// not in "no section", and the defect says what is wrong.
+    #[test]
+    fn a_descriptor_that_its_section_cuts_short_is_reported_as_cut_short() {
+        let image = PeImage::parse(MANDELBROT).unwrap();
+        let (_type, descriptor, _pair) = entry_by_hand(MANDELBROT, 0);
+        let cut = section_end(MANDELBROT, descriptor) - 4;
+        assert_eq!(image.region_at_va(Va::new(cut)).unwrap().len(), 4);
+        let at = u32::try_from(declare_entry_field_offset(MANDELBROT, 0, 0x04)).unwrap();
+
+        let table = declare_table(&with_mandelbrot_entry_u32(0x04, cut));
+        assert!(table.declarations.is_empty());
+        assert_eq!(table.entries.len(), 1);
+        assert_eq!(table.entries[0].descriptor, None);
+        assert_eq!(table.defects().len(), 1);
+        let defect = &table.defects()[0];
+        assert_eq!(
+            defect.kind,
+            DefectKind::ItemCutShort {
+                offset: at,
+                va: cut,
+                len: 8,
+            }
+        );
+        assert_eq!(defect.kind.severity(), Severity::Recoverable);
+        assert_eq!(defect.site.offset, at);
+        assert_eq!(defect.site.structure, "DeclareTableEntry");
+        assert_eq!(defect.site.field, "lpImportDescriptor");
     }
 
     /// `lpDllName` is in the descriptor, so the defect names the descriptor.

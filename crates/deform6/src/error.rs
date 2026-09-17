@@ -358,6 +358,25 @@ pub enum DefectKind {
         /// The length that was added to it.
         len: u32,
     },
+
+    /// One item's own address maps into a section, and the file holds fewer
+    /// bytes of that section than the item needs. The item is skipped.
+    ///
+    /// The address is in a section, so this is not
+    /// [`DefectKind::ItemAddressUnmapped`]. `vb/project.rs::DeclareTable::read`
+    /// gives it for a `Declare` descriptor that starts too near the end of
+    /// its section.
+    #[error(
+        "the {len} bytes at address {va:#x}, which the pointer at offset {offset:#x} names, run past the bytes that the file holds for their section, and the item is skipped"
+    )]
+    ItemCutShort {
+        /// The absolute file offset of the pointer that held the address.
+        offset: u32,
+        /// The address of the item.
+        va: u32,
+        /// The number of bytes that the reader must read at that address.
+        len: u32,
+    },
 }
 
 /// How bad a defect is.
@@ -461,6 +480,9 @@ impl DefectKind {
             // downstream rests on the run continuing without it, and strict
             // mode refuses rather than assume the item away.
             Self::ItemOffsetOverflow { .. } => Severity::Recoverable,
+            // The item is absent, as it is for an address in no section, and
+            // strict mode refuses rather than assume the item away.
+            Self::ItemCutShort { .. } => Severity::Recoverable,
         }
     }
 }
@@ -740,6 +762,14 @@ mod tests {
                 },
                 0xbb,
             ),
+            (
+                DefectKind::ItemCutShort {
+                    offset: 0xcc,
+                    va: 0x0040_4000,
+                    len: 8,
+                },
+                0xcc,
+            ),
         ]
     }
 
@@ -786,6 +816,20 @@ mod tests {
         );
         assert!(message.contains("81 6c 24 04"), "{message}");
         assert!(message.contains("e9 at +0x08"), "{message}");
+    }
+
+    #[test]
+    fn an_item_cut_short_message_names_the_address_and_the_length() {
+        let kind = DefectKind::ItemCutShort {
+            offset: 0x1ae0,
+            va: 0x0040_3ffc,
+            len: 8,
+        };
+        let message = format!("{kind}");
+        assert!(message.contains("0x1ae0"), "{message}");
+        assert!(message.contains("0x403ffc"), "{message}");
+        assert!(message.contains("the 8 bytes"), "{message}");
+        assert!(message.contains("run past"), "{message}");
     }
 
     #[test]
@@ -846,6 +890,11 @@ mod tests {
             DefectKind::ClassNameNoDot { offset: 0 },
             DefectKind::ItemAddressUnmapped { offset: 0, va: 0 },
             DefectKind::ItemOffsetOverflow { offset: 0, len: 0 },
+            DefectKind::ItemCutShort {
+                offset: 0,
+                va: 0,
+                len: 0,
+            },
         ];
         for kind in recoverable {
             assert_eq!(
