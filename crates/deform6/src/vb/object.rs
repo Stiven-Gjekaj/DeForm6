@@ -245,6 +245,10 @@ fn object_array_va(pe: &PeImage<'_>, lp_object_table: Va) -> Result<Va, Refusal>
 /// The object keeps its other fields, the walk continues, and the returned
 /// defect names the byte offset and the address so a person can open the
 /// file at that offset.
+///
+/// The site of the defect is the name pointer. For a name with no NUL, the
+/// kind gives the file offset where the text starts and the number of bytes
+/// that the search read.
 fn read_name(
     pe: &PeImage<'_>,
     element: &Region<'_>,
@@ -274,8 +278,8 @@ fn read_name(
         Some(bytes) => (bytes.iter().copied().map(char::from).collect(), None),
         None => {
             let kind = DefectKind::NoNulTerminator {
-                offset,
-                limit: NAME_MAX,
+                offset: name_region.file_offset(Off::new(0)).map_or(0, Off::get),
+                limit: name_region.cstr_span(Off::new(0), NAME_MAX),
             };
             (String::new(), Some(Defect { site, kind }))
         }
@@ -351,10 +355,10 @@ fn va_at(window: &Region<'_>, at: u32, what: &'static str) -> Result<Va, Refusal
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{OBJECT_SIZE, Object, ObjectTable};
-    use crate::error::{DefectKind, Refusal, Severity};
+    use super::{NAME_MAX, OBJECT_SIZE, Object, ObjectTable};
+    use crate::error::{Defect, DefectKind, Refusal, Severity, Site};
     use crate::read::pe::PeImage;
-    use crate::read::region::{Off, Va};
+    use crate::read::region::{Off, Rva, Va};
     use crate::vb::header::{VbHeader, header_region};
     use crate::vb::project::{ObjectTableHead, ProjectInfo};
 
@@ -629,6 +633,66 @@ mod tests {
             defect.site.rva,
             Some(array + 0x30 + 0x18 - image.image_base())
         );
+    }
+
+    /// Copies `data`, writes `len` bytes of `A` where the mapped bytes of the
+    /// section that holds `near` end, and writes the address of those bytes
+    /// at the file offset `pointer_at`. Gives the copy and the file offset of
+    /// the text.
+    fn with_text_at_section_end(
+        data: &[u8],
+        near: u32,
+        len: u32,
+        pointer_at: usize,
+    ) -> (Vec<u8>, u32) {
+        let image = PeImage::parse(data).unwrap();
+        let section = image
+            .section_for(Rva::new(near - image.image_base()))
+            .unwrap();
+        let text = image.image_base() + section.virtual_address.get() + section.mapped_len() - len;
+        let text_at = image.va_to_off(Va::new(text)).unwrap().get();
+        let from = usize::try_from(text_at).unwrap();
+        let mut out = data.to_vec();
+        out[from..from + usize::try_from(len).unwrap()].fill(b'A');
+        out[pointer_at..pointer_at + 4].copy_from_slice(&text.to_le_bytes());
+        (out, text_at)
+    }
+
+    /// A name with no NUL loses the name and no object. The site is the
+    /// name pointer. The kind gives where the text starts and the number of
+    /// bytes that the search read: the rest of the section when the section
+    /// ends first, and `NAME_MAX` when it does not.
+    #[test]
+    fn a_grayscale_name_with_no_nul_names_the_text_and_the_bytes_searched() {
+        let image = PeImage::parse(GRAYSCALE).unwrap();
+        let at = object_element_field_offset(GRAYSCALE, 1, 0x18);
+        let name = u32::from_le_bytes(GRAYSCALE[at..at + 4].try_into().unwrap());
+        let pointer = Site {
+            offset: u32::try_from(at).unwrap(),
+            rva: Some(object_array_va(GRAYSCALE).get() + 0x30 + 0x18 - image.image_base()),
+            structure: "Object",
+            field: "lpszObjectName",
+        };
+        assert_eq!(NAME_MAX, 0x104);
+
+        for (len, limit) in [(4, 4), (0x200, NAME_MAX)] {
+            let (bytes, text_at) = with_text_at_section_end(GRAYSCALE, name, len, at);
+            let table = walk(&bytes).unwrap();
+            assert_eq!(table.objects.len(), 3, "{len}");
+            assert_eq!(table.objects[1].name, "", "{len}");
+            assert_eq!(table.objects[2].name, "FastDrawing", "{len}");
+            assert_eq!(
+                table.defects(),
+                [Defect {
+                    site: pointer.clone(),
+                    kind: DefectKind::NoNulTerminator {
+                        offset: text_at,
+                        limit,
+                    },
+                }],
+                "{len}"
+            );
+        }
     }
 
     /// `fObjectType` is carried raw. Plan 02-02 classifies it; this file does

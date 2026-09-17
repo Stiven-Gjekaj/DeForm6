@@ -407,6 +407,10 @@ fn bound_control_count(
 /// control keeps its other fields, and the returned defect names the byte
 /// offset and the address so a person can open the file there.
 ///
+/// The site of the defect is the name pointer. For a name with no NUL, the
+/// kind gives the file offset where the text starts and the number of bytes
+/// that the search read.
+///
 /// Each byte becomes its own Latin-1 code point. `String::from_utf8_lossy`
 /// is never used here: a byte in `0x80` to `0xFF` would become the
 /// replacement character and the name would be lost.
@@ -431,8 +435,8 @@ fn read_name(pe: &PeImage<'_>, element: &Region<'_>, lpsz_name: Va) -> (String, 
         Some(bytes) => (bytes.iter().copied().map(char::from).collect(), None),
         None => {
             let kind = DefectKind::NoNulTerminator {
-                offset,
-                limit: NAME_MAX,
+                offset: name_region.file_offset(Off::new(0)).map_or(0, Off::get),
+                limit: name_region.cstr_span(Off::new(0), NAME_MAX),
             };
             (String::new(), Some(Defect { site, kind }))
         }
@@ -1348,6 +1352,48 @@ mod tests {
                 field: "lpszName",
             }
         );
+    }
+
+    /// A name with no NUL gives an empty name. The site is `lpszName`. The
+    /// kind gives where the text starts and the number of bytes that the
+    /// search read: the rest of the section when the section ends first,
+    /// and `NAME_MAX` when it does not.
+    #[test]
+    fn an_lpsz_name_with_no_nul_names_the_text_and_the_bytes_searched() {
+        assert_eq!(super::NAME_MAX, 0x104);
+        // The section holds `extra` and no byte more, and the text fills the
+        // last `len` bytes of it.
+        for (extra_len, len, limit) in [(0x100_u32, 4_u32, 4_u32), (0x300, 0x200, super::NAME_MAX)]
+        {
+            let mut extra = vec![0_u8; usize::try_from(extra_len).unwrap()];
+            extra[0x58..0x5C].copy_from_slice(&1_u32.to_le_bytes());
+            extra[0x5C..0x60].copy_from_slice(&0x0040_1080_u32.to_le_bytes());
+            let text = extra_len - len;
+            extra[0xA0..0xA4].copy_from_slice(&(0x0040_1000 + text).to_le_bytes());
+            extra[usize::try_from(text).unwrap()..].fill(b'A');
+            let bytes = synthetic_image(&extra);
+            let image = PeImage::parse(&bytes).unwrap();
+
+            let table = ControlInfoTable::read(&image, &synthetic_form_object()).unwrap();
+            assert_eq!(table.entries.len(), 1, "{len}");
+            assert_eq!(table.entries[0].name, "", "{len}");
+            assert_eq!(
+                table.defects(),
+                [Defect {
+                    site: Site {
+                        offset: 0x4A0,
+                        rva: Some(0x10A0),
+                        structure: "ControlInfo",
+                        field: "lpszName",
+                    },
+                    kind: DefectKind::NoNulTerminator {
+                        offset: 0x400 + text,
+                        limit,
+                    },
+                }],
+                "{len}"
+            );
+        }
     }
 
     #[test]

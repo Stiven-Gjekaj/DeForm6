@@ -339,6 +339,18 @@ impl<'a> Region<'a> {
         let end = window.iter().position(|&b| b == 0)?;
         window.get(..end)
     }
+
+    /// Gives the number of bytes that [`Region::cstr`] searches at `at` with
+    /// the bound `max`.
+    ///
+    /// That is `max`, or the rest of the window when the rest is shorter. It
+    /// is `0` when `at` is at or past the end of the window. A defect about a
+    /// string with no NUL gives this number, so the defect and the search
+    /// follow one rule.
+    #[must_use]
+    pub fn cstr_span(&self, at: Off, max: u32) -> u32 {
+        self.len().saturating_sub(at.get()).min(max)
+    }
 }
 
 #[cfg(test)]
@@ -427,6 +439,35 @@ mod tests {
         let sub = r.subregion(Off::new(1), 1).unwrap();
         assert_eq!(sub.rva(Off::new(0)), None);
         assert_eq!(sub.u8(Off::new(0)), Some(0x02));
+    }
+
+    /// Each search below finds no NUL, and the span is the number of bytes
+    /// that it read.
+    #[test]
+    fn a_string_search_reads_the_bound_or_the_rest_of_the_window() {
+        let bytes = [b'A'; 8];
+        let r = Region::new(&bytes, Off::new(0x100));
+        assert_eq!(r.cstr(Off::new(0), 4), None);
+        assert_eq!(r.cstr_span(Off::new(0), 4), 4);
+        assert_eq!(r.cstr(Off::new(2), 64), None);
+        assert_eq!(r.cstr_span(Off::new(2), 64), 6);
+        assert_eq!(r.cstr_span(Off::new(8), 64), 0);
+        assert_eq!(r.cstr_span(Off::new(9), 64), 0);
+        assert_eq!(r.cstr_span(Off::new(u32::MAX), 64), 0);
+    }
+
+    /// The search reads the bytes that the span counts and no byte more: a
+    /// NUL on the last byte of the span is found, and a NUL one byte after
+    /// the span is not.
+    #[test]
+    fn the_search_span_ends_where_the_search_ends() {
+        let mut bytes = [b'A'; 8];
+        bytes[5] = 0;
+        let r = Region::new(&bytes, Off::new(0));
+        assert_eq!(r.cstr_span(Off::new(2), 4), 4);
+        assert_eq!(r.cstr(Off::new(2), 4), Some(&b"AAA"[..]));
+        assert_eq!(r.cstr_span(Off::new(2), 3), 3);
+        assert_eq!(r.cstr(Off::new(2), 3), None);
     }
 
     #[test]

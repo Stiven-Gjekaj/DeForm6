@@ -569,6 +569,10 @@ impl ProcedureList {
 /// `window.va_le` cannot be reached, because `index < proc_count` and the
 /// window is exactly `proc_count * 4` bytes: they stay because `Region` has
 /// no infallible accessor, and no test covers them for that reason.
+///
+/// The site of the defect is the entry. For a name with no NUL, the kind
+/// gives the file offset where the text starts and the number of bytes that
+/// the search read.
 fn resolve_entry(pe: &PeImage<'_>, window: &Region<'_>, index: u32) -> (Procedure, Option<Defect>) {
     let Some(entry_off) = index.checked_mul(PROC_NAME_PTR_SIZE) else {
         return (Procedure::Private, None);
@@ -603,8 +607,8 @@ fn resolve_entry(pe: &PeImage<'_>, window: &Region<'_>, index: u32) -> (Procedur
         let defect = Defect {
             site,
             kind: DefectKind::NoNulTerminator {
-                offset,
-                limit: PROC_NAME_MAX,
+                offset: name_region.file_offset(Off::new(0)).map_or(0, Off::get),
+                limit: name_region.cstr_span(Off::new(0), PROC_NAME_MAX),
             },
         };
         return (Procedure::Private, Some(defect));
@@ -755,12 +759,12 @@ fn va_at(window: &Region<'_>, at: u32, what: &'static str) -> Result<Va, Refusal
 )]
 mod tests {
     use super::{
-        Gap, OBJECT_INFO_SIZE, ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureCounts,
-        ProcedureList, event_descriptor_addresses, is_plausible_identifier,
+        Gap, OBJECT_INFO_SIZE, ObjectInfo, PROC_NAME_MAX, PrivateObj, ProcNames, Procedure,
+        ProcedureCounts, ProcedureList, event_descriptor_addresses, is_plausible_identifier,
     };
     use crate::error::{Defect, DefectKind, Refusal, Site};
     use crate::read::pe::PeImage;
-    use crate::read::region::{Off, Va};
+    use crate::read::region::{Off, Rva, Va};
     use crate::vb::header::{VbHeader, header_region};
     use crate::vb::object::{Object, ObjectTable};
     use crate::vb::project::{ObjectTableHead, ProjectInfo};
@@ -1086,6 +1090,82 @@ mod tests {
                 },
             }]
         );
+    }
+
+    /// Copies `data`, writes `len` bytes of `A` where the mapped bytes of the
+    /// section that holds `near` end, and writes the address of those bytes
+    /// at the file offset `pointer_at`. Gives the copy and the file offset of
+    /// the text.
+    fn with_text_at_section_end(
+        data: &[u8],
+        near: u32,
+        len: u32,
+        pointer_at: usize,
+    ) -> (Vec<u8>, u32) {
+        let image = PeImage::parse(data).unwrap();
+        let section = image
+            .section_for(Rva::new(near - image.image_base()))
+            .unwrap();
+        let text = image.image_base() + section.virtual_address.get() + section.mapped_len() - len;
+        let text_at = image.va_to_off(Va::new(text)).unwrap().get();
+        let from = usize::try_from(text_at).unwrap();
+        let mut out = data.to_vec();
+        out[from..from + usize::try_from(len).unwrap()].fill(b'A');
+        out[pointer_at..pointer_at + 4].copy_from_slice(&text.to_le_bytes());
+        (out, text_at)
+    }
+
+    /// A procedure name with no NUL makes its slot private. The site is the
+    /// slot of the name array. The kind gives where the text starts and the
+    /// number of bytes that the search read: the rest of the section when
+    /// the section ends first, and `PROC_NAME_MAX` when it does not.
+    #[test]
+    fn a_procedure_name_with_no_nul_names_the_text_and_the_bytes_searched() {
+        let image = PeImage::parse(GRAYSCALE).unwrap();
+        let fast_drawing = &objects(GRAYSCALE)[2];
+        assert_eq!(fast_drawing.name, "FastDrawing");
+        let array = fast_drawing.lp_proc_names_array;
+        // `GetImageWidth` is slot 4.
+        let slot = image
+            .region_at_va(array)
+            .unwrap()
+            .file_offset(Off::new(4 * 4))
+            .unwrap()
+            .get();
+        let at = usize::try_from(slot).unwrap();
+        let name = u32::from_le_bytes(GRAYSCALE[at..at + 4].try_into().unwrap());
+        assert_eq!(PROC_NAME_MAX, 64);
+
+        for (len, limit) in [(4, 4), (0x100, PROC_NAME_MAX)] {
+            let (bytes, text_at) = with_text_at_section_end(GRAYSCALE, name, len, at);
+            let patched = PeImage::parse(&bytes).unwrap();
+            let list = ProcedureList::read(&patched, &objects(&bytes)[2]);
+            let ProcNames::Slots(slots) = &list.procs else {
+                panic!("FastDrawing carries a name array");
+            };
+            assert_eq!(slots[4], Procedure::Private, "{len}");
+            assert_eq!(
+                slots[5],
+                Procedure::Public("GetImageHeight".to_owned()),
+                "{len}"
+            );
+            assert_eq!(
+                list.defects(),
+                [Defect {
+                    site: Site {
+                        offset: slot,
+                        rva: Some(array.get() + 4 * 4 - image.image_base()),
+                        structure: "Object",
+                        field: "lpProcNamesArray",
+                    },
+                    kind: DefectKind::NoNulTerminator {
+                        offset: text_at,
+                        limit,
+                    },
+                }],
+                "{len}"
+            );
+        }
     }
 
     /// Plan 05-02, Task 2's audit of `ProcedureList::read`'s own

@@ -695,6 +695,10 @@ fn property_kind_of(arg_size: u8) -> PropertyKind {
 /// name empty, matching `vb/privateobj.rs`'s own choice for its sibling
 /// array's null-or-unmapped pointer, and is not itself reported as a
 /// defect: only a per-entry failure is.
+///
+/// The site of a per-entry defect is the entry. For a name with no NUL, the
+/// kind gives the file offset where the text starts and the number of bytes
+/// that the search read.
 fn resolve_arg_names(
     pe: &PeImage<'_>,
     lp_ary_arg_names: Va,
@@ -757,8 +761,8 @@ fn resolve_arg_names(
                 defects.push(Defect {
                     site,
                     kind: DefectKind::NoNulTerminator {
-                        offset,
-                        limit: ARG_NAME_MAX,
+                        offset: name_region.file_offset(Off::new(0)).map_or(0, Off::get),
+                        limit: name_region.cstr_span(Off::new(0), ARG_NAME_MAX),
                     },
                 });
             }
@@ -1153,12 +1157,13 @@ fn read_one(
 )]
 mod tests {
     use super::{
-        Argument, DefaultValue, FuncTypeWalk, OptionalDefaultsOutcome, ProcedureSignature,
-        PropertyKind, Prototype, PrototypeList, VbType, read_raw_header, walk_type_buffer,
+        ARG_NAME_MAX, Argument, DefaultValue, FuncTypeWalk, OptionalDefaultsOutcome,
+        ProcedureSignature, PropertyKind, Prototype, PrototypeList, VbType, read_raw_header,
+        walk_type_buffer,
     };
     use crate::error::Severity;
     use crate::read::pe::PeImage;
-    use crate::read::region::{Off, Region, Va};
+    use crate::read::region::{Off, Region, Rva, Va};
     use crate::vb::header::{VbHeader, header_region};
     use crate::vb::object::{Object, ObjectTable};
     use crate::vb::privateobj::{ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureList};
@@ -1531,6 +1536,98 @@ mod tests {
                 },
             }]
         );
+    }
+
+    /// Copies `data`, writes `len` bytes of `A` where the mapped bytes of the
+    /// section that holds `near` end, and writes the address of those bytes
+    /// at the file offset `pointer_at`. Gives the copy and the file offset of
+    /// the text.
+    fn with_text_at_section_end(
+        data: &[u8],
+        near: u32,
+        len: u32,
+        pointer_at: usize,
+    ) -> (Vec<u8>, u32) {
+        let image = PeImage::parse(data).unwrap();
+        let section = image
+            .section_for(Rva::new(near - image.image_base()))
+            .unwrap();
+        let text = image.image_base() + section.virtual_address.get() + section.mapped_len() - len;
+        let text_at = image.va_to_off(Va::new(text)).unwrap().get();
+        let from = usize::try_from(text_at).unwrap();
+        let mut out = data.to_vec();
+        out[from..from + usize::try_from(len).unwrap()].fill(b'A');
+        out[pointer_at..pointer_at + 4].copy_from_slice(&text.to_le_bytes());
+        (out, text_at)
+    }
+
+    /// An argument name with no NUL loses that name and keeps the prototype.
+    /// The site is the slot of the name array. The kind gives where the text
+    /// starts and the number of bytes that the search read: the rest of the
+    /// section when the section ends first, and `ARG_NAME_MAX` when it does
+    /// not.
+    #[test]
+    fn an_argument_name_with_no_nul_names_the_text_and_the_bytes_searched() {
+        let image = PeImage::parse(GRAYSCALE).unwrap();
+        let object = find_object(GRAYSCALE, "FastDrawing");
+        let PrivateObj::Present {
+            lp_func_type_info, ..
+        } = private_obj_of(&image, &object)
+        else {
+            panic!("FastDrawing is a class, not a module");
+        };
+        // `GetImageWidth` is index 4, and it has one argument.
+        let entry_va = image
+            .region_at_va(lp_func_type_info)
+            .unwrap()
+            .va_le(Off::new(4 * 4))
+            .unwrap();
+        let names_va = image
+            .region_at_va(entry_va)
+            .unwrap()
+            .va_le(Off::new(0x10))
+            .unwrap();
+        let slot = image
+            .region_at_va(names_va)
+            .unwrap()
+            .file_offset(Off::new(0))
+            .unwrap()
+            .get();
+        let at = usize::try_from(slot).unwrap();
+        let name = u32::from_le_bytes(GRAYSCALE[at..at + 4].try_into().unwrap());
+        assert_eq!(ARG_NAME_MAX, 64);
+
+        for (len, limit) in [(4, 4), (0x100, ARG_NAME_MAX)] {
+            let (bytes, text_at) = with_text_at_section_end(GRAYSCALE, name, len, at);
+            let patched = PeImage::parse(&bytes).unwrap();
+            let object = find_object(&bytes, "FastDrawing");
+            let private = private_obj_of(&patched, &object);
+            let walk = FuncTypeWalk::read(&patched, &object, &private);
+            let PrototypeList::Slots(slots) = &walk.signatures else {
+                panic!("FastDrawing carries no FuncTypDesc array");
+            };
+            let ProcedureSignature::Prototype(prototype) = &slots[4] else {
+                panic!("the prototype must survive: {:?}", slots[4]);
+            };
+            assert_eq!(prototype.arguments.len(), 1, "{len}");
+            assert_eq!(prototype.arguments[0].name, "", "{len}");
+            assert_eq!(
+                walk.defects(),
+                [crate::error::Defect {
+                    site: crate::error::Site {
+                        offset: slot,
+                        rva: Some(names_va.get() - image.image_base()),
+                        structure: "FuncTypDesc",
+                        field: "lpAryArgNames",
+                    },
+                    kind: crate::error::DefectKind::NoNulTerminator {
+                        offset: text_at,
+                        limit,
+                    },
+                }],
+                "{len}"
+            );
+        }
     }
 
     // Task 1's fifth deliberate breakage (`member_id` read from `0x0A`

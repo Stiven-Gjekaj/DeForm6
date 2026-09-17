@@ -964,9 +964,7 @@ fn read_declare_name(pe: &PeImage<'_>, va: Va) -> Result<String, Miss> {
         .cstr(Off::new(0), NAME_MAX)
         .ok_or_else(|| Miss::Unterminated {
             at: region.file_offset(Off::new(0)),
-            // `Region::cstr` searches `NAME_MAX` bytes, or the whole window
-            // when the window is shorter.
-            searched: region.len().min(NAME_MAX),
+            searched: region.cstr_span(Off::new(0), NAME_MAX),
         })?;
     Ok(bytes.iter().copied().map(char::from).collect())
 }
