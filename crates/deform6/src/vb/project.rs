@@ -1180,7 +1180,7 @@ impl ComponentTable {
             };
 
             match read_component_entry(&entry) {
-                Some(mut component) => {
+                Ok(mut component) => {
                     let (guid_text, guid_defect) = decode_guid_text(
                         &entry,
                         entry_offset.get(),
@@ -1211,18 +1211,7 @@ impl ComponentTable {
                 // too short to hold the fixed fields, or a string offset
                 // with no terminator, must not panic and must not invent a
                 // component out of the bytes that are there.
-                None => defects.push(Defect {
-                    site: Site {
-                        offset: entry_offset.get(),
-                        rva: None,
-                        structure: "ExternalComponentEntry",
-                        field: "NameOffset",
-                    },
-                    kind: DefectKind::NoNulTerminator {
-                        offset: entry_offset.get(),
-                        limit: NAME_MAX,
-                    },
-                }),
+                Err(failure) => defects.push(failure.into_defect(&entry)),
             }
 
             let Some(next) = cursor.checked_add(struct_len) else {
@@ -1260,25 +1249,90 @@ impl ComponentTable {
     }
 }
 
+/// The length of the fixed fields of a component entry. `NameOffset`, at
+/// `0x30`, is the last of them (`STRUCTURES.md` section 7.3).
+const COMPONENT_FIXED_LEN: u32 = 0x34;
+
+/// Why one component entry gives no component.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EntryFailure {
+    /// `StructLength` is shorter than the fixed fields.
+    Short,
+    /// The string that an offset field names has no NUL in the bytes that
+    /// the search read. `field_at` is where the offset field is in the
+    /// entry, and `text` is the offset that the field holds.
+    Unterminated {
+        field: &'static str,
+        field_at: Off,
+        text: Off,
+    },
+}
+
+impl EntryFailure {
+    /// Builds the defect for this failure in `entry`.
+    ///
+    /// A short entry gives its defect at `StructLength`, as a length of zero
+    /// does. A string with no NUL gives its defect at the offset field that
+    /// names the string. The kind gives where the text starts and the number
+    /// of bytes that the search read. That number is `0` when the offset
+    /// names no byte of the entry.
+    fn into_defect(self, entry: &Region<'_>) -> Defect {
+        let site = |at: Off, field: &'static str| Site {
+            offset: entry.file_offset(at).map_or(0, Off::get),
+            rva: entry.rva(at).map(Rva::get),
+            structure: "ExternalComponentEntry",
+            field,
+        };
+        match self {
+            Self::Short => {
+                let site = site(Off::new(0), "StructLength");
+                let kind = DefectKind::CountMismatch {
+                    offset: site.offset,
+                    count: entry.len(),
+                    expected: COMPONENT_FIXED_LEN,
+                    other_field: "the fixed part of an ExternalComponentEntry",
+                };
+                Defect { site, kind }
+            }
+            Self::Unterminated {
+                field,
+                field_at,
+                text,
+            } => Defect {
+                site: site(field_at, field),
+                kind: DefectKind::NoNulTerminator {
+                    offset: entry.file_offset(text).map_or(0, Off::get),
+                    limit: entry.cstr_span(text, NAME_MAX),
+                },
+            },
+        }
+    }
+}
+
 /// Reads the three strings and the GUID fields of one component entry.
 ///
 /// Every offset read here is relative to `entry`'s own base, never to the
 /// table. `entry` already spans exactly `StructLength` bytes, so a string
 /// offset that names a byte inside this entry resolves inside `entry`
 /// directly, with no second address to follow.
-fn read_component_entry(entry: &Region<'_>) -> Option<Component> {
-    let o_uuid = entry.off_le(Off::new(0x04))?;
-    let guid_offset = entry.off_le(Off::new(0x1C))?;
-    let guid_length = entry.i32_le(Off::new(0x20))?;
-    let file_name_off = entry.off_le(Off::new(0x28))?;
-    let source_off = entry.off_le(Off::new(0x2C))?;
-    let name_off = entry.off_le(Off::new(0x30))?;
+///
+/// An entry shorter than `COMPONENT_FIXED_LEN` bytes gives
+/// [`EntryFailure::Short`] before any field is read. The field reads after
+/// that check cannot fail. They keep a failure because `Region` has no
+/// infallible accessor, and no test covers them for that reason.
+fn read_component_entry(entry: &Region<'_>) -> Result<Component, EntryFailure> {
+    if entry.len() < COMPONENT_FIXED_LEN {
+        return Err(EntryFailure::Short);
+    }
+    let o_uuid = entry.off_le(Off::new(0x04)).ok_or(EntryFailure::Short)?;
+    let guid_offset = entry.off_le(Off::new(0x1C)).ok_or(EntryFailure::Short)?;
+    let guid_length = entry.i32_le(Off::new(0x20)).ok_or(EntryFailure::Short)?;
 
-    let file_name = component_cstr(entry, file_name_off)?;
-    let library = component_cstr(entry, source_off)?;
-    let name = component_cstr(entry, name_off)?;
+    let file_name = component_string(entry, "FileNameOffset", Off::new(0x28))?;
+    let library = component_string(entry, "SourceOffset", Off::new(0x2C))?;
+    let name = component_string(entry, "NameOffset", Off::new(0x30))?;
 
-    Some(Component {
+    Ok(Component {
         file_name,
         library,
         name,
@@ -1425,11 +1479,22 @@ fn decode_ouuid_text(
     }
 }
 
-/// Reads one NUL terminated, Latin-1 decoded string at an entry-relative
-/// offset.
-fn component_cstr(entry: &Region<'_>, at: Off) -> Option<String> {
-    let bytes = entry.cstr(at, NAME_MAX)?;
-    Some(bytes.iter().copied().map(char::from).collect())
+/// Reads the NUL terminated, Latin-1 decoded string that the offset field
+/// `field` at `field_at` names. The offset is relative to the entry.
+fn component_string(
+    entry: &Region<'_>,
+    field: &'static str,
+    field_at: Off,
+) -> Result<String, EntryFailure> {
+    let text = entry.off_le(field_at).ok_or(EntryFailure::Short)?;
+    let bytes = entry
+        .cstr(text, NAME_MAX)
+        .ok_or(EntryFailure::Unterminated {
+            field,
+            field_at,
+            text,
+        })?;
+    Ok(bytes.iter().copied().map(char::from).collect())
 }
 
 #[cfg(test)]
@@ -2976,5 +3041,139 @@ mod tests {
             defect.kind,
             DefectKind::ImplausibleCount { count, .. } if count == real_len + 10_000
         ));
+    }
+
+    /// Reads a table of one entry, built from `payload`, out of a synthetic
+    /// image.
+    fn one_entry_table(payload: &[u8]) -> ComponentTable {
+        let (bytes, va) = a_synthetic_pe_image(payload);
+        let image = PeImage::parse(&bytes).unwrap();
+        ComponentTable::read(&image, va, 1)
+    }
+
+    /// Reads the `u32` at `at` of a built entry.
+    fn entry_u32(payload: &[u8], at: usize) -> u32 {
+        u32::from_le_bytes(payload[at..at + 4].try_into().unwrap())
+    }
+
+    /// The fixed fields end at `0x34`. A declared length that is shorter
+    /// gives no component and one defect at `StructLength`. The entry
+    /// starts at file offset `0x400` and at address `0x1000`.
+    #[test]
+    fn a_declared_length_shorter_than_the_fixed_fields_gives_a_defect_at_struct_length() {
+        for short in [0x04_u32, 0x33] {
+            let mut payload = build_component_entry("Short.ocx", "ShortLib.Short", "Short");
+            payload[0x00..0x04].copy_from_slice(&short.to_le_bytes());
+            let table = one_entry_table(&payload);
+
+            assert!(table.components.is_empty(), "{short:#x}");
+            assert_eq!(
+                table.defects(),
+                [Defect {
+                    site: Site {
+                        offset: 0x400,
+                        rva: Some(0x1000),
+                        structure: "ExternalComponentEntry",
+                        field: "StructLength",
+                    },
+                    kind: DefectKind::CountMismatch {
+                        offset: 0x400,
+                        count: short,
+                        expected: 0x34,
+                        other_field: "the fixed part of an ExternalComponentEntry",
+                    },
+                }],
+                "{short:#x}"
+            );
+            assert_eq!(table.defects()[0].kind.severity(), Severity::Recoverable);
+        }
+    }
+
+    /// A declared length of exactly `0x34` holds the fixed fields and none
+    /// of the strings. The file name offset names no byte of the entry, so
+    /// the search reads no byte, and the defect is at `FileNameOffset`.
+    #[test]
+    fn a_string_offset_past_the_entry_names_the_text_and_no_byte_searched() {
+        let mut payload = build_component_entry("Past.ocx", "PastLib.Past", "Past");
+        let file_name = entry_u32(&payload, 0x28);
+        assert!(file_name > 0x34);
+        payload[0x00..0x04].copy_from_slice(&0x34_u32.to_le_bytes());
+        let table = one_entry_table(&payload);
+
+        assert!(table.components.is_empty());
+        assert_eq!(
+            table.defects(),
+            [Defect {
+                site: Site {
+                    offset: 0x428,
+                    rva: Some(0x1028),
+                    structure: "ExternalComponentEntry",
+                    field: "FileNameOffset",
+                },
+                kind: DefectKind::NoNulTerminator {
+                    offset: 0x400 + file_name,
+                    limit: 0,
+                },
+            }]
+        );
+    }
+
+    /// The search for a string stops at the end of the entry, or after
+    /// `NAME_MAX` bytes. Each case gives no component and one defect at the
+    /// offset field that names the string.
+    #[test]
+    fn a_component_string_with_no_nul_gives_a_defect_at_its_own_offset_field() {
+        // The component name is the last string. With its NUL gone, the
+        // search reads to the end of the entry.
+        let mut payload = build_component_entry("End.ocx", "EndLib.End", "End");
+        let end = payload.len();
+        assert_eq!(payload[end - 1], 0);
+        payload[end - 1] = b'A';
+        let name = entry_u32(&payload, 0x30);
+        let entry_len = u32::try_from(end).unwrap();
+        let table = one_entry_table(&payload);
+
+        assert!(table.components.is_empty());
+        assert_eq!(entry_len - name, 4);
+        assert_eq!(
+            table.defects(),
+            [Defect {
+                site: Site {
+                    offset: 0x430,
+                    rva: Some(0x1030),
+                    structure: "ExternalComponentEntry",
+                    field: "NameOffset",
+                },
+                kind: DefectKind::NoNulTerminator {
+                    offset: 0x400 + name,
+                    limit: 4,
+                },
+            }]
+        );
+
+        // A library name longer than `NAME_MAX` has its NUL after the last
+        // byte that the search reads.
+        let long = "L".repeat(0x110);
+        let payload = build_component_entry("Long.ocx", &long, "Long");
+        let source = entry_u32(&payload, 0x2C);
+        let table = one_entry_table(&payload);
+
+        assert!(table.components.is_empty());
+        assert_eq!(NAME_MAX, 0x104);
+        assert_eq!(
+            table.defects(),
+            [Defect {
+                site: Site {
+                    offset: 0x42C,
+                    rva: Some(0x102C),
+                    structure: "ExternalComponentEntry",
+                    field: "SourceOffset",
+                },
+                kind: DefectKind::NoNulTerminator {
+                    offset: 0x400 + source,
+                    limit: NAME_MAX,
+                },
+            }]
+        );
     }
 }

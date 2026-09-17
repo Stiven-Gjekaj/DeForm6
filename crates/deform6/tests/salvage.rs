@@ -33,12 +33,13 @@ use deform6::vb::project::ProjectInfo;
 
 /// `corpus/vb6-code/Fire-effect/Fast_Flames.exe`, read once at compile time.
 ///
-/// Chosen because plan 05-01's own research measured, this session, that
-/// patching its `VBHeader.wExternalCount` field to `1` raises exactly one
-/// `NoNulTerminator` defect at file offset `0x1da4`: the file declares zero
-/// external components, so a phantom entry walks off the end of a table
-/// that holds nothing, and the name field the walk reaches next runs off
-/// the end of its own bounded window with no terminator in it.
+/// Chosen because patching its `VBHeader.wExternalCount` field to `1` raises
+/// exactly one recoverable defect, at file offset `0x1da4`. The file declares
+/// zero external components, so the walk reads a phantom entry there. The
+/// `StructLength` of that entry holds 6, and 6 bytes cannot hold the `0x34`
+/// bytes of fixed fields that an entry needs. Plan 05-01 read this defect as
+/// a name with no terminator, which is what the reader said until it told
+/// the two failures apart.
 const FAST_FLAMES: &[u8] = include_bytes!("../../../corpus/vb6-code/Fire-effect/Fast_Flames.exe");
 
 /// Copies `data` and writes `value` into the two bytes at
@@ -107,7 +108,8 @@ fn a_patched_external_count_refuses_in_strict_and_names_the_offset() {
         "the refusal must name the byte offset 0x1da4: {message}"
     );
     assert!(
-        message.contains("no nul terminator"),
+        message.contains("count 6 at offset 0x1da4")
+            && message.contains("the fixed part of an ExternalComponentEntry"),
         "the refusal must name what the parser expected there: {message}"
     );
 }
