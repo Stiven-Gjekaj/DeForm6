@@ -91,6 +91,14 @@ is therefore 2.0.0, not 1.1.0.
   `ProjectInfo + 0x234`. 1.0.0 gave an empty list and no defect, which said
   that the project declares nothing. A strict run now refuses such a file,
   and a salvage run reports no `Declare` statement and the defect.
+- Two `Declare` failures now give a defect that states what the file holds.
+  A descriptor whose address maps, in a section that ends before its 8
+  bytes, gives `ItemCutShort`. A library name or an export name with no NUL
+  in the bytes that the reader searched gives `NoNulTerminator`, at the
+  offset of the text, with the number of bytes searched. 1.0.0 gave
+  `ItemAddressUnmapped` for both, and its message says that the address is
+  in no section. All three kinds are `Recoverable`, so a strict run refuses
+  these files as before.
 - New public fields that break no caller: `ObjectTableHead::lp_object_array`
   and `DeclareTable::entries`. Each of the two structures already has a
   private field, so no code outside this crate builds one or names every
@@ -107,10 +115,10 @@ is therefore 2.0.0, not 1.1.0.
   size of the table in bytes left a `u32`, and the loop still stopped at the
   end of the table's region. A strict run can now refuse such a file even
   when no entry gives a defect.
-- `DefectKind` has two new variants, `ModuleMarkerMismatch` and
-  `UnknownStubShape`, and `schema/report.schema.json` accepts both. A
-  `match` on `DefectKind` with no wildcard arm does not compile until it
-  names them.
+- `DefectKind` has three new variants, `ModuleMarkerMismatch`,
+  `UnknownStubShape` and `ItemCutShort`, and `schema/report.schema.json`
+  accepts all three. A `match` on `DefectKind` with no wildcard arm does not
+  compile until it names them.
 - An event stub without the native opcodes now gives `UnknownStubShape` at
   the stub. 1.0.0 gave `UnreadablePointer` at the slot when the jump left
   the address space, and otherwise a wrong handler address with no defect.
