@@ -530,41 +530,46 @@ fn read_private(pe: &PeImage<'_>, object: &Object, defects: &mut Vec<Defect>) ->
     match PrivateObj::read(pe, info.lp_private_object) {
         Ok(private) => private,
         Err(_) => {
-            defects.push(unreadable_pointer(
-                Va::new(info.lp_private_object),
-                "ObjectInfo",
-                "lpPrivateObject",
-            ));
+            let site = private_object_site(pe, object);
+            let offset = site.offset;
+            defects.push(Defect {
+                site,
+                kind: DefectKind::UnreadablePointer {
+                    offset,
+                    va: info.lp_private_object,
+                },
+            });
             PrivateObj::Absent
         }
+    }
+}
+
+/// Gives the site of `ObjectInfo.lpPrivateObject` for `object`: its file
+/// offset and its address, both read from the `ObjectInfo` window.
+///
+/// The caller has already read this `ObjectInfo`, so both lookups succeed for
+/// every file that reaches this function. The fallback `0` and `None` only
+/// keep this function free of a panic.
+fn private_object_site(pe: &PeImage<'_>, object: &Object) -> Site {
+    let info = pe.region_at_va(object.lp_object_info);
+    let at = Off::new(LP_PRIVATE_OBJECT_AT);
+    Site {
+        offset: info.and_then(|w| w.file_offset(at)).map_or(0, Off::get),
+        rva: info.and_then(|w| w.rva(at)).map(Rva::get),
+        structure: "ObjectInfo",
+        field: "lpPrivateObject",
     }
 }
 
 /// Builds the defect for an object whose two module markers disagree.
 ///
 /// The site is `ObjectInfo.lpPrivateObject`, the field whose value
-/// contradicts `fObjectType`. `ObjectInfo` was reached through
-/// `Object.lpObjectInfo`, so the site gives that address plus the field
-/// offset as its RVA, as the object table's own count mismatch does. The
-/// caller has already read this `ObjectInfo`, so both lookups succeed for
-/// every file that reaches this function. The fallback `0` and `None` only
-/// keep this function free of a panic.
+/// contradicts `fObjectType`.
 fn module_marker_mismatch(pe: &PeImage<'_>, object: &Object, lp_private_object: u32) -> Defect {
-    let offset = pe
-        .region_at_va(object.lp_object_info)
-        .and_then(|info| info.file_offset(Off::new(LP_PRIVATE_OBJECT_AT)))
-        .map_or(0, Off::get);
+    let site = private_object_site(pe, object);
+    let offset = site.offset;
     Defect {
-        site: Site {
-            offset,
-            rva: object
-                .lp_object_info
-                .to_rva(pe.image_base())
-                .and_then(|rva| rva.checked_add(LP_PRIVATE_OBJECT_AT))
-                .map(Rva::get),
-            structure: "ObjectInfo",
-            field: "lpPrivateObject",
-        },
+        site,
         kind: DefectKind::ModuleMarkerMismatch {
             offset,
             pointer: lp_private_object,
@@ -573,15 +578,16 @@ fn module_marker_mismatch(pe: &PeImage<'_>, object: &Object, lp_private_object: 
     }
 }
 
-/// Builds the defect for a leaf pointer this file could not follow.
+/// Builds the defect for `Object.lpObjectInfo` when the reader cannot follow
+/// it.
 ///
-/// `offset` is `0`: the byte position the pointer itself was read from is
-/// not carried by [`Object`] or [`ObjectInfo`] once composition reaches this
-/// function. This is the same fallback `vb/object.rs`'s own `read_name` uses
-/// (`.map_or(0, Off::get)`) whenever a file offset is unavailable. The site
-/// gives no address for the same reason, because `site.rva` is the address
-/// of the byte at `offset`. The address that the pointer holds is in
-/// `kind.va`, and a reader uses it to find the structure in question.
+/// `offset` is `0`: [`Object`] does not carry the byte position that the
+/// pointer was read from. This is the same fallback `vb/object.rs`'s own
+/// `read_name` uses (`.map_or(0, Off::get)`) whenever a file offset is
+/// unavailable. The site gives no address for the same reason, because
+/// `site.rva` is the address of the byte at `offset`. The address that the
+/// pointer holds is in `kind.va`, and a reader uses it to find the structure
+/// in question.
 const fn unreadable_pointer(va: Va, structure: &'static str, field: &'static str) -> Defect {
     Defect {
         site: Site {
@@ -923,12 +929,13 @@ mod tests {
     fn builtin_table() -> OpcodeTable {
         OpcodeTable::builtin()
     }
-    use crate::error::DefectKind;
+    use crate::error::{Defect, DefectKind, Site};
     use crate::read::pe::PeImage;
-    use crate::read::region::Off;
+    use crate::read::region::{Off, Va};
     use crate::vb::classify::ObjectKind;
     use crate::vb::header::{VbHeader, header_region};
-    use crate::vb::privateobj::Gap;
+    use crate::vb::object::Object;
+    use crate::vb::privateobj::{Gap, PrivateObj};
     use crate::vb::project::{ObjectTableHead, ProjectInfo};
 
     /// The corpus program this module reads.
@@ -1316,14 +1323,128 @@ mod tests {
             .iter()
             .find(|d| d.site.structure == "ObjectInfo" && d.site.field == "lpPrivateObject")
             .expect("the patched ObjectInfo.lpPrivateObject must produce a defect");
-        assert!(matches!(
+        // The site and the kind give the byte of the pointer, which is
+        // `ObjectInfo + 0x0C`. The kind gives the address that it holds.
+        let at = u32::try_from(at).unwrap();
+        assert_eq!(
             defect.kind,
-            DefectKind::UnreadablePointer { va, .. } if va == nowhere
-        ));
-        // This reader does not give the place of the pointer, so the site
-        // gives offset 0 and no address. The address that the pointer holds
-        // is in the kind only.
-        assert_eq!((defect.site.offset, defect.site.rva), (0, None));
+            DefectKind::UnreadablePointer {
+                offset: at,
+                va: nowhere,
+            }
+        );
+        assert_eq!(defect.site.offset, at);
+        assert_eq!(
+            defect.site.rva,
+            Some(frm_grayscale.lp_object_info.get() - image.image_base() + 0x0C)
+        );
+    }
+
+    /// Builds a minimal 32-bit i386 portable executable with one section at
+    /// RVA `0x1000` and file offset `0x400`, holding `extra` at its start.
+    ///
+    /// A local copy of the helper that the tests of `vb/controlinfo.rs` hold,
+    /// so that the tests of each file fail on their own.
+    fn synthetic_image(extra: &[u8]) -> Vec<u8> {
+        const LFANEW: usize = 0x40;
+        const OPTIONAL: usize = LFANEW + 24;
+        const SECTION: usize = OPTIONAL + 224;
+        const SECTION_START: usize = 0x400;
+
+        let mapped_len = u32::try_from(extra.len().max(0x10)).unwrap();
+        let file_len = SECTION_START + usize::try_from(mapped_len).unwrap() + 0x10;
+
+        let mut out = vec![0_u8; file_len];
+        out[0] = b'M';
+        out[1] = b'Z';
+        out[0x3c..0x40].copy_from_slice(&u32::try_from(LFANEW).unwrap().to_le_bytes());
+        out[LFANEW..LFANEW + 4].copy_from_slice(b"PE\0\0");
+
+        out[LFANEW + 4..LFANEW + 6].copy_from_slice(&0x014c_u16.to_le_bytes());
+        out[LFANEW + 6..LFANEW + 8].copy_from_slice(&1_u16.to_le_bytes());
+        out[LFANEW + 20..LFANEW + 22].copy_from_slice(&224_u16.to_le_bytes());
+        out[LFANEW + 22..LFANEW + 24].copy_from_slice(&0x0102_u16.to_le_bytes());
+
+        out[OPTIONAL..OPTIONAL + 2].copy_from_slice(&0x010b_u16.to_le_bytes());
+        out[OPTIONAL + 0x1c..OPTIONAL + 0x20].copy_from_slice(&0x0040_0000_u32.to_le_bytes());
+
+        out[SECTION..SECTION + 8].copy_from_slice(b".text\0\0\0");
+        out[SECTION + 8..SECTION + 12].copy_from_slice(&mapped_len.to_le_bytes());
+        out[SECTION + 12..SECTION + 16].copy_from_slice(&0x1000_u32.to_le_bytes());
+        out[SECTION + 16..SECTION + 20].copy_from_slice(&mapped_len.to_le_bytes());
+        out[SECTION + 20..SECTION + 24]
+            .copy_from_slice(&u32::try_from(SECTION_START).unwrap().to_le_bytes());
+        out[SECTION + 36..SECTION + 40].copy_from_slice(&0x6000_0020_u32.to_le_bytes());
+
+        out[SECTION_START..SECTION_START + extra.len()].copy_from_slice(extra);
+        out
+    }
+
+    /// The corpus puts each `ObjectInfo` at an address that is equal to its
+    /// file offset. Here `ObjectInfo` starts at file offset `0x400` and at
+    /// address `0x1000`, so the site of `lpPrivateObject` is file offset
+    /// `0x40C` and address `0x100C`. Both defects that name this field give
+    /// that site.
+    #[test]
+    fn a_private_object_defect_gives_the_address_of_its_pointer_and_not_its_file_offset() {
+        let form = Object {
+            lp_object_info: Va::new(0x0040_1000),
+            lpsz_object_name: Va::new(0),
+            name: "Synthetic".to_owned(),
+            proc_count: 0,
+            lp_proc_names_array: Va::new(0),
+            f_object_type: 0x0001_8083,
+        };
+        let site = Site {
+            offset: 0x40C,
+            rva: Some(0x100C),
+            structure: "ObjectInfo",
+            field: "lpPrivateObject",
+        };
+
+        // A private object address in no section.
+        let nowhere = 0x0130_0000_u32;
+        let mut info = vec![0_u8; 0x40];
+        info[0x0C..0x10].copy_from_slice(&nowhere.to_le_bytes());
+        let bytes = synthetic_image(&info);
+        let image = PeImage::parse(&bytes).unwrap();
+        assert!(image.region_at_va(Va::new(nowhere)).is_none());
+        let mut defects = Vec::new();
+        assert_eq!(
+            super::read_private(&image, &form, &mut defects),
+            PrivateObj::Absent
+        );
+        assert_eq!(
+            defects,
+            [Defect {
+                site: site.clone(),
+                kind: DefectKind::UnreadablePointer {
+                    offset: 0x40C,
+                    va: nowhere,
+                },
+            }]
+        );
+
+        // A form whose private object address is 0, which names no private
+        // object: the two markers disagree.
+        let bytes = synthetic_image(&[0_u8; 0x40]);
+        let image = PeImage::parse(&bytes).unwrap();
+        let mut defects = Vec::new();
+        assert_eq!(
+            super::read_private(&image, &form, &mut defects),
+            PrivateObj::Absent
+        );
+        assert_eq!(
+            defects,
+            [Defect {
+                site,
+                kind: DefectKind::ModuleMarkerMismatch {
+                    offset: 0x40C,
+                    pointer: 0,
+                    object_type: 0x0001_8083,
+                },
+            }]
+        );
     }
 
     /// On `Grayscale.exe`, `inspect` gives three objects with the right
