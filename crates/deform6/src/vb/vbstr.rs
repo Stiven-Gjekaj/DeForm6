@@ -121,7 +121,10 @@ impl VbStr {
         };
 
         if declared_end.get() > region.len() {
-            let max = region.len().saturating_sub(at.get());
+            // The largest declared length that fits: the bytes after `at`,
+            // less the 2 bytes of the length and the 1 byte of the trailing
+            // null.
+            let max = region.len().saturating_sub(at.get()).saturating_sub(3);
             return Self::region_overflow(offset, rva, declared_len, declared_end, max);
         }
 
@@ -367,7 +370,16 @@ mod tests {
         let message = format!("{}", defect.kind);
         assert!(message.contains("100"), "{message}");
         assert!(message.contains("0x0"), "{message}");
-        assert!(matches!(defect.kind, DefectKind::ImplausibleCount { .. }));
+        // The 4 bytes hold a length of 1 at most: 2 bytes of length, 1 of
+        // text and 1 of trailing null.
+        assert_eq!(
+            defect.kind,
+            DefectKind::ImplausibleCount {
+                offset: 0,
+                count: 100,
+                max: 1,
+            }
+        );
         // 0 + 2 (length field) + 100 (declared) + 1 (trailing null) = 103.
         assert_eq!(s.declared_end(), Off::new(103));
         assert_eq!(s.text(), "");
