@@ -239,8 +239,6 @@ pub fn read_array_index(block: &Region<'_>) -> Option<u16> {
 /// contract.
 #[must_use]
 pub fn read_control_header(block: &Region<'_>) -> (ControlHeader, Vec<Defect>) {
-    let offset = block.file_offset(Off::new(0)).map_or(0, Off::get);
-    let rva = block.rva(Off::new(0)).map(Rva::get);
     let mut defects = Vec::new();
 
     let flags = block.u8(Off::new(0x03));
@@ -250,10 +248,12 @@ pub fn read_control_header(block: &Region<'_>) -> (ControlHeader, Vec<Defect>) {
             && index > 0xFF
         {
             let high = u8::try_from(index >> 8).unwrap_or(0);
+            let at = Off::new(INDEX_AT);
+            let offset = block.file_offset(at).map_or(0, Off::get);
             defects.push(Defect {
                 site: Site {
                     offset,
-                    rva,
+                    rva: block.rva(at).map(Rva::get),
                     structure: "ControlHeader",
                     field: "Index",
                 },
@@ -262,7 +262,7 @@ pub fn read_control_header(block: &Region<'_>) -> (ControlHeader, Vec<Defect>) {
         }
 
         let name_len = block.u16_le(Off::new(0x07)).unwrap_or(0);
-        let (name, name_defect) = read_name(block, offset, 0x09, name_len);
+        let (name, name_defect) = read_name(block, 0x09, name_len);
         if let Some(defect) = name_defect {
             defects.push(defect);
         }
@@ -284,7 +284,7 @@ pub fn read_control_header(block: &Region<'_>) -> (ControlHeader, Vec<Defect>) {
     } else {
         let c_id = block.u8(Off::new(0x04)).unwrap_or(0);
         let name_len = block.u16_le(Off::new(0x05)).unwrap_or(0);
-        let (name, name_defect) = read_name(block, offset, 0x07, name_len);
+        let (name, name_defect) = read_name(block, 0x07, name_len);
         if let Some(defect) = name_defect {
             defects.push(defect);
         }
@@ -309,29 +309,25 @@ pub fn read_control_header(block: &Region<'_>) -> (ControlHeader, Vec<Defect>) {
 /// Reads a control's length-prefixed name.
 ///
 /// A declared length of `0` gives an empty name and a [`Defect`] naming the
-/// block's own byte offset; the header still gives its `cType`. A declared
-/// length larger than the remaining block also gives an empty name and a
-/// [`Defect`]; no allocation is sized from the declared length before this
+/// offset of the two-byte length, right before the name; the header still
+/// gives its `cType`. A declared length larger than the remaining block also
+/// gives an empty name and a [`Defect`] at the same offset; no allocation is sized from the declared length before this
 /// check, because [`Region::take`] itself refuses the read rather than
 /// allocating first.
-fn read_name(
-    block: &Region<'_>,
-    block_offset: u32,
-    name_start: u32,
-    name_len: u16,
-) -> (String, Option<Defect>) {
-    let rva = block.rva(Off::new(0)).map(Rva::get);
+fn read_name(block: &Region<'_>, name_start: u32, name_len: u16) -> (String, Option<Defect>) {
+    // Each defect names the two-byte length of the name, right before it.
+    let length_at = Off::new(name_start.saturating_sub(2));
+    let offset = block.file_offset(length_at).map_or(0, Off::get);
+    let site = Site {
+        offset,
+        rva: block.rva(length_at).map(Rva::get),
+        structure: "ControlHeader",
+        field: "name",
+    };
     if name_len == 0 {
         let defect = Defect {
-            site: Site {
-                offset: block_offset,
-                rva,
-                structure: "ControlHeader",
-                field: "name",
-            },
-            kind: DefectKind::EmptyName {
-                offset: block_offset,
-            },
+            site,
+            kind: DefectKind::EmptyName { offset },
         };
         return (String::new(), Some(defect));
     }
@@ -344,14 +340,9 @@ fn read_name(
         None => {
             let max = block.len().saturating_sub(name_start);
             let defect = Defect {
-                site: Site {
-                    offset: block_offset,
-                    rva,
-                    structure: "ControlHeader",
-                    field: "name",
-                },
+                site,
                 kind: DefectKind::ImplausibleCount {
-                    offset: block_offset,
+                    offset,
                     count: u32::from(name_len),
                     max,
                 },
@@ -985,32 +976,48 @@ mod tests {
         ));
     }
 
-    /// Each defect of the header reader names the first byte of the block:
-    /// its file offset and its address. The window here starts at file
-    /// offset `0x1560` and at address `0x2560`.
+    /// Each defect of the header reader names its own field: the two-byte
+    /// index at `0x05`, or the two-byte length of the name, at `0x07` in an
+    /// array element and at `0x05` in another block. The site and the kind
+    /// give the same file offset. The window here starts at file offset
+    /// `0x1560` and at address `0x2560`.
     #[test]
-    fn each_control_header_defect_gives_the_file_offset_and_the_address_of_the_block() {
-        let block = |field: &'static str| Site {
-            offset: 0x1560,
-            rva: Some(0x2560),
-            structure: "ControlHeader",
-            field,
-        };
+    fn each_control_header_defect_gives_the_file_offset_and_the_address_of_its_field() {
         let mut high_byte = txt_f_element(0, 2);
         high_byte[6] = 0x01;
-        let cases: [(Vec<u8>, &'static str); 3] = [
-            (high_byte, "Index"),
+        let mut array_name_too_long = txt_f_element(0, 2);
+        array_name_too_long[7..9].copy_from_slice(&0xFFFF_u16.to_le_bytes());
+        let cases: [(Vec<u8>, &'static str, u32); 4] = [
+            (high_byte, "Index", 0x05),
+            (array_name_too_long, "name", 0x07),
             (
                 vec![0x00, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 13],
                 "name",
+                0x05,
             ),
-            (vec![0x00, 0x00, 0x00, 0x00, 0x07, 0xFF, 0xFF], "name"),
+            (vec![0x00, 0x00, 0x00, 0x00, 0x07, 0xFF, 0xFF], "name", 0x05),
         ];
-        for (bytes, field) in cases {
+        for (bytes, field, at) in cases {
             let region = Region::mapped(&bytes, Off::new(0x1560), Rva::new(0x2560));
             let (_header, defects) = read_control_header(&region);
             assert_eq!(defects.len(), 1, "{bytes:?}");
-            assert_eq!(defects[0].site, block(field), "{bytes:?}");
+            assert_eq!(
+                defects[0].site,
+                Site {
+                    offset: 0x1560 + at,
+                    rva: Some(0x2560 + at),
+                    structure: "ControlHeader",
+                    field,
+                },
+                "{bytes:?}"
+            );
+            let offset = match defects[0].kind {
+                DefectKind::IndexHighByteSet { offset, .. }
+                | DefectKind::EmptyName { offset }
+                | DefectKind::ImplausibleCount { offset, .. } => offset,
+                ref other => panic!("{other:?}"),
+            };
+            assert_eq!(offset, 0x1560 + at, "{bytes:?}");
         }
     }
 

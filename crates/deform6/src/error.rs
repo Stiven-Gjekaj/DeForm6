@@ -201,8 +201,7 @@ pub enum DefectKind {
     /// zero. The control keeps every other field; only the name is empty.
     #[error("the name at offset {offset:#x} has a declared length of zero")]
     EmptyName {
-        /// The absolute file offset of the control block that holds the
-        /// name.
+        /// The absolute file offset of the two-byte length of the name.
         offset: u32,
     },
 
@@ -218,8 +217,7 @@ pub enum DefectKind {
         "the array index at offset {offset:#x} carries a non-zero high byte {high:#x}, which no corpus sample proves meaningful"
     )]
     IndexHighByteSet {
-        /// The absolute file offset of the control block that holds the
-        /// index.
+        /// The absolute file offset of the two-byte index.
         offset: u32,
         /// The high byte of the two-byte index value.
         high: u8,
