@@ -109,6 +109,7 @@ const fn kind_name(kind: &DefectKind) -> &'static str {
         DefectKind::ItemCutShort { .. } => "ItemCutShort",
         DefectKind::RunsPastEnd { .. } => "RunsPastEnd",
         DefectKind::UnexpectedConstant { .. } => "UnexpectedConstant",
+        DefectKind::NotAnIdentifier { .. } => "NotAnIdentifier",
     }
 }
 

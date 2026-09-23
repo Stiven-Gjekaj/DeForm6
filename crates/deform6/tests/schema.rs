@@ -493,3 +493,55 @@ fn a_report_that_carries_an_unexpected_constant_validates() {
         );
     }
 }
+
+/// A report that carries a `NotAnIdentifier` defect validates, and the schema refuses
+/// the same defect when one of its fields is missing.
+///
+/// No corpus program raises this kind, for the reason the tests above give
+/// for their own kinds.
+#[test]
+fn a_report_that_carries_a_not_an_identifier_defect_validates() {
+    let validator = compiled_schema();
+    let exe = corpus_root().join("vb6-code/Fire-effect/Fast_Flames.exe");
+    let mut value = report_value_for(&exe);
+    let defect = Defect {
+        site: Site {
+            offset: 0x2e50,
+            rva: Some(0x2e50),
+            structure: "Object",
+            field: "lpProcNamesArray",
+        },
+        kind: DefectKind::NotAnIdentifier {
+            offset: 0x2f10,
+            len: 13,
+        },
+    };
+    let serialized = serde_json::to_value(&defect).expect("a defect serializes");
+    let at = value["defects"]
+        .as_array()
+        .expect("defects must be an array")
+        .len();
+    value["defects"]
+        .as_array_mut()
+        .expect("defects must be an array")
+        .push(serialized);
+
+    let errors = describe_errors(&validator, &value);
+    assert!(
+        errors.is_empty(),
+        "a report with a NotAnIdentifier defect failed schema validation:\n{}",
+        errors.join("\n")
+    );
+
+    for field in ["offset", "len"] {
+        let mut missing = value.clone();
+        missing["defects"][at]["kind"]["NotAnIdentifier"]
+            .as_object_mut()
+            .expect("the kind must be an object")
+            .remove(field);
+        assert!(
+            !validator.is_valid(&missing),
+            "a defect with no {field} must be refused"
+        );
+    }
+}

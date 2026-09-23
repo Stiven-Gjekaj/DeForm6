@@ -479,6 +479,22 @@
               }
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["NotAnIdentifier"],
+          "properties": {
+            "NotAnIdentifier": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "len"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "len": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              }
+            }
+          }
         }
       ]
     }

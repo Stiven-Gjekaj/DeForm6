@@ -421,6 +421,21 @@ pub enum DefectKind {
         /// The value that the field holds.
         found: u32,
     },
+
+    /// The text that a name pointer names is not a Visual Basic identifier.
+    ///
+    /// An identifier starts with an ASCII letter or an underscore, and each of
+    /// its bytes is an ASCII letter, a digit or an underscore. The name is not
+    /// kept, and the item keeps its other fields. The site names the pointer.
+    #[error(
+        "the {len} bytes of text at offset {offset:#x} are not an identifier, and the item keeps its other fields"
+    )]
+    NotAnIdentifier {
+        /// The absolute file offset where the text starts.
+        offset: u32,
+        /// The number of bytes of the text, before its NUL.
+        len: u32,
+    },
 }
 
 /// How bad a defect is.
@@ -532,6 +547,8 @@ impl DefectKind {
             Self::RunsPastEnd { .. } => Severity::Tolerated,
             // The item is not read, and nothing is invented in its place.
             Self::UnexpectedConstant { .. } => Severity::Tolerated,
+            // The name is absent, and no name is invented in its place.
+            Self::NotAnIdentifier { .. } => Severity::Tolerated,
         }
     }
 }
@@ -835,6 +852,13 @@ mod tests {
                 },
                 0xee,
             ),
+            (
+                DefectKind::NotAnIdentifier {
+                    offset: 0xef,
+                    len: 13,
+                },
+                0xef,
+            ),
         ]
     }
 
@@ -922,6 +946,20 @@ mod tests {
         let message = format!("{kind}");
         assert!(message.contains("offset 0x1d24 holds 0x1234"), "{message}");
         assert!(message.contains("the format gives 0xffff"), "{message}");
+    }
+
+    #[test]
+    fn a_not_an_identifier_message_names_the_text_and_its_length() {
+        let kind = DefectKind::NotAnIdentifier {
+            offset: 0x2f10,
+            len: 13,
+        };
+        let message = format!("{kind}");
+        assert!(
+            message.contains("the 13 bytes of text at offset 0x2f10"),
+            "{message}"
+        );
+        assert!(message.contains("not an identifier"), "{message}");
     }
 
     #[test]
@@ -1042,6 +1080,7 @@ mod tests {
                 expected: 0,
                 found: 0,
             },
+            DefectKind::NotAnIdentifier { offset: 0, len: 0 },
         ];
         for kind in tolerated {
             assert_eq!(

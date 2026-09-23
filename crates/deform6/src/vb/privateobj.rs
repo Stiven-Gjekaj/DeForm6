@@ -572,7 +572,8 @@ impl ProcedureList {
 ///
 /// The site of the defect is the entry. For a name with no NUL, the kind
 /// gives the file offset where the text starts and the number of bytes that
-/// the search read.
+/// the search read. For a name that is not an identifier, the kind gives the
+/// file offset where the text starts and the number of bytes before its NUL.
 fn resolve_entry(pe: &PeImage<'_>, window: &Region<'_>, index: u32) -> (Procedure, Option<Defect>) {
     let Some(entry_off) = index.checked_mul(PROC_NAME_PTR_SIZE) else {
         return (Procedure::Private, None);
@@ -622,16 +623,12 @@ fn resolve_entry(pe: &PeImage<'_>, window: &Region<'_>, index: u32) -> (Procedur
         // bytes do not read as an identifier: the same shape of evidence a
         // build-machine path fragment would leave if a garbage dword ever
         // happened to land inside a mapped section. Not observed anywhere
-        // in the corpus, this file does not use `error.rs`'s
-        // `UnmappedAddress`, because the address did resolve; it reuses
-        // `UnreadablePointer`, which already carries exactly the raw value
-        // CONTEXT.md asks a gap to carry, and is the nearest fit among the
-        // kinds this plan's file boundary leaves reachable.
+        // in the corpus.
         let defect = Defect {
             site,
-            kind: DefectKind::UnreadablePointer {
-                offset,
-                va: va.get(),
+            kind: DefectKind::NotAnIdentifier {
+                offset: name_region.file_offset(Off::new(0)).map_or(0, Off::get),
+                len: u32::try_from(bytes.len()).unwrap_or(u32::MAX),
             },
         };
         (Procedure::Private, Some(defect))
@@ -1164,6 +1161,55 @@ mod tests {
                     },
                 }],
                 "{len}"
+            );
+        }
+    }
+
+    /// A procedure name that is not an identifier makes its slot private. The
+    /// site is the slot of the name array. The kind gives where the text
+    /// starts and the number of bytes before its NUL, which is 0 for a name
+    /// whose first byte is the NUL.
+    #[test]
+    fn a_procedure_name_that_is_not_an_identifier_names_the_text_and_its_length() {
+        let image = PeImage::parse(GRAYSCALE).unwrap();
+        let fast_drawing = &objects(GRAYSCALE)[2];
+        assert_eq!(fast_drawing.name, "FastDrawing");
+        let array = image
+            .region_at_va(fast_drawing.lp_proc_names_array)
+            .unwrap();
+        // `GetImageWidth` is slot 4.
+        let slot = array.file_offset(Off::new(4 * 4)).unwrap().get();
+        let name = array.va_le(Off::new(4 * 4)).unwrap();
+        let name_at = image.va_to_off(name).unwrap().get();
+        let at = usize::try_from(name_at).unwrap();
+        assert_eq!(&GRAYSCALE[at..at + 14], b"GetImageWidth\0");
+
+        for (first, len) in [(b'1', 13), (0, 0)] {
+            let mut bytes = GRAYSCALE.to_vec();
+            bytes[at] = first;
+            let patched = PeImage::parse(&bytes).unwrap();
+            let list = ProcedureList::read(&patched, &objects(&bytes)[2]);
+            let ProcNames::Slots(slots) = &list.procs else {
+                panic!("FastDrawing carries a name array");
+            };
+            assert_eq!(slots[4], Procedure::Private, "{first}");
+            assert_eq!(
+                list.defects(),
+                [Defect {
+                    site: Site {
+                        offset: slot,
+                        rva: Some(
+                            fast_drawing.lp_proc_names_array.get() + 4 * 4 - image.image_base()
+                        ),
+                        structure: "Object",
+                        field: "lpProcNamesArray",
+                    },
+                    kind: DefectKind::NotAnIdentifier {
+                        offset: name_at,
+                        len,
+                    },
+                }],
+                "{first}"
             );
         }
     }
