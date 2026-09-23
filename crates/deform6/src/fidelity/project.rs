@@ -78,6 +78,7 @@ mod tests {
     fn project() -> ProjectInfo {
         ProjectInfo {
             file_offset: Off::new(0x1000),
+            rva: None,
             dw_version: 0x0000_01F4,
             lp_object_table: Va::new(0x0040_1111),
             lp_native_code: 0x0040_2222,

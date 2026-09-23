@@ -95,6 +95,7 @@ mod tests {
     fn header() -> VbHeader {
         VbHeader {
             file_offset: Off::new(0x400),
+            rva: None,
             signature: *b"VB5!",
             runtime_build: 0x231C,
             lp_sub_main: Va::new(0x0040_1000),

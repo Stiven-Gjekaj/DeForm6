@@ -110,6 +110,12 @@ pub struct ControlInfo {
     /// array the element was cut from, and has no other way to know where the
     /// element sits.
     pub file_offset: Off,
+    /// The address of this element's first byte, when the window that it was
+    /// read from knows one.
+    ///
+    /// Kept with [`ControlInfo::file_offset`], so that a defect about a field
+    /// in this element can give the address of that field's own byte too.
+    pub rva: Option<Rva>,
     /// `0x40` for an intrinsic control's plain event sink, `0x2E` for a COM
     /// control's `IDispatch` sink. Carried raw: [`read_event_table`] selects
     /// the event table's header size from it, and this reader refuses no
@@ -313,6 +319,7 @@ impl ControlInfoTable {
                 .ok_or(Refusal::Damaged("a ControlInfo element has no file offset"))?;
             entries.push(ControlInfo {
                 file_offset,
+                rva: element.rva(Off::new(0)),
                 f_control_type: raw.f_control_type,
                 w_event_count: raw.w_event_count,
                 lp_guid: raw.lp_guid,
@@ -1078,7 +1085,7 @@ mod tests {
     use crate::error::Refusal;
     use crate::error::{Defect, Site};
     use crate::read::pe::PeImage;
-    use crate::read::region::{Off, Region, Va};
+    use crate::read::region::{Off, Region, Rva, Va};
     use crate::vb::classify::{self, ObjectKind};
     use crate::vb::controltree::{self, ControlTree};
     use crate::vb::gui::{GuiObjectInfo, GuiTable, Tiling};
@@ -1610,6 +1617,7 @@ mod tests {
         let control_info_table = ControlInfoTable {
             entries: vec![super::ControlInfo {
                 file_offset: Off::new(0),
+                rva: None,
                 f_control_type: 0x40,
                 w_event_count: 0,
                 lp_guid: Va::new(0),
@@ -1634,6 +1642,7 @@ mod tests {
     ) -> super::ControlInfo {
         super::ControlInfo {
             file_offset: Off::new(0x0000_0200),
+            rva: None,
             f_control_type,
             w_event_count,
             lp_guid: Va::new(0),
@@ -1749,6 +1758,10 @@ mod tests {
         assert_eq!(second.get() - first.get(), super::CONTROL_INFO_SIZE);
         // The section starts at file offset 0x400 and the array at 0x80 in it.
         assert_eq!(first, Off::new(0x400 + 0x80));
+        // The section starts at address 0x1000, so each element keeps the
+        // address of its own first byte too.
+        assert_eq!(table.entries[0].rva, Some(Rva::new(0x1000 + 0x80)));
+        assert_eq!(table.entries[1].rva, Some(Rva::new(0x1000 + 0xA8)));
     }
 
     #[test]

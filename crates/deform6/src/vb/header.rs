@@ -12,7 +12,7 @@
 
 use crate::error::Refusal;
 use crate::read::pe::PeImage;
-use crate::read::region::{Off, Region, Va};
+use crate::read::region::{Off, Region, Rva, Va};
 
 /// The opcode of `push imm32`.
 ///
@@ -149,6 +149,12 @@ pub struct VbHeader {
     /// own byte. A reader that is handed only this value, and not the window
     /// it came from, has no other way to know where the record sits.
     pub file_offset: Off,
+    /// The address of the header's first byte, when the window that it was
+    /// read from knows one.
+    ///
+    /// Kept with [`VbHeader::file_offset`], so that a defect about a field in
+    /// this record can give the address of that field's own byte too.
+    pub rva: Option<Rva>,
     /// The four magic bytes at offset 0, as the file holds them.
     ///
     /// [`header_region`] has already refused the file when these are not
@@ -234,6 +240,7 @@ impl VbHeader {
             .ok_or(Refusal::Damaged("the VB header window has no file offset"))?;
         Ok(Self {
             file_offset,
+            rva: hdr.rva(Off::new(0)),
             signature,
             runtime_build: hdr
                 .u16_le(Off::new(0x04))
@@ -713,6 +720,11 @@ mod tests {
         assert_eq!(header.title, synth::TITLE);
         assert_eq!(header.help_file, synth::HELP_FILE);
         assert_eq!(header.project_name, synth::PROJECT_NAME);
+        // The header keeps both places of its first byte.
+        let header_off = u32::try_from(synth::HEADER_OFF).unwrap();
+        assert_eq!(header.file_offset, Off::new(header_off));
+        assert_eq!(header.rva, Some(Rva::new(synth::HEADER_RVA)));
+        assert_ne!(header_off, synth::HEADER_RVA);
     }
 
     /// The file offset of `AddressOfEntryPoint` inside the synthetic image.

@@ -467,6 +467,7 @@ mod tests {
     fn header_with_gui_table(lp_gui_table: Va, w_form_count: u16) -> VbHeader {
         VbHeader {
             file_offset: crate::read::region::Off::new(0x0000_0100),
+            rva: None,
             signature: *b"VB5!",
             runtime_build: 0,
             lp_sub_main: Va::new(0),

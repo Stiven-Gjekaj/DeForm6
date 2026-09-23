@@ -99,6 +99,12 @@ pub struct ProjectInfo {
     /// own byte. [`DeclareTable::read`] is handed only this value, not the
     /// window it came from, and has no other way to know where it sits.
     pub file_offset: Off,
+    /// The address of the structure's first byte, when the window that it
+    /// was read from knows one.
+    ///
+    /// Kept with [`ProjectInfo::file_offset`], so that a defect about a field
+    /// in this structure can give the address of that field's own byte too.
+    pub rva: Option<Rva>,
     /// The template version of the structure. Nothing branches on it.
     pub dw_version: u32,
     /// The address of the object table, which holds the project name.
@@ -147,6 +153,7 @@ impl ProjectInfo {
         ))?;
         Ok(Self {
             file_offset,
+            rva: window.rva(Off::new(0)),
             dw_version: u32_at(&window, 0x00, "ProjectInfo holds no template version")?,
             lp_object_table: va_at(
                 &window,
@@ -2462,6 +2469,7 @@ mod tests {
             assert_eq!(image.va_to_off(table), Some(Off::new(0x400)));
             let info = ProjectInfo {
                 file_offset: Off::new(0),
+                rva: None,
                 dw_version: 0,
                 lp_object_table: Va::new(0),
                 lp_native_code: 0,
@@ -2501,6 +2509,17 @@ mod tests {
                 "{field}"
             );
         }
+    }
+
+    /// `ProjectInfo` keeps the file offset and the address of its first byte.
+    /// Here the two differ.
+    #[test]
+    fn project_info_keeps_the_file_offset_and_the_address_of_its_first_byte() {
+        let (bytes, va) = a_synthetic_pe_image(&[0_u8; 0x23C]);
+        let image = PeImage::parse(&bytes).unwrap();
+        let info = ProjectInfo::read(&image, va).unwrap();
+        assert_eq!(info.file_offset, Off::new(0x400));
+        assert_eq!(info.rva, Some(Rva::new(0x1000)));
     }
 
     /// A zero count never reads the table address, so an address that maps
