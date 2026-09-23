@@ -448,6 +448,9 @@ fn section_table_offset(nt_headers_offset: u32, size_of_optional_header: u16) ->
         .unwrap_or(u32::MAX)
 }
 
+/// Where `VirtualAddress` is in a section header.
+const VIRTUAL_ADDRESS_AT: u32 = 0x0C;
+
 /// Gives the file offset of the section header at `index`.
 fn section_header_offset(table_at: u32, index: usize) -> u32 {
     u32::try_from(index)
@@ -474,6 +477,9 @@ fn section_header_offset(table_at: u32, index: usize) -> u32 {
 /// gives this function a section list that overlaps, and no parsed file in
 /// the tests does.
 ///
+/// The defect names the `VirtualAddress` field of the later header of the
+/// pair, because that field places the section that overlaps.
+///
 /// A section whose mapped length is zero claims no byte, so it overlaps
 /// nothing. An end that leaves a `u32` is reported as an overlap rather than
 /// clamped to `u32::MAX`, because a section that runs past the end of the
@@ -496,7 +502,7 @@ fn overlap_defects(sections: &[SectionInfo], table_at: u32) -> Vec<Defect> {
                 None => true,
             };
             if overlaps {
-                let offset = section_header_offset(table_at, j);
+                let offset = section_header_offset(table_at, j).saturating_add(VIRTUAL_ADDRESS_AT);
                 out.push(Defect {
                     // The section table is in no section, so this reader
                     // knows no address for the header byte.
@@ -968,20 +974,21 @@ mod tests {
         assert!(overlap_defects(&touching, 0x178).is_empty());
 
         // `.data` starts inside `.text`. Its header is the second one, 40
-        // bytes after the table start. The section table is in no section,
-        // so the site gives no address.
+        // bytes after the table start, and its `VirtualAddress` is 12 bytes
+        // into it. The section table is in no section, so the site gives no
+        // address.
         let overlapping = [text, section(b".data\0\0\0", 0x1800, 0x1400), rsrc];
         assert_eq!(
             overlap_defects(&overlapping, 0x178),
             [Defect {
                 site: Site {
-                    offset: 0x1A0,
+                    offset: 0x1AC,
                     rva: None,
                     structure: "ImageSectionHeader",
                     field: "VirtualAddress",
                 },
                 kind: DefectKind::SectionOverlap {
-                    offset: 0x1A0,
+                    offset: 0x1AC,
                     other: 0x400,
                 },
             }]

@@ -102,12 +102,13 @@ pub enum DefectKind {
         va: u32,
     },
 
-    /// Two sections claim the same bytes of the file.
+    /// Two sections claim the same addresses.
     #[error(
-        "the section header at offset {offset:#x} overlaps the section that starts at {other:#x}"
+        "the section whose address is at offset {offset:#x} overlaps the section whose bytes start at offset {other:#x}"
     )]
     SectionOverlap {
-        /// The absolute file offset of the second section header.
+        /// The absolute file offset of the `VirtualAddress` field of the
+        /// second section header.
         offset: u32,
         /// The file offset the first section starts at.
         other: u32,
