@@ -790,7 +790,9 @@ fn resolve_arg_names(
 /// Why one `optionalVals` value record could not be read.
 enum ValueRecordError {
     /// The bytes needed for this record run past the bounded value region.
-    Truncated,
+    /// `needed` is the number of bytes, from the first byte of the record to
+    /// the end of the read that failed, that the reader needs.
+    Truncated { needed: u32 },
     /// The tag is not one of the six this file's grammar holds.
     UnknownTag(u16),
 }
@@ -805,47 +807,60 @@ fn read_value_record(
     buffer: &Region<'_>,
     at: Off,
 ) -> Result<(DefaultValue, u32), ValueRecordError> {
-    let tag = buffer.u16_le(at).ok_or(ValueRecordError::Truncated)?;
-    let value_at = at.checked_add(2).ok_or(ValueRecordError::Truncated)?;
+    let tag = buffer
+        .u16_le(at)
+        .ok_or(ValueRecordError::Truncated { needed: 2 })?;
+    let value_at = at
+        .checked_add(2)
+        .ok_or(ValueRecordError::Truncated { needed: 2 })?;
     match tag {
         0 => Ok((DefaultValue::Empty, 2)),
         3 => {
-            let raw = buffer.i32_le(value_at).ok_or(ValueRecordError::Truncated)?;
+            let raw = buffer
+                .i32_le(value_at)
+                .ok_or(ValueRecordError::Truncated { needed: 6 })?;
             Ok((DefaultValue::Integer(raw), 6))
         }
         4 => {
             let raw = buffer
                 .take(value_at, 4)
-                .ok_or(ValueRecordError::Truncated)?;
-            let bytes: [u8; 4] = raw.try_into().ok().ok_or(ValueRecordError::Truncated)?;
+                .ok_or(ValueRecordError::Truncated { needed: 6 })?;
+            let bytes: [u8; 4] = raw
+                .try_into()
+                .ok()
+                .ok_or(ValueRecordError::Truncated { needed: 6 })?;
             Ok((DefaultValue::Single(f32::from_le_bytes(bytes)), 6))
         }
         8 => {
-            let len = buffer.u16_le(value_at).ok_or(ValueRecordError::Truncated)?;
+            let len = buffer
+                .u16_le(value_at)
+                .ok_or(ValueRecordError::Truncated { needed: 4 })?;
             let len_u32 = u32::from(len);
-            let text_at = value_at.checked_add(2).ok_or(ValueRecordError::Truncated)?;
+            // The tag, the length and the text. A `u16` length keeps each
+            // sum far below the top of a `u32`.
+            let text_end = len_u32.saturating_add(4);
+            let text_at = value_at
+                .checked_add(2)
+                .ok_or(ValueRecordError::Truncated { needed: 4 })?;
             let raw = buffer
                 .take(text_at, len_u32)
-                .ok_or(ValueRecordError::Truncated)?;
+                .ok_or(ValueRecordError::Truncated { needed: text_end })?;
             let text: String = raw.iter().copied().map(char::from).collect();
-            let content_width = 2_u32
-                .checked_add(len_u32)
-                .ok_or(ValueRecordError::Truncated)?;
+            let content_width = len_u32.saturating_add(2);
             let pad = content_width.checked_rem(2).unwrap_or(0);
-            let padded = content_width
-                .checked_add(pad)
-                .ok_or(ValueRecordError::Truncated)?;
-            let record_width = 2_u32
-                .checked_add(padded)
-                .ok_or(ValueRecordError::Truncated)?;
+            let record_width = content_width.saturating_add(pad).saturating_add(2);
             Ok((DefaultValue::Text(text), record_width))
         }
         11 => {
-            let raw = buffer.u16_le(value_at).ok_or(ValueRecordError::Truncated)?;
+            let raw = buffer
+                .u16_le(value_at)
+                .ok_or(ValueRecordError::Truncated { needed: 4 })?;
             Ok((DefaultValue::Boolean(raw != 0), 4))
         }
         17 => {
-            let raw = buffer.u8(value_at).ok_or(ValueRecordError::Truncated)?;
+            let raw = buffer
+                .u8(value_at)
+                .ok_or(ValueRecordError::Truncated { needed: 3 })?;
             Ok((DefaultValue::Byte(raw), 4))
         }
         other => Err(ValueRecordError::UnknownTag(other)),
@@ -881,6 +896,12 @@ const MAX_OPTIONAL_VALS_STEPS: u32 = 4096;
 /// anything a person could open the file at more precisely than the field
 /// that pointed here, matching `vb/object.rs`'s own choice of the
 /// `ProcCount` field's offset for its "implausible count" defect.
+///
+/// An `optionalVals` address in no section gives
+/// [`DefectKind::UnreadablePointer`]. A block that its section ends inside
+/// gives [`DefectKind::RunsPastEnd`], with the bytes of the block that the
+/// reader needs. A record that runs past the end that `cbValues` gives also
+/// gives [`DefectKind::RunsPastEnd`], with the bytes of that record.
 fn walk_optional_vals(
     pe: &PeImage<'_>,
     field_offset: u32,
@@ -909,11 +930,30 @@ fn walk_optional_vals(
     let Some(region) = pe.region_at_va(optional_vals) else {
         return unreadable();
     };
-    let Some(cb_values) = region.u32_le(Off::new(0)) else {
-        return unreadable();
+    // The address maps, and the section ends before the `len` bytes that
+    // the reader needs there.
+    let past_section_end = |len: u32| {
+        (
+            OptionalValsWalk::Unrecoverable,
+            Some(Defect {
+                site: site.clone(),
+                kind: DefectKind::RunsPastEnd {
+                    offset: region.file_offset(Off::new(0)).map_or(0, Off::get),
+                    len,
+                    end: region
+                        .file_offset(Off::new(region.len()))
+                        .map_or(0, Off::get),
+                },
+            }),
+        )
     };
+    let Some(cb_values) = region.u32_le(Off::new(0)) else {
+        return past_section_end(4);
+    };
+    // The block is `cbValues`, an address, then `cbValues` bytes of
+    // records.
     let Some(values) = region.subregion(Off::new(8), cb_values) else {
-        return unreadable();
+        return past_section_end(cb_values.saturating_add(8));
     };
 
     let mut records = Vec::new();
@@ -972,12 +1012,16 @@ fn walk_optional_vals(
                 };
                 return (OptionalValsWalk::Unrecoverable, Some(defect));
             }
-            Err(ValueRecordError::Truncated) => {
+            Err(ValueRecordError::Truncated { needed }) => {
+                // The record runs past the end that `cbValues` gives.
                 let defect = Defect {
                     site,
-                    kind: DefectKind::UnreadablePointer {
-                        offset: field_offset,
-                        va: optional_vals.get(),
+                    kind: DefectKind::RunsPastEnd {
+                        offset: values.file_offset(cursor).map_or(0, Off::get),
+                        len: needed,
+                        end: values
+                            .file_offset(Off::new(values.len()))
+                            .map_or(0, Off::get),
                     },
                 };
                 return (OptionalValsWalk::Unrecoverable, Some(defect));
@@ -1170,10 +1214,10 @@ fn read_one(
 mod tests {
     use super::{
         ARG_NAME_MAX, Argument, DefaultValue, FuncTypeWalk, OptionalDefaultsOutcome,
-        ProcedureSignature, PropertyKind, Prototype, PrototypeList, VbType, read_raw_header,
-        walk_type_buffer,
+        OptionalValsWalk, ProcedureSignature, PropertyKind, Prototype, PrototypeList, VbType,
+        read_raw_header, walk_optional_vals, walk_type_buffer,
     };
-    use crate::error::Severity;
+    use crate::error::{Defect, DefectKind, Severity, Site};
     use crate::read::pe::PeImage;
     use crate::read::region::{Off, Region, Rva, Va};
     use crate::vb::header::{VbHeader, header_region};
@@ -2098,6 +2142,171 @@ mod tests {
         assert_eq!(
             defect.site.rva,
             Some(entry_va.get() - image.image_base() + 0x08)
+        );
+    }
+
+    /// Builds a minimal 32-bit i386 portable executable with one section at
+    /// RVA `0x1000` and file offset `0x400`. The section holds `extra` and no
+    /// byte more.
+    ///
+    /// A local copy of the helper that the tests of `vb/controlinfo.rs` hold,
+    /// so that the tests of each file fail on their own.
+    fn synthetic_image(extra: &[u8]) -> Vec<u8> {
+        const LFANEW: usize = 0x40;
+        const OPTIONAL: usize = LFANEW + 24;
+        const SECTION: usize = OPTIONAL + 224;
+        const SECTION_START: usize = 0x400;
+
+        let mapped_len = u32::try_from(extra.len()).unwrap();
+        let file_len = SECTION_START + extra.len() + 0x10;
+
+        let mut out = vec![0_u8; file_len];
+        out[0] = b'M';
+        out[1] = b'Z';
+        out[0x3c..0x40].copy_from_slice(&u32::try_from(LFANEW).unwrap().to_le_bytes());
+        out[LFANEW..LFANEW + 4].copy_from_slice(b"PE\0\0");
+
+        out[LFANEW + 4..LFANEW + 6].copy_from_slice(&0x014c_u16.to_le_bytes());
+        out[LFANEW + 6..LFANEW + 8].copy_from_slice(&1_u16.to_le_bytes());
+        out[LFANEW + 20..LFANEW + 22].copy_from_slice(&224_u16.to_le_bytes());
+        out[LFANEW + 22..LFANEW + 24].copy_from_slice(&0x0102_u16.to_le_bytes());
+
+        out[OPTIONAL..OPTIONAL + 2].copy_from_slice(&0x010b_u16.to_le_bytes());
+        out[OPTIONAL + 0x1c..OPTIONAL + 0x20].copy_from_slice(&0x0040_0000_u32.to_le_bytes());
+
+        out[SECTION..SECTION + 8].copy_from_slice(b".text\0\0\0");
+        out[SECTION + 8..SECTION + 12].copy_from_slice(&mapped_len.to_le_bytes());
+        out[SECTION + 12..SECTION + 16].copy_from_slice(&0x1000_u32.to_le_bytes());
+        out[SECTION + 16..SECTION + 20].copy_from_slice(&mapped_len.to_le_bytes());
+        out[SECTION + 20..SECTION + 24]
+            .copy_from_slice(&u32::try_from(SECTION_START).unwrap().to_le_bytes());
+        out[SECTION + 36..SECTION + 40].copy_from_slice(&0x6000_0020_u32.to_le_bytes());
+
+        out[SECTION_START..SECTION_START + extra.len()].copy_from_slice(extra);
+        out
+    }
+
+    /// Walks an `optionalVals` block at `at` bytes into a synthetic section
+    /// that holds `extra`, and gives the one defect that the walk must give.
+    fn optional_vals_defect(extra: &[u8], at: u32) -> Defect {
+        let bytes = synthetic_image(extra);
+        let image = PeImage::parse(&bytes).unwrap();
+        let (outcome, defect) =
+            walk_optional_vals(&image, 0x777, Some(0x1777), Va::new(0x0040_1000 + at));
+        assert!(matches!(outcome, OptionalValsWalk::Unrecoverable));
+        defect.unwrap()
+    }
+
+    /// The site of each `optionalVals` defect is the field that named the
+    /// block. The walk takes its offset and its address from the caller.
+    const OPTIONAL_VALS_SITE: Site = Site {
+        offset: 0x777,
+        rva: Some(0x1777),
+        structure: "FuncTypDesc",
+        field: "optionalVals",
+    };
+
+    /// A block that its section ends inside gives the bytes of the block that
+    /// the reader needs: the 4 bytes of `cbValues` when the section ends
+    /// first, and the 8-byte head and the records when `cbValues` is too
+    /// large for the section. A `cbValues` near the top of a `u32` gives
+    /// `u32::MAX`.
+    #[test]
+    fn an_optional_vals_block_that_its_section_cuts_short_names_the_block_bytes() {
+        // Two bytes remain, and `cbValues` needs four.
+        assert_eq!(
+            optional_vals_defect(&[0_u8; 0x20], 0x1E),
+            Defect {
+                site: OPTIONAL_VALS_SITE,
+                kind: DefectKind::RunsPastEnd {
+                    offset: 0x41E,
+                    len: 4,
+                    end: 0x420,
+                },
+            }
+        );
+
+        for (cb_values, len) in [
+            (0x100_u32, 0x108_u32),
+            (u32::MAX - 7, u32::MAX),
+            (u32::MAX, u32::MAX),
+        ] {
+            let mut extra = [0_u8; 0x20];
+            extra[0x10..0x14].copy_from_slice(&cb_values.to_le_bytes());
+            assert_eq!(
+                optional_vals_defect(&extra, 0x10),
+                Defect {
+                    site: OPTIONAL_VALS_SITE,
+                    kind: DefectKind::RunsPastEnd {
+                        offset: 0x410,
+                        len,
+                        end: 0x420,
+                    },
+                },
+                "{cb_values:#x}"
+            );
+        }
+    }
+
+    /// A record that runs past the end that `cbValues` gives names its own
+    /// bytes, from its tag to the end of the read that failed, and the offset
+    /// where `cbValues` ends the records. The section holds more bytes, and
+    /// the reader does not read them.
+    #[test]
+    fn a_value_record_past_the_end_that_cb_values_gives_names_the_record_bytes() {
+        // Two integers need 12 bytes, and `cbValues` gives 10.
+        let mut extra = [0_u8; 0x40];
+        extra[0x00..0x04].copy_from_slice(&10_u32.to_le_bytes());
+        extra[0x08..0x0A].copy_from_slice(&3_u16.to_le_bytes());
+        extra[0x0A..0x0E].copy_from_slice(&1_i32.to_le_bytes());
+        extra[0x0E..0x10].copy_from_slice(&3_u16.to_le_bytes());
+        extra[0x10..0x14].copy_from_slice(&2_i32.to_le_bytes());
+        assert_eq!(
+            optional_vals_defect(&extra, 0),
+            Defect {
+                site: OPTIONAL_VALS_SITE,
+                kind: DefectKind::RunsPastEnd {
+                    offset: 0x40E,
+                    len: 6,
+                    end: 0x412,
+                },
+            }
+        );
+
+        // A text of 5 bytes needs 9 bytes with its tag and its length, and
+        // `cbValues` gives 6.
+        let mut extra = [0_u8; 0x40];
+        extra[0x00..0x04].copy_from_slice(&6_u32.to_le_bytes());
+        extra[0x08..0x0A].copy_from_slice(&8_u16.to_le_bytes());
+        extra[0x0A..0x0C].copy_from_slice(&5_u16.to_le_bytes());
+        extra[0x0C..0x11].copy_from_slice(b"Text\0");
+        assert_eq!(
+            optional_vals_defect(&extra, 0),
+            Defect {
+                site: OPTIONAL_VALS_SITE,
+                kind: DefectKind::RunsPastEnd {
+                    offset: 0x408,
+                    len: 9,
+                    end: 0x40E,
+                },
+            }
+        );
+
+        // One tag byte remains of the two that a tag needs.
+        let mut extra = [0_u8; 0x40];
+        extra[0x00..0x04].copy_from_slice(&7_u32.to_le_bytes());
+        extra[0x08..0x0A].copy_from_slice(&3_u16.to_le_bytes());
+        extra[0x0A..0x0E].copy_from_slice(&1_i32.to_le_bytes());
+        assert_eq!(
+            optional_vals_defect(&extra, 0),
+            Defect {
+                site: OPTIONAL_VALS_SITE,
+                kind: DefectKind::RunsPastEnd {
+                    offset: 0x40E,
+                    len: 2,
+                    end: 0x40F,
+                },
+            }
         );
     }
 
