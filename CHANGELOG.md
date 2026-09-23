@@ -145,13 +145,32 @@ is therefore 2.0.0, not 1.1.0.
   size of the table in bytes left a `u32`, and the loop still stopped at the
   end of the table's region. A strict run can now refuse such a file even
   when no entry gives a defect.
-- `DefectKind` has three new variants, `ModuleMarkerMismatch`,
-  `UnknownStubShape` and `ItemCutShort`, and `schema/report.schema.json`
-  accepts all three. A `match` on `DefectKind` with no wildcard arm does not
+- `DefectKind` has seven new variants, `ModuleMarkerMismatch`,
+  `UnknownStubShape`, `ItemCutShort`, `RunsPastEnd`, `UnexpectedConstant`,
+  `NotAnIdentifier` and `JumpOutOfRange`, and `schema/report.schema.json`
+  accepts all seven. A `match` on `DefectKind` with no wildcard arm does not
   compile until it names them.
 - An event stub without the native opcodes now gives `UnknownStubShape` at
   the stub. 1.0.0 gave `UnreadablePointer` at the slot when the jump left
   the address space, and otherwise a wrong handler address with no defect.
+- Failures whose address resolves no longer give `UnreadablePointer`, whose
+  message says that the address resolves to nothing. Bytes that their
+  section cuts short now give `RunsPastEnd`, with the offset of the bytes,
+  their number and the offset where their section or their block ends. This
+  holds for an event stub, a `FuncTypDesc` header, an `ObjectInfo`, a
+  `PrivateObj`, and the bytes of `optionalVals`, which can also run past the
+  end that `cbValues` gives. A `constFFFF` that is not `0xFFFF` now gives
+  `UnexpectedConstant`, with the value that the format gives and the value
+  that the field holds. A procedure name that is not an identifier now
+  gives `NotAnIdentifier`, with the offset and the length of the text. A
+  native stub whose jump leaves the address space now gives
+  `JumpOutOfRange`.
+- The four new kinds are `Tolerated`, as `UnreadablePointer` is, so a
+  strict run refuses the same files. Two of these defects name a different
+  byte. A `FuncTypDesc` header that its section cuts short names the slot
+  of `lpFuncTypeInfo` that held its address, where 1.0.0 named the first
+  byte of the record as `argSize`. A jump that leaves the address space
+  names the `rel32` field of the stub, where 1.0.0 named the slot.
 - `vb::classify::agree` now treats an `lpPrivateObject` of `0` as no private
   object, as `PrivateObj::read` already did. It now gives `false` for a form
   whose pointer is `0`, and `true` for a module whose pointer is `0`. The new
