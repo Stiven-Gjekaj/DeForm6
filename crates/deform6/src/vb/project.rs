@@ -1180,12 +1180,8 @@ impl ComponentTable {
 
             match read_component_entry(&entry) {
                 Ok(mut component) => {
-                    let (guid_text, guid_defect) = decode_guid_text(
-                        &entry,
-                        entry_offset.get(),
-                        component.guid_offset,
-                        component.guid_length,
-                    );
+                    let (guid_text, guid_defect) =
+                        decode_guid_text(&entry, component.guid_offset, component.guid_length);
                     component.guid_text = guid_text;
                     if let Some(defect) = guid_defect {
                         defects.push(defect);
@@ -1246,6 +1242,9 @@ impl ComponentTable {
         }
     }
 }
+
+/// Where `GUIDlength` is in a component entry (`STRUCTURES.md` section 7.3).
+const GUID_LENGTH_AT: u32 = 0x20;
 
 /// The length of the fixed fields of a component entry. `NameOffset`, at
 /// `0x30`, is the last of them (`STRUCTURES.md` section 7.3).
@@ -1324,7 +1323,9 @@ fn read_component_entry(entry: &Region<'_>) -> Result<Component, EntryFailure> {
     }
     let o_uuid = entry.off_le(Off::new(0x04)).ok_or(EntryFailure::Short)?;
     let guid_offset = entry.off_le(Off::new(0x1C)).ok_or(EntryFailure::Short)?;
-    let guid_length = entry.i32_le(Off::new(0x20)).ok_or(EntryFailure::Short)?;
+    let guid_length = entry
+        .i32_le(Off::new(GUID_LENGTH_AT))
+        .ok_or(EntryFailure::Short)?;
 
     let file_name = component_string(entry, "FileNameOffset", Off::new(0x28))?;
     let library = component_string(entry, "SourceOffset", Off::new(0x2C))?;
@@ -1360,7 +1361,6 @@ fn read_component_entry(entry: &Region<'_>) -> Result<Component, EntryFailure> {
 /// value of `guid_length` gives a `Defect` naming it, and gives `None`.
 fn decode_guid_text(
     entry: &Region<'_>,
-    entry_offset: u32,
     guid_offset: Off,
     guid_length: i32,
 ) -> (Option<String>, Option<Defect>) {
@@ -1383,15 +1383,17 @@ fn decode_guid_text(
             }
         },
         other => {
+            let at = Off::new(GUID_LENGTH_AT);
+            let offset = entry.file_offset(at).map_or(0, Off::get);
             let defect = Defect {
                 site: Site {
-                    offset: entry_offset,
-                    rva: entry.rva(Off::new(0)).map(Rva::get),
+                    offset,
+                    rva: entry.rva(at).map(Rva::get),
                     structure: "ExternalComponentEntry",
                     field: "GUIDlength",
                 },
                 kind: DefectKind::GuidLengthUnexpected {
-                    offset: entry_offset,
+                    offset,
                     value: other,
                 },
             };
@@ -2871,15 +2873,22 @@ mod tests {
             defect.kind,
             DefectKind::GuidLengthUnexpected { value: 40, .. }
         ));
-        // The kind documents the entry's first byte as its offset, and the
-        // site gives the same byte.
+        // The site and the kind name the `GUIDlength` field, at `0x20` of
+        // the entry.
         assert_eq!(
             defect.site,
             Site {
-                offset: 0x400,
-                rva: Some(0x1000),
+                offset: 0x420,
+                rva: Some(0x1020),
                 structure: "ExternalComponentEntry",
                 field: "GUIDlength",
+            }
+        );
+        assert_eq!(
+            defect.kind,
+            DefectKind::GuidLengthUnexpected {
+                offset: 0x420,
+                value: 40,
             }
         );
         let message = format!("{}", defect.kind);

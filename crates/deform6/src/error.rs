@@ -270,8 +270,7 @@ pub enum DefectKind {
         "the value {value} at offset {offset:#x} is neither -1 nor 72, so the textual GUID is not decoded"
     )]
     GuidLengthUnexpected {
-        /// The absolute file offset of the component entry that holds the
-        /// value.
+        /// The absolute file offset of the `GUIDlength` field.
         offset: u32,
         /// The value found.
         value: i32,
