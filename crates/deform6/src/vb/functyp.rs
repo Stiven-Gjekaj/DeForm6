@@ -485,7 +485,22 @@ impl FuncTypeWalk {
                 continue;
             };
 
-            let (prototype, mut record_defects) = read_one(pe, va, base);
+            let Some((raw, header, buffer)) = cut_record(&base) else {
+                // The address maps, and the section ends inside the header
+                // of the record.
+                defects.push(Defect {
+                    site,
+                    kind: DefectKind::RunsPastEnd {
+                        offset: base.file_offset(Off::new(0)).map_or(0, Off::get),
+                        len: HEADER_SIZE,
+                        end: base.file_offset(Off::new(base.len())).map_or(0, Off::get),
+                    },
+                });
+                signatures.push(ProcedureSignature::Unrecoverable);
+                continue;
+            };
+
+            let (prototype, mut record_defects) = read_one(pe, &raw, &header, &buffer);
             defects.append(&mut record_defects);
             match prototype {
                 Some(prototype) => signatures.push(ProcedureSignature::Prototype(prototype)),
@@ -971,9 +986,25 @@ fn walk_optional_vals(
     }
 }
 
-/// Reads one `FuncTypDesc` record, already resolved to `base`, the region
-/// starting at its own address and running to the end of its section's
-/// mapped bytes.
+/// Cuts one `FuncTypDesc` record into its header and its type buffer, and
+/// reads the header.
+///
+/// `base` starts at the record and runs to the end of its section. This gives
+/// `None` when the section ends inside the [`HEADER_SIZE`] bytes of the
+/// header. That is the only way that any of the three steps fails: the buffer
+/// is the rest of `base` after the header, and every field that
+/// [`read_raw_header`] reads is inside the header.
+fn cut_record<'a>(base: &Region<'a>) -> Option<(RawHeader, Region<'a>, Region<'a>)> {
+    let header = base.subregion(Off::new(0), HEADER_SIZE)?;
+    let buffer = base.subregion(
+        Off::new(HEADER_SIZE),
+        base.len().saturating_sub(HEADER_SIZE),
+    )?;
+    Some((read_raw_header(&header)?, header, buffer))
+}
+
+/// Reads one `FuncTypDesc` record that [`cut_record`] has cut into `raw`,
+/// the fields of its header, `header`, and `buffer`, its type buffer.
 ///
 /// Returns the recovered prototype, when the record's layout validated, and
 /// every defect this record's own reading produced: a `constFFFF`
@@ -984,38 +1015,11 @@ fn walk_optional_vals(
 /// are independent facts about the same record.
 fn read_one(
     pe: &PeImage<'_>,
-    functype_va: Va,
-    base: Region<'_>,
+    raw: &RawHeader,
+    header: &Region<'_>,
+    buffer: &Region<'_>,
 ) -> (Option<Prototype>, Vec<Defect>) {
-    let self_offset = base.file_offset(Off::new(0)).map_or(0, Off::get);
-    let unrecoverable_here = |at: Off, field: &'static str| {
-        let offset = base.file_offset(at).map_or(self_offset, Off::get);
-        let site = Site {
-            offset,
-            rva: base.rva(at).map(Rva::get),
-            structure: "FuncTypDesc",
-            field,
-        };
-        vec![Defect {
-            site,
-            kind: DefectKind::UnreadablePointer {
-                offset,
-                va: functype_va.get(),
-            },
-        }]
-    };
-
-    let Some(header) = base.subregion(Off::new(0), HEADER_SIZE) else {
-        return (None, unrecoverable_here(Off::new(0x00), "argSize"));
-    };
-
-    // `header` is exactly `HEADER_SIZE` bytes, and every field
-    // `read_raw_header` reads is inside that window. `Region` has no
-    // infallible accessor, so this check stays; no test covers it and none
-    // can.
-    let Some(raw) = read_raw_header(&header) else {
-        return (None, unrecoverable_here(Off::new(0x00), "argSize"));
-    };
+    let self_offset = header.file_offset(Off::new(0)).map_or(0, Off::get);
 
     if raw.const_ffff != 0xFFFF {
         let at = Off::new(0x04);
@@ -1034,12 +1038,7 @@ fn read_one(
         return (None, vec![Defect { site, kind }]);
     }
 
-    let buffer_len = base.len().saturating_sub(HEADER_SIZE);
-    let Some(buffer) = base.subregion(Off::new(HEADER_SIZE), buffer_len) else {
-        return (None, unrecoverable_here(Off::new(0x00), "argSize"));
-    };
-
-    let walk = walk_type_buffer(&buffer, raw.arg_size);
+    let walk = walk_type_buffer(buffer, raw.arg_size);
     if !walk.closed {
         let offset = header
             .file_offset(Off::new(0x00))
@@ -1488,6 +1487,61 @@ mod tests {
         assert_eq!(
             defect.site.rva,
             Some(lp_func_type_info.get() - image.image_base() + 4 * 4)
+        );
+    }
+
+    /// A descriptor address that maps 16 bytes before the end of its section
+    /// gives no prototype. The site is the slot of the `lpFuncTypeInfo`
+    /// array. The kind names the 32 bytes of the header and the offset where
+    /// the section ends.
+    #[test]
+    fn a_descriptor_that_its_section_cuts_short_names_the_header_bytes_and_the_section_end() {
+        let image = PeImage::parse(GRAYSCALE).unwrap();
+        let object = find_object(GRAYSCALE, "FastDrawing");
+        let PrivateObj::Present {
+            lp_func_type_info, ..
+        } = private_obj_of(&image, &object)
+        else {
+            panic!("FastDrawing is a class, not a module");
+        };
+
+        // `GetImageWidth` is index 4.
+        let array = image.region_at_va(lp_func_type_info).unwrap();
+        let slot = array.file_offset(Off::new(4 * 4)).unwrap().get();
+        let descriptor = array.va_le(Off::new(4 * 4)).unwrap().get();
+        let section = image
+            .section_for(Rva::new(descriptor - image.image_base()))
+            .unwrap();
+        let cut = image.image_base() + section.virtual_address.get() + section.mapped_len() - 0x10;
+        let cut_at = image.va_to_off(Va::new(cut)).unwrap().get();
+        let at = usize::try_from(slot).unwrap();
+        let mut bytes = GRAYSCALE.to_vec();
+        bytes[at..at + 4].copy_from_slice(&cut.to_le_bytes());
+
+        let patched = PeImage::parse(&bytes).unwrap();
+        assert_eq!(patched.region_at_va(Va::new(cut)).unwrap().len(), 0x10);
+        let object = find_object(&bytes, "FastDrawing");
+        let private = private_obj_of(&patched, &object);
+        let walk = FuncTypeWalk::read(&patched, &object, &private);
+        let PrototypeList::Slots(slots) = &walk.signatures else {
+            panic!("FastDrawing carries no FuncTypDesc array");
+        };
+        assert_eq!(slots[4], ProcedureSignature::Unrecoverable);
+        assert_eq!(
+            walk.defects(),
+            [crate::error::Defect {
+                site: crate::error::Site {
+                    offset: slot,
+                    rva: Some(lp_func_type_info.get() - image.image_base() + 4 * 4),
+                    structure: "PrivateObj",
+                    field: "lpFuncTypeInfo",
+                },
+                kind: crate::error::DefectKind::RunsPastEnd {
+                    offset: cut_at,
+                    len: 0x20,
+                    end: cut_at + 0x10,
+                },
+            }]
         );
     }
 
