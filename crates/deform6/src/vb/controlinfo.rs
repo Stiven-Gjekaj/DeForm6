@@ -555,10 +555,8 @@ const STUB_LEN: u32 = 13;
 /// native stub (`STRUCTURES.md` section 8.6).
 const SUB_OPCODE: [u8; 4] = [0x81, 0x6C, 0x24, 0x04];
 
-/// Where the `jmp rel32` opcode sits in a native stub.
-const JMP_OPCODE_AT: u32 = 0x08;
-
-/// The opcode of `jmp rel32` (`STRUCTURES.md` section 8.6).
+/// The opcode of `jmp rel32`, at `+0x08` of a native stub (`STRUCTURES.md`
+/// section 8.6).
 const JMP_OPCODE: u8 = 0xE9;
 
 /// The `imm32` value a stub gives for a method. Any smaller value marks an
@@ -789,23 +787,26 @@ fn bound_event_count(
 /// handler address computation overflows. Every one of these keeps the slot
 /// itself bound; only the decoded handler is lost.
 ///
-/// The defect for a stub of another shape is
+/// A stub address in no section gives [`DefectKind::UnreadablePointer`]. A
+/// stub that its section ends inside gives [`DefectKind::RunsPastEnd`],
+/// which names the bytes of the stub and where the section ends. Both name
+/// the slot as their site. The defect for a stub of another shape is
 /// [`DefectKind::UnknownStubShape`]. It names the stub's own first byte,
-/// because the fault is in the stub and not in the slot. Every other defect
-/// here names the slot.
+/// because the fault is in the stub and not in the slot.
 fn decode_stub(
     pe: &PeImage<'_>,
     stub_va: Va,
     slot_offset: u32,
     slot_rva: Option<u32>,
 ) -> (Option<StubHandler>, Option<Defect>) {
+    let slot = || Site {
+        offset: slot_offset,
+        rva: slot_rva,
+        structure: "EventSlot",
+        field: "stub",
+    };
     let unreadable = || Defect {
-        site: Site {
-            offset: slot_offset,
-            rva: slot_rva,
-            structure: "EventSlot",
-            field: "stub",
-        },
+        site: slot(),
         kind: DefectKind::UnreadablePointer {
             offset: slot_offset,
             va: stub_va.get(),
@@ -816,11 +817,22 @@ fn decode_stub(
         return (None, Some(unreadable()));
     };
     let Some(Ok(found)) = stub.take(Off::new(0), STUB_LEN).map(<[u8; 13]>::try_from) else {
-        return (None, Some(unreadable()));
+        // The address maps, and the section ends inside the stub.
+        let defect = Defect {
+            site: slot(),
+            kind: DefectKind::RunsPastEnd {
+                offset: stub.file_offset(Off::new(0)).map_or(0, Off::get),
+                len: STUB_LEN,
+                end: stub.file_offset(Off::new(stub.len())).map_or(0, Off::get),
+            },
+        };
+        return (None, Some(defect));
     };
-    let native = stub.take(Off::new(0), 4) == Some(SUB_OPCODE.as_slice())
-        && stub.u8(Off::new(JMP_OPCODE_AT)) == Some(JMP_OPCODE);
-    if !native {
+    // The 13 bytes by their place in the native stub: the `sub` opcode at
+    // `+0x00`, `imm32` at `+0x04`, the `jmp` opcode at `+0x08` and `rel32`
+    // at `+0x09`.
+    let [s0, s1, s2, s3, i0, i1, i2, i3, jmp, r0, r1, r2, r3] = found;
+    if [s0, s1, s2, s3] != SUB_OPCODE || jmp != JMP_OPCODE {
         let offset = stub.file_offset(Off::new(0)).map_or(0, Off::get);
         let defect = Defect {
             site: Site {
@@ -833,12 +845,8 @@ fn decode_stub(
         };
         return (None, Some(defect));
     }
-    let Some(imm32) = stub.u32_le(Off::new(0x04)) else {
-        return (None, Some(unreadable()));
-    };
-    let Some(rel32) = stub.i32_le(Off::new(0x09)) else {
-        return (None, Some(unreadable()));
-    };
+    let imm32 = u32::from_le_bytes([i0, i1, i2, i3]);
+    let rel32 = i32::from_le_bytes([r0, r1, r2, r3]);
     let Some(handler_address) = stub_va
         .get()
         .checked_add(STUB_LEN)
@@ -1868,6 +1876,44 @@ mod tests {
                 structure: "EventSlot",
                 field: "stub",
             }
+        );
+    }
+
+    /// A stub address that maps 5 bytes before the end of its section gives
+    /// no handler, and the slot stays bound. The site is the slot. The kind
+    /// names the 13 bytes of the stub and the offset where the section ends.
+    #[test]
+    fn a_stub_that_its_section_cuts_short_names_the_stub_bytes_and_the_section_end() {
+        let mut extra = vec![0_u8; 0x30];
+        extra[0x18..0x1C].copy_from_slice(&0x0040_102B_u32.to_le_bytes());
+        let bytes = synthetic_image(&extra);
+        let image = PeImage::parse(&bytes).unwrap();
+        assert_eq!(image.region_at_va(Va::new(0x0040_102B)).unwrap().len(), 5);
+        let control = synthetic_control_info(0x0040, 1, 0x0040_1000);
+        let table = read_event_table(&image, &control).unwrap();
+        assert_eq!(
+            table.slots,
+            vec![EventSlot::Bound {
+                index: 0,
+                stub: Va::new(0x0040_102B),
+                handler: None,
+            }]
+        );
+        assert_eq!(
+            table.defects(),
+            [Defect {
+                site: Site {
+                    offset: 0x418,
+                    rva: Some(0x1018),
+                    structure: "EventSlot",
+                    field: "stub",
+                },
+                kind: DefectKind::RunsPastEnd {
+                    offset: 0x42B,
+                    len: 13,
+                    end: 0x430,
+                },
+            }]
         );
     }
 

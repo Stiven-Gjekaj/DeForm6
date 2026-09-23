@@ -107,6 +107,7 @@ const fn kind_name(kind: &DefectKind) -> &'static str {
         DefectKind::ItemAddressUnmapped { .. } => "ItemAddressUnmapped",
         DefectKind::ItemOffsetOverflow { .. } => "ItemOffsetOverflow",
         DefectKind::ItemCutShort { .. } => "ItemCutShort",
+        DefectKind::RunsPastEnd { .. } => "RunsPastEnd",
     }
 }
 

@@ -383,6 +383,28 @@ pub enum DefectKind {
         /// The number of bytes that the reader must read at that address.
         len: u32,
     },
+
+    /// Bytes that the reader needs run past the end of the bytes that can
+    /// hold them: the end of their section, or the end that the declared
+    /// length of their block gives.
+    ///
+    /// The site names the pointer or the field that led the reader to these
+    /// bytes. Nothing is read from them, and the item keeps every other
+    /// field. A `Declare` descriptor that its section cuts short gives
+    /// [`DefectKind::ItemCutShort`] instead, because that reader skips the
+    /// whole item.
+    #[error(
+        "the {len} bytes at offset {offset:#x} run past offset {end:#x}, where their section or their block ends, and the item keeps its other fields"
+    )]
+    RunsPastEnd {
+        /// The absolute file offset of the first of the bytes.
+        offset: u32,
+        /// The number of bytes that the reader needs there. It is
+        /// `u32::MAX` when that number leaves a `u32`.
+        len: u32,
+        /// The absolute file offset where their section or their block ends.
+        end: u32,
+    },
 }
 
 /// How bad a defect is.
@@ -489,6 +511,9 @@ impl DefectKind {
             // The item is absent, as it is for an address in no section, and
             // strict mode refuses rather than assume the item away.
             Self::ItemCutShort { .. } => Severity::Recoverable,
+            // Nothing is read from the bytes, and nothing is invented in
+            // their place. The item keeps every other field.
+            Self::RunsPastEnd { .. } => Severity::Tolerated,
         }
     }
 }
@@ -776,6 +801,14 @@ mod tests {
                 },
                 0xcc,
             ),
+            (
+                DefectKind::RunsPastEnd {
+                    offset: 0xdd,
+                    len: 13,
+                    end: 0xe0,
+                },
+                0xdd,
+            ),
         ]
     }
 
@@ -836,6 +869,21 @@ mod tests {
         assert!(message.contains("0x403ffc"), "{message}");
         assert!(message.contains("the 8 bytes"), "{message}");
         assert!(message.contains("run past"), "{message}");
+    }
+
+    #[test]
+    fn a_runs_past_end_message_names_the_bytes_and_where_they_end() {
+        let kind = DefectKind::RunsPastEnd {
+            offset: 0x42b,
+            len: 13,
+            end: 0x430,
+        };
+        let message = format!("{kind}");
+        assert!(
+            message.contains("the 13 bytes at offset 0x42b"),
+            "{message}"
+        );
+        assert!(message.contains("run past offset 0x430"), "{message}");
     }
 
     #[test]
@@ -945,6 +993,11 @@ mod tests {
                 offset: 0,
                 pointer: 0,
                 object_type: 0,
+            },
+            DefectKind::RunsPastEnd {
+                offset: 0,
+                len: 0,
+                end: 0,
             },
         ];
         for kind in tolerated {
