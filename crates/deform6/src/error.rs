@@ -436,6 +436,26 @@ pub enum DefectKind {
         /// The number of bytes of the text, before its NUL.
         len: u32,
     },
+
+    /// The relative jump of a native event stub gives an address outside the
+    /// 32-bit address space.
+    ///
+    /// The jump counts from the end of the 13-byte stub. The slot stays bound
+    /// and keeps its stub address, and it has no handler. The site names the
+    /// `rel32` field of the stub, because the fault is in the stub and not in
+    /// the slot.
+    #[error(
+        "the relative jump {rel} at offset {offset:#x}, which counts from the end of the stub at address {va:#x}, leaves the address space, and the slot keeps no handler"
+    )]
+    JumpOutOfRange {
+        /// The absolute file offset of the 4-byte relative jump, at `+0x09`
+        /// of the stub.
+        offset: u32,
+        /// The address of the stub.
+        va: u32,
+        /// The relative jump, as the file holds it.
+        rel: i32,
+    },
 }
 
 /// How bad a defect is.
@@ -549,6 +569,9 @@ impl DefectKind {
             Self::UnexpectedConstant { .. } => Severity::Tolerated,
             // The name is absent, and no name is invented in its place.
             Self::NotAnIdentifier { .. } => Severity::Tolerated,
+            // The slot keeps its stub address, and no handler is invented in
+            // its place.
+            Self::JumpOutOfRange { .. } => Severity::Tolerated,
         }
     }
 }
@@ -859,6 +882,14 @@ mod tests {
                 },
                 0xef,
             ),
+            (
+                DefectKind::JumpOutOfRange {
+                    offset: 0xf1,
+                    va: 0x0040_1100,
+                    rel: i32::MIN,
+                },
+                0xf1,
+            ),
         ]
     }
 
@@ -960,6 +991,24 @@ mod tests {
             "{message}"
         );
         assert!(message.contains("not an identifier"), "{message}");
+    }
+
+    #[test]
+    fn a_jump_out_of_range_message_names_the_jump_and_the_stub() {
+        let kind = DefectKind::JumpOutOfRange {
+            offset: 0x509,
+            va: 0x0040_1100,
+            rel: -2_147_483_648,
+        };
+        let message = format!("{kind}");
+        assert!(
+            message.contains("the relative jump -2147483648 at offset 0x509"),
+            "{message}"
+        );
+        assert!(
+            message.contains("the stub at address 0x401100"),
+            "{message}"
+        );
     }
 
     #[test]
@@ -1081,6 +1130,11 @@ mod tests {
                 found: 0,
             },
             DefectKind::NotAnIdentifier { offset: 0, len: 0 },
+            DefectKind::JumpOutOfRange {
+                offset: 0,
+                va: 0,
+                rel: 0,
+            },
         ];
         for kind in tolerated {
             assert_eq!(

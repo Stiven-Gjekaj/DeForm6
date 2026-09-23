@@ -792,7 +792,9 @@ fn bound_event_count(
 /// which names the bytes of the stub and where the section ends. Both name
 /// the slot as their site. The defect for a stub of another shape is
 /// [`DefectKind::UnknownStubShape`]. It names the stub's own first byte,
-/// because the fault is in the stub and not in the slot.
+/// because the fault is in the stub and not in the slot. For the same
+/// reason, a jump that leaves the address space gives
+/// [`DefectKind::JumpOutOfRange`] at the `rel32` field of the stub.
 fn decode_stub(
     pe: &PeImage<'_>,
     stub_va: Va,
@@ -852,7 +854,22 @@ fn decode_stub(
         .checked_add(STUB_LEN)
         .and_then(|v| v.checked_add_signed(rel32))
     else {
-        return (None, Some(unreadable()));
+        let at = Off::new(0x09);
+        let offset = stub.file_offset(at).map_or(0, Off::get);
+        let defect = Defect {
+            site: Site {
+                offset,
+                rva: stub.rva(at).map(Rva::get),
+                structure: "EventStub",
+                field: "rel32",
+            },
+            kind: DefectKind::JumpOutOfRange {
+                offset,
+                va: stub_va.get(),
+                rel: rel32,
+            },
+        };
+        return (None, Some(defect));
     };
 
     (
@@ -1915,6 +1932,42 @@ mod tests {
                 },
             }]
         );
+    }
+
+    /// A native stub whose jump leaves the address space, below 0 or above
+    /// the top of a `u32`, gives no handler, and the slot stays bound. The
+    /// site and the kind name the `rel32` field of the stub, at `+0x09`.
+    #[test]
+    fn a_jump_that_leaves_the_address_space_names_the_jump_in_the_stub() {
+        for (image_base, rel) in [(0x0040_0000_u32, i32::MIN), (0xF000_0000, i32::MAX)] {
+            let table = table_with_one_stub(image_base, image_base + 0x1000, stub_bytes(0x3F, rel));
+            assert_eq!(
+                table.slots,
+                vec![EventSlot::Bound {
+                    index: 0,
+                    stub: Va::new(image_base + 0x1100),
+                    handler: None,
+                }],
+                "{image_base:#x}"
+            );
+            assert_eq!(
+                table.defects(),
+                [Defect {
+                    site: Site {
+                        offset: 0x509,
+                        rva: Some(0x1109),
+                        structure: "EventStub",
+                        field: "rel32",
+                    },
+                    kind: DefectKind::JumpOutOfRange {
+                        offset: 0x509,
+                        va: image_base + 0x1100,
+                        rel,
+                    },
+                }],
+                "{image_base:#x}"
+            );
+        }
     }
 
     /// Builds one P-code stub (`STRUCTURES.md` section 8.6): `xor eax,eax`,

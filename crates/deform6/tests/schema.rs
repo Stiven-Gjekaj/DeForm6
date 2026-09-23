@@ -545,3 +545,56 @@ fn a_report_that_carries_a_not_an_identifier_defect_validates() {
         );
     }
 }
+
+/// A report that carries a `JumpOutOfRange` defect validates, and the schema refuses
+/// the same defect when one of its fields is missing.
+///
+/// No corpus program raises this kind, for the reason the tests above give
+/// for their own kinds.
+#[test]
+fn a_report_that_carries_a_jump_out_of_range_defect_validates() {
+    let validator = compiled_schema();
+    let exe = corpus_root().join("vb6-code/Fire-effect/Fast_Flames.exe");
+    let mut value = report_value_for(&exe);
+    let defect = Defect {
+        site: Site {
+            offset: 0x509,
+            rva: Some(0x1109),
+            structure: "EventStub",
+            field: "rel32",
+        },
+        kind: DefectKind::JumpOutOfRange {
+            offset: 0x509,
+            va: 0x0040_1100,
+            rel: i32::MIN,
+        },
+    };
+    let serialized = serde_json::to_value(&defect).expect("a defect serializes");
+    let at = value["defects"]
+        .as_array()
+        .expect("defects must be an array")
+        .len();
+    value["defects"]
+        .as_array_mut()
+        .expect("defects must be an array")
+        .push(serialized);
+
+    let errors = describe_errors(&validator, &value);
+    assert!(
+        errors.is_empty(),
+        "a report with a JumpOutOfRange defect failed schema validation:\n{}",
+        errors.join("\n")
+    );
+
+    for field in ["offset", "va", "rel"] {
+        let mut missing = value.clone();
+        missing["defects"][at]["kind"]["JumpOutOfRange"]
+            .as_object_mut()
+            .expect("the kind must be an object")
+            .remove(field);
+        assert!(
+            !validator.is_valid(&missing),
+            "a defect with no {field} must be refused"
+        );
+    }
+}
