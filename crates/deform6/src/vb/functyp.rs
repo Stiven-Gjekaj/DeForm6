@@ -1093,15 +1093,17 @@ fn read_one(
             structure: "FuncTypDesc",
             field: "argSize",
         };
+        // The count read at `argSize`, and the number of entries that the
+        // type buffer holds.
         let wanted = u32::from(raw.arg_size.checked_shr(2).unwrap_or(0));
         let found = u32::try_from(walk.entries.len()).unwrap_or(u32::MAX);
         let defect = Defect {
             site,
             kind: DefectKind::CountMismatch {
                 offset,
-                count: found,
-                expected: wanted,
-                other_field: "argSize",
+                count: wanted,
+                expected: found,
+                other_field: "the type buffer",
             },
         };
         return (None, vec![defect]);
@@ -1215,7 +1217,7 @@ mod tests {
     use super::{
         ARG_NAME_MAX, Argument, DefaultValue, FuncTypeWalk, OptionalDefaultsOutcome,
         OptionalValsWalk, ProcedureSignature, PropertyKind, Prototype, PrototypeList, VbType,
-        read_raw_header, walk_optional_vals, walk_type_buffer,
+        read_one, read_raw_header, walk_optional_vals, walk_type_buffer,
     };
     use crate::error::{Defect, DefectKind, Severity, Site};
     use crate::read::pe::PeImage;
@@ -2307,6 +2309,43 @@ mod tests {
                     end: 0x40F,
                 },
             }
+        );
+    }
+
+    /// A type buffer that holds fewer entries than `argSize` gives is a count
+    /// mismatch at `argSize`. The count is the one that `argSize` gives, and
+    /// the other count is the number of entries that the type buffer holds.
+    #[test]
+    fn a_type_buffer_shorter_than_arg_size_gives_both_counts_at_arg_size() {
+        let bytes = synthetic_image(&[0_u8; 0x40]);
+        let image = PeImage::parse(&bytes).unwrap();
+        let mut head = [0_u8; 0x20];
+        head[0x00] = 3 << 2;
+        head[0x04..0x06].copy_from_slice(&0xFFFF_u16.to_le_bytes());
+        let header = Region::mapped(&head, Off::new(0x400), Rva::new(0x1000));
+        // The leading byte, then one entry, and the buffer ends.
+        let body = [0x1E_u8, 0x03];
+        let buffer = Region::mapped(&body, Off::new(0x420), Rva::new(0x1020));
+        let raw = read_raw_header(&header).unwrap();
+
+        let (prototype, defects) = read_one(&image, &raw, &header, &buffer);
+        assert!(prototype.is_none());
+        assert_eq!(
+            defects,
+            [Defect {
+                site: Site {
+                    offset: 0x400,
+                    rva: Some(0x1000),
+                    structure: "FuncTypDesc",
+                    field: "argSize",
+                },
+                kind: DefectKind::CountMismatch {
+                    offset: 0x400,
+                    count: 3,
+                    expected: 1,
+                    other_field: "the type buffer",
+                },
+            }]
         );
     }
 
