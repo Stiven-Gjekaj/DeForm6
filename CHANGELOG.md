@@ -62,8 +62,9 @@ heading its version and its date.
 These changes break code that was written against 1.0.0. The next release
 is therefore 2.0.0, not 1.1.0.
 
-- New public fields: `VbHeader::file_offset`, `ProjectInfo::file_offset`,
-  `ControlInfo::file_offset`, `ControlInfo::lpsz_name`,
+- New public fields: `VbHeader::file_offset`, `VbHeader::rva`,
+  `ProjectInfo::file_offset`, `ProjectInfo::rva`,
+  `ControlInfo::file_offset`, `ControlInfo::rva`, `ControlInfo::lpsz_name`,
   `Object::lpsz_object_name`, `GuiTableEntry::l_struct_size` and
   `StubHandler::imm32`. Code that builds one of these structures with a
   struct expression does not compile. Code that names every field of one in
@@ -77,9 +78,8 @@ is therefore 2.0.0, not 1.1.0.
   `wFormCount` names the structure `VBHeader`, at `VBHeader + 0x44`, where
   1.0.0 named `GuiTable`, at the start of the GUI table. A clamped
   `wEventCount` gives `ControlInfo + 0x02`. A clamped `dwExternalCount`
-  gives `ProjectInfo + 0x238`, and its `rva` is now `null`, because that
-  byte was not reached through the address of the `Declare` table that
-  1.0.0 gave.
+  gives `ProjectInfo + 0x238`, and its `rva` is the address of that byte,
+  where 1.0.0 gave the address of the `Declare` table.
 - Three `Declare` defects now give the offset of the pointer that held the
   address, as `ItemAddressUnmapped` documents. A defect about
   `lpImportDescriptor` gives `+ 0x04` of the entry. A defect about
@@ -99,18 +99,21 @@ is therefore 2.0.0, not 1.1.0.
   `ItemAddressUnmapped` for both, and its message says that the address is
   in no section. All three kinds are `Recoverable`, so a strict run refuses
   these files as before.
-- `Site::rva` is now the address of the byte at `Site::offset`, or `null`.
-  It never holds an address that the byte points at. At each pointer
-  defect, 1.0.0 gave the address that the pointer holds: at
-  `lpszObjectName`, `lpszName`, an event slot, `lpProcNamesArray`,
-  `lpFuncTypeInfo`, `lpAryArgNames`, `optionalVals`, `lpObjectInfo`,
-  `lpPrivateObject` and the three `Declare` pointers. The kind of each of
-  these defects still gives that address. A `constFFFF` defect gave the
-  address where its `FuncTypDesc` starts, and a section overlap gave the
-  address where the other section starts. A section overlap, an unreadable
-  `lpObjectInfo` or `lpPrivateObject`, and a `Declare` table in no section
-  now give `null`, because the reader does not know the address of that
-  byte.
+- `Site::rva` is now the address of the byte at `Site::offset`. It never
+  holds an address that the byte points at. At each pointer defect, 1.0.0
+  gave the address that the pointer holds: at `lpszObjectName`,
+  `lpszName`, an event slot, `lpProcNamesArray`, `lpFuncTypeInfo`,
+  `lpAryArgNames`, `optionalVals`, `lpObjectInfo`, `lpPrivateObject` and
+  the three `Declare` pointers. The kind of each of these defects still
+  gives that address. A `constFFFF` defect gave the address where its
+  `FuncTypDesc` starts, and a section overlap gave the address where the
+  other section starts.
+- Most defects about a count, a `Declare` or component entry, or the form
+  stream gave `null` in `Site::rva`, and they now give the address of their
+  byte too. `Site::rva` is `null` only when the byte is in no section, as
+  for a section overlap, or when the reader does not know where the byte
+  is: for `lpObjectInfo`, and for a structure that a form cannot read and
+  whose offset is 0.
 - Each `NoNulTerminator` defect now gives the file offset where the text
   starts, and the number of bytes that the search read, as the kind
   documents. For the names of objects, controls, procedures and arguments,
