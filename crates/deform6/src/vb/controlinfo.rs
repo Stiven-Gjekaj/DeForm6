@@ -697,8 +697,17 @@ pub fn read_event_table(pe: &PeImage<'_>, control: &ControlInfo) -> Result<Event
         .file_offset
         .checked_add(W_EVENT_COUNT_AT)
         .map_or(0, Off::get);
-    let (event_count, count_defect) =
-        bound_event_count(&table, header_len, control.w_event_count, count_at);
+    let count_rva = control
+        .rva
+        .and_then(|rva| rva.checked_add(W_EVENT_COUNT_AT))
+        .map(Rva::get);
+    let (event_count, count_defect) = bound_event_count(
+        &table,
+        header_len,
+        control.w_event_count,
+        count_at,
+        count_rva,
+    );
     if let Some(defect) = count_defect {
         defects.push(defect);
     }
@@ -748,12 +757,14 @@ pub fn read_event_table(pe: &PeImage<'_>, control: &ControlInfo) -> Result<Event
 /// `count_at` is the absolute file offset of `wEventCount` itself, which lives
 /// in the `ControlInfo` element and not in the event table. `ImplausibleCount`
 /// documents its offset as that of the count field, so the defect names this
-/// offset, never the start of the table the count bounds.
+/// offset, never the start of the table the count bounds. `count_rva` is the
+/// address of the same byte, when the `ControlInfo` keeps its address.
 fn bound_event_count(
     table: &Region<'_>,
     header_len: u32,
     raw_count: u16,
     count_at: u32,
+    count_rva: Option<u32>,
 ) -> (u16, Option<Defect>) {
     let remaining = table.len().saturating_sub(header_len);
     let max_entries = remaining.checked_div(EVENT_SLOT_SIZE).unwrap_or(0);
@@ -767,7 +778,7 @@ fn bound_event_count(
     let defect = Defect {
         site: Site {
             offset,
-            rva: None,
+            rva: count_rva,
             structure: "ControlInfo",
             field: "wEventCount",
         },
@@ -1642,7 +1653,7 @@ mod tests {
     ) -> super::ControlInfo {
         super::ControlInfo {
             file_offset: Off::new(0x0000_0200),
-            rva: None,
+            rva: Some(Rva::new(0x0000_1200)),
             f_control_type,
             w_event_count,
             lp_guid: Va::new(0),
@@ -1734,6 +1745,7 @@ mod tests {
         assert_eq!(defect.site.structure, "ControlInfo");
         assert_eq!(defect.site.field, "wEventCount");
         assert_eq!(defect.site.offset, 0x0000_0200 + 0x02);
+        assert_eq!(defect.site.rva, Some(0x0000_1200 + 0x02));
         assert!(matches!(
             defect.kind,
             DefectKind::ImplausibleCount {

@@ -650,9 +650,9 @@ impl DeclareTable {
         let Some(table) = pe.region_at_va(info.lp_external_table) else {
             // The count says that the table holds entries, and the table's
             // address maps nowhere. The defect names lpExternalTable, which
-            // lives in ProjectInfo. The reader knows where ProjectInfo sits
-            // in the file and not its address, so the site gives no address.
-            // The kind carries the address that the pointer holds.
+            // lives in ProjectInfo. The site gives the file offset and the
+            // address of that field. The kind carries the address that the
+            // pointer holds.
             let offset = info
                 .file_offset
                 .checked_add(LP_EXTERNAL_TABLE_AT)
@@ -660,7 +660,10 @@ impl DeclareTable {
             defects.push(Defect {
                 site: Site {
                     offset,
-                    rva: None,
+                    rva: info
+                        .rva
+                        .and_then(|rva| rva.checked_add(LP_EXTERNAL_TABLE_AT))
+                        .map(Rva::get),
                     structure: "ProjectInfo",
                     field: "lpExternalTable",
                 },
@@ -691,10 +694,10 @@ impl DeclareTable {
             defects.push(Defect {
                 site: Site {
                     offset,
-                    // The offset came from where ProjectInfo sits, not from
-                    // lpExternalTable, so the table's address is not the
-                    // address of this byte.
-                    rva: None,
+                    rva: info
+                        .rva
+                        .and_then(|rva| rva.checked_add(DW_EXTERNAL_COUNT_AT))
+                        .map(Rva::get),
                     structure: "ProjectInfo",
                     field: "dwExternalCount",
                 },
@@ -2407,8 +2410,8 @@ mod tests {
     /// nowhere. The whole table is lost, and the defect says so at
     /// `lpExternalTable`.
     ///
-    /// `ProjectInfo` keeps its file offset and not its address, so the site
-    /// gives no address. The address that the pointer holds is in the kind.
+    /// The site gives the file offset and the address of `lpExternalTable`.
+    /// The address that the pointer holds is in the kind.
     #[test]
     fn a_declare_table_whose_address_maps_nowhere_gives_one_defect_at_lp_external_table() {
         let image = PeImage::parse(MANDELBROT).unwrap();
@@ -2424,7 +2427,7 @@ mod tests {
             [Defect {
                 site: Site {
                     offset: at,
-                    rva: None,
+                    rva: Some(rva_of(MANDELBROT, project_data_va(MANDELBROT).get()) + 0x234),
                     structure: "ProjectInfo",
                     field: "lpExternalTable",
                 },
@@ -2511,6 +2514,57 @@ mod tests {
         }
     }
 
+    /// Each `ProjectInfo` of this corpus sits at an address that is equal to
+    /// its file offset. Here `ProjectInfo` starts at file offset `0x400` and
+    /// at address `0x1000`, and the two defects about its fields give the
+    /// file offset and the address of each field.
+    #[test]
+    fn a_project_info_defect_gives_the_address_of_its_field_and_not_its_file_offset() {
+        let with = |table: u32, count: u32| {
+            let mut payload = vec![0_u8; 0x240];
+            payload[0x234..0x238].copy_from_slice(&table.to_le_bytes());
+            payload[0x238..0x23C].copy_from_slice(&count.to_le_bytes());
+            let (bytes, va) = a_synthetic_pe_image(&payload);
+            let image = PeImage::parse(&bytes).unwrap();
+            let info = ProjectInfo::read(&image, va).unwrap();
+            DeclareTable::read(&image, &info).defects().to_vec()
+        };
+
+        let nowhere = 0x0130_0000;
+        assert_eq!(
+            with(nowhere, 1),
+            [Defect {
+                site: Site {
+                    offset: 0x634,
+                    rva: Some(0x1234),
+                    structure: "ProjectInfo",
+                    field: "lpExternalTable",
+                },
+                kind: DefectKind::ItemAddressUnmapped {
+                    offset: 0x634,
+                    va: nowhere,
+                },
+            }]
+        );
+
+        // The table is the last 4 bytes of the payload, and more of the
+        // section after it. The count asks for more entries than that.
+        let clamps: Vec<Defect> = with(0x0040_123C, 0xFFFF)
+            .into_iter()
+            .filter(|d| matches!(d.kind, DefectKind::ImplausibleCount { .. }))
+            .collect();
+        assert_eq!(clamps.len(), 1);
+        assert_eq!(
+            clamps[0].site,
+            Site {
+                offset: 0x638,
+                rva: Some(0x1238),
+                structure: "ProjectInfo",
+                field: "dwExternalCount",
+            }
+        );
+    }
+
     /// `ProjectInfo` keeps the file offset and the address of its first byte.
     /// Here the two differ.
     #[test]
@@ -2583,9 +2637,12 @@ mod tests {
             max,
             "the table keeps each whole entry that its region holds"
         );
-        // Site::rva is the address the offset came from. This offset did not
-        // come from lpExternalTable, so the defect must not give that address.
-        assert_eq!(defect.site.rva, None);
+        // Site::rva is the address of the count itself, and not the address
+        // of the table that the count bounds.
+        assert_eq!(
+            defect.site.rva,
+            Some(rva_of(MANDELBROT, project_data_va(MANDELBROT).get()) + 0x238)
+        );
     }
 
     /// A count whose size in bytes leaves a `u32` is bounded and flagged

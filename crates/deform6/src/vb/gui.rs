@@ -28,7 +28,7 @@
 
 use crate::error::{Defect, DefectKind, Refusal, Site, damaged};
 use crate::read::pe::PeImage;
-use crate::read::region::{Off, Region, Va};
+use crate::read::region::{Off, Region, Rva, Va};
 use crate::vb::header::VbHeader;
 
 /// The size of one `tGuiTable` entry. `STRUCTURES.md` section 8.1: `0x50`
@@ -118,8 +118,12 @@ impl GuiTable {
             .file_offset
             .checked_add(W_FORM_COUNT_AT)
             .map_or(0, Off::get);
+        let count_rva = header
+            .rva
+            .and_then(|rva| rva.checked_add(W_FORM_COUNT_AT))
+            .map(Rva::get);
         let (form_count, count_defect) =
-            bound_form_count(&array, u32::from(header.w_form_count), count_at);
+            bound_form_count(&array, u32::from(header.w_form_count), count_at, count_rva);
         let mut defects = Vec::new();
         if let Some(defect) = count_defect {
             defects.push(defect);
@@ -178,11 +182,13 @@ impl GuiTable {
 /// `count_at` is the absolute file offset of `wFormCount` itself, which lives
 /// in the VB header and not in the table. `ImplausibleCount` documents its
 /// offset as that of the count field, so the defect names the header and this
-/// offset, never the start of the table the count bounds.
+/// offset, never the start of the table the count bounds. `count_rva` is the
+/// address of the same byte, when the header keeps its address.
 fn bound_form_count(
     array: &Region<'_>,
     raw_form_count: u32,
     count_at: u32,
+    count_rva: Option<u32>,
 ) -> (u32, Option<Defect>) {
     let max_entries = array.len().checked_div(GUI_ENTRY_SIZE).unwrap_or(0);
     if raw_form_count <= max_entries {
@@ -193,7 +199,7 @@ fn bound_form_count(
     let defect = Defect {
         site: Site {
             offset,
-            rva: None,
+            rva: count_rva,
             structure: "VBHeader",
             field: "wFormCount",
         },
@@ -467,7 +473,7 @@ mod tests {
     fn header_with_gui_table(lp_gui_table: Va, w_form_count: u16) -> VbHeader {
         VbHeader {
             file_offset: crate::read::region::Off::new(0x0000_0100),
-            rva: None,
+            rva: Some(crate::read::region::Rva::new(0x0000_1100)),
             signature: *b"VB5!",
             runtime_build: 0,
             lp_sub_main: Va::new(0),
@@ -670,6 +676,7 @@ mod tests {
         assert_eq!(defect.site.structure, "VBHeader");
         assert_eq!(defect.site.field, "wFormCount");
         assert_eq!(defect.site.offset, 0x0000_0100 + 0x44);
+        assert_eq!(defect.site.rva, Some(0x0000_1100 + 0x44));
         assert!(matches!(
             defect.kind,
             DefectKind::ImplausibleCount {
