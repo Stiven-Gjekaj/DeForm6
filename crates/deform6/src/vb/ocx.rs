@@ -278,10 +278,11 @@ pub fn join_component(control: &mut ExternalControl, table: &ComponentTable) -> 
         Some(clsid) => {
             control.clsid = Some(clsid);
             Some(format!(
-                "the value {clsid}, read from the entry's own oUuid field at offset \
-                 {:#x}, is not confirmed to match the identifier a project file's own \
-                 Object= line declares for this control; this repository's own research \
-                 found no field of the external component table entry that does",
+                "the value {clsid}, read from the sixteen bytes at offset {:#x} that the \
+                 entry's own oUuid field names, is not confirmed to match the identifier a \
+                 project file's own Object= line declares for this control; this \
+                 repository's own research found no field of the external component table \
+                 entry that does",
                 component.ouuid_field_offset
             ))
         }
@@ -782,6 +783,15 @@ mod tests {
         assert_eq!(clsid.to_string(), "{248DD896-BB45-11CF-9ABC-0080C7E7B78D}");
         let caveat = reason.expect("a joined CLSID must always carry the unconfirmed-value caveat");
         assert!(caveat.contains("oUuid"), "{caveat}");
+        // The offset in the caveat is where the sixteen bytes start, and the
+        // caveat says so.
+        let at = table.components[0].ouuid_field_offset;
+        assert!(
+            caveat.contains(&format!(
+                "the sixteen bytes at offset {at:#x} that the entry's own oUuid field names"
+            )),
+            "{caveat}"
+        );
         assert!(caveat.to_lowercase().contains("project file"), "{caveat}");
     }
 

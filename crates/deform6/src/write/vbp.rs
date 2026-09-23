@@ -262,11 +262,14 @@ fn object_line(component: &Component) -> Result<(String, ReportItem), ReportItem
                 project file; the closest recovered field is written instead, and its own \
                 version and locale are IDE defaults, never a recovery"
             .to_owned(),
+        // The offset is where the sixteen bytes of the identifier start,
+        // which the `oUuid` field names. A reader checks the identifier
+        // there.
         evidence: vec![Evidence {
             offset: component.ouuid_field_offset,
             structure: "ExternalComponentEntry",
             field: "oUuid",
-            note: None,
+            note: Some("the sixteen bytes that the oUuid field names".to_owned()),
         }],
     };
     Ok((line, item))
@@ -390,8 +393,9 @@ fn write_settings(
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{SETTING_ORDER, write_vbp};
+    use super::{SETTING_ORDER, object_line, write_vbp};
     use crate::read::region::Off;
+    use crate::report::Evidence;
     use crate::vb::classify::ObjectKind;
     use crate::vb::controltree::ControlKind;
     use crate::vb::project::Component;
@@ -577,6 +581,23 @@ mod tests {
             .expect("an Object= line must be written");
         assert!(!object_line.contains('"'), "{object_line}");
         assert!(object_line.contains("MSWINSCK.OCX"), "{object_line}");
+    }
+
+    /// The evidence of an `Object=` line gives the offset of the sixteen
+    /// bytes of the identifier. Its note says that these are the bytes that
+    /// `oUuid` names, and not the field itself.
+    #[test]
+    fn the_evidence_of_a_declared_component_gives_the_bytes_that_the_o_uuid_field_names() {
+        let (_line, item) = object_line(&resolved_component("Winsock", "MSWINSCK.OCX")).unwrap();
+        assert_eq!(
+            item.evidence,
+            [Evidence {
+                offset: 0x100,
+                structure: "ExternalComponentEntry",
+                field: "oUuid",
+                note: Some("the sixteen bytes that the oUuid field names".to_owned()),
+            }]
+        );
     }
 
     #[test]
