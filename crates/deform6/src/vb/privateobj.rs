@@ -1325,6 +1325,8 @@ mod tests {
     fn a_synthetic_object_with_a_null_array_pointer_and_a_nonzero_count_gives_the_absent_state() {
         let image = PeImage::parse(GRAYSCALE).unwrap();
         let object = Object {
+            file_offset: Off::new(0),
+            rva: None,
             lp_object_info: Va::new(0x0040_1000),
             lpsz_object_name: Va::new(0),
             name: "SyntheticModule".to_owned(),

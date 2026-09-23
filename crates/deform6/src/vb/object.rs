@@ -72,6 +72,18 @@ const PROC_NAME_PTR_SIZE: u32 = 4;
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Object {
+    /// The absolute file offset of this element's first byte.
+    ///
+    /// Kept so a defect about a field in this element can name that field's
+    /// own byte. A reader that is handed only the `Object`, and not the
+    /// array it was cut from, has no other way to know where it sits.
+    pub file_offset: Off,
+    /// The address of this element's first byte, when the window that it
+    /// was read from knows one.
+    ///
+    /// Kept with [`Object::file_offset`], so that a defect about a field in
+    /// this element can give the address of that field's own byte too.
+    pub rva: Option<Rva>,
     /// The address of this object's `ObjectInfo`.
     pub lp_object_info: Va,
     /// The address the object's name was read from.
@@ -196,7 +208,12 @@ impl ObjectTable {
                 defects.push(defect);
             }
 
+            let file_offset = element
+                .file_offset(Off::new(0))
+                .ok_or(Refusal::Damaged("an Object element has no file offset"))?;
             objects.push(Object {
+                file_offset,
+                rva: element.rva(Off::new(0)),
                 lp_object_info,
                 lpsz_object_name,
                 name,
@@ -756,6 +773,10 @@ mod tests {
 
     /// A whole recovered list compared against a literal with one
     /// `assert_eq!`, so a mismatch prints both lists rather than a length.
+    ///
+    /// The place of each element was measured on 2026-09-24 by a reader of
+    /// the PE headers outside this crate. `Grayscale.exe` puts its object
+    /// array at an address that is equal to its file offset.
     /// This is what makes `Object` need to derive `Clone`, `Debug`,
     /// `PartialEq` and `Eq`.
     #[test]
@@ -763,6 +784,8 @@ mod tests {
         let table = walk(GRAYSCALE).unwrap();
         let expected = vec![
             Object {
+                file_offset: Off::new(0x29b0),
+                rva: Some(Rva::new(0x29b0)),
                 lp_object_info: Va::new(0x0040_1ff0),
                 lpsz_object_name: Va::new(0x0040_2ae0),
                 name: "frmGrayscale".to_owned(),
@@ -771,6 +794,8 @@ mod tests {
                 f_object_type: 0x0001_8083,
             },
             Object {
+                file_offset: Off::new(0x29e0),
+                rva: Some(Rva::new(0x29e0)),
                 lp_object_info: Va::new(0x0040_1b98),
                 lpsz_object_name: Va::new(0x0040_2b0c),
                 name: "pdOpenSaveDialog".to_owned(),
@@ -779,6 +804,8 @@ mod tests {
                 f_object_type: 0x0011_8003,
             },
             Object {
+                file_offset: Off::new(0x2a10),
+                rva: Some(Rva::new(0x2a10)),
                 lp_object_info: Va::new(0x0040_1c98),
                 lpsz_object_name: Va::new(0x0040_2b00),
                 name: "FastDrawing".to_owned(),
@@ -874,6 +901,8 @@ mod tests {
 
         assert_eq!(table.objects.len(), 1);
         assert_eq!(table.objects[0].name, "X");
+        assert_eq!(table.objects[0].file_offset, Off::new(0x454));
+        assert_eq!(table.objects[0].rva, Some(Rva::new(0x1054)));
         assert_eq!(
             table.defects(),
             [Defect {

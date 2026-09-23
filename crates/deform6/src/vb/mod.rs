@@ -1409,6 +1409,8 @@ mod tests {
     #[test]
     fn a_private_object_defect_gives_the_address_of_its_pointer_and_not_its_file_offset() {
         let form = Object {
+            file_offset: Off::new(0),
+            rva: None,
             lp_object_info: Va::new(0x0040_1000),
             lpsz_object_name: Va::new(0),
             name: "Synthetic".to_owned(),
@@ -1474,6 +1476,8 @@ mod tests {
     #[test]
     fn an_object_info_or_a_private_object_that_its_section_cuts_short_names_its_bytes() {
         let form = |lp_object_info: u32| Object {
+            file_offset: Off::new(0),
+            rva: None,
             lp_object_info: Va::new(lp_object_info),
             lpsz_object_name: Va::new(0),
             name: "Synthetic".to_owned(),
@@ -1543,6 +1547,8 @@ mod tests {
     fn an_object_info_address_in_no_section_gives_an_unreadable_pointer() {
         let nowhere = 0x0130_0000_u32;
         let object = Object {
+            file_offset: Off::new(0),
+            rva: None,
             lp_object_info: Va::new(nowhere),
             lpsz_object_name: Va::new(0),
             name: "Synthetic".to_owned(),

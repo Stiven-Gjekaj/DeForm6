@@ -1198,6 +1198,8 @@ mod tests {
     /// RVA.
     fn synthetic_form_object() -> Object {
         Object {
+            file_offset: Off::new(0),
+            rva: None,
             lp_object_info: Va::new(0x0040_1000),
             lpsz_object_name: Va::new(0),
             name: "SyntheticForm".to_owned(),
@@ -1212,6 +1214,8 @@ mod tests {
     /// `lpObjectInfo + 0x38` at all for it.
     fn synthetic_module_object() -> Object {
         Object {
+            file_offset: Off::new(0),
+            rva: None,
             lp_object_info: Va::new(0x0040_1000),
             lpsz_object_name: Va::new(0),
             name: "SyntheticModule".to_owned(),
