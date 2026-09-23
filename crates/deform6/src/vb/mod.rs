@@ -515,17 +515,18 @@ fn read_private(pe: &PeImage<'_>, object: &Object, defects: &mut Vec<Defect>) ->
     let info = match ObjectInfo::read(pe, object.lp_object_info) {
         Ok(info) => info,
         Err(_) => {
-            // `Object` does not carry the place of the pointer, so the site
-            // gives offset 0 and no address. The kind gives the address that
-            // the pointer holds.
+            // `lpObjectInfo` is the first field of the `Object` element, so
+            // the site is the place that the `Object` keeps. The kind gives
+            // the address that the pointer holds.
+            let offset = object.file_offset.get();
             defects.push(Defect {
                 site: Site {
-                    offset: 0,
-                    rva: None,
+                    offset,
+                    rva: object.rva.map(Rva::get),
                     structure: "Object",
                     field: "lpObjectInfo",
                 },
-                kind: unread_structure(pe, 0, object.lp_object_info, OBJECT_INFO_SIZE),
+                kind: unread_structure(pe, offset, object.lp_object_info, OBJECT_INFO_SIZE),
             });
             return PrivateObj::Absent;
         }
@@ -614,9 +615,8 @@ fn module_marker_mismatch(pe: &PeImage<'_>, object: &Object, lp_private_object: 
 /// [`Refusal`] refused: a form's own `GuiObjectInfo`, its property stream,
 /// its control tree, its `ControlInfoTable`, or one control's own event
 /// table. `offset` is `0` when no byte offset was known at the point of
-/// failure, the same fallback that the defect about `Object.lpObjectInfo`
-/// uses. `rva` is the address of the byte at `offset`, and `None` when the
-/// offset is that fallback.
+/// failure. `rva` is the address of the byte at `offset`, and `None` when
+/// the offset is that fallback.
 fn structure_defect(
     offset: u32,
     rva: Option<u32>,
@@ -952,7 +952,7 @@ mod tests {
     }
     use crate::error::{Defect, DefectKind, Site};
     use crate::read::pe::PeImage;
-    use crate::read::region::{Off, Va};
+    use crate::read::region::{Off, Rva, Va};
     use crate::vb::classify::ObjectKind;
     use crate::vb::header::{VbHeader, header_region};
     use crate::vb::object::Object;
@@ -1476,8 +1476,8 @@ mod tests {
     #[test]
     fn an_object_info_or_a_private_object_that_its_section_cuts_short_names_its_bytes() {
         let form = |lp_object_info: u32| Object {
-            file_offset: Off::new(0),
-            rva: None,
+            file_offset: Off::new(0x480),
+            rva: Some(Rva::new(0x1080)),
             lp_object_info: Va::new(lp_object_info),
             lpsz_object_name: Va::new(0),
             name: "Synthetic".to_owned(),
@@ -1487,7 +1487,8 @@ mod tests {
         };
 
         // The section holds 0x20 bytes, and `ObjectInfo` starts 0x10 bytes
-        // before its end. `Object` does not carry the place of its pointer.
+        // before its end. The site is `lpObjectInfo`, the first field of the
+        // `Object`, at the place that the `Object` keeps.
         let bytes = synthetic_image(&[0_u8; 0x20]);
         let image = PeImage::parse(&bytes).unwrap();
         let mut defects = Vec::new();
@@ -1499,8 +1500,8 @@ mod tests {
             defects,
             [Defect {
                 site: Site {
-                    offset: 0,
-                    rva: None,
+                    offset: 0x480,
+                    rva: Some(0x1080),
                     structure: "Object",
                     field: "lpObjectInfo",
                 },
@@ -1541,14 +1542,15 @@ mod tests {
         );
     }
 
-    /// An `ObjectInfo` address in no section gives `UnreadablePointer`, with
-    /// the address that the pointer holds.
+    /// An `ObjectInfo` address in no section gives `UnreadablePointer` at
+    /// `lpObjectInfo`, the first field of the `Object`. The kind gives the
+    /// address that the pointer holds.
     #[test]
     fn an_object_info_address_in_no_section_gives_an_unreadable_pointer() {
         let nowhere = 0x0130_0000_u32;
         let object = Object {
-            file_offset: Off::new(0),
-            rva: None,
+            file_offset: Off::new(0x480),
+            rva: Some(Rva::new(0x1080)),
             lp_object_info: Va::new(nowhere),
             lpsz_object_name: Va::new(0),
             name: "Synthetic".to_owned(),
@@ -1567,13 +1569,13 @@ mod tests {
             defects,
             [Defect {
                 site: Site {
-                    offset: 0,
-                    rva: None,
+                    offset: 0x480,
+                    rva: Some(0x1080),
                     structure: "Object",
                     field: "lpObjectInfo",
                 },
                 kind: DefectKind::UnreadablePointer {
-                    offset: 0,
+                    offset: 0x480,
                     va: nowhere,
                 },
             }]
