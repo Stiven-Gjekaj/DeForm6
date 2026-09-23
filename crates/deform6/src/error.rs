@@ -319,8 +319,7 @@ pub enum DefectKind {
     #[error("the structure at offset {offset:#x} could not be read: {reason}")]
     StructureUnreadable {
         /// The absolute file offset the structure was read from, when one
-        /// was known; `0` when it was not (the same fallback
-        /// `vb/object.rs::unreadable_pointer` uses).
+        /// was known; `0` when it was not.
         offset: u32,
         /// The refusal's own message, carried verbatim.
         reason: String,

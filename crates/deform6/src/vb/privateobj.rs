@@ -71,12 +71,12 @@ use crate::vb::object::Object;
 /// The size of the `ObjectInfo` structure.
 ///
 /// `STRUCTURES.md` section 5.2 gives `0x38` = 56 bytes.
-const OBJECT_INFO_SIZE: u32 = 0x38;
+pub(crate) const OBJECT_INFO_SIZE: u32 = 0x38;
 
 /// The size of the `PrivateObj` structure.
 ///
 /// `STRUCTURES.md` section 6.1 gives `0x40` = 64 bytes.
-const PRIVATE_OBJ_SIZE: u32 = 0x40;
+pub(crate) const PRIVATE_OBJ_SIZE: u32 = 0x40;
 
 /// `STRUCTURES.md` section 5.2: `lpPrivateObject` sits at `ObjectInfo + 0x0C`.
 ///

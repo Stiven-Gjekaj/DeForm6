@@ -48,7 +48,8 @@ use header::{VbHeader, header_region};
 use object::{Object, ObjectTable};
 use opcodes::OpcodeTable;
 use privateobj::{
-    Gap, LP_PRIVATE_OBJECT_AT, ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureList,
+    Gap, LP_PRIVATE_OBJECT_AT, OBJECT_INFO_SIZE, ObjectInfo, PRIVATE_OBJ_SIZE, PrivateObj,
+    ProcNames, Procedure, ProcedureList,
 };
 use project::{Component, ComponentTable, Declaration, DeclareTable, ObjectTableHead, ProjectInfo};
 use runtime::{Runtime, runtime_of};
@@ -514,11 +515,18 @@ fn read_private(pe: &PeImage<'_>, object: &Object, defects: &mut Vec<Defect>) ->
     let info = match ObjectInfo::read(pe, object.lp_object_info) {
         Ok(info) => info,
         Err(_) => {
-            defects.push(unreadable_pointer(
-                object.lp_object_info,
-                "Object",
-                "lpObjectInfo",
-            ));
+            // `Object` does not carry the place of the pointer, so the site
+            // gives offset 0 and no address. The kind gives the address that
+            // the pointer holds.
+            defects.push(Defect {
+                site: Site {
+                    offset: 0,
+                    rva: None,
+                    structure: "Object",
+                    field: "lpObjectInfo",
+                },
+                kind: unread_structure(pe, 0, object.lp_object_info, OBJECT_INFO_SIZE),
+            });
             return PrivateObj::Absent;
         }
     };
@@ -531,16 +539,40 @@ fn read_private(pe: &PeImage<'_>, object: &Object, defects: &mut Vec<Defect>) ->
         Ok(private) => private,
         Err(_) => {
             let site = private_object_site(pe, object);
-            let offset = site.offset;
-            defects.push(Defect {
-                site,
-                kind: DefectKind::UnreadablePointer {
-                    offset,
-                    va: info.lp_private_object,
-                },
-            });
+            let kind = unread_structure(
+                pe,
+                site.offset,
+                Va::new(info.lp_private_object),
+                PRIVATE_OBJ_SIZE,
+            );
+            defects.push(Defect { site, kind });
             PrivateObj::Absent
         }
+    }
+}
+
+/// Gives the kind of defect for a structure of `len` bytes at `va` that the
+/// reader could not read. `offset` is the file offset of the pointer that
+/// held the address.
+///
+/// An address in no section gives [`DefectKind::UnreadablePointer`]. An
+/// address whose section ends inside the structure gives
+/// [`DefectKind::RunsPastEnd`], with the bytes of the structure and where
+/// the section ends. The readers of `ObjectInfo` and `PrivateObj` refuse for
+/// these two reasons only.
+fn unread_structure(pe: &PeImage<'_>, offset: u32, va: Va, len: u32) -> DefectKind {
+    match pe.region_at_va(va) {
+        Some(region) if region.len() < len => DefectKind::RunsPastEnd {
+            offset: region.file_offset(Off::new(0)).map_or(0, Off::get),
+            len,
+            end: region
+                .file_offset(Off::new(region.len()))
+                .map_or(0, Off::get),
+        },
+        _ => DefectKind::UnreadablePointer {
+            offset,
+            va: va.get(),
+        },
     }
 }
 
@@ -578,36 +610,12 @@ fn module_marker_mismatch(pe: &PeImage<'_>, object: &Object, lp_private_object: 
     }
 }
 
-/// Builds the defect for `Object.lpObjectInfo` when the reader cannot follow
-/// it.
-///
-/// `offset` is `0`: [`Object`] does not carry the byte position that the
-/// pointer was read from. This is the same fallback `vb/object.rs`'s own
-/// `read_name` uses (`.map_or(0, Off::get)`) whenever a file offset is
-/// unavailable. The site gives no address for the same reason, because
-/// `site.rva` is the address of the byte at `offset`. The address that the
-/// pointer holds is in `kind.va`, and a reader uses it to find the structure
-/// in question.
-const fn unreadable_pointer(va: Va, structure: &'static str, field: &'static str) -> Defect {
-    Defect {
-        site: Site {
-            offset: 0,
-            rva: None,
-            structure,
-            field,
-        },
-        kind: DefectKind::UnreadablePointer {
-            offset: 0,
-            va: va.get(),
-        },
-    }
-}
-
 /// Builds the [`Defect`] for a structure this composed walk needed that a
 /// [`Refusal`] refused: a form's own `GuiObjectInfo`, its property stream,
 /// its control tree, its `ControlInfoTable`, or one control's own event
 /// table. `offset` is `0` when no byte offset was known at the point of
-/// failure, the same fallback [`unreadable_pointer`] uses.
+/// failure, the same fallback that the defect about `Object.lpObjectInfo`
+/// uses.
 fn structure_defect(offset: u32, structure: &'static str, refusal: &Refusal) -> Defect {
     Defect {
         site: Site {
@@ -1442,6 +1450,112 @@ mod tests {
                     offset: 0x40C,
                     pointer: 0,
                     object_type: 0x0001_8083,
+                },
+            }]
+        );
+    }
+
+    /// An `ObjectInfo` or a `PrivateObj` whose address maps, in a section
+    /// that ends inside the structure, gives the bytes of the structure and
+    /// the offset where the section ends. The site stays at the pointer.
+    #[test]
+    fn an_object_info_or_a_private_object_that_its_section_cuts_short_names_its_bytes() {
+        let form = |lp_object_info: u32| Object {
+            lp_object_info: Va::new(lp_object_info),
+            lpsz_object_name: Va::new(0),
+            name: "Synthetic".to_owned(),
+            proc_count: 0,
+            lp_proc_names_array: Va::new(0),
+            f_object_type: 0x0001_8083,
+        };
+
+        // The section holds 0x20 bytes, and `ObjectInfo` starts 0x10 bytes
+        // before its end. `Object` does not carry the place of its pointer.
+        let bytes = synthetic_image(&[0_u8; 0x20]);
+        let image = PeImage::parse(&bytes).unwrap();
+        let mut defects = Vec::new();
+        assert_eq!(
+            super::read_private(&image, &form(0x0040_1010), &mut defects),
+            PrivateObj::Absent
+        );
+        assert_eq!(
+            defects,
+            [Defect {
+                site: Site {
+                    offset: 0,
+                    rva: None,
+                    structure: "Object",
+                    field: "lpObjectInfo",
+                },
+                kind: DefectKind::RunsPastEnd {
+                    offset: 0x410,
+                    len: 0x38,
+                    end: 0x420,
+                },
+            }]
+        );
+
+        // The section holds 0x60 bytes. `ObjectInfo` is whole, and its
+        // `PrivateObj` starts 0x20 bytes before the end of the section.
+        let mut extra = vec![0_u8; 0x60];
+        extra[0x0C..0x10].copy_from_slice(&0x0040_1040_u32.to_le_bytes());
+        let bytes = synthetic_image(&extra);
+        let image = PeImage::parse(&bytes).unwrap();
+        let mut defects = Vec::new();
+        assert_eq!(
+            super::read_private(&image, &form(0x0040_1000), &mut defects),
+            PrivateObj::Absent
+        );
+        assert_eq!(
+            defects,
+            [Defect {
+                site: Site {
+                    offset: 0x40C,
+                    rva: Some(0x100C),
+                    structure: "ObjectInfo",
+                    field: "lpPrivateObject",
+                },
+                kind: DefectKind::RunsPastEnd {
+                    offset: 0x440,
+                    len: 0x40,
+                    end: 0x460,
+                },
+            }]
+        );
+    }
+
+    /// An `ObjectInfo` address in no section gives `UnreadablePointer`, with
+    /// the address that the pointer holds.
+    #[test]
+    fn an_object_info_address_in_no_section_gives_an_unreadable_pointer() {
+        let nowhere = 0x0130_0000_u32;
+        let object = Object {
+            lp_object_info: Va::new(nowhere),
+            lpsz_object_name: Va::new(0),
+            name: "Synthetic".to_owned(),
+            proc_count: 0,
+            lp_proc_names_array: Va::new(0),
+            f_object_type: 0x0001_8083,
+        };
+        let bytes = synthetic_image(&[0_u8; 0x20]);
+        let image = PeImage::parse(&bytes).unwrap();
+        let mut defects = Vec::new();
+        assert_eq!(
+            super::read_private(&image, &object, &mut defects),
+            PrivateObj::Absent
+        );
+        assert_eq!(
+            defects,
+            [Defect {
+                site: Site {
+                    offset: 0,
+                    rva: None,
+                    structure: "Object",
+                    field: "lpObjectInfo",
+                },
+                kind: DefectKind::UnreadablePointer {
+                    offset: 0,
+                    va: nowhere,
                 },
             }]
         );
