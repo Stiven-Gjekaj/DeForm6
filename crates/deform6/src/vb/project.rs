@@ -319,13 +319,7 @@ impl ObjectTableHead {
         // would become the replacement character and the name would be lost.
         let project_name = bytes.iter().copied().map(char::from).collect();
 
-        let defects = count_defects(
-            &window,
-            lp_object_table,
-            pe.image_base(),
-            w_total_objects,
-            w_compiled_objects,
-        );
+        let defects = count_defects(&window, w_total_objects, w_compiled_objects);
 
         Ok(Self {
             w_total_objects,
@@ -364,8 +358,6 @@ impl ObjectTableHead {
 /// so one of the two numbers is wrong.
 fn count_defects(
     window: &Region<'_>,
-    lp_object_table: Va,
-    image_base: u32,
     w_total_objects: u16,
     w_compiled_objects: u16,
 ) -> Vec<Defect> {
@@ -379,10 +371,7 @@ fn count_defects(
     vec![Defect {
         site: Site {
             offset,
-            rva: lp_object_table
-                .to_rva(image_base)
-                .and_then(|rva| rva.checked_add(0x2C))
-                .map(Rva::get),
+            rva: window.rva(Off::new(0x2C)).map(Rva::get),
             structure: "ObjectTable",
             field: "wCompiledObjects",
         },
@@ -771,7 +760,7 @@ impl DeclareTable {
                 other => defects.push(Defect {
                     site: Site {
                         offset: entry_offset,
-                        rva: None,
+                        rva: entry.rva(Off::new(0)).map(Rva::get),
                         structure: "DeclareTableEntry",
                         field: "dwEntryType",
                     },
@@ -1155,7 +1144,7 @@ impl ComponentTable {
                 defects.push(Defect {
                     site: Site {
                         offset: entry_offset.get(),
-                        rva: None,
+                        rva: table.rva(cursor).map(Rva::get),
                         structure: "ExternalComponentEntry",
                         field: "StructLength",
                     },
@@ -1176,7 +1165,7 @@ impl ComponentTable {
                 defects.push(Defect {
                     site: Site {
                         offset: entry_offset.get(),
-                        rva: None,
+                        rva: table.rva(cursor).map(Rva::get),
                         structure: "ExternalComponentEntry",
                         field: "StructLength",
                     },
@@ -1397,7 +1386,7 @@ fn decode_guid_text(
             let defect = Defect {
                 site: Site {
                     offset: entry_offset,
-                    rva: None,
+                    rva: entry.rva(Off::new(0)).map(Rva::get),
                     structure: "ExternalComponentEntry",
                     field: "GUIDlength",
                 },
@@ -1823,6 +1812,15 @@ mod tests {
             defect.site.offset,
             u32::try_from(object_table_field_offset(MANDELBROT, 0x2C)).unwrap()
         );
+        assert_eq!(
+            defect.site.rva,
+            Some(
+                rva_of(
+                    MANDELBROT,
+                    project_info(MANDELBROT).unwrap().lp_object_table.get()
+                ) + 0x2C
+            )
+        );
         assert_eq!(defect.site.field, "wCompiledObjects");
     }
 
@@ -2012,6 +2010,10 @@ mod tests {
         assert_eq!(
             defect.site.offset,
             u32::try_from(declare_entry_field_offset(MANDELBROT, 0, 0x00)).unwrap()
+        );
+        assert_eq!(
+            defect.site.rva,
+            Some(declare_entry_field_rva(MANDELBROT, 0, 0x00))
         );
     }
 
@@ -2495,6 +2497,22 @@ mod tests {
             (payload(DESCRIPTOR, NOWHERE, API_NAME), "lpDllName", 0x08),
             (payload(DESCRIPTOR, DLL_NAME, NOWHERE), "lpApiName", 0x0C),
         ];
+        // An entry type that is neither 6 nor 7 names the entry's own first
+        // byte.
+        let mut undocumented = payload(DESCRIPTOR, DLL_NAME, API_NAME);
+        undocumented[0x00..0x04].copy_from_slice(&99_u32.to_le_bytes());
+        let table = read(&undocumented);
+        assert_eq!(table.defects().len(), 1);
+        assert_eq!(
+            table.defects()[0].site,
+            Site {
+                offset: 0x400,
+                rva: Some(0x1000),
+                structure: "DeclareTableEntry",
+                field: "dwEntryType",
+            }
+        );
+
         for (bytes, field, at) in cases {
             let table = read(&bytes);
             assert!(table.declarations.is_empty(), "{field}");
@@ -2853,6 +2871,17 @@ mod tests {
             defect.kind,
             DefectKind::GuidLengthUnexpected { value: 40, .. }
         ));
+        // The kind documents the entry's first byte as its offset, and the
+        // site gives the same byte.
+        assert_eq!(
+            defect.site,
+            Site {
+                offset: 0x400,
+                rva: Some(0x1000),
+                structure: "ExternalComponentEntry",
+                field: "GUIDlength",
+            }
+        );
         let message = format!("{}", defect.kind);
         let wanted = "40";
         assert!(message.find(wanted).is_some(), "{message}");
@@ -3139,6 +3168,15 @@ mod tests {
             defect.kind,
             DefectKind::CountMismatch { count: 0, .. }
         ));
+        assert_eq!(
+            defect.site,
+            Site {
+                offset: 0x400,
+                rva: Some(0x1000),
+                structure: "ExternalComponentEntry",
+                field: "StructLength",
+            }
+        );
     }
 
     #[test]
@@ -3159,6 +3197,15 @@ mod tests {
             defect.kind,
             DefectKind::ImplausibleCount { count, .. } if count == real_len + 10_000
         ));
+        assert_eq!(
+            defect.site,
+            Site {
+                offset: 0x400,
+                rva: Some(0x1000),
+                structure: "ExternalComponentEntry",
+                field: "StructLength",
+            }
+        );
     }
 
     /// Reads a table of one entry, built from `payload`, out of a synthetic

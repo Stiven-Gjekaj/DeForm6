@@ -393,7 +393,7 @@ fn bound_control_count(
     let defect = Defect {
         site: Site {
             offset,
-            rva: None,
+            rva: optional.rva(Off::new(0x20)).map(Rva::get),
             structure: "OptionalObjectInfo",
             field: "dwControlCount",
         },
@@ -1356,6 +1356,17 @@ mod tests {
                 ..
             }
         ));
+        // The count is at extra offset 0x58: file offset 0x458 and address
+        // 0x1058.
+        assert_eq!(
+            table.defects()[0].site,
+            Site {
+                offset: 0x458,
+                rva: Some(0x1058),
+                structure: "OptionalObjectInfo",
+                field: "dwControlCount",
+            }
+        );
     }
 
     #[test]

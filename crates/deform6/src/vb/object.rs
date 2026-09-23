@@ -322,7 +322,7 @@ fn bound_proc_count(
     let defect = Defect {
         site: Site {
             offset,
-            rva: None,
+            rva: element.rva(Off::new(0x1C)).map(Rva::get),
             structure: "Object",
             field: "ProcCount",
         },
@@ -851,6 +851,45 @@ mod tests {
         }
 
         out
+    }
+
+    /// The corpus puts each object array at an address that is equal to its
+    /// file offset. Here the one `Object` element starts at file offset
+    /// `0x454` and at address `0x1054`, so a clamped `ProcCount` gives file
+    /// offset `0x470` and address `0x1070`.
+    #[test]
+    fn a_clamped_proc_count_gives_the_address_of_its_field_and_not_its_file_offset() {
+        let mut bytes = synthetic_image_with_a_short_mapped_section();
+        bytes[0x400 + 0x2A..0x400 + 0x2C].copy_from_slice(&1_u16.to_le_bytes());
+        // The element: the name at 0x18 names the "X" at the section start,
+        // ProcCount at 0x1C asks for 1000 names, and the name array at 0x20
+        // starts 4 bytes before the end of the section.
+        bytes[0x454 + 0x18..0x454 + 0x1C].copy_from_slice(&0x0040_1000_u32.to_le_bytes());
+        bytes[0x454 + 0x1C..0x454 + 0x20].copy_from_slice(&1000_u32.to_le_bytes());
+        bytes[0x454 + 0x20..0x454 + 0x24].copy_from_slice(&0x0040_1080_u32.to_le_bytes());
+        let image = PeImage::parse(&bytes).unwrap();
+        let lp_object_table = Va::new(0x0040_1000);
+        let head = ObjectTableHead::read(&image, lp_object_table).unwrap();
+        let table = ObjectTable::walk(&image, lp_object_table, &head).unwrap();
+
+        assert_eq!(table.objects.len(), 1);
+        assert_eq!(table.objects[0].name, "X");
+        assert_eq!(
+            table.defects(),
+            [Defect {
+                site: Site {
+                    offset: 0x470,
+                    rva: Some(0x1070),
+                    structure: "Object",
+                    field: "ProcCount",
+                },
+                kind: DefectKind::ImplausibleCount {
+                    offset: 0x470,
+                    count: 1000,
+                    max: 1,
+                },
+            }]
+        );
     }
 
     /// The second `Object` element sits past the section's declared mapped
