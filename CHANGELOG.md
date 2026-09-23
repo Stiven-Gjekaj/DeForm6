@@ -117,6 +117,21 @@ is therefore 2.0.0, not 1.1.0.
   1.0.0 gave the offset of the pointer and the bound. A search reads fewer
   bytes than the bound when the section ends first. The site of each of
   these defects is still the pointer.
+- A defect about `ObjectInfo.lpPrivateObject`, when the reader cannot read
+  the private object, now gives `ObjectInfo + 0x0C` in the site and in the
+  kind, as the defect of the module marker check does. 1.0.0 gave offset 0.
+- A section overlap now gives the offset of the `VirtualAddress` field of
+  the second section header, 12 bytes into the header, in the site and in
+  the kind. 1.0.0 gave the first byte of the header, although the site named
+  `VirtualAddress`. The message now says that the two sections claim the
+  same addresses, which is what the check compares.
+- When the 72 bytes at `GUIDoffset` or the 16 bytes at `oUuid` run past the
+  end of their component entry, the defect is now `RunsPastEnd`, and its
+  site is that offset field, at `+ 0x1C` or `+ 0x04` of the entry. 1.0.0
+  gave `ImplausibleCount` at the first byte of the entry, and neither field
+  is a count. The severity moves from `Recoverable` to `Tolerated`, as
+  `GuidLengthUnexpected` already is for the same loss, so a strict run no
+  longer refuses a file for these two defects.
 - A component entry that gives no component now gives a defect that names
   the failure. An entry shorter than its `0x34` bytes of fixed fields gives
   `CountMismatch` at `StructLength`. A string with no NUL gives
