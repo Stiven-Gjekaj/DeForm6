@@ -15,7 +15,7 @@
 //! Plan 03-05 fills this module. It serves FRM-03.
 
 use crate::error::{Defect, DefectKind, Site};
-use crate::read::region::{Off, Region};
+use crate::read::region::{Off, Region, Rva};
 
 /// The encoding a [`VbStr`] read decodes text with.
 ///
@@ -102,6 +102,7 @@ impl VbStr {
     #[must_use]
     pub fn read(region: &Region<'_>, at: Off, encoding: StrEncoding) -> (Self, Option<Defect>) {
         let offset = region.file_offset(at).map_or(0, Off::get);
+        let rva = region.rva(at).map(Rva::get);
 
         // A length field that does not fit at `at` is read as 0, the same
         // defensive default `vb/controltree.rs::read_control_header` uses
@@ -110,18 +111,18 @@ impl VbStr {
         let declared_len = region.u16_le(at).unwrap_or(0);
 
         let Some(text_start) = at.checked_add(2) else {
-            return Self::overflow(offset, declared_len);
+            return Self::overflow(offset, rva, declared_len);
         };
         let Some(after_text) = text_start.checked_add(u32::from(declared_len)) else {
-            return Self::overflow(offset, declared_len);
+            return Self::overflow(offset, rva, declared_len);
         };
         let Some(declared_end) = after_text.checked_add(1) else {
-            return Self::overflow(offset, declared_len);
+            return Self::overflow(offset, rva, declared_len);
         };
 
         if declared_end.get() > region.len() {
             let max = region.len().saturating_sub(at.get());
-            return Self::region_overflow(offset, declared_len, declared_end, max);
+            return Self::region_overflow(offset, rva, declared_len, declared_end, max);
         }
 
         if let Some((text, consumed)) = decode(region, text_start, declared_len, encoding)
@@ -140,7 +141,7 @@ impl VbStr {
         let defect = Defect {
             site: Site {
                 offset,
-                rva: None,
+                rva,
                 structure: "VbStr",
                 field: "text",
             },
@@ -164,12 +165,15 @@ impl VbStr {
     /// declared end to trust, so this saturates to `Off`'s own maximum: a
     /// caller's own bound check then refuses cleanly rather than reading
     /// past the file.
-    fn overflow(offset: u32, declared_len: u16) -> (Self, Option<Defect>) {
+    ///
+    /// `offset` and `rva` are the file offset and the address of the length
+    /// field, as they are for [`VbStr::region_overflow`].
+    fn overflow(offset: u32, rva: Option<u32>, declared_len: u16) -> (Self, Option<Defect>) {
         let len = u32::from(declared_len).saturating_add(3);
         let defect = Defect {
             site: Site {
                 offset,
-                rva: None,
+                rva,
                 structure: "VbStr",
                 field: "declared_end",
             },
@@ -188,6 +192,7 @@ impl VbStr {
     /// allocation is sized from `declared_len` before this check runs.
     fn region_overflow(
         offset: u32,
+        rva: Option<u32>,
         declared_len: u16,
         declared_end: Off,
         max: u32,
@@ -195,7 +200,7 @@ impl VbStr {
         let defect = Defect {
             site: Site {
                 offset,
-                rva: None,
+                rva,
                 structure: "VbStr",
                 field: "declared_end",
             },
@@ -308,8 +313,8 @@ const fn encoding_name(encoding: StrEncoding) -> &'static str {
 )]
 mod tests {
     use super::{StrEncoding, VbStr};
-    use crate::error::{DefectKind, Severity};
-    use crate::read::region::{Off, Region};
+    use crate::error::{DefectKind, Severity, Site};
+    use crate::read::region::{Off, Region, Rva};
 
     #[test]
     fn a_declared_length_of_zero_gives_an_empty_string_and_a_declared_end_three_bytes_past_the_start()
@@ -506,6 +511,47 @@ mod tests {
         let defect = defect.expect("must refuse");
         let message = format!("{}", defect.kind);
         assert!(message.contains("0x2000"), "{message}");
+    }
+
+    /// Each defect of this reader names the length field of the string: its
+    /// file offset and its address. The windows here start at a file offset
+    /// and at an address that differ.
+    #[test]
+    fn each_string_defect_gives_the_file_offset_and_the_address_of_the_length_field() {
+        let site = |offset: u32, rva: u32, field: &'static str| Site {
+            offset,
+            rva: Some(rva),
+            structure: "VbStr",
+            field,
+        };
+
+        // A declared length of 100 in a window of 4 bytes.
+        let buf = [0x64_u8, 0x00, 0xAA, 0xAA];
+        let region = Region::mapped(&buf, Off::new(0x2000), Rva::new(0x5000));
+        let (_s, defect) = VbStr::read(&region, Off::new(0), StrEncoding::Ascii);
+        assert_eq!(defect.unwrap().site, site(0x2000, 0x5000, "declared_end"));
+
+        // A text that lands under neither encoding, 1 byte into its window.
+        let mut buf = vec![0xEE_u8, 0x03, 0x00];
+        buf.extend_from_slice(b"Tag");
+        buf.push(0xFF);
+        let region = Region::mapped(&buf, Off::new(0x2000), Rva::new(0x5000));
+        let (_s, defect) = VbStr::read(&region, Off::new(1), StrEncoding::Ascii);
+        assert_eq!(defect.unwrap().site, site(0x2001, 0x5001, "text"));
+
+        // A declared end that leaves a `u32`. The window starts at file
+        // offset 0 and at address 1, so a length field at the top of the
+        // range still has a file offset and an address.
+        let buf = [0_u8; 4];
+        let region = Region::mapped(&buf, Off::new(0), Rva::new(1));
+        for at in [u32::MAX - 1, u32::MAX - 2] {
+            let (_s, defect) = VbStr::read(&region, Off::new(at), StrEncoding::Ascii);
+            assert_eq!(
+                defect.unwrap().site,
+                site(at, at + 1, "declared_end"),
+                "{at:#x}"
+            );
+        }
     }
 
     #[test]

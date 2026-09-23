@@ -30,7 +30,7 @@
 //! `--opcode-table` as the way to supply a table that decodes it.
 
 use crate::error::{Defect, DefectKind, Refusal, Site};
-use crate::read::region::{Off, Region};
+use crate::read::region::{Off, Region, Rva};
 use crate::vb::controltree::{ControlHeader, classify_control_type};
 use crate::vb::frx::{self, BlobCursor};
 use crate::vb::opcodes::{OpcodeTable, PayloadType};
@@ -242,12 +242,14 @@ fn ends_within(payload_start: u32, width: u32, block_end: u32) -> Option<u32> {
 
 /// Builds the [`Defect`] for a payload that would end past the block's own
 /// end. Names both positions, per this plan's own acceptance criteria: where
-/// the payload would have ended, and where the block itself ends.
-fn overrun_defect(offset: u32, payload_end: u32, block_end: u32) -> Defect {
+/// the payload would have ended, and where the block itself ends. The site is
+/// the byte at `at` of `block`: its file offset and its address.
+fn overrun_defect(block: &Region<'_>, at: u32, payload_end: u32, block_end: u32) -> Defect {
+    let offset = block.file_offset(Off::new(at)).map_or(0, Off::get);
     Defect {
         site: Site {
             offset,
-            rva: None,
+            rva: block.rva(Off::new(at)).map(Rva::get),
             structure: "PropertyStream",
             field: "payload",
         },
@@ -270,11 +272,15 @@ fn overrun_defect(offset: u32, payload_end: u32, block_end: u32) -> Defect {
 /// `u32`, which requires billions of bytes of resource data in one file.
 /// It exists for the hostile file the corpus does not contain, per
 /// `AGENTS.md`'s "no panic on any input, ever".
-fn blob_cursor_defect(offset: u32, refusal: &Refusal) -> Defect {
+///
+/// The site is the byte at `at` of `block`, where the blob's length field
+/// is: its file offset and its address.
+fn blob_cursor_defect(block: &Region<'_>, at: u32, refusal: &Refusal) -> Defect {
+    let offset = block.file_offset(Off::new(at)).map_or(0, Off::get);
     Defect {
         site: Site {
             offset,
-            rva: None,
+            rva: block.rva(Off::new(at)).map(Rva::get),
             structure: "BlobCursor",
             field: "take",
         },
@@ -389,7 +395,6 @@ fn read_position_block(
     at: u32,
     block_end: u32,
 ) -> Result<(PositionBlock, u32), Defect> {
-    let offset = block.file_offset(Off::new(at)).map_or(0, Off::get);
     let block_end_offset = block.file_offset(Off::new(block_end)).map_or(0, Off::get);
 
     // Peek the first signed 16 bit value to decide the form. Bound the peek
@@ -399,7 +404,7 @@ fn read_position_block(
         let peek_end_offset = block
             .file_offset(Off::new(at.saturating_add(2)))
             .map_or(0, Off::get);
-        return Err(overrun_defect(offset, peek_end_offset, block_end_offset));
+        return Err(overrun_defect(block, at, peek_end_offset, block_end_offset));
     }
     let first = block.i16_le(Off::new(at)).unwrap_or(0);
     let escaped = first == i16::MIN;
@@ -409,7 +414,12 @@ fn read_position_block(
         let payload_end_offset = block
             .file_offset(Off::new(at.saturating_add(width)))
             .map_or(0, Off::get);
-        return Err(overrun_defect(offset, payload_end_offset, block_end_offset));
+        return Err(overrun_defect(
+            block,
+            at,
+            payload_end_offset,
+            block_end_offset,
+        ));
     }
 
     if escaped {
@@ -507,14 +517,18 @@ fn read_font_block(
     at: u32,
     block_end: u32,
 ) -> Result<(FontBlock, u32), Defect> {
-    let offset = block.file_offset(Off::new(at)).map_or(0, Off::get);
     let block_end_offset = block.file_offset(Off::new(block_end)).map_or(0, Off::get);
 
     if ends_within(at, 11, block_end).is_none() {
         let fixed_end_offset = block
             .file_offset(Off::new(at.saturating_add(11)))
             .map_or(0, Off::get);
-        return Err(overrun_defect(offset, fixed_end_offset, block_end_offset));
+        return Err(overrun_defect(
+            block,
+            at,
+            fixed_end_offset,
+            block_end_offset,
+        ));
     }
 
     let charset = at
@@ -543,7 +557,7 @@ fn read_font_block(
         let name_end_offset = block
             .file_offset(Off::new(at.saturating_add(total_width)))
             .map_or(0, Off::get);
-        return Err(overrun_defect(offset, name_end_offset, block_end_offset));
+        return Err(overrun_defect(block, at, name_end_offset, block_end_offset));
     };
 
     let name = at
@@ -626,16 +640,18 @@ fn read_special_opcode(
 /// byte. Gives the cursor position after all of that; produces no property,
 /// per `STRUCTURES.md` section 8.5.1.
 fn read_scale_mode(block: &Region<'_>, payload_start: u32, block_end: u32) -> Result<u32, Defect> {
-    let offset = block
-        .file_offset(Off::new(payload_start))
-        .map_or(0, Off::get);
     let block_end_offset = block.file_offset(Off::new(block_end)).map_or(0, Off::get);
 
     let Some(after_mode) = ends_within(payload_start, 1, block_end) else {
         let end_offset = block
             .file_offset(Off::new(payload_start.saturating_add(1)))
             .map_or(0, Off::get);
-        return Err(overrun_defect(offset, end_offset, block_end_offset));
+        return Err(overrun_defect(
+            block,
+            payload_start,
+            end_offset,
+            block_end_offset,
+        ));
     };
     let scale_mode = block.u8(Off::new(payload_start)).unwrap_or(0);
 
@@ -644,7 +660,12 @@ fn read_scale_mode(block: &Region<'_>, payload_start: u32, block_end: u32) -> Re
             let end_offset = block
                 .file_offset(Off::new(after_mode.saturating_add(16)))
                 .map_or(0, Off::get);
-            return Err(overrun_defect(offset, end_offset, block_end_offset));
+            return Err(overrun_defect(
+                block,
+                payload_start,
+                end_offset,
+                block_end_offset,
+            ));
         };
         skipped
     } else {
@@ -655,7 +676,12 @@ fn read_scale_mode(block: &Region<'_>, payload_start: u32, block_end: u32) -> Re
         let end_offset = block
             .file_offset(Off::new(after_skip.saturating_add(1)))
             .map_or(0, Off::get);
-        return Err(overrun_defect(offset, end_offset, block_end_offset));
+        return Err(overrun_defect(
+            block,
+            payload_start,
+            end_offset,
+            block_end_offset,
+        ));
     };
 
     // One more byte after the flags byte, per STRUCTURES.md section 8.5.1.
@@ -663,7 +689,12 @@ fn read_scale_mode(block: &Region<'_>, payload_start: u32, block_end: u32) -> Re
         let end_offset = block
             .file_offset(Off::new(after_flags.saturating_add(1)))
             .map_or(0, Off::get);
-        return Err(overrun_defect(offset, end_offset, block_end_offset));
+        return Err(overrun_defect(
+            block,
+            payload_start,
+            end_offset,
+            block_end_offset,
+        ));
     };
 
     Ok(final_end)
@@ -758,7 +789,8 @@ pub fn walk_properties(
                     let block_end_offset =
                         block.file_offset(Off::new(block_end)).map_or(0, Off::get);
                     defects.push(overrun_defect(
-                        opcode_offset,
+                        block,
+                        cursor,
                         payload_end_offset,
                         block_end_offset,
                     ));
@@ -788,7 +820,8 @@ pub fn walk_properties(
                         let block_end_offset =
                             block.file_offset(Off::new(block_end)).map_or(0, Off::get);
                         defects.push(overrun_defect(
-                            opcode_offset,
+                            block,
+                            cursor,
                             payload_end_offset,
                             block_end_offset,
                         ));
@@ -862,7 +895,7 @@ pub fn walk_properties(
                                 cursor = new_cursor;
                             }
                             Err(refusal) => {
-                                defects.push(blob_cursor_defect(blob.offset, &refusal));
+                                defects.push(blob_cursor_defect(block, payload_start, &refusal));
                                 properties.push(PropertyValue::BlobUnreadable {
                                     name: entry.name.clone(),
                                     offset: blob.offset,
@@ -935,11 +968,11 @@ pub fn walk_properties(
 )]
 mod tests {
     use super::{
-        BlobCursor, PositionBlock, PropertyValue, read_font_block, read_position_block,
-        walk_properties,
+        BlobCursor, PositionBlock, PropertyValue, blob_cursor_defect, read_font_block,
+        read_position_block, walk_properties,
     };
-    use crate::error::DefectKind;
-    use crate::read::region::{Off, Region};
+    use crate::error::{DefectKind, Refusal, Site};
+    use crate::read::region::{Off, Region, Rva};
     use crate::vb::controltree::read_control_header;
     use crate::vb::opcodes::OpcodeTable;
 
@@ -1027,6 +1060,67 @@ mod tests {
         // Both positions: the offset the payload would end at (past the
         // block), and the block's own end.
         assert!(message.contains("0x"), "{message}");
+    }
+
+    /// Each property stream defect gives the file offset and the address of
+    /// its byte. The windows here start at file offset `0x7000` and at
+    /// address `0x8000`.
+    #[test]
+    fn each_property_stream_defect_gives_the_file_offset_and_the_address_of_its_byte() {
+        let payload = |offset: u32, rva: u32| Site {
+            offset,
+            rva: Some(rva),
+            structure: "PropertyStream",
+            field: "payload",
+        };
+
+        // A byte payload that ends one byte past the block. The site is the
+        // opcode, 13 bytes into a block for a control named `Frm1`.
+        let mut bytes = control_block("Frm1", 13, &[10, 1]);
+        let shrunk = u16::from_le_bytes([bytes[0], bytes[1]]) - 1;
+        bytes[0..2].copy_from_slice(&shrunk.to_le_bytes());
+        let region = Region::mapped(&bytes, Off::new(0x7000), Rva::new(0x8000));
+        let (header, _) = read_control_header(&region);
+        let (_stream, defects) =
+            walk_properties(&region, &header, &form_byte_table(), &mut BlobCursor::new());
+        assert_eq!(defects.len(), 1);
+        assert_eq!(defects[0].site, payload(0x700D, 0x800D));
+
+        // A scale mode of 0 with no room for the 16 bytes that it skips. The
+        // site is the payload, one byte after the opcode.
+        let bytes = control_block("Frm1", 13, &[25, 0]);
+        let region = Region::mapped(&bytes, Off::new(0x7000), Rva::new(0x8000));
+        let (header, _) = read_control_header(&region);
+        let (_stream, defects) = walk_properties(
+            &region,
+            &header,
+            &OpcodeTable::builtin(),
+            &mut BlobCursor::new(),
+        );
+        assert_eq!(defects.len(), 1);
+        assert_eq!(defects[0].site, payload(0x700E, 0x800E));
+
+        // A position block and a font block 4 bytes into a window that
+        // ends first. The site is the first byte of each block.
+        let bytes = [0_u8; 8];
+        let region = Region::mapped(&bytes, Off::new(0x7000), Rva::new(0x8000));
+        let position = read_position_block(&region, 4, 8).unwrap_err();
+        assert_eq!(position.site, payload(0x7004, 0x8004));
+        let font = read_font_block(&region, 4, 8).unwrap_err();
+        assert_eq!(font.site, payload(0x7004, 0x8004));
+
+        // The cursor of the `.frx` offsets names the length field of the blob.
+        let region = Region::mapped(&[0_u8; 0x40], Off::new(0x7000), Rva::new(0x8000));
+        let defect = blob_cursor_defect(&region, 0x20, &Refusal::NotPe);
+        assert_eq!(
+            defect.site,
+            Site {
+                offset: 0x7020,
+                rva: Some(0x8020),
+                structure: "BlobCursor",
+                field: "take",
+            }
+        );
     }
 
     #[test]

@@ -28,12 +28,14 @@
 pub struct Site {
     /// The absolute file offset. `Region::file_offset` gives this value.
     pub offset: u32,
-    /// The address of the byte at `offset`, as a relative virtual address,
-    /// or `None`.
+    /// The address of the byte at `offset`, as a relative virtual address.
     ///
-    /// This field never holds an address that the byte points at: a defect
-    /// about a pointer carries the address that the pointer holds in its
-    /// [`DefectKind`].
+    /// It is `None` when the byte is in no section, such as a byte of a
+    /// section header, or when the reader does not know the address of the
+    /// byte. A site whose `offset` is 0 because the reader does not know
+    /// where the byte is also gives `None`. This field never holds an address
+    /// that the byte points at: a defect about a pointer carries the address
+    /// that the pointer holds in its [`DefectKind`].
     pub rva: Option<u32>,
     /// The structure that is being read, such as `"VbHeader"`.
     pub structure: &'static str,

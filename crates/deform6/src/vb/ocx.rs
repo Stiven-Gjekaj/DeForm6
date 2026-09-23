@@ -23,7 +23,7 @@
 use std::fmt;
 
 use crate::error::{Defect, DefectKind, Site};
-use crate::read::region::{Off, Region};
+use crate::read::region::{Off, Region, Rva};
 use crate::vb::controltree::ControlHeader;
 use crate::vb::project::ComponentTable;
 use crate::vb::vbstr::{StrEncoding, VbStr};
@@ -77,13 +77,14 @@ pub fn read_external_control(
     let mut defects = Vec::new();
     let name_start = header.header_len();
     let offset = block.file_offset(Off::new(name_start)).map_or(0, Off::get);
+    let rva = block.rva(Off::new(name_start)).map(Rva::get);
 
     let declared_len = block.u16_le(Off::new(name_start)).unwrap_or(0);
     if declared_len == 0 {
         defects.push(Defect {
             site: Site {
                 offset,
-                rva: None,
+                rva,
                 structure: "ExternalControl",
                 field: "class_name",
             },
@@ -99,7 +100,7 @@ pub fn read_external_control(
     let class_name = vb_str.text().to_owned();
     let consumed = vb_str.declared_end().get().saturating_sub(name_start);
 
-    let (library, component) = split_class_name(&class_name, offset, &mut defects);
+    let (library, component) = split_class_name(&class_name, offset, rva, &mut defects);
 
     (
         ExternalControl {
@@ -121,7 +122,12 @@ pub fn read_external_control(
 /// name with no text has no dot to be missing. A non-empty class name with
 /// no dot gives the whole string as the library part, an empty component
 /// part, and a [`Defect`] naming `offset`.
-fn split_class_name(class_name: &str, offset: u32, defects: &mut Vec<Defect>) -> (String, String) {
+fn split_class_name(
+    class_name: &str,
+    offset: u32,
+    rva: Option<u32>,
+    defects: &mut Vec<Defect>,
+) -> (String, String) {
     if class_name.is_empty() {
         return (String::new(), String::new());
     }
@@ -131,7 +137,7 @@ fn split_class_name(class_name: &str, offset: u32, defects: &mut Vec<Defect>) ->
             defects.push(Defect {
                 site: Site {
                     offset,
-                    rva: None,
+                    rva,
                     structure: "ExternalControl",
                     field: "class_name",
                 },
@@ -429,7 +435,9 @@ fn read_ocx_header_at(block: &Region<'_>, sig_at: u32) -> (OcxHeader, Vec<Defect
         defects.push(Defect {
             site: Site {
                 offset,
-                rva: None,
+                rva: reserved_at
+                    .and_then(|at| block.rva(Off::new(at)))
+                    .map(Rva::get),
                 structure: "OcxHeader",
                 field: "reserved",
             },
@@ -476,8 +484,8 @@ mod tests {
     use super::{
         Clsid, ExternalControl, OCX_SIGNATURE, join_component, read_external_control, read_ocx_blob,
     };
-    use crate::error::DefectKind;
-    use crate::read::region::{Off, Region};
+    use crate::error::{DefectKind, Site};
+    use crate::read::region::{Off, Region, Rva};
     use crate::vb::controltree::{ControlKind, classify_control_type, read_control_header};
     use crate::vb::project::{Component, ComponentTable};
 
@@ -574,6 +582,29 @@ mod tests {
     /// a `Defect` through `VbStr::read`'s own bound check, and no allocation
     /// is sized from it: `Region::take` refuses the read rather than
     /// allocating first.
+    /// Each class name defect names the length field of the class name: its
+    /// file offset and its address. The block here starts at file offset
+    /// `0x3000` and at address `0x4000`, and the class name follows the
+    /// 13-byte header of a control named `Foo1`.
+    #[test]
+    fn each_class_name_defect_gives_the_file_offset_and_the_address_of_its_length_field() {
+        let class_name = Site {
+            offset: 0x300D,
+            rva: Some(0x400D),
+            structure: "ExternalControl",
+            field: "class_name",
+        };
+        for tail in [length_prefixed("Foo"), vec![0x00, 0x00, 0x00]] {
+            let bytes = external_control_block("Foo1", &tail);
+            let region = Region::mapped(&bytes, Off::new(0x3000), Rva::new(0x4000));
+            let (header, _) = read_control_header(&region);
+            assert_eq!(header.header_len(), 13);
+            let (_control, _consumed, defects) = read_external_control(&region, &header);
+            assert_eq!(defects.len(), 1, "{tail:?}");
+            assert_eq!(defects[0].site, class_name, "{tail:?}");
+        }
+    }
+
     #[test]
     fn a_declared_length_past_the_block_end_gives_a_defect_and_sizes_no_allocation() {
         let mut tail = vec![0x64, 0x00]; // declared length 100
@@ -1102,6 +1133,20 @@ mod tests {
             defects[0].kind,
             DefectKind::OcxReservedFieldUnexpected { value: 99, .. }
         ));
+
+        // The reserved field is 4 bytes after the signature. On a window at
+        // file offset 0x5000 and address 0x6000, the site gives both.
+        let region = Region::mapped(&bytes, Off::new(0x5000), Rva::new(0x6000));
+        let (_header, _opaque, defects) = read_ocx_blob(&region, 0, block_end);
+        assert_eq!(
+            defects[0].site,
+            Site {
+                offset: 0x5004,
+                rva: Some(0x6004),
+                structure: "OcxHeader",
+                field: "reserved",
+            }
+        );
     }
 
     /// Synthetic fixture: the signature sits three bytes before the block's

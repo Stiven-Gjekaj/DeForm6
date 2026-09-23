@@ -54,7 +54,7 @@
 //! subtraction, never a plain one) before it computes the image byte count.
 
 use crate::error::{Defect, DefectKind, Refusal, Site, damaged};
-use crate::read::region::{Off, Region};
+use crate::read::region::{Off, Region, Rva};
 
 /// The four byte little endian length value that means "the property is
 /// absent". `STRUCTURES.md` section 8.8.
@@ -87,11 +87,12 @@ pub struct Blob {
     pub offset: u32,
 }
 
-/// Builds the [`Site`] every [`extract_blob`] defect uses.
-const fn site(offset: u32) -> Site {
+/// Builds the [`Site`] every [`extract_blob`] defect uses: the file offset
+/// and the address of the blob's length field.
+const fn site(offset: u32, rva: Option<u32>) -> Site {
     Site {
         offset,
-        rva: None,
+        rva,
         structure: "Blob",
         field: "blobLen",
     }
@@ -120,6 +121,7 @@ fn ends_within(start: u32, width: u32, block_end: u32) -> Option<u32> {
 #[must_use]
 pub fn extract_blob(block: &Region<'_>, at: Off) -> (Option<Blob>, u32, Option<Defect>) {
     let offset = block.file_offset(at).map_or(0, Off::get);
+    let rva = block.rva(at).map(Rva::get);
     let block_end = block.len();
 
     // Bound the length field's own four bytes before reading them. A
@@ -134,7 +136,7 @@ pub fn extract_blob(block: &Region<'_>, at: Off) -> (Option<Blob>, u32, Option<D
             None,
             0,
             Some(Defect {
-                site: site(offset),
+                site: site(offset, rva),
                 kind,
             }),
         );
@@ -152,7 +154,7 @@ pub fn extract_blob(block: &Region<'_>, at: Off) -> (Option<Blob>, u32, Option<D
             None,
             0,
             Some(Defect {
-                site: site(offset),
+                site: site(offset, rva),
                 kind,
             }),
         );
@@ -184,7 +186,7 @@ pub fn extract_blob(block: &Region<'_>, at: Off) -> (Option<Blob>, u32, Option<D
             None,
             4,
             Some(Defect {
-                site: site(offset),
+                site: site(offset, rva),
                 kind,
             }),
         );
@@ -201,7 +203,7 @@ pub fn extract_blob(block: &Region<'_>, at: Off) -> (Option<Blob>, u32, Option<D
             None,
             4,
             Some(Defect {
-                site: site(offset),
+                site: site(offset, rva),
                 kind,
             }),
         );
@@ -384,8 +386,8 @@ pub fn sniff_format(image: &[u8]) -> ImageFormat {
 )]
 mod tests {
     use super::{Blob, BlobCursor, FRX_ITEM_HEADER_LEN, ImageFormat, extract_blob, sniff_format};
-    use crate::error::{DefectKind, Severity};
-    use crate::read::region::{Off, Region};
+    use crate::error::{DefectKind, Severity, Site};
+    use crate::read::region::{Off, Region, Rva};
 
     // --- Task 1: the inline blob and its bounds --------------------------
 
@@ -505,6 +507,37 @@ mod tests {
         let message = format!("{}", defect.kind);
         // 0x9000 + 5 = 0x9005.
         assert!(message.contains("0x9005"), "{message}");
+    }
+
+    /// Each defect of this reader names the length field of the blob: its
+    /// file offset and its address. The window here starts at file offset
+    /// `0x9000` and at address `0x2000`, and the length field is 5 bytes in.
+    #[test]
+    fn each_blob_defect_gives_the_file_offset_and_the_address_of_the_length_field() {
+        let length_field = Site {
+            offset: 0x9005,
+            rva: Some(0x2005),
+            structure: "Blob",
+            field: "blobLen",
+        };
+        let cases: [&[u8]; 4] = [
+            // Too small to hold its own picture header.
+            &[3, 0, 0, 0, 0, 0, 0],
+            // Larger than the bytes that remain.
+            &[0xE8, 0x03, 0, 0, 0, 0, 0, 0],
+            // An end that leaves a `u32`.
+            &[0xFD, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0],
+            // Two of the four bytes of the length field.
+            &[8, 0],
+        ];
+        for tail in cases {
+            let mut bytes = vec![0xEE; 5];
+            bytes.extend_from_slice(tail);
+            let region = Region::mapped(&bytes, Off::new(0x9000), Rva::new(0x2000));
+            let (blob, _consumed, defect) = extract_blob(&region, Off::new(5));
+            assert!(blob.is_none(), "{tail:?}");
+            assert_eq!(defect.unwrap().site, length_field, "{tail:?}");
+        }
     }
 
     #[test]

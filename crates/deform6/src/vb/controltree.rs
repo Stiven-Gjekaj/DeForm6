@@ -49,7 +49,7 @@
 //! not settle.
 
 use crate::error::{Defect, DefectKind, Refusal, Site, damaged};
-use crate::read::region::{Off, Region};
+use crate::read::region::{Off, Region, Rva};
 use crate::vb::gui::{FormStream, Tiling};
 
 /// The flags byte value, at block offset `0x03`, that selects the array
@@ -240,6 +240,7 @@ pub fn read_array_index(block: &Region<'_>) -> Option<u16> {
 #[must_use]
 pub fn read_control_header(block: &Region<'_>) -> (ControlHeader, Vec<Defect>) {
     let offset = block.file_offset(Off::new(0)).map_or(0, Off::get);
+    let rva = block.rva(Off::new(0)).map(Rva::get);
     let mut defects = Vec::new();
 
     let flags = block.u8(Off::new(0x03));
@@ -252,7 +253,7 @@ pub fn read_control_header(block: &Region<'_>) -> (ControlHeader, Vec<Defect>) {
             defects.push(Defect {
                 site: Site {
                     offset,
-                    rva: None,
+                    rva,
                     structure: "ControlHeader",
                     field: "Index",
                 },
@@ -319,11 +320,12 @@ fn read_name(
     name_start: u32,
     name_len: u16,
 ) -> (String, Option<Defect>) {
+    let rva = block.rva(Off::new(0)).map(Rva::get);
     if name_len == 0 {
         let defect = Defect {
             site: Site {
                 offset: block_offset,
-                rva: None,
+                rva,
                 structure: "ControlHeader",
                 field: "name",
             },
@@ -344,7 +346,7 @@ fn read_name(
             let defect = Defect {
                 site: Site {
                     offset: block_offset,
-                    rva: None,
+                    rva,
                     structure: "ControlHeader",
                     field: "name",
                 },
@@ -909,9 +911,9 @@ mod tests {
         ARRAY_FLAG, ControlKind, ScopeRun, classify_control_type, read_array_index,
         read_control_header, walk,
     };
-    use crate::error::{DefectKind, Refusal};
+    use crate::error::{DefectKind, Refusal, Site};
     use crate::read::pe::PeImage;
-    use crate::read::region::{Off, Region};
+    use crate::read::region::{Off, Region, Rva};
     use crate::vb::gui::{GuiObjectInfo, GuiTable, Tiling};
     use crate::vb::header::{VbHeader, header_region};
 
@@ -981,6 +983,35 @@ mod tests {
             defects[0].kind,
             DefectKind::IndexHighByteSet { high: 0x01, .. }
         ));
+    }
+
+    /// Each defect of the header reader names the first byte of the block:
+    /// its file offset and its address. The window here starts at file
+    /// offset `0x1560` and at address `0x2560`.
+    #[test]
+    fn each_control_header_defect_gives_the_file_offset_and_the_address_of_the_block() {
+        let block = |field: &'static str| Site {
+            offset: 0x1560,
+            rva: Some(0x2560),
+            structure: "ControlHeader",
+            field,
+        };
+        let mut high_byte = txt_f_element(0, 2);
+        high_byte[6] = 0x01;
+        let cases: [(Vec<u8>, &'static str); 3] = [
+            (high_byte, "Index"),
+            (
+                vec![0x00, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 13],
+                "name",
+            ),
+            (vec![0x00, 0x00, 0x00, 0x00, 0x07, 0xFF, 0xFF], "name"),
+        ];
+        for (bytes, field) in cases {
+            let region = Region::mapped(&bytes, Off::new(0x1560), Rva::new(0x2560));
+            let (_header, defects) = read_control_header(&region);
+            assert_eq!(defects.len(), 1, "{bytes:?}");
+            assert_eq!(defects[0].site, block(field), "{bytes:?}");
+        }
     }
 
     #[test]

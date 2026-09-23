@@ -615,12 +615,18 @@ fn module_marker_mismatch(pe: &PeImage<'_>, object: &Object, lp_private_object: 
 /// its control tree, its `ControlInfoTable`, or one control's own event
 /// table. `offset` is `0` when no byte offset was known at the point of
 /// failure, the same fallback that the defect about `Object.lpObjectInfo`
-/// uses.
-fn structure_defect(offset: u32, structure: &'static str, refusal: &Refusal) -> Defect {
+/// uses. `rva` is the address of the byte at `offset`, and `None` when the
+/// offset is that fallback.
+fn structure_defect(
+    offset: u32,
+    rva: Option<u32>,
+    structure: &'static str,
+    refusal: &Refusal,
+) -> Defect {
     Defect {
         site: Site {
             offset,
-            rva: None,
+            rva,
             structure,
             field: "read",
         },
@@ -679,7 +685,7 @@ fn compose_form(
     let info = match GuiObjectInfo::read(pe, entry.a_form_pointer) {
         Ok(info) => info,
         Err(refusal) => {
-            form_defects.push(structure_defect(0, "GuiObjectInfo", &refusal));
+            form_defects.push(structure_defect(0, None, "GuiObjectInfo", &refusal));
             defects.extend(form_defects.iter().cloned());
             return FormReport {
                 name: String::new(),
@@ -692,7 +698,7 @@ fn compose_form(
     let stream = match info.form_stream() {
         Ok(stream) => stream,
         Err(refusal) => {
-            form_defects.push(structure_defect(0, "FormStream", &refusal));
+            form_defects.push(structure_defect(0, None, "FormStream", &refusal));
             defects.extend(form_defects.iter().cloned());
             return FormReport {
                 name: String::new(),
@@ -704,6 +710,7 @@ fn compose_form(
 
     let stream_region = stream.region();
     let stream_offset = stream_region.file_offset(Off::new(0)).map_or(0, Off::get);
+    let stream_rva = stream_region.rva(Off::new(0)).map(Rva::get);
     let name = stream.name().unwrap_or_default();
 
     let mut tiling = Tiling::new(info.l_properties_length).at(stream_offset);
@@ -713,7 +720,12 @@ fn compose_form(
             Some(tree)
         }
         Err(refusal) => {
-            form_defects.push(structure_defect(stream_offset, "ControlTree", &refusal));
+            form_defects.push(structure_defect(
+                stream_offset,
+                stream_rva,
+                "ControlTree",
+                &refusal,
+            ));
             None
         }
     };
@@ -729,6 +741,7 @@ fn compose_form(
             Err(refusal) => {
                 form_defects.push(structure_defect(
                     stream_offset,
+                    stream_rva,
                     "ControlInfoTable",
                     &refusal,
                 ));
@@ -855,7 +868,7 @@ fn compose_control(
                 report_events(&header.name, &control_type_name, &table, tables.event_names)
             }
             Err(refusal) => {
-                defects.push(structure_defect(0, "EventTable", &refusal));
+                defects.push(structure_defect(0, None, "EventTable", &refusal));
                 Vec::new()
             }
         },
@@ -1558,6 +1571,39 @@ mod tests {
                     va: nowhere,
                 },
             }]
+        );
+    }
+
+    /// `Map Editor.exe` holds one form whose control tree refuses. The defect
+    /// names the first byte of the form's property stream: its file offset,
+    /// and the address that the section table maps that offset to.
+    #[test]
+    fn a_control_tree_refusal_gives_the_file_offset_and_the_address_of_the_stream() {
+        let report = inspect(MAP_EDITOR, &builtin_table(), Mode::Strict).unwrap();
+        let trees: Vec<&Defect> = report
+            .defects
+            .iter()
+            .filter(|d| d.site.structure == "ControlTree")
+            .collect();
+        assert_eq!(trees.len(), 1, "{:?}", report.defects);
+        let offset = trees[0].site.offset;
+        assert!(matches!(
+            trees[0].kind,
+            DefectKind::StructureUnreadable { offset: at, .. } if at == offset
+        ));
+
+        let image = PeImage::parse(MAP_EDITOR).unwrap();
+        let section = image
+            .sections()
+            .iter()
+            .find(|s| {
+                let raw = s.pointer_to_raw_data.get();
+                offset >= raw && offset - raw < s.mapped_len()
+            })
+            .unwrap();
+        assert_eq!(
+            trees[0].site.rva,
+            Some(section.virtual_address.get() + offset - section.pointer_to_raw_data.get())
         );
     }
 
