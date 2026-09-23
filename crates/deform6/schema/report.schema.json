@@ -462,6 +462,23 @@
               }
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["UnexpectedConstant"],
+          "properties": {
+            "UnexpectedConstant": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "expected", "found"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "expected": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "found": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              }
+            }
+          }
         }
       ]
     }

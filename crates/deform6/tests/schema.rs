@@ -440,3 +440,56 @@ fn a_report_that_carries_a_runs_past_end_defect_validates() {
         );
     }
 }
+
+/// A report that carries a `UnexpectedConstant` defect validates, and the schema refuses
+/// the same defect when one of its fields is missing.
+///
+/// No corpus program raises this kind, for the reason the tests above give
+/// for their own kinds.
+#[test]
+fn a_report_that_carries_an_unexpected_constant_validates() {
+    let validator = compiled_schema();
+    let exe = corpus_root().join("vb6-code/Fire-effect/Fast_Flames.exe");
+    let mut value = report_value_for(&exe);
+    let defect = Defect {
+        site: Site {
+            offset: 0x1d24,
+            rva: Some(0x1d24),
+            structure: "FuncTypDesc",
+            field: "constFFFF",
+        },
+        kind: DefectKind::UnexpectedConstant {
+            offset: 0x1d24,
+            expected: 0xFFFF,
+            found: 0x1234,
+        },
+    };
+    let serialized = serde_json::to_value(&defect).expect("a defect serializes");
+    let at = value["defects"]
+        .as_array()
+        .expect("defects must be an array")
+        .len();
+    value["defects"]
+        .as_array_mut()
+        .expect("defects must be an array")
+        .push(serialized);
+
+    let errors = describe_errors(&validator, &value);
+    assert!(
+        errors.is_empty(),
+        "a report with a UnexpectedConstant defect failed schema validation:\n{}",
+        errors.join("\n")
+    );
+
+    for field in ["offset", "expected", "found"] {
+        let mut missing = value.clone();
+        missing["defects"][at]["kind"]["UnexpectedConstant"]
+            .as_object_mut()
+            .expect("the kind must be an object")
+            .remove(field);
+        assert!(
+            !validator.is_valid(&missing),
+            "a defect with no {field} must be refused"
+        );
+    }
+}

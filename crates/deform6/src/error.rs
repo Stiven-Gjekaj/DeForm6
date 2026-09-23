@@ -405,6 +405,23 @@ pub enum DefectKind {
         /// The absolute file offset where their section or their block ends.
         end: u32,
     },
+
+    /// A field that the format fixes at one value holds another value.
+    ///
+    /// The reader does not read the item that holds the field, and nothing is
+    /// invented in its place. `vb/functyp.rs` gives it for a `FuncTypDesc`
+    /// whose `constFFFF` is not `0xFFFF`.
+    #[error(
+        "the field at offset {offset:#x} holds {found:#x}, where the format gives {expected:#x}, and the item is not read"
+    )]
+    UnexpectedConstant {
+        /// The absolute file offset of the field.
+        offset: u32,
+        /// The value that the format gives.
+        expected: u32,
+        /// The value that the field holds.
+        found: u32,
+    },
 }
 
 /// How bad a defect is.
@@ -514,6 +531,8 @@ impl DefectKind {
             // Nothing is read from the bytes, and nothing is invented in
             // their place. The item keeps every other field.
             Self::RunsPastEnd { .. } => Severity::Tolerated,
+            // The item is not read, and nothing is invented in its place.
+            Self::UnexpectedConstant { .. } => Severity::Tolerated,
         }
     }
 }
@@ -809,6 +828,14 @@ mod tests {
                 },
                 0xdd,
             ),
+            (
+                DefectKind::UnexpectedConstant {
+                    offset: 0xee,
+                    expected: 0xffff,
+                    found: 0x1234,
+                },
+                0xee,
+            ),
         ]
     }
 
@@ -884,6 +911,18 @@ mod tests {
             "{message}"
         );
         assert!(message.contains("run past offset 0x430"), "{message}");
+    }
+
+    #[test]
+    fn an_unexpected_constant_message_names_both_values() {
+        let kind = DefectKind::UnexpectedConstant {
+            offset: 0x1d24,
+            expected: 0xffff,
+            found: 0x1234,
+        };
+        let message = format!("{kind}");
+        assert!(message.contains("offset 0x1d24 holds 0x1234"), "{message}");
+        assert!(message.contains("the format gives 0xffff"), "{message}");
     }
 
     #[test]
@@ -998,6 +1037,11 @@ mod tests {
                 offset: 0,
                 len: 0,
                 end: 0,
+            },
+            DefectKind::UnexpectedConstant {
+                offset: 0,
+                expected: 0,
+                found: 0,
             },
         ];
         for kind in tolerated {

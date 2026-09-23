@@ -1018,7 +1018,20 @@ fn read_one(
     };
 
     if raw.const_ffff != 0xFFFF {
-        return (None, unrecoverable_here(Off::new(0x04), "constFFFF"));
+        let at = Off::new(0x04);
+        let offset = header.file_offset(at).map_or(self_offset, Off::get);
+        let site = Site {
+            offset,
+            rva: header.rva(at).map(Rva::get),
+            structure: "FuncTypDesc",
+            field: "constFFFF",
+        };
+        let kind = DefectKind::UnexpectedConstant {
+            offset,
+            expected: 0xFFFF,
+            found: u32::from(raw.const_ffff),
+        };
+        return (None, vec![Defect { site, kind }]);
     }
 
     let buffer_len = base.len().saturating_sub(HEADER_SIZE);
@@ -1402,6 +1415,14 @@ mod tests {
         assert_eq!(walk.defects().len(), 1);
         let defect = &walk.defects()[0];
         assert_eq!(defect.kind.severity(), Severity::Tolerated);
+        assert_eq!(
+            defect.kind,
+            crate::error::DefectKind::UnexpectedConstant {
+                offset: u32::try_from(at).unwrap(),
+                expected: 0xFFFF,
+                found: 0x1234,
+            }
+        );
         assert_eq!(defect.site.field, "constFFFF");
         assert_eq!(defect.site.offset, u32::try_from(at).unwrap());
         // The site gives the address of the same byte, and not the address

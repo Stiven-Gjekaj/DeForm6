@@ -108,6 +108,7 @@ const fn kind_name(kind: &DefectKind) -> &'static str {
         DefectKind::ItemOffsetOverflow { .. } => "ItemOffsetOverflow",
         DefectKind::ItemCutShort { .. } => "ItemCutShort",
         DefectKind::RunsPastEnd { .. } => "RunsPastEnd",
+        DefectKind::UnexpectedConstant { .. } => "UnexpectedConstant",
     }
 }
 
