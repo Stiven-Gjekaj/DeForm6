@@ -1195,8 +1195,7 @@ impl ComponentTable {
                     component.ouuid_field_offset = entry
                         .file_offset(component.o_uuid)
                         .map_or(entry_offset.get(), Off::get);
-                    let (ouuid_text, ouuid_defect) =
-                        decode_ouuid_text(&entry, entry_offset.get(), component.o_uuid);
+                    let (ouuid_text, ouuid_defect) = decode_ouuid_text(&entry, component.o_uuid);
                     component.ouuid_text = ouuid_text;
                     if let Some(defect) = ouuid_defect {
                         defects.push(defect);
@@ -1357,8 +1356,9 @@ fn read_component_entry(entry: &Region<'_>) -> Result<Component, EntryFailure> {
 /// already names. `72` means the textual GUID is 36 UTF-16 characters; the
 /// 72 bytes are read bounded by the entry's own region, so a `guid_offset`
 /// that leaves too little room does not size an allocation from
-/// `guid_length` before that bound is checked. Any other value gives a
-/// `Defect` naming it, and gives `None`.
+/// `guid_length` before that bound is checked. Such a `guid_offset` gives a
+/// [`DefectKind::RunsPastEnd`] defect at the `GUIDoffset` field. Any other
+/// value of `guid_length` gives a `Defect` naming it, and gives `None`.
 fn decode_guid_text(
     entry: &Region<'_>,
     entry_offset: u32,
@@ -1379,20 +1379,7 @@ fn decode_guid_text(
                 (Some(String::from_utf16_lossy(&units)), None)
             }
             None => {
-                let max = entry.len().saturating_sub(guid_offset.get());
-                let defect = Defect {
-                    site: Site {
-                        offset: entry_offset,
-                        rva: None,
-                        structure: "ExternalComponentEntry",
-                        field: "GUIDoffset",
-                    },
-                    kind: DefectKind::ImplausibleCount {
-                        offset: entry_offset,
-                        count: 72,
-                        max,
-                    },
-                };
+                let defect = past_entry_end(entry, "GUIDoffset", Off::new(0x1C), guid_offset, 72);
                 (None, Some(defect))
             }
         },
@@ -1419,18 +1406,15 @@ fn decode_guid_text(
 /// offset relative to the entry's own base, never to the table, read
 /// bounded by the entry's own region.
 ///
-/// Gives `None` and a [`Defect`] naming the byte offset when the entry
-/// holds fewer than sixteen bytes at `o_uuid`. The sixteen bytes decode as
+/// Gives `None` and a [`DefectKind::RunsPastEnd`] defect when the entry
+/// holds fewer than sixteen bytes at `o_uuid`. Its site is the `oUuid`
+/// field. The sixteen bytes decode as
 /// a standard Microsoft binary GUID: the first three fields (four, two and
 /// two bytes) are stored little-endian and are reversed back to their
 /// textual byte order; the fourth field (eight bytes) is stored raw and is
 /// never reversed. [`Component::ouuid_text`]'s own doc comment carries the
 /// measurement that selected this field.
-fn decode_ouuid_text(
-    entry: &Region<'_>,
-    entry_offset: u32,
-    o_uuid: Off,
-) -> (Option<String>, Option<Defect>) {
+fn decode_ouuid_text(entry: &Region<'_>, o_uuid: Off) -> (Option<String>, Option<Defect>) {
     match entry.take(o_uuid, 16) {
         Some(bytes) => {
             // `entry.take` gives exactly sixteen bytes or `None`, never a
@@ -1460,22 +1444,37 @@ fn decode_ouuid_text(
             (Some(text), None)
         }
         None => {
-            let max = entry.len().saturating_sub(o_uuid.get());
-            let defect = Defect {
-                site: Site {
-                    offset: entry_offset,
-                    rva: None,
-                    structure: "ExternalComponentEntry",
-                    field: "oUuid",
-                },
-                kind: DefectKind::ImplausibleCount {
-                    offset: entry_offset,
-                    count: 16,
-                    max,
-                },
-            };
+            let defect = past_entry_end(entry, "oUuid", Off::new(0x04), o_uuid, 16);
             (None, Some(defect))
         }
+    }
+}
+
+/// Builds the defect for the `len` bytes at `at` in `entry` that the offset
+/// field `field` at `field_at` names, when they run past the end that
+/// `StructLength` gives the entry.
+///
+/// The site is the offset field. The kind gives the bytes and the end of
+/// the entry.
+fn past_entry_end(
+    entry: &Region<'_>,
+    field: &'static str,
+    field_at: Off,
+    at: Off,
+    len: u32,
+) -> Defect {
+    Defect {
+        site: Site {
+            offset: entry.file_offset(field_at).map_or(0, Off::get),
+            rva: entry.rva(field_at).map(Rva::get),
+            structure: "ExternalComponentEntry",
+            field,
+        },
+        kind: DefectKind::RunsPastEnd {
+            offset: entry.file_offset(at).map_or(0, Off::get),
+            len,
+            end: entry.file_offset(Off::new(entry.len())).map_or(0, Off::get),
+        },
     }
 }
 
@@ -2811,9 +2810,9 @@ mod tests {
 
     /// A synthetic fixture: `oUuid`'s own offset points close enough to the
     /// entry's own end that fewer than sixteen bytes remain there. The
-    /// sixteen byte binary GUID is not decoded, and the defect names the
-    /// entry's own byte offset, matching `decode_guid_text`'s own
-    /// bound-check precedent for the textual GUID field.
+    /// sixteen byte binary GUID is not decoded. The site is the `oUuid`
+    /// field, at `0x04` of the entry, and the kind names the sixteen bytes
+    /// and the end of the entry.
     #[test]
     fn an_o_uuid_offset_leaving_fewer_than_sixteen_bytes_gives_a_defect_and_no_ouuid_text() {
         let mut payload = build_component_entry("Short.ocx", "ShortLib.Short", "Short");
@@ -2822,19 +2821,62 @@ mod tests {
         // byte binary GUID.
         let too_close = entry_len - 5;
         payload[0x04..0x08].copy_from_slice(&too_close.to_le_bytes());
-        let (bytes, va) = a_synthetic_pe_image(&payload);
-        let image = PeImage::parse(&bytes).unwrap();
-        let table = ComponentTable::read(&image, va, 1);
+        let table = one_entry_table(&payload);
 
         assert_eq!(table.components.len(), 1, "{:?}", table.defects());
         assert_eq!(table.components[0].ouuid_text, None);
-        assert_eq!(table.defects().len(), 1);
-        let defect = &table.defects()[0];
-        assert_eq!(defect.kind.severity(), Severity::Recoverable);
-        assert!(matches!(
-            defect.kind,
-            DefectKind::ImplausibleCount { count: 16, .. }
-        ));
+        assert_eq!(
+            table.defects(),
+            [Defect {
+                site: Site {
+                    offset: 0x404,
+                    rva: Some(0x1004),
+                    structure: "ExternalComponentEntry",
+                    field: "oUuid",
+                },
+                kind: DefectKind::RunsPastEnd {
+                    offset: 0x400 + too_close,
+                    len: 16,
+                    end: 0x400 + entry_len,
+                },
+            }]
+        );
+        assert_eq!(table.defects()[0].kind.severity(), Severity::Tolerated);
+    }
+
+    /// A synthetic fixture: `GUIDoffset` points close enough to the entry's
+    /// own end that fewer than the 72 bytes that `GUIDlength` asks for remain
+    /// there. The textual GUID is not decoded, and the component keeps its
+    /// other fields. The site is the `GUIDoffset` field, at `0x1C` of the
+    /// entry, and the kind names the 72 bytes and the end of the entry.
+    #[test]
+    fn a_guid_offset_leaving_fewer_than_seventy_two_bytes_gives_a_defect_and_no_guid_text() {
+        let mut payload = build_component_entry("Short.ocx", "ShortLib.Short", "Short");
+        let entry_len = u32::try_from(payload.len()).unwrap();
+        assert_eq!(entry_u32(&payload, 0x20), 72);
+        let too_close = entry_len - 10;
+        payload[0x1C..0x20].copy_from_slice(&too_close.to_le_bytes());
+        let table = one_entry_table(&payload);
+
+        assert_eq!(table.components.len(), 1, "{:?}", table.defects());
+        assert_eq!(table.components[0].guid_text, None);
+        assert_eq!(table.components[0].name, "Short");
+        assert_eq!(
+            table.defects(),
+            [Defect {
+                site: Site {
+                    offset: 0x41C,
+                    rva: Some(0x101C),
+                    structure: "ExternalComponentEntry",
+                    field: "GUIDoffset",
+                },
+                kind: DefectKind::RunsPastEnd {
+                    offset: 0x400 + too_close,
+                    len: 72,
+                    end: 0x400 + entry_len,
+                },
+            }]
+        );
     }
 
     #[test]
