@@ -455,6 +455,23 @@ pub enum DefectKind {
         /// The relative jump, as the file holds it.
         rel: i32,
     },
+
+    /// A field holds a value that is not one of the values that the reader
+    /// knows for it.
+    ///
+    /// The reader does not guess what the value means. It does not read what
+    /// the field describes, and nothing is invented in its place.
+    /// `vb/functyp.rs` gives it for a value tag in `optionalVals` that is not
+    /// one of the six tags that the corpus holds.
+    #[error(
+        "the field at offset {offset:#x} holds {value:#x}, which is not a value that the reader knows, and the reader does not read what the field describes"
+    )]
+    UnknownValue {
+        /// The absolute file offset of the field.
+        offset: u32,
+        /// The value that the field holds.
+        value: u32,
+    },
 }
 
 /// How bad a defect is.
@@ -571,6 +588,9 @@ impl DefectKind {
             // The slot keeps its stub address, and no handler is invented in
             // its place.
             Self::JumpOutOfRange { .. } => Severity::Tolerated,
+            // The reader does not read what the field describes, and nothing
+            // is invented in its place.
+            Self::UnknownValue { .. } => Severity::Tolerated,
         }
     }
 }
@@ -889,6 +909,13 @@ mod tests {
                 },
                 0xf1,
             ),
+            (
+                DefectKind::UnknownValue {
+                    offset: 0xf2,
+                    value: 99,
+                },
+                0xf2,
+            ),
         ]
     }
 
@@ -1006,6 +1033,23 @@ mod tests {
         );
         assert!(
             message.contains("the stub at address 0x401100"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_value_message_names_the_field_and_its_value() {
+        let kind = DefectKind::UnknownValue {
+            offset: 0x408,
+            value: 99,
+        };
+        let message = format!("{kind}");
+        assert!(
+            message.contains("the field at offset 0x408 holds 0x63"),
+            "{message}"
+        );
+        assert!(
+            message.contains("not a value that the reader knows"),
             "{message}"
         );
     }
@@ -1133,6 +1177,10 @@ mod tests {
                 offset: 0,
                 va: 0,
                 rel: 0,
+            },
+            DefectKind::UnknownValue {
+                offset: 0,
+                value: 0,
             },
         ];
         for kind in tolerated {

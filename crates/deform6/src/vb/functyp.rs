@@ -902,7 +902,9 @@ const MAX_OPTIONAL_VALS_STEPS: u32 = 4096;
 /// gives [`DefectKind::RunsPastEnd`], with the bytes of the block that the
 /// reader needs. A record that runs past the end that `cbValues` gives also
 /// gives [`DefectKind::RunsPastEnd`], with the bytes of that record. The
-/// padding after the value of a record is part of the record.
+/// padding after the value of a record is part of the record. A tag that is
+/// not one of the six gives [`DefectKind::UnknownValue`], with the offset of
+/// the tag.
 fn walk_optional_vals(
     pe: &PeImage<'_>,
     field_offset: u32,
@@ -1001,20 +1003,13 @@ fn walk_optional_vals(
                 cursor = next;
             }
             Err(ValueRecordError::UnknownTag(tag)) => {
-                // `error.rs` is outside this plan's file boundary, and no
-                // existing kind names "a tag this file does not
-                // recognise." `CountMismatch` is reused because it is the
-                // nearest kind that carries a raw number forward and marks
-                // the record's defaults unrecoverable, matching the
-                // precedent `vb/privateobj.rs` set for its own third
-                // failure mode.
+                // The reader does not know the width of the record, so it
+                // reads no record from here on.
                 let defect = Defect {
                     site,
-                    kind: DefectKind::CountMismatch {
-                        offset: field_offset,
-                        count: u32::from(tag),
-                        expected: 0,
-                        other_field: "a value tag this file's grammar holds",
+                    kind: DefectKind::UnknownValue {
+                        offset: values.file_offset(cursor).map_or(0, Off::get),
+                        value: u32::from(tag),
                     },
                 };
                 return (OptionalValsWalk::Unrecoverable, Some(defect));
@@ -2140,13 +2135,16 @@ mod tests {
         let defect = walk
             .defects()
             .iter()
-            .find(|d| {
-                matches!(
-                    d.kind,
-                    crate::error::DefectKind::CountMismatch { count: 99, .. }
-                )
-            })
+            .find(|d| matches!(d.kind, DefectKind::UnknownValue { value: 99, .. }))
             .unwrap();
+        // The kind names the tag itself.
+        assert_eq!(
+            defect.kind,
+            DefectKind::UnknownValue {
+                offset: u32::try_from(tag_offset).unwrap(),
+                value: 99,
+            }
+        );
         // The site is the optionalVals field of the header, and not the
         // records that the field points at.
         assert_eq!(defect.site.field, "optionalVals");
@@ -2320,6 +2318,28 @@ mod tests {
                     offset: 0x40E,
                     len: 2,
                     end: 0x40F,
+                },
+            }
+        );
+    }
+
+    /// A tag that is not one of the six gives the tag and its value, at the
+    /// first byte of the record.
+    #[test]
+    fn an_unknown_value_tag_gives_the_tag_and_its_value() {
+        // An integer, then a tag of 99.
+        let mut extra = [0_u8; 0x40];
+        extra[0x00..0x04].copy_from_slice(&8_u32.to_le_bytes());
+        extra[0x08..0x0A].copy_from_slice(&3_u16.to_le_bytes());
+        extra[0x0A..0x0E].copy_from_slice(&1_i32.to_le_bytes());
+        extra[0x0E..0x10].copy_from_slice(&99_u16.to_le_bytes());
+        assert_eq!(
+            optional_vals_defect(&extra, 0),
+            Defect {
+                site: OPTIONAL_VALS_SITE,
+                kind: DefectKind::UnknownValue {
+                    offset: 0x40E,
+                    value: 99,
                 },
             }
         );
