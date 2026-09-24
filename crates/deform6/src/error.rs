@@ -462,7 +462,8 @@ pub enum DefectKind {
     /// The reader does not guess what the value means. It does not read what
     /// the field describes, and nothing is invented in its place.
     /// `vb/functyp.rs` gives it for a value tag in `optionalVals` that is not
-    /// one of the six tags that the corpus holds.
+    /// one of the six tags that the corpus holds, and for a leading byte of a
+    /// type buffer that is neither `0x1E` nor `0x00`.
     #[error(
         "the field at offset {offset:#x} holds {value:#x}, which is not a value that the reader knows, and the reader does not read what the field describes"
     )]

@@ -566,9 +566,12 @@ struct RawEntry {
 /// The outcome of walking a type buffer.
 struct BufferWalk {
     entries: Vec<RawEntry>,
-    /// True when the leading byte was one of the two documented values and
-    /// the walk found exactly `argSize >> 2` entries within the step bound.
-    /// A partial walk is never accepted; see the module doc comment.
+    /// The leading byte, or `None` when the buffer holds no byte. The caller
+    /// checks its value.
+    lead: Option<u8>,
+    /// True when the buffer holds a leading byte and the walk found exactly
+    /// `argSize >> 2` entries within the step bound. A partial walk is never
+    /// accepted; see the module doc comment.
     closed: bool,
 }
 
@@ -593,9 +596,10 @@ fn align4_pad(off: Off) -> u32 {
 /// large mapped section looking for a padding byte that never arrives
 /// (T-02-15).
 ///
-/// The first byte is validated as `0x1E` (a member) or `0x00` (an event,
-/// not reached through `lpFuncTypeInfo` in this corpus) and skipped. Then
-/// exactly `argSize >> 2` entries are read. Zero bytes between entries are
+/// The first byte is the leading byte, and the walk skips it. The caller
+/// validates it as `0x1E` (a member) or `0x00` (an event, not reached
+/// through `lpFuncTypeInfo` in this corpus). Then exactly `argSize >> 2`
+/// entries are read. Zero bytes between entries are
 /// padding and are tolerated, per `STRUCTURES.md` section 6.6, and bounded
 /// by the same step count. When an entry's base code is `0x13`, `0x1C` or
 /// `0x1D`, a 32-bit value follows it, aligned up to a four-byte boundary
@@ -605,10 +609,9 @@ fn walk_type_buffer(buffer: &Region<'_>, arg_size: u8) -> BufferWalk {
 
     let mut cursor = Off::new(0);
     let mut steps: u32 = 0;
-    let mut leading_byte_valid = false;
 
-    if let Some(lead) = buffer.u8(cursor) {
-        leading_byte_valid = lead == 0x1E || lead == 0x00;
+    let lead = buffer.u8(cursor);
+    if lead.is_some() {
         cursor = cursor.checked_add(1).unwrap_or(cursor);
     }
 
@@ -661,8 +664,12 @@ fn walk_type_buffer(buffer: &Region<'_>, arg_size: u8) -> BufferWalk {
         });
     }
 
-    let closed = leading_byte_valid && entries.len() == wanted;
-    BufferWalk { entries, closed }
+    let closed = lead.is_some() && entries.len() == wanted;
+    BufferWalk {
+        entries,
+        lead,
+        closed,
+    }
 }
 
 /// Maps a type buffer entry's base code, plus its trailing pointer when it
@@ -1060,7 +1067,8 @@ fn cut_record<'a>(base: &Region<'a>) -> Option<(RawHeader, Region<'a>, Region<'a
 ///
 /// Returns the recovered prototype, when the record's layout validated, and
 /// every defect this record's own reading produced: a `constFFFF`
-/// mismatch, a type buffer that did not close, an unresolvable argument
+/// mismatch, a leading byte of the type buffer that is neither `0x1E` nor
+/// `0x00`, a type buffer that did not close, an unresolvable argument
 /// name, or an `optionalVals` walk that failed. More than one of these can
 /// occur on a single record, which is why this returns a `Vec` and not
 /// `Option<Defect>`: an argument-name failure and an `optionalVals` failure
@@ -1091,6 +1099,26 @@ fn read_one(
     }
 
     let walk = walk_type_buffer(buffer, raw.arg_size);
+    // The leading byte is `0x1E` for a member and `0x00` for an event, per
+    // `STRUCTURES.md` section 6.6.
+    if let Some(lead) = walk.lead
+        && lead != 0x1E
+        && lead != 0x00
+    {
+        let at = Off::new(0);
+        let offset = buffer.file_offset(at).map_or(self_offset, Off::get);
+        let site = Site {
+            offset,
+            rva: buffer.rva(at).map(Rva::get),
+            structure: "FuncTypDesc",
+            field: "leading byte",
+        };
+        let kind = DefectKind::UnknownValue {
+            offset,
+            value: u32::from(lead),
+        };
+        return (None, vec![Defect { site, kind }]);
+    }
     if !walk.closed {
         let offset = header
             .file_offset(Off::new(0x00))
@@ -2424,6 +2452,59 @@ mod tests {
                 },
             }]
         );
+    }
+
+    /// A leading byte that is neither `0x1E` nor `0x00` gives the byte and
+    /// its value, and the record gives no prototype. The walk does not also
+    /// give a count mismatch, because the buffer holds the entries that
+    /// `argSize` gives. A leading byte of `0x00`, an event, gives a
+    /// prototype.
+    #[test]
+    fn a_leading_byte_that_is_not_0x1e_or_0x00_gives_the_byte_and_its_value() {
+        let bytes = synthetic_image(&[0_u8; 0x40]);
+        let image = PeImage::parse(&bytes).unwrap();
+        let mut head = [0_u8; 0x20];
+        head[0x00] = 1 << 2;
+        head[0x04..0x06].copy_from_slice(&0xFFFF_u16.to_le_bytes());
+        let header = Region::mapped(&head, Off::new(0x400), Rva::new(0x1000));
+        let raw = read_raw_header(&header).unwrap();
+
+        // The leading byte, then one entry.
+        let body = [0x55_u8, 0x03];
+        let buffer = Region::mapped(&body, Off::new(0x420), Rva::new(0x1020));
+        let (prototype, defects) = read_one(&image, &raw, &header, &buffer);
+        assert!(prototype.is_none());
+        assert_eq!(
+            defects,
+            [Defect {
+                site: Site {
+                    offset: 0x420,
+                    rva: Some(0x1020),
+                    structure: "FuncTypDesc",
+                    field: "leading byte",
+                },
+                kind: DefectKind::UnknownValue {
+                    offset: 0x420,
+                    value: 0x55,
+                },
+            }]
+        );
+
+        let body = [0x00_u8, 0x03];
+        let buffer = Region::mapped(&body, Off::new(0x420), Rva::new(0x1020));
+        let (prototype, defects) = read_one(&image, &raw, &header, &buffer);
+        assert!(defects.is_empty(), "{defects:?}");
+        assert_eq!(prototype.unwrap().arguments.len(), 1);
+    }
+
+    /// A type buffer that holds no byte has no leading byte, and it never
+    /// closes, not even when `argSize` gives no entry.
+    #[test]
+    fn a_type_buffer_with_no_leading_byte_never_closes() {
+        let region = Region::new(&[], Off::new(0));
+        let walk = walk_type_buffer(&region, 0);
+        assert_eq!(walk.lead, None);
+        assert!(!walk.closed);
     }
 
     /// `read_raw_header` and `walk_type_buffer` are reachable from the test
