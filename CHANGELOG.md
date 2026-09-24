@@ -192,11 +192,11 @@ is therefore 2.0.0, not 1.1.0.
   size of the table in bytes left a `u32`, and the loop still stopped at the
   end of the table's region. A strict run can now refuse such a file even
   when no entry gives a defect.
-- `DefectKind` has seven new variants, `ModuleMarkerMismatch`,
+- `DefectKind` has nine new variants, `ModuleMarkerMismatch`,
   `UnknownStubShape`, `ItemCutShort`, `RunsPastEnd`, `UnexpectedConstant`,
-  `NotAnIdentifier` and `JumpOutOfRange`, and `schema/report.schema.json`
-  accepts all seven. A `match` on `DefectKind` with no wildcard arm does not
-  compile until it names them.
+  `NotAnIdentifier`, `JumpOutOfRange`, `UnknownValue` and `ItemTypeUnknown`,
+  and `schema/report.schema.json` accepts all nine. A `match` on
+  `DefectKind` with no wildcard arm does not compile until it names them.
 - An event stub without the native opcodes now gives `UnknownStubShape` at
   the stub. 1.0.0 gave `UnreadablePointer` at the slot when the jump left
   the address space, and otherwise a wrong handler address with no defect.
@@ -218,6 +218,35 @@ is therefore 2.0.0, not 1.1.0.
   of `lpFuncTypeInfo` that held its address, where 1.0.0 named the first
   byte of the record as `argSize`. A jump that leaves the address space
   names the `rel32` field of the stub, where 1.0.0 named the slot.
+- Six defects gave a kind about a count for a value that is not a count.
+  Each one now gives a kind that says what the file holds:
+  - A property payload that runs past the end of its control block gives
+    `RunsPastEnd`, with the bytes that the read needs. For a fixed payload
+    and for a string, the site is now the first byte of the payload, where
+    1.0.0 gave the opcode. 1.0.0 gave `ImplausibleCount`.
+  - A blob length field whose four bytes run past the end of the control
+    block gives `RunsPastEnd`. 1.0.0 gave `ImplausibleCount` with a count
+    of 4.
+  - A value record of `optionalVals` whose padding runs past the end that
+    `cbValues` gives now gives `RunsPastEnd`, with all the bytes of the
+    record. 1.0.0 gave `CountMismatch` between the cursor and `cbValues`.
+  - A value tag of `optionalVals` that is not one of the six tags gives the
+    new kind `UnknownValue`, at the tag. 1.0.0 gave `CountMismatch` between
+    the tag and 0, at `optionalVals`.
+  - A leading byte of a type buffer that is neither `0x1E` nor `0x00` gives
+    `UnknownValue` at the byte. 1.0.0 gave `CountMismatch` at `argSize`,
+    although the two counts could agree.
+  - An `optionalVals` block that holds more value records than the reader
+    reads gives `StructureUnreadable` at the block. 1.0.0 gave
+    `CountMismatch` between the cursor and `cbValues`.
+- These six defects were `Recoverable` and are now `Tolerated`, so a strict
+  run no longer refuses a file for them. The reader loses the same item as
+  before, and invents nothing in its place.
+- A `Declare` entry whose `dwEntryType` is neither 6 nor 7 gives the new
+  kind `ItemTypeUnknown`, with the offset of the type and its value. 1.0.0
+  gave `CountMismatch` between the type and 7. The kind is `Recoverable`, as
+  the other kinds for a skipped `Declare` entry are, so a strict run refuses
+  such a file as before.
 - `vb::classify::agree` now treats an `lpPrivateObject` of `0` as no private
   object, as `PrivateObj::read` already did. It now gives `false` for a form
   whose pointer is `0`, and `true` for a module whose pointer is `0`. The new
