@@ -141,12 +141,16 @@ is therefore 2.0.0, not 1.1.0.
   longer refuses a file for these two defects.
 - A component entry that gives no component now gives a defect that names
   the failure. An entry shorter than its `0x34` bytes of fixed fields gives
-  `CountMismatch` at `StructLength`. A string with no NUL gives
+  the new kind `ItemLengthTooSmall` at `StructLength`, with the length and
+  the 52 bytes that the fixed fields need. A string with no NUL gives
   `NoNulTerminator` at the offset field that names it, which is
   `FileNameOffset`, `SourceOffset` or `NameOffset`. 1.0.0 gave
   `NoNulTerminator` at the first byte of the entry, named `NameOffset`, for
   each of these. Both kinds are `Recoverable`, so a strict run refuses these
   files as before.
+- A `StructLength` of 0 also gives `ItemLengthTooSmall`, and the walk still
+  stops there. 1.0.0 gave `CountMismatch` between 0 and 1, and neither
+  number is a count in the file. The kind is `Recoverable`, as before.
 - `GuidLengthUnexpected` now gives the offset of the `GUIDlength` field, at
   `+ 0x20` of the component entry, in the site and in the kind. 1.0.0 gave
   the first byte of the entry, which is `StructLength`, although the site
@@ -192,11 +196,12 @@ is therefore 2.0.0, not 1.1.0.
   size of the table in bytes left a `u32`, and the loop still stopped at the
   end of the table's region. A strict run can now refuse such a file even
   when no entry gives a defect.
-- `DefectKind` has nine new variants, `ModuleMarkerMismatch`,
+- `DefectKind` has ten new variants, `ModuleMarkerMismatch`,
   `UnknownStubShape`, `ItemCutShort`, `RunsPastEnd`, `UnexpectedConstant`,
-  `NotAnIdentifier`, `JumpOutOfRange`, `UnknownValue` and `ItemTypeUnknown`,
-  and `schema/report.schema.json` accepts all nine. A `match` on
-  `DefectKind` with no wildcard arm does not compile until it names them.
+  `NotAnIdentifier`, `JumpOutOfRange`, `UnknownValue`, `ItemTypeUnknown`
+  and `ItemLengthTooSmall`, and `schema/report.schema.json` accepts all ten.
+  A `match` on `DefectKind` with no wildcard arm does not compile until it
+  names them.
 - An event stub without the native opcodes now gives `UnknownStubShape` at
   the stub. 1.0.0 gave `UnreadablePointer` at the slot when the jump left
   the address space, and otherwise a wrong handler address with no defect.
