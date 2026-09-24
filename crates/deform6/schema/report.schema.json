@@ -544,6 +544,23 @@
               }
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ItemLengthTooSmall"],
+          "properties": {
+            "ItemLengthTooSmall": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "len", "min"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "len": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "min": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              }
+            }
+          }
         }
       ]
     }

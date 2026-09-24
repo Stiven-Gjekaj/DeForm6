@@ -108,8 +108,7 @@ fn a_patched_external_count_refuses_in_strict_and_names_the_offset() {
         "the refusal must name the byte offset 0x1da4: {message}"
     );
     assert!(
-        message.contains("count 6 at offset 0x1da4")
-            && message.contains("the fixed part of an ExternalComponentEntry"),
+        message.contains("the length 6 at offset 0x1da4 is less than the 52 bytes"),
         "the refusal must name what the parser expected there: {message}"
     );
 }

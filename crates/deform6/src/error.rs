@@ -494,6 +494,26 @@ pub enum DefectKind {
         /// The value that the type field holds.
         value: u32,
     },
+
+    /// One item's own length field gives fewer bytes than the fixed fields of
+    /// the item need, and the item is skipped.
+    ///
+    /// `vb/project.rs::ComponentTable::read` gives it for a component entry
+    /// whose `StructLength` is less than the `0x34` bytes of its fixed
+    /// fields. A length of 0 also stops the walk, because the next entry
+    /// would start at the same byte. The entries after it are then absent
+    /// too.
+    #[error(
+        "the length {len} at offset {offset:#x} is less than the {min} bytes that the item needs, and the item is skipped"
+    )]
+    ItemLengthTooSmall {
+        /// The absolute file offset of the length field.
+        offset: u32,
+        /// The length that the field gives.
+        len: u32,
+        /// The number of bytes that the fixed fields of the item need.
+        min: u32,
+    },
 }
 
 /// How bad a defect is.
@@ -616,6 +636,9 @@ impl DefectKind {
             // The item is absent, as it is for an address in no section, and
             // strict mode refuses rather than assume the item away.
             Self::ItemTypeUnknown { .. } => Severity::Recoverable,
+            // The item is absent, as it is for an address in no section, and
+            // strict mode refuses rather than assume the item away.
+            Self::ItemLengthTooSmall { .. } => Severity::Recoverable,
         }
     }
 }
@@ -948,6 +971,14 @@ mod tests {
                 },
                 0xf3,
             ),
+            (
+                DefectKind::ItemLengthTooSmall {
+                    offset: 0xf4,
+                    len: 4,
+                    min: 0x34,
+                },
+                0xf4,
+            ),
         ]
     }
 
@@ -1098,6 +1129,21 @@ mod tests {
     }
 
     #[test]
+    fn an_item_length_too_small_message_names_the_length_and_the_bytes_needed() {
+        let kind = DefectKind::ItemLengthTooSmall {
+            offset: 0x400,
+            len: 4,
+            min: 0x34,
+        };
+        let message = format!("{kind}");
+        assert!(
+            message.contains("the length 4 at offset 0x400 is less than the 52 bytes"),
+            "{message}"
+        );
+        assert!(message.contains("the item is skipped"), "{message}");
+    }
+
+    #[test]
     fn a_bad_magic_message_names_what_it_expected_there() {
         let kind = DefectKind::BadMagic {
             offset: 0x1760,
@@ -1163,6 +1209,11 @@ mod tests {
             DefectKind::ItemTypeUnknown {
                 offset: 0,
                 value: 0,
+            },
+            DefectKind::ItemLengthTooSmall {
+                offset: 0,
+                len: 0,
+                min: 0,
             },
         ];
         for kind in recoverable {

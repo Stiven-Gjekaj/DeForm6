@@ -702,3 +702,56 @@ fn a_report_that_carries_an_item_type_unknown_defect_validates() {
         );
     }
 }
+
+/// A report that carries a `ItemLengthTooSmall` defect validates, and the schema refuses
+/// the same defect when one of its fields is missing.
+///
+/// No corpus program raises this kind, for the reason the tests above give
+/// for their own kinds.
+#[test]
+fn a_report_that_carries_an_item_length_too_small_defect_validates() {
+    let validator = compiled_schema();
+    let exe = corpus_root().join("vb6-code/Fire-effect/Fast_Flames.exe");
+    let mut value = report_value_for(&exe);
+    let defect = Defect {
+        site: Site {
+            offset: 0x400,
+            rva: Some(0x1000),
+            structure: "ExternalComponentEntry",
+            field: "StructLength",
+        },
+        kind: DefectKind::ItemLengthTooSmall {
+            offset: 0x400,
+            len: 4,
+            min: 0x34,
+        },
+    };
+    let serialized = serde_json::to_value(&defect).expect("a defect serializes");
+    let at = value["defects"]
+        .as_array()
+        .expect("defects must be an array")
+        .len();
+    value["defects"]
+        .as_array_mut()
+        .expect("defects must be an array")
+        .push(serialized);
+
+    let errors = describe_errors(&validator, &value);
+    assert!(
+        errors.is_empty(),
+        "a report with a ItemLengthTooSmall defect failed schema validation:\n{}",
+        errors.join("\n")
+    );
+
+    for field in ["offset", "len", "min"] {
+        let mut missing = value.clone();
+        missing["defects"][at]["kind"]["ItemLengthTooSmall"]
+            .as_object_mut()
+            .expect("the kind must be an object")
+            .remove(field);
+        assert!(
+            !validator.is_valid(&missing),
+            "a defect with no {field} must be refused"
+        );
+    }
+}

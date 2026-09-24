@@ -1136,8 +1136,10 @@ impl ComponentTable {
             };
 
             if struct_len == 0 {
-                // A zero length would leave the cursor standing still for
-                // the rest of the count. Stop rather than loop.
+                // A zero length is shorter than the fixed fields, as a short
+                // entry is. It would also leave the cursor standing still
+                // for the rest of the count, so the walk stops rather than
+                // loop.
                 defects.push(Defect {
                     site: Site {
                         offset: entry_offset.get(),
@@ -1145,12 +1147,10 @@ impl ComponentTable {
                         structure: "ExternalComponentEntry",
                         field: "StructLength",
                     },
-                    kind: DefectKind::CountMismatch {
+                    kind: DefectKind::ItemLengthTooSmall {
                         offset: entry_offset.get(),
-                        count: 0,
-                        expected: 1,
-                        other_field: "StructLength, which must be at least 1 byte for the \
-                                      cursor to advance",
+                        len: 0,
+                        min: COMPONENT_FIXED_LEN,
                     },
                 });
                 break;
@@ -1280,11 +1280,11 @@ impl EntryFailure {
         match self {
             Self::Short => {
                 let site = site(Off::new(0), "StructLength");
-                let kind = DefectKind::CountMismatch {
+                // The entry spans exactly `StructLength` bytes.
+                let kind = DefectKind::ItemLengthTooSmall {
                     offset: site.offset,
-                    count: entry.len(),
-                    expected: COMPONENT_FIXED_LEN,
-                    other_field: "the fixed part of an ExternalComponentEntry",
+                    len: entry.len(),
+                    min: COMPONENT_FIXED_LEN,
                 };
                 Defect { site, kind }
             }
@@ -3174,10 +3174,14 @@ mod tests {
         assert_eq!(table.defects().len(), 1);
         let defect = &table.defects()[0];
         assert_eq!(defect.kind.severity(), Severity::Recoverable);
-        assert!(matches!(
+        assert_eq!(
             defect.kind,
-            DefectKind::CountMismatch { count: 0, .. }
-        ));
+            DefectKind::ItemLengthTooSmall {
+                offset: 0x400,
+                len: 0,
+                min: 0x34,
+            }
+        );
         assert_eq!(
             defect.site,
             Site {
@@ -3251,11 +3255,10 @@ mod tests {
                         structure: "ExternalComponentEntry",
                         field: "StructLength",
                     },
-                    kind: DefectKind::CountMismatch {
+                    kind: DefectKind::ItemLengthTooSmall {
                         offset: 0x400,
-                        count: short,
-                        expected: 0x34,
-                        other_field: "the fixed part of an ExternalComponentEntry",
+                        len: short,
+                        min: 0x34,
                     },
                 }],
                 "{short:#x}"
