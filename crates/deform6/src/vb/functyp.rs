@@ -901,7 +901,8 @@ const MAX_OPTIONAL_VALS_STEPS: u32 = 4096;
 /// [`DefectKind::UnreadablePointer`]. A block that its section ends inside
 /// gives [`DefectKind::RunsPastEnd`], with the bytes of the block that the
 /// reader needs. A record that runs past the end that `cbValues` gives also
-/// gives [`DefectKind::RunsPastEnd`], with the bytes of that record.
+/// gives [`DefectKind::RunsPastEnd`], with the bytes of that record. The
+/// padding after the value of a record is part of the record.
 fn walk_optional_vals(
     pe: &PeImage<'_>,
     field_offset: u32,
@@ -964,7 +965,7 @@ fn walk_optional_vals(
         if cursor.get() == values.len() {
             return (OptionalValsWalk::Resolved(records), None);
         }
-        if cursor.get() > values.len() || steps >= MAX_OPTIONAL_VALS_STEPS {
+        if steps >= MAX_OPTIONAL_VALS_STEPS {
             let defect = Defect {
                 site,
                 kind: DefectKind::CountMismatch {
@@ -980,7 +981,6 @@ fn walk_optional_vals(
 
         match read_value_record(&values, cursor) {
             Ok((value, width)) => {
-                records.push(value);
                 let Some(next) = cursor.checked_add(width) else {
                     let defect = Defect {
                         site,
@@ -991,6 +991,13 @@ fn walk_optional_vals(
                     };
                     return (OptionalValsWalk::Unrecoverable, Some(defect));
                 };
+                // The value is inside the records, and its padding runs
+                // past the end that `cbValues` gives.
+                if next.get() > values.len() {
+                    let defect = past_values_end(site, &values, cursor, width);
+                    return (OptionalValsWalk::Unrecoverable, Some(defect));
+                }
+                records.push(value);
                 cursor = next;
             }
             Err(ValueRecordError::UnknownTag(tag)) => {
@@ -1014,19 +1021,25 @@ fn walk_optional_vals(
             }
             Err(ValueRecordError::Truncated { needed }) => {
                 // The record runs past the end that `cbValues` gives.
-                let defect = Defect {
-                    site,
-                    kind: DefectKind::RunsPastEnd {
-                        offset: values.file_offset(cursor).map_or(0, Off::get),
-                        len: needed,
-                        end: values
-                            .file_offset(Off::new(values.len()))
-                            .map_or(0, Off::get),
-                    },
-                };
+                let defect = past_values_end(site, &values, cursor, needed);
                 return (OptionalValsWalk::Unrecoverable, Some(defect));
             }
         }
+    }
+}
+
+/// Builds the [`Defect`] for the `len` bytes of a value record at `at` that
+/// run past the end of `values`, the records that `cbValues` gives.
+fn past_values_end(site: Site, values: &Region<'_>, at: Off, len: u32) -> Defect {
+    Defect {
+        site,
+        kind: DefectKind::RunsPastEnd {
+            offset: values.file_offset(at).map_or(0, Off::get),
+            len,
+            end: values
+                .file_offset(Off::new(values.len()))
+                .map_or(0, Off::get),
+        },
     }
 }
 
@@ -2307,6 +2320,50 @@ mod tests {
                     offset: 0x40E,
                     len: 2,
                     end: 0x40F,
+                },
+            }
+        );
+    }
+
+    /// The padding after the value of a record is part of the record. When
+    /// `cbValues` ends the records inside that padding, the record gives all
+    /// of its bytes, with the padding, and the offset where `cbValues` ends
+    /// the records.
+    #[test]
+    fn a_record_whose_padding_passes_the_end_that_cb_values_gives_names_the_record_bytes() {
+        // A byte is its tag, its value and one byte of padding: 4 bytes.
+        // `cbValues` gives 3, so the value is inside and the padding is not.
+        let mut extra = [0_u8; 0x40];
+        extra[0x00..0x04].copy_from_slice(&3_u32.to_le_bytes());
+        extra[0x08..0x0A].copy_from_slice(&17_u16.to_le_bytes());
+        extra[0x0A] = 0x7F;
+        assert_eq!(
+            optional_vals_defect(&extra, 0),
+            Defect {
+                site: OPTIONAL_VALS_SITE,
+                kind: DefectKind::RunsPastEnd {
+                    offset: 0x408,
+                    len: 4,
+                    end: 0x40B,
+                },
+            }
+        );
+
+        // A text of 1 byte is its tag, its length, its text and one byte of
+        // padding: 6 bytes. `cbValues` gives 5.
+        let mut extra = [0_u8; 0x40];
+        extra[0x00..0x04].copy_from_slice(&5_u32.to_le_bytes());
+        extra[0x08..0x0A].copy_from_slice(&8_u16.to_le_bytes());
+        extra[0x0A..0x0C].copy_from_slice(&1_u16.to_le_bytes());
+        extra[0x0C] = b'A';
+        assert_eq!(
+            optional_vals_defect(&extra, 0),
+            Defect {
+                site: OPTIONAL_VALS_SITE,
+                kind: DefectKind::RunsPastEnd {
+                    offset: 0x408,
+                    len: 6,
+                    end: 0x40D,
                 },
             }
         );
