@@ -308,13 +308,17 @@ pub enum DefectKind {
         /// The declared length that was too small.
         blob_len: u32,
     },
-    /// Plan 03-10: one structure the composed `inspect` walk needed could
-    /// not be read, converted from a [`Refusal`] into a per-item defect so
-    /// the walk that reached it can continue over the rest of the report.
-    /// Used for a form's own `GuiObjectInfo`, its property stream, its
+
+    /// One structure could not be read, and the walk that reached it
+    /// continues over the rest of the report. The reason says why.
+    ///
+    /// Plan 03-10: the composed `inspect` walk converts a [`Refusal`] into
+    /// this defect for a form's own `GuiObjectInfo`, its property stream, its
     /// control tree, its `ControlInfoTable`, or one control's own event
-    /// table: any of these refusing costs the one form or the one control,
-    /// never the whole file.
+    /// table. Any of these refusing costs the one form or the one control,
+    /// never the whole file. `vb/functyp.rs` gives it for an `optionalVals`
+    /// block that holds more value records than the reader reads, and the
+    /// prototype then keeps no default.
     #[error("the structure at offset {offset:#x} could not be read: {reason}")]
     StructureUnreadable {
         /// The absolute file offset the structure was read from, when one

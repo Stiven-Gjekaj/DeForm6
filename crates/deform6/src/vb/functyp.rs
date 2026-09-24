@@ -911,7 +911,9 @@ const MAX_OPTIONAL_VALS_STEPS: u32 = 4096;
 /// gives [`DefectKind::RunsPastEnd`], with the bytes of that record. The
 /// padding after the value of a record is part of the record. A tag that is
 /// not one of the six gives [`DefectKind::UnknownValue`], with the offset of
-/// the tag.
+/// the tag. A block that holds more value records than
+/// [`MAX_OPTIONAL_VALS_STEPS`] gives [`DefectKind::StructureUnreadable`],
+/// with the offset of the block.
 fn walk_optional_vals(
     pe: &PeImage<'_>,
     field_offset: u32,
@@ -975,13 +977,14 @@ fn walk_optional_vals(
             return (OptionalValsWalk::Resolved(records), None);
         }
         if steps >= MAX_OPTIONAL_VALS_STEPS {
+            // The records do not end within the step limit.
             let defect = Defect {
                 site,
-                kind: DefectKind::CountMismatch {
-                    offset: field_offset,
-                    count: cursor.get(),
-                    expected: cb_values,
-                    other_field: "cbValues",
+                kind: DefectKind::StructureUnreadable {
+                    offset: region.file_offset(Off::new(0)).map_or(0, Off::get),
+                    reason: format!(
+                        "optionalVals holds more than the {MAX_OPTIONAL_VALS_STEPS} value records that the reader reads"
+                    ),
                 },
             };
             return (OptionalValsWalk::Unrecoverable, Some(defect));
@@ -1251,9 +1254,9 @@ fn read_one(
 )]
 mod tests {
     use super::{
-        ARG_NAME_MAX, Argument, DefaultValue, FuncTypeWalk, OptionalDefaultsOutcome,
-        OptionalValsWalk, ProcedureSignature, PropertyKind, Prototype, PrototypeList, VbType,
-        read_one, read_raw_header, walk_optional_vals, walk_type_buffer,
+        ARG_NAME_MAX, Argument, DefaultValue, FuncTypeWalk, MAX_OPTIONAL_VALS_STEPS,
+        OptionalDefaultsOutcome, OptionalValsWalk, ProcedureSignature, PropertyKind, Prototype,
+        PrototypeList, VbType, read_one, read_raw_header, walk_optional_vals, walk_type_buffer,
     };
     use crate::error::{Defect, DefectKind, Severity, Site};
     use crate::read::pe::PeImage;
@@ -2368,6 +2371,42 @@ mod tests {
                 kind: DefectKind::UnknownValue {
                     offset: 0x40E,
                     value: 99,
+                },
+            }
+        );
+    }
+
+    /// A block that holds more value records than the step limit allows is a
+    /// structure that the reader could not read. A block that holds as many
+    /// records as the limit allows resolves.
+    #[test]
+    fn an_optional_vals_block_past_the_step_limit_is_a_structure_the_reader_could_not_read() {
+        // An empty record is its tag of 0: 2 bytes.
+        let limit = MAX_OPTIONAL_VALS_STEPS;
+        let at_limit = limit * 2;
+        let mut extra = vec![0_u8; usize::try_from(8 + at_limit + 2).unwrap()];
+        extra[0x00..0x04].copy_from_slice(&at_limit.to_le_bytes());
+        let bytes = synthetic_image(&extra);
+        let image = PeImage::parse(&bytes).unwrap();
+        let (outcome, defect) =
+            walk_optional_vals(&image, 0x777, Some(0x1777), Va::new(0x0040_1000));
+        assert_eq!(defect, None);
+        let OptionalValsWalk::Resolved(records) = outcome else {
+            panic!("a block of {limit} records must resolve");
+        };
+        assert_eq!(records.len(), usize::try_from(limit).unwrap());
+
+        // One record more.
+        extra[0x00..0x04].copy_from_slice(&(at_limit + 2).to_le_bytes());
+        assert_eq!(
+            optional_vals_defect(&extra, 0),
+            Defect {
+                site: OPTIONAL_VALS_SITE,
+                kind: DefectKind::StructureUnreadable {
+                    offset: 0x400,
+                    reason: "optionalVals holds more than the 4096 value records that the reader \
+                             reads"
+                        .to_owned(),
                 },
             }
         );
