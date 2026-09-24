@@ -112,6 +112,7 @@ const fn kind_name(kind: &DefectKind) -> &'static str {
         DefectKind::NotAnIdentifier { .. } => "NotAnIdentifier",
         DefectKind::JumpOutOfRange { .. } => "JumpOutOfRange",
         DefectKind::UnknownValue { .. } => "UnknownValue",
+        DefectKind::ItemTypeUnknown { .. } => "ItemTypeUnknown",
     }
 }
 

@@ -764,12 +764,9 @@ impl DeclareTable {
                         structure: "DeclareTableEntry",
                         field: "dwEntryType",
                     },
-                    kind: DefectKind::CountMismatch {
+                    kind: DefectKind::ItemTypeUnknown {
                         offset: entry_offset,
-                        count: other,
-                        expected: 7,
-                        other_field: "dwEntryType, which this table defines only as 6 \
-                                      (internal) or 7 (external)",
+                        value: other,
                     },
                 }),
             }
@@ -2001,18 +1998,15 @@ mod tests {
         assert_eq!(table.defects().len(), 1);
         let defect = &table.defects()[0];
         assert_eq!(defect.kind.severity(), Severity::Recoverable);
-        assert!(matches!(
-            defect.kind,
-            DefectKind::CountMismatch {
-                count: 99,
-                expected: 7,
-                ..
-            }
-        ));
+        let type_at = u32::try_from(declare_entry_field_offset(MANDELBROT, 0, 0x00)).unwrap();
         assert_eq!(
-            defect.site.offset,
-            u32::try_from(declare_entry_field_offset(MANDELBROT, 0, 0x00)).unwrap()
+            defect.kind,
+            DefectKind::ItemTypeUnknown {
+                offset: type_at,
+                value: 99,
+            }
         );
+        assert_eq!(defect.site.offset, type_at);
         assert_eq!(
             defect.site.rva,
             Some(declare_entry_field_rva(MANDELBROT, 0, 0x00))
@@ -2512,6 +2506,13 @@ mod tests {
                 rva: Some(0x1000),
                 structure: "DeclareTableEntry",
                 field: "dwEntryType",
+            }
+        );
+        assert_eq!(
+            table.defects()[0].kind,
+            DefectKind::ItemTypeUnknown {
+                offset: 0x400,
+                value: 99,
             }
         );
 

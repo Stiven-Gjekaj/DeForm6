@@ -528,6 +528,22 @@
               }
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ItemTypeUnknown"],
+          "properties": {
+            "ItemTypeUnknown": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["offset", "value"],
+              "properties": {
+                "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "value": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+              }
+            }
+          }
         }
       ]
     }

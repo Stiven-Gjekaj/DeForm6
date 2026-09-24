@@ -477,6 +477,23 @@ pub enum DefectKind {
         /// The value that the field holds.
         value: u32,
     },
+
+    /// One item's own type field holds a value that no source describes, and
+    /// the item is skipped.
+    ///
+    /// `vb/project.rs::DeclareTable::read` gives it for a `Declare` entry
+    /// whose `dwEntryType` is neither 6 (internal) nor 7 (external). The
+    /// reader does not guess what the entry names, and it keeps walking the
+    /// rest of the table.
+    #[error(
+        "the type {value} at offset {offset:#x} is not a type that the reader knows, and the item is skipped"
+    )]
+    ItemTypeUnknown {
+        /// The absolute file offset of the type field.
+        offset: u32,
+        /// The value that the type field holds.
+        value: u32,
+    },
 }
 
 /// How bad a defect is.
@@ -596,6 +613,9 @@ impl DefectKind {
             // The reader does not read what the field describes, and nothing
             // is invented in its place.
             Self::UnknownValue { .. } => Severity::Tolerated,
+            // The item is absent, as it is for an address in no section, and
+            // strict mode refuses rather than assume the item away.
+            Self::ItemTypeUnknown { .. } => Severity::Recoverable,
         }
     }
 }
@@ -921,6 +941,13 @@ mod tests {
                 },
                 0xf2,
             ),
+            (
+                DefectKind::ItemTypeUnknown {
+                    offset: 0xf3,
+                    value: 99,
+                },
+                0xf3,
+            ),
         ]
     }
 
@@ -1060,6 +1087,17 @@ mod tests {
     }
 
     #[test]
+    fn an_item_type_unknown_message_names_the_type_and_its_offset() {
+        let kind = DefectKind::ItemTypeUnknown {
+            offset: 0x400,
+            value: 99,
+        };
+        let message = format!("{kind}");
+        assert!(message.contains("the type 99 at offset 0x400"), "{message}");
+        assert!(message.contains("the item is skipped"), "{message}");
+    }
+
+    #[test]
     fn a_bad_magic_message_names_what_it_expected_there() {
         let kind = DefectKind::BadMagic {
             offset: 0x1760,
@@ -1121,6 +1159,10 @@ mod tests {
                 offset: 0,
                 va: 0,
                 len: 0,
+            },
+            DefectKind::ItemTypeUnknown {
+                offset: 0,
+                value: 0,
             },
         ];
         for kind in recoverable {
