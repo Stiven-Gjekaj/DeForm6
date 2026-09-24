@@ -65,10 +65,11 @@ is therefore 2.0.0, not 1.1.0.
 - New public fields: `VbHeader::file_offset`, `VbHeader::rva`,
   `ProjectInfo::file_offset`, `ProjectInfo::rva`,
   `ControlInfo::file_offset`, `ControlInfo::rva`, `ControlInfo::lpsz_name`,
-  `Object::lpsz_object_name`, `GuiTableEntry::l_struct_size` and
-  `StubHandler::imm32`. Code that builds one of these structures with a
-  struct expression does not compile. Code that names every field of one in
-  a pattern does not compile. `imm32` does not go into the JSON report.
+  `Object::file_offset`, `Object::rva`, `Object::lpsz_object_name`,
+  `GuiTableEntry::l_struct_size` and `StubHandler::imm32`. Code that builds
+  one of these structures with a struct expression does not compile. Code
+  that names every field of one in a pattern does not compile. `imm32` does
+  not go into the JSON report.
 - These six structures and the new `OptionalObjectInfo` are now
   `#[non_exhaustive]`. Outside this crate, do not build them with a struct
   expression, and put `..` in each pattern that names their fields. Then a
@@ -112,8 +113,7 @@ is therefore 2.0.0, not 1.1.0.
   stream gave `null` in `Site::rva`, and they now give the address of their
   byte too. `Site::rva` is `null` only when the byte is in no section, as
   for a section overlap, or when the reader does not know where the byte
-  is: for `lpObjectInfo`, and for a structure that a form cannot read and
-  whose offset is 0.
+  is, as for a structure that a form cannot read and whose offset is 0.
 - Each `NoNulTerminator` defect now gives the file offset where the text
   starts, and the number of bytes that the search read, as the kind
   documents. For the names of objects, controls, procedures and arguments,
@@ -123,6 +123,10 @@ is therefore 2.0.0, not 1.1.0.
 - A defect about `ObjectInfo.lpPrivateObject`, when the reader cannot read
   the private object, now gives `ObjectInfo + 0x0C` in the site and in the
   kind, as the defect of the module marker check does. 1.0.0 gave offset 0.
+- A defect about `Object.lpObjectInfo`, when the reader cannot read the
+  `ObjectInfo`, now gives the first byte of the `Object` element, which
+  holds `lpObjectInfo`, in the site and in the kind. `Site::rva` gives the
+  address of that byte. 1.0.0 gave offset 0.
 - A section overlap now gives the offset of the `VirtualAddress` field of
   the second section header, 12 bytes into the header, in the site and in
   the kind. 1.0.0 gave the first byte of the header, although the site named
@@ -143,6 +147,31 @@ is therefore 2.0.0, not 1.1.0.
   `NoNulTerminator` at the first byte of the entry, named `NameOffset`, for
   each of these. Both kinds are `Recoverable`, so a strict run refuses these
   files as before.
+- `GuidLengthUnexpected` now gives the offset of the `GUIDlength` field, at
+  `+ 0x20` of the component entry, in the site and in the kind. 1.0.0 gave
+  the first byte of the entry, which is `StructLength`, although the site
+  named `GUIDlength`.
+- The three defects of the control header now give the field that each one
+  is about, in the site and in the kind. `IndexHighByteSet` gives the
+  two-byte index at `+ 0x05` of the control block. `EmptyName`, and
+  `ImplausibleCount` for a name that runs past the block, give the two-byte
+  length of the name. That length is at `+ 0x07` in an element of a control
+  array, and at `+ 0x05` in another block. 1.0.0 gave the first byte of the
+  control block for all three.
+- A string whose declared length runs past its window gives
+  `ImplausibleCount`. Its `max` is now the largest length that the window
+  allows: the bytes from the length field to the end of the window, less 2
+  for the length field and 1 for the trailing NUL. 1.0.0 gave the bytes from
+  the length field to the end of the window.
+- A type buffer that does not close gives `CountMismatch` at `argSize`. Its
+  `count` is now the count that `argSize` gives, as `CountMismatch`
+  documents, and `expected` is the number of entries that the type buffer
+  holds. `other_field` is now `the type buffer`. 1.0.0 gave the two counts
+  in the other order, and gave `argSize` as the other field.
+- The evidence of an `Object=` line in the JSON report now has a note that
+  its offset is of the sixteen bytes that `oUuid` names, and not of the
+  field. The caveat on a joined CLSID says the same. The offset does not
+  change.
 - New public methods that break no caller: `Region::rva` gives the address
   of a byte in a window that `PeImage::region_at` built, and
   `Region::cstr_span` gives the number of bytes that `Region::cstr`
