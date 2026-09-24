@@ -124,40 +124,27 @@ pub fn extract_blob(block: &Region<'_>, at: Off) -> (Option<Blob>, u32, Option<D
     let rva = block.rva(at).map(Rva::get);
     let block_end = block.len();
 
+    // The four bytes of the length field run past the end of the block.
+    let length_past_end = || Defect {
+        site: site(offset, rva),
+        kind: DefectKind::RunsPastEnd {
+            offset,
+            len: 4,
+            end: block.file_offset(Off::new(block_end)).map_or(0, Off::get),
+        },
+    };
+
     // Bound the length field's own four bytes before reading them. A
     // crafted `at` near the block's own end must not read past it.
     let Some(after_len) = ends_within(at.get(), 4, block_end) else {
-        let kind = DefectKind::ImplausibleCount {
-            offset,
-            count: 4,
-            max: block_end.saturating_sub(at.get()),
-        };
-        return (
-            None,
-            0,
-            Some(Defect {
-                site: site(offset, rva),
-                kind,
-            }),
-        );
+        return (None, 0, Some(length_past_end()));
     };
 
     // `ends_within` above already proved these four bytes sit inside
     // `block`, so this read cannot fail against a well-formed `Region`.
+    // The read checks the same bound, so it gives the same defect.
     let Some(blob_len) = block.u32_le(at) else {
-        let kind = DefectKind::ImplausibleCount {
-            offset,
-            count: 4,
-            max: 0,
-        };
-        return (
-            None,
-            0,
-            Some(Defect {
-                site: site(offset, rva),
-                kind,
-            }),
-        );
+        return (None, 0, Some(length_past_end()));
     };
 
     if blob_len == ABSENT_LEN {
@@ -538,6 +525,28 @@ mod tests {
             assert!(blob.is_none(), "{tail:?}");
             assert_eq!(defect.unwrap().site, length_field, "{tail:?}");
         }
+    }
+
+    /// A length field with only two of its four bytes in the block gives the
+    /// four bytes past the end of the block, and consumes nothing.
+    #[test]
+    fn a_length_field_that_runs_past_the_block_gives_its_four_bytes_past_the_end() {
+        let mut bytes = vec![0xEE; 5];
+        bytes.extend_from_slice(&[8, 0]);
+        let region = Region::new(&bytes, Off::new(0x9000));
+        let (blob, consumed, defect) = extract_blob(&region, Off::new(5));
+        assert!(blob.is_none());
+        assert_eq!(consumed, 0);
+        let defect = defect.expect("two bytes cannot hold the length field");
+        assert_eq!(
+            defect.kind,
+            DefectKind::RunsPastEnd {
+                offset: 0x9005,
+                len: 4,
+                end: 0x9007,
+            }
+        );
+        assert_eq!(defect.kind.severity(), Severity::Tolerated);
     }
 
     #[test]
