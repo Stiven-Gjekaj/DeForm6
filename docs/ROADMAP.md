@@ -20,12 +20,17 @@ The phases below deliver two different things, and the first one is close.
 
 | | What the user gets | Distance |
 |---|---|---|
-| **1.1** | The shell of the program: forms, controls, properties, names, signatures, API declarations. Verified to build. The user writes the logic. | About 3 months |
-| **2.0** | The logic as well, for a P-code program. | About 2 to 3 years after 1.1 |
+| **The shell, 2.0.0** | The shell of the program: forms, controls, properties, names, signatures, API declarations. Verified to build. The user writes the logic. | About 3 months |
+| **The logic** | The logic as well, for a P-code program. | About 2 to 3 years after the shell |
 
-Version 1.1 is worth shipping on its own. A person who lost a program still
+The shell is worth shipping on its own. A person who lost a program still
 has to rebuild the user interface by hand today, and that is most of the
 typing.
+
+A version number follows the rule that `CHANGELOG.md` applies: a release that
+breaks code written against the release before it takes the next major
+number. The shell breaks code written against 1.0.0, so it is 2.0.0 and not
+1.1. The logic takes the number that the same rule gives when it ships.
 
 ## A note on the numbers below
 
@@ -626,7 +631,7 @@ Phase 12 runs beside 10 and 11.
 Phase 13 closes the milestone.
 ```
 
-Version 1.1 ships after Phase 8. Version 2.0 ships after Phase 11 and 13.
+The shell, 2.0.0, ships after Phase 8. The logic ships after Phase 11 and 13.
 
 ## Procurement
 
