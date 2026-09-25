@@ -461,7 +461,7 @@ collected.
 cargo test --workspace
 ```
 
-1385 tests run. The suite includes:
+1395 tests run. The suite includes:
 
 - **The corpus sweep.** All 44 programs are read and report what they hold.
 - **The structural check.** Every extracted project is checked against the
