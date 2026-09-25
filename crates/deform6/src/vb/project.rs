@@ -49,6 +49,13 @@ const LP_EXTERNAL_TABLE_AT: u32 = 0x234;
 /// The defect for a component table in no section names this byte.
 const HEADER_LP_EXTERNAL_TABLE_AT: u32 = 0x50;
 
+/// `STRUCTURES.md` section 2: the `wExternalCount` of the VB header sits at
+/// `VBHeader + 0x46`. It gives the number of entries in the component
+/// table.
+///
+/// The defect for a count that the table cannot hold names this byte.
+const HEADER_W_EXTERNAL_COUNT_AT: u32 = 0x46;
+
 /// `STRUCTURES.md` section 3: `dwExternalCount` sits at `ProjectInfo + 0x238`.
 ///
 /// One constant for the read and for the defect that names this field, so the
@@ -1106,6 +1113,13 @@ impl ComponentTable {
     /// that is lost. An empty list with no defect would say that the program
     /// uses no component, which is a different claim.
     ///
+    /// A table that ends before the count does gives the entries that it
+    /// holds and one [`DefectKind::ImplausibleCount`] at the
+    /// `wExternalCount` field of the VB header. The table ends there when its
+    /// section ends at the start of the next entry, or in the four bytes of
+    /// that entry's `StructLength`. `max` is the number of entries that the
+    /// walk found before that end.
+    ///
     /// # What this corpus proves and what it does not
     ///
     /// A script run over all 44 vendored programs, this session, found
@@ -1165,11 +1179,33 @@ impl ComponentTable {
         };
 
         let mut cursor = Off::new(0);
-        for _ in 0..header.w_external_count {
-            let Some(entry_offset) = table.file_offset(cursor) else {
-                break;
-            };
-            let Some(struct_len) = table.u32_le(cursor) else {
+        for index in 0..header.w_external_count {
+            let (Some(entry_offset), Some(struct_len)) =
+                (table.file_offset(cursor), table.u32_le(cursor))
+            else {
+                // The section ends at this entry, or in its StructLength. The
+                // count asks for more entries than the table holds, so the
+                // defect names wExternalCount in the VB header.
+                let offset = header
+                    .file_offset
+                    .checked_add(HEADER_W_EXTERNAL_COUNT_AT)
+                    .map_or(0, Off::get);
+                defects.push(Defect {
+                    site: Site {
+                        offset,
+                        rva: header
+                            .rva
+                            .and_then(|rva| rva.checked_add(HEADER_W_EXTERNAL_COUNT_AT))
+                            .map(Rva::get),
+                        structure: "VBHeader",
+                        field: "wExternalCount",
+                    },
+                    kind: DefectKind::ImplausibleCount {
+                        offset,
+                        count: u32::from(header.w_external_count),
+                        max: u32::from(index),
+                    },
+                });
                 break;
             };
 
@@ -1256,8 +1292,8 @@ impl ComponentTable {
     }
 
     /// Gives the defects the walk found: a table address in no section, a
-    /// zero or overrunning declared length, or an entry whose fixed fields or
-    /// strings did not resolve.
+    /// count that the table cannot hold, a zero or overrunning declared
+    /// length, or an entry whose fixed fields or strings did not resolve.
     #[must_use]
     pub fn defects(&self) -> &[Defect] {
         &self.defects
@@ -3326,6 +3362,58 @@ mod tests {
         let none = ComponentTable::read(&image, &header_with_external_table(nowhere, 0));
         assert!(none.components.is_empty());
         assert!(none.defects().is_empty(), "{:?}", none.defects());
+    }
+
+    /// Reads a table out of a synthetic image whose section ends where
+    /// `payload` ends. The mapped length of a section is the smaller of its
+    /// two sizes, so a virtual size of `payload.len()` ends the table there.
+    fn a_table_that_ends_with(payload: &[u8], w_external_count: u16) -> ComponentTable {
+        const VIRTUAL_SIZE_AT: usize = 0x40 + 24 + 224 + 8;
+        let (mut bytes, va) = a_synthetic_pe_image(payload);
+        let size = u32::try_from(payload.len()).unwrap();
+        bytes[VIRTUAL_SIZE_AT..VIRTUAL_SIZE_AT + 4].copy_from_slice(&size.to_le_bytes());
+        let image = PeImage::parse(&bytes).unwrap();
+        ComponentTable::read(&image, &header_with_external_table(va, w_external_count))
+    }
+
+    /// A count of two with a table that ends after the first entry, or two
+    /// bytes after it, in the `StructLength` of the second entry. Each gives
+    /// the first component and one defect at `wExternalCount`, `+ 0x46`: the
+    /// count asks for two entries, and the table holds one.
+    #[test]
+    fn a_count_past_the_end_of_the_table_gives_a_defect_at_the_header_field() {
+        let entry = build_component_entry("Only.ocx", "OnlyLib.Only", "Only");
+        let mut two_more_bytes = entry.clone();
+        two_more_bytes.extend_from_slice(&[0xAA, 0xBB]);
+
+        for payload in [entry, two_more_bytes] {
+            let table = a_table_that_ends_with(&payload, 2);
+            assert_eq!(table.components.len(), 1, "{:?}", table.defects());
+            assert_eq!(table.components[0].name, "Only");
+            assert_eq!(
+                table.defects(),
+                [Defect {
+                    site: Site {
+                        offset: 0x146,
+                        rva: Some(0x1146),
+                        structure: "VBHeader",
+                        field: "wExternalCount",
+                    },
+                    kind: DefectKind::ImplausibleCount {
+                        offset: 0x146,
+                        count: 2,
+                        max: 1,
+                    },
+                }],
+                "a table of {} bytes",
+                payload.len()
+            );
+            assert_eq!(table.defects()[0].kind.severity(), Severity::Recoverable);
+        }
+
+        let exact = a_table_that_ends_with(&build_component_entry("A.ocx", "ALib.A", "A"), 1);
+        assert_eq!(exact.components.len(), 1);
+        assert!(exact.defects().is_empty(), "{:?}", exact.defects());
     }
 
     /// Reads a table of one entry, built from `payload`, out of a synthetic
