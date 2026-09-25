@@ -2,8 +2,9 @@
 //!
 //! `cargo run -p xtask -- update-ratios` rewrites `tests/ratios.toml`.
 //! `cargo run -p xtask -- update-fidelity` rewrites `tests/fidelity.toml`.
-//! `cargo run -p xtask -- export-builds <dir>` writes each corpus program for
-//! a build with the Visual Basic 6 IDE on a Windows host; see `builds.rs`.
+//! `cargo run -p xtask -- export-builds [--probe] <dir>` writes each corpus
+//! program, or the four probe projects, for a build with the Visual Basic 6
+//! IDE on a Windows host; see `builds.rs`.
 //! `cargo run -p xtask -- derive-opcode-table` writes the opcode table
 //! `deform6::vb::opcodes::OpcodeTable::parse` reads, from a type library on
 //! a Windows host; see `opcode_table.rs`'s own doc comment for why this
@@ -124,7 +125,7 @@ fn run(args: Vec<String>) -> i32 {
     }
 }
 
-const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | update-fidelity | export-builds <dir> | derive-opcode-table | fetch-corpus | pin-corpus <name> <url> | fuzz-pr | fuzz-cron | licences";
+const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | update-fidelity | export-builds [--probe] <dir> | derive-opcode-table | fetch-corpus | pin-corpus <name> <url> | fuzz-pr | fuzz-cron | licences";
 
 /// The number of corpus programs `update-ratios` refuses to write fewer
 /// than. Matches `EXPECTED_PROGRAM_COUNT` in `crates/deform6/tests/ratios.rs`

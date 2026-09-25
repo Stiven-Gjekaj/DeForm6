@@ -20,6 +20,17 @@
 //!
 //! The short names, `p01` to `p44`, keep the paths short on the host. They
 //! follow the order of the keys.
+//!
+//! # The probe
+//!
+//! `export-builds --probe <dir>` writes four small projects in place of the
+//! corpus, in the same layout. Each one shows how VB6 reports one kind of
+//! result: a project that builds, a syntax error, a component that is not
+//! on the host, and a form property that VB6 does not know. The importer
+//! reads the logs by the rules that a run of the probe shows. This code
+//! writes each project, so no third party byte is in it. Each project is on
+//! both sides, so the two builds of one project also show whether VB6 gives
+//! the same result twice.
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -41,6 +52,9 @@ const HOST_OUT_DIR: &str = r"C:\deform6-out";
 /// that holds one of them is refused.
 const REFUSED_IN_A_NAME: &[char] = &['%', '^', '&', '!', '"', '\\', '/', '\r', '\n'];
 
+/// The files of one project: each name, with its bytes.
+type ProjectFiles = Vec<(String, Vec<u8>)>;
+
 /// One program as the export wrote it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Exported {
@@ -58,12 +72,19 @@ pub(crate) struct Exported {
 
 /// Runs `export-builds`.
 pub(crate) fn run_export(args: &[String]) -> i32 {
-    let [dir] = args else {
-        eprintln!("xtask: usage: cargo run -p xtask -- export-builds <dir>");
-        return 1;
+    let (probe, dir) = match export_args(args) {
+        Ok(read) => read,
+        Err(message) => {
+            eprintln!("xtask: {message}");
+            return 1;
+        }
     };
-    let dir = Path::new(dir);
-    match export(dir) {
+    let exported = if probe {
+        export_probe(dir)
+    } else {
+        export(dir)
+    };
+    match exported {
         Ok(count) => {
             println!(
                 "xtask: exported {count} programs to {}. Run build.bat there on the Windows \
@@ -77,6 +98,19 @@ pub(crate) fn run_export(args: &[String]) -> i32 {
             eprintln!("xtask: {message}");
             1
         }
+    }
+}
+
+/// Reads the arguments of `export-builds`: `[--probe] <dir>`. Gives whether
+/// the probe is asked for, and the directory.
+///
+/// A directory that starts with `-` is refused, so that a flag with no
+/// directory after it is never read as the name of a directory.
+pub(crate) fn export_args(args: &[String]) -> Result<(bool, &Path), String> {
+    match args {
+        [dir] if !dir.starts_with('-') => Ok((false, Path::new(dir))),
+        [flag, dir] if flag == "--probe" && !dir.starts_with('-') => Ok((true, Path::new(dir))),
+        _ => Err("usage: cargo run -p xtask -- export-builds [--probe] <dir>".to_owned()),
     }
 }
 
@@ -224,13 +258,139 @@ fn export(dir: &Path) -> Result<usize, String> {
         });
     }
 
+    write_lists(dir, &exported)?;
+    Ok(exported.len())
+}
+
+/// The four probe projects: a key, and the files of the project. The key
+/// names what the probe tests.
+pub(crate) fn probe_projects() -> Vec<(&'static str, ProjectFiles)> {
+    let crlf = |lines: &[&str]| -> Vec<u8> {
+        let mut out = String::new();
+        for line in lines {
+            out.push_str(line);
+            out.push_str("\r\n");
+        }
+        out.into_bytes()
+    };
+    let module = |body: &[&str]| -> Vec<u8> {
+        let mut lines = vec!["Attribute VB_Name = \"Module1\"", "Option Explicit", ""];
+        lines.extend_from_slice(body);
+        crlf(&lines)
+    };
+    let module_project = |name: &str, extra: &[&str]| -> Vec<u8> {
+        let exe = format!("ExeName32=\"{name}.exe\"");
+        let title = format!("Name=\"{name}\"");
+        let mut lines = vec!["Type=Exe"];
+        lines.extend_from_slice(extra);
+        lines.extend_from_slice(&["Module=Module1; Module1.bas", "Startup=\"Sub Main\""]);
+        lines.push(&exe);
+        lines.push(&title);
+        crlf(&lines)
+    };
+    let file = |name: &str, bytes: Vec<u8>| (name.to_owned(), bytes);
+
+    vec![
+        (
+            "probe/ok",
+            vec![
+                file("Probe.vbp", module_project("ProbeOk", &[])),
+                file("Module1.bas", module(&["Sub Main()", "End Sub"])),
+            ],
+        ),
+        (
+            "probe/syntax",
+            vec![
+                file("Probe.vbp", module_project("ProbeSyntax", &[])),
+                file(
+                    "Module1.bas",
+                    module(&["Sub Main()", "    Dim x As Long", "    x =", "End Sub"]),
+                ),
+            ],
+        ),
+        (
+            "probe/missing-ocx",
+            vec![
+                file(
+                    "Probe.vbp",
+                    module_project(
+                        "ProbeMissingOcx",
+                        &["Object={0D5F4C9A-6E5B-4F32-9A11-3C8F1D2B7E10}#1.0#0; NOPE.OCX"],
+                    ),
+                ),
+                file("Module1.bas", module(&["Sub Main()", "End Sub"])),
+            ],
+        ),
+        (
+            "probe/bad-property",
+            vec![
+                file(
+                    "Probe.vbp",
+                    crlf(&[
+                        "Type=Exe",
+                        "Form=Form1.frm",
+                        "Startup=\"Form1\"",
+                        "ExeName32=\"ProbeBadProperty.exe\"",
+                        "Name=\"ProbeBadProperty\"",
+                    ]),
+                ),
+                file(
+                    "Form1.frm",
+                    crlf(&[
+                        "VERSION 5.00",
+                        "Begin VB.Form Form1",
+                        "   Caption         =   \"Probe\"",
+                        "   ClientHeight    =   3000",
+                        "   ClientLeft      =   60",
+                        "   ClientTop       =   345",
+                        "   ClientWidth     =   4000",
+                        "   BogusProperty   =   1",
+                        "   ScaleHeight     =   3000",
+                        "   ScaleWidth      =   4000",
+                        "End",
+                        "Attribute VB_Name = \"Form1\"",
+                        "Attribute VB_GlobalNameSpace = False",
+                        "Attribute VB_Creatable = False",
+                        "Attribute VB_PredeclaredId = True",
+                        "Attribute VB_Exposed = False",
+                        "Option Explicit",
+                    ]),
+                ),
+            ],
+        ),
+    ]
+}
+
+/// Writes the probe into `dir`, and gives the number of projects. Each
+/// project is on both sides.
+fn export_probe(dir: &Path) -> Result<usize, String> {
+    prepare(dir)?;
+    let mut exported = Vec::new();
+    for (index, (key, files)) in probe_projects().into_iter().enumerate() {
+        let short = short_name(index.checked_add(1).ok_or("too many probes")?)?;
+        write_files(&dir.join("extracted").join(&short), &files)?;
+        write_files(&dir.join("original").join(&short), &files)?;
+        let vbp = project_file_name(&files)?;
+        exported.push(Exported {
+            short,
+            key: key.to_owned(),
+            original_vbp: vbp.clone(),
+            extracted_vbp: vbp,
+            files: build_record::files_hash(&files),
+        });
+    }
+    write_lists(dir, &exported)?;
+    Ok(exported.len())
+}
+
+/// Writes `manifest.txt` and `build.bat` into `dir`.
+fn write_lists(dir: &Path, exported: &[Exported]) -> Result<(), String> {
     let manifest = dir.join("manifest.txt");
-    std::fs::write(&manifest, render_manifest(&exported))
+    std::fs::write(&manifest, render_manifest(exported))
         .map_err(|err| format!("writing {}: {err}", manifest.display()))?;
     let batch = dir.join("build.bat");
-    std::fs::write(&batch, render_batch(&exported))
-        .map_err(|err| format!("writing {}: {err}", batch.display()))?;
-    Ok(exported.len())
+    std::fs::write(&batch, render_batch(exported))
+        .map_err(|err| format!("writing {}: {err}", batch.display()))
 }
 
 /// Renders `manifest.txt`: a comment line, then one line for each program,
@@ -345,8 +505,12 @@ pub(crate) fn render_batch(programs: &[Exported]) -> String {
     reason = "a test builds its own values; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{Exported, check_batch_name, export, render_batch, render_manifest, short_name};
+    use super::{
+        Exported, check_batch_name, export, export_args, export_probe, probe_projects,
+        render_batch, render_manifest, run_export, short_name,
+    };
     use crate::build_record;
+    use std::path::Path;
 
     fn program(short: &str, key: &str, vbp: &str) -> Exported {
         Exported {
@@ -491,5 +655,99 @@ mod tests {
             "{executables_in_original:?}"
         );
         assert!(again.unwrap_err().contains("is not empty"));
+    }
+
+    /// Each probe project is written with CRLF, and holds the one thing that
+    /// it tests. Only the syntax probe holds a line with no expression after
+    /// `=`, and only the component probe names a component.
+    #[test]
+    fn each_probe_project_holds_the_one_thing_that_it_tests() {
+        let probes = probe_projects();
+        let keys: Vec<&str> = probes.iter().map(|(key, _files)| *key).collect();
+        assert_eq!(
+            keys,
+            [
+                "probe/ok",
+                "probe/syntax",
+                "probe/missing-ocx",
+                "probe/bad-property"
+            ]
+        );
+        for (key, files) in &probes {
+            for (name, bytes) in files {
+                let text = String::from_utf8(bytes.clone()).unwrap();
+                assert!(text.ends_with("\r\n"), "{key} {name}");
+                assert_eq!(text.matches('\n').count(), text.matches("\r\n").count());
+            }
+            let all: String = files
+                .iter()
+                .map(|(_name, bytes)| String::from_utf8(bytes.clone()).unwrap())
+                .collect();
+            assert_eq!(all.contains("    x =\r\n"), *key == "probe/syntax", "{key}");
+            assert_eq!(
+                all.contains("Object="),
+                *key == "probe/missing-ocx",
+                "{key}"
+            );
+            assert_eq!(
+                all.contains("BogusProperty"),
+                *key == "probe/bad-property",
+                "{key}"
+            );
+        }
+    }
+
+    /// A probe export writes four projects, each on both sides with the same
+    /// bytes, and a batch file with eight builds.
+    #[test]
+    fn a_probe_export_writes_four_projects_on_both_sides() {
+        let dir = std::env::temp_dir().join(format!("deform6-probe-{}", std::process::id()));
+        let _ignored = std::fs::remove_dir_all(&dir);
+        let count = export_probe(&dir).unwrap();
+        let manifest = std::fs::read_to_string(dir.join("manifest.txt")).unwrap();
+        let batch = std::fs::read_to_string(dir.join("build.bat")).unwrap();
+        let same = ["Probe.vbp", "Module1.bas"].iter().all(|name| {
+            std::fs::read(dir.join("original/p01").join(name)).unwrap()
+                == std::fs::read(dir.join("extracted/p01").join(name)).unwrap()
+        });
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        assert_eq!(count, 4);
+        assert_eq!(manifest.lines().count(), 5);
+        assert!(manifest.contains("\tprobe/bad-property\t"), "{manifest}");
+        assert_eq!(batch.matches("call :build").count(), 8);
+        assert!(same);
+    }
+
+    /// The command takes a directory, with `--probe` before it or not. A
+    /// flag with no directory after it, a word that is not `--probe`, and
+    /// no argument are refused. The refused calls go only to the parser, so
+    /// that a fault here cannot write a directory.
+    #[test]
+    fn the_command_takes_a_directory_and_an_optional_probe_flag() {
+        let owned = |words: &[&str]| -> Vec<String> {
+            words.iter().map(|word| (*word).to_owned()).collect()
+        };
+        let plain = owned(&["out"]);
+        assert_eq!(export_args(&plain).unwrap(), (false, Path::new("out")));
+        let probe = owned(&["--probe", "out"]);
+        assert_eq!(export_args(&probe).unwrap(), (true, Path::new("out")));
+        for refused in [
+            owned(&[]),
+            owned(&["--probe"]),
+            owned(&["--other", "out"]),
+            owned(&["--probe", "--probe"]),
+            owned(&["out", "more"]),
+        ] {
+            assert!(export_args(&refused).is_err(), "{refused:?}");
+        }
+
+        let dir = std::env::temp_dir().join(format!("deform6-probe-args-{}", std::process::id()));
+        let _ignored = std::fs::remove_dir_all(&dir);
+        let status = run_export(&["--probe".to_owned(), dir.to_string_lossy().into_owned()]);
+        let manifest = std::fs::read_to_string(dir.join("manifest.txt")).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(status, 0);
+        assert_eq!(manifest.lines().count(), 5);
     }
 }
