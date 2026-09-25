@@ -58,7 +58,7 @@ heading its version and its date.
 - `sh scripts/gate.sh` runs the whole gate on a local machine.
 - The build record: `tests/builds.toml` holds what the Visual Basic 6 IDE
   built for each corpus program, on the author's Windows XP host. It built
-  41 of the 44 projects that DeForm6 wrote, and 42 of the 44 projects in the
+  all 44 projects that DeForm6 wrote, and 42 of the 44 projects in the
   corpus. `cargo run -p xtask -- export-builds <dir>` writes the projects,
   `build.bat` and `sendlogs.bat`. `cargo run -p xtask -- import-builds
   [--capture <file>] <dir>` reads the logs back, from the directory or from a
@@ -67,6 +67,18 @@ heading its version and its date.
 - `cargo test -p deform6 --test build_record` holds the tree to the record.
   When DeForm6 writes different files for a program than the host built, the
   gate fails with `STALE`, until the host builds the new files.
+- The record has a fourth result, `built with load errors`. The importer
+  gives it when VB6 changes a project to load it, and then builds it. For
+  example, VB6 puts a picture box in place of a control whose class it
+  cannot load.
+- The `Object=` line of the Winsock control is the line that the corpus
+  projects declare. The executable holds the class identifier of the
+  control, not the type library identifier of the line. A table of one row,
+  measured in the corpus, joins the two, and the line is graded `inferred`.
+- An external control gets the class name that the file gives, such as
+  `MSWinsockLib.Winsock`, on its `Begin` line. It got `VB.Control`, which
+  VB6 does not know. A class name that is not two names joined by one dot
+  writes no block, and an `unrecoverable` item names the control.
 
 ### What changes for a caller
 
@@ -277,13 +289,14 @@ is therefore 2.0.0, not 1.1.0.
   object, as `PrivateObj::read` already did. It now gives `false` for a form
   whose pointer is `0`, and `true` for a module whose pointer is `0`. The new
   `vb::classify::names_no_private_object` states that rule for both.
+- New public field: `write::model::ControlModel::external_class`. Code that
+  builds a `ControlModel` with a struct literal must give it.
 
 ### What stays open
 
-- Three projects that DeForm6 writes do not build: the three that use the
-  Winsock control. VB6 writes `'MSWINSCK.OCX' could not be loaded`, because
-  the `Object=` line gives an identifier that is one byte away from the one
-  that the original project declares.
+- DeForm6 knows the `Object=` line of the Winsock control only. For
+  another control, it writes the class identifier of the control on that
+  line, and VB6 does not load the line.
 - `--verify-build`, where DeForm6 runs the compiler of the user, waits for a
   Windows 10 host. DeForm6 does not run on Windows XP.
 - The fidelity walk grades thirteen structures. `docs/ROADMAP.md` names
