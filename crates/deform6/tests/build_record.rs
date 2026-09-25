@@ -13,7 +13,15 @@
 //!
 //! `shared.rs` holds the files that a build covers, their hash, the text and
 //! the parser, and `crates/xtask` compiles the same file to write the record.
-//! This file tests that shared code.
+//! This file tests that shared code, and then holds the tree to the record.
+//!
+//! # What the gate proves
+//!
+//! Each result in the record is true for the files that the Windows host
+//! built. The gate writes the files of each program again and compares
+//! their hash with the hash in the record. When DeForm6 writes different
+//! files, the gate fails with `STALE` until the host builds the new files.
+//! No test runs the Visual Basic 6 IDE: this machine cannot.
 
 #[path = "build_record/shared.rs"]
 #[allow(
@@ -26,8 +34,8 @@ mod shared;
 use std::collections::BTreeMap;
 
 use shared::{
-    BuildRecord, Outcome, ProgramBuild, Side, build_files, corpus_root, executables, files_hash,
-    parse, program_key, project_files, render,
+    BuildRecord, Outcome, ProgramBuild, Side, build_files, builds_toml_path, corpus_root,
+    executables, files_hash, parse, program_key, project_files, render,
 };
 
 /// A file with a name and bytes, built here.
@@ -261,4 +269,86 @@ fn the_walk_skips_each_directory_named_fetched() {
         .map(|exe| program_key(exe, &root).unwrap())
         .collect();
     assert_eq!(keys, ["kept/A.exe", "kept/deeper/B.EXE"]);
+}
+
+/// The committed record, read once.
+fn committed() -> BuildRecord {
+    let path = builds_toml_path();
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|err| panic!("reading {}: {err}", path.display()));
+    parse(&text).unwrap_or_else(|err| panic!("{}: {err}", path.display()))
+}
+
+/// The committed record is the exact text that `render` writes from its own
+/// values, so an import on a clean tree changes no line.
+#[test]
+fn the_committed_record_is_the_text_that_render_writes() {
+    let path = builds_toml_path();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(render(&committed()), text, "{}", path.display());
+}
+
+/// The record names each corpus program, and no other program.
+#[test]
+fn the_record_names_each_corpus_program_and_no_other() {
+    let root = corpus_root();
+    let keys: Vec<String> = executables(&root)
+        .unwrap()
+        .iter()
+        .map(|exe| program_key(exe, &root).unwrap())
+        .collect();
+    let record = committed();
+    let held: Vec<&String> = record.programs.keys().collect();
+    assert_eq!(held, keys.iter().collect::<Vec<_>>());
+    assert_eq!(held.len(), shared::EXPECTED_PROGRAM_COUNT);
+}
+
+/// Each program's files are the files that the host built. A program whose
+/// files changed is `STALE`, and the failure names each such program.
+#[test]
+fn each_result_covers_the_files_that_deform6_writes_now() {
+    let root = corpus_root();
+    let record = committed();
+    let mut stale = Vec::new();
+    for exe in executables(&root).unwrap() {
+        let key = program_key(&exe, &root).unwrap();
+        let files = project_files(&std::fs::read(&exe).unwrap()).unwrap();
+        let now = files_hash(&files);
+        let Some(program) = record.programs.get(&key) else {
+            continue;
+        };
+        if program.files != now {
+            stale.push(format!(
+                "  {key}: the record holds {}, and DeForm6 now writes {now}",
+                program.files
+            ));
+        }
+    }
+    assert!(
+        stale.is_empty(),
+        "STALE: DeForm6 writes different files for {} programs than the Windows host built:\n{}\n\
+         Build them again:\n  1. cargo run -p xtask -- export-builds <dir>\n  2. On the Windows \
+         host, run build.bat in <dir>.\n  3. cargo run -p xtask -- import-builds <dir>",
+        stale.len(),
+        stale.join("\n")
+    );
+}
+
+/// A failed side holds the lines that VB6 wrote, and no line holds a path
+/// with a drive letter of the host.
+#[test]
+fn a_failed_side_holds_its_messages_and_no_host_path() {
+    for (key, program) in &committed().programs {
+        for (side, result) in [
+            ("original", &program.original),
+            ("extracted", &program.extracted),
+        ] {
+            if result.outcome == Outcome::Failed {
+                assert!(!result.messages.is_empty(), "{key} {side}");
+            }
+            for message in &result.messages {
+                assert!(!message.contains(":\\"), "{key} {side}: {message}");
+            }
+        }
+    }
 }
