@@ -500,6 +500,315 @@ pub(crate) fn render_batch(programs: &[Exported]) -> String {
     out
 }
 
+/// Runs `import-builds`.
+pub(crate) fn run_import(args: &[String]) -> i32 {
+    let [dir] = args else {
+        eprintln!("xtask: usage: cargo run -p xtask -- import-builds <dir>");
+        return 1;
+    };
+    if dir.starts_with('-') {
+        eprintln!("xtask: usage: cargo run -p xtask -- import-builds <dir>");
+        return 1;
+    }
+    match import_and_write(Path::new(dir)) {
+        Ok(lines) => {
+            for line in lines {
+                println!("{line}");
+            }
+            println!(
+                "xtask: wrote {}",
+                build_record::builds_toml_path().display()
+            );
+            0
+        }
+        Err(message) => {
+            eprintln!("xtask: {message}");
+            1
+        }
+    }
+}
+
+/// Reads the export in `dir`, checks that it holds the 44 corpus programs,
+/// and writes `tests/builds.toml`. Gives one line for each program whose
+/// result moved since the old file.
+fn import_and_write(dir: &Path) -> Result<Vec<String>, String> {
+    let record = import_record(dir)?;
+    let root = corpus_root();
+    let mut keys = Vec::new();
+    for exe in executables(&root)? {
+        keys.push(program_key(&exe, &root)?);
+    }
+    check_corpus_keys(&record, &keys)
+        .map_err(|err| format!("the export in {}: {err}", dir.display()))?;
+
+    let path = build_record::builds_toml_path();
+    let changes = match std::fs::read_to_string(&path) {
+        Ok(old_text) => match build_record::parse(&old_text) {
+            Ok(old) => changes(&old, &record),
+            Err(err) => vec![format!(
+                "the old file does not parse, so no change is listed: {err}"
+            )],
+        },
+        Err(_) => vec!["there is no old file, so no change is listed".to_owned()],
+    };
+    let rendered = build_record::render(&record);
+    if build_record::parse(&rendered)? != record {
+        return Err("the rendered record does not parse back to the same record".to_owned());
+    }
+    std::fs::write(&path, &rendered).map_err(|err| format!("writing {}: {err}", path.display()))?;
+    Ok(changes)
+}
+
+/// Refuses a record that does not name exactly the corpus programs `keys`.
+/// A probe is never written into `tests/builds.toml`.
+pub(crate) fn check_corpus_keys(
+    record: &build_record::BuildRecord,
+    keys: &[String],
+) -> Result<(), String> {
+    let imported: Vec<&String> = record.programs.keys().collect();
+    if imported != keys.iter().collect::<Vec<_>>() {
+        return Err(format!(
+            "it does not hold the {} corpus programs, so it is not imported. A probe is never \
+             imported",
+            keys.len()
+        ));
+    }
+    Ok(())
+}
+
+/// Gives one line for each program whose `files` or whose results differ
+/// between `old` and `new`.
+fn changes(old: &build_record::BuildRecord, new: &build_record::BuildRecord) -> Vec<String> {
+    let mut lines = Vec::new();
+    for (key, program) in &new.programs {
+        let describe = |p: &build_record::ProgramBuild| {
+            format!(
+                "original {}, extracted {}",
+                p.original.outcome.word(),
+                p.extracted.outcome.word()
+            )
+        };
+        match old.programs.get(key) {
+            None => lines.push(format!("{key}: new: {}", describe(program))),
+            Some(held) if held != program => {
+                lines.push(format!(
+                    "{key}: {} -> {}",
+                    describe(held),
+                    describe(program)
+                ));
+            }
+            Some(_) => {}
+        }
+    }
+    for key in old.programs.keys() {
+        if !new.programs.contains_key(key) {
+            lines.push(format!("{key}: removed"));
+        }
+    }
+    lines
+}
+
+/// Reads `manifest.txt`, which [`render_manifest`] writes.
+pub(crate) fn parse_manifest(text: &str) -> Result<Vec<Exported>, String> {
+    let mut out = Vec::new();
+    for line in text.lines().filter(|line| !line.starts_with('#')) {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let [short, key, original_vbp, extracted_vbp, files] = fields.as_slice() else {
+            return Err(format!(
+                "the manifest line {line:?} does not hold five fields"
+            ));
+        };
+        out.push(Exported {
+            short: (*short).to_owned(),
+            key: (*key).to_owned(),
+            original_vbp: (*original_vbp).to_owned(),
+            extracted_vbp: (*extracted_vbp).to_owned(),
+            files: (*files).to_owned(),
+        });
+    }
+    Ok(out)
+}
+
+/// Gives the Windows line and the `VB6.EXE` line of `logs\environment.txt`.
+/// The first is the line that `ver` writes. The second is the line that
+/// `dir` writes for `VB6.EXE`, with each run of spaces made one space.
+pub(crate) fn parse_environment(text: &str) -> Result<(String, String), String> {
+    let windows = text
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("Microsoft Windows"))
+        .ok_or("logs/environment.txt holds no Windows version line")?;
+    let vb6 = text
+        .lines()
+        .map(str::trim)
+        .find(|line| line.to_ascii_uppercase().ends_with(" VB6.EXE"))
+        .ok_or("logs/environment.txt holds no line for VB6.EXE")?;
+    Ok((
+        windows.to_owned(),
+        vb6.split_whitespace().collect::<Vec<_>>().join(" "),
+    ))
+}
+
+/// Cuts each path in `line` that runs through the project directory
+/// `\<side>\<short>\` to start after that directory. A path starts after the
+/// last quote before it, because VB6 puts each path between single quotes.
+pub(crate) fn cut_paths(line: &str, side: &str, short: &str) -> String {
+    let marker = format!("\\{side}\\{short}\\").to_ascii_lowercase();
+    let mut out = line.to_owned();
+    while let Some(at) = out.to_ascii_lowercase().find(&marker) {
+        let start = out
+            .get(..at)
+            .and_then(|before| before.rfind('\''))
+            .and_then(|quote| quote.checked_add(1))
+            .unwrap_or(0);
+        let Some(end) = at.checked_add(marker.len()) else {
+            break;
+        };
+        let (Some(head), Some(tail)) = (out.get(..start), out.get(end..)) else {
+            break;
+        };
+        out = format!("{head}{tail}");
+    }
+    out
+}
+
+/// Reads a file of VB6 as text. VB6 writes ANSI text. A byte that is not
+/// UTF-8 becomes U+FFFD, and no line is dropped for it.
+fn read_text(path: &Path) -> Result<Option<String>, String> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(Some(String::from_utf8_lossy(&bytes).into_owned())),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(format!("reading {}: {err}", path.display())),
+    }
+}
+
+/// Gives each `.log` file under `dir`, as a path relative to `dir` with `/`,
+/// with its bytes as text, in the order of the paths.
+fn load_logs(dir: &Path) -> Result<Vec<(String, String)>, String> {
+    fn walk(base: &Path, dir: &Path, out: &mut Vec<(String, String)>) -> Result<(), String> {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Ok(());
+        };
+        for entry in entries {
+            let path = entry
+                .map_err(|err| format!("reading an entry of {}: {err}", dir.display()))?
+                .path();
+            if path.is_dir() {
+                walk(base, &path, out)?;
+            } else if path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("log"))
+            {
+                let relative = path
+                    .strip_prefix(base)
+                    .map_err(|err| format!("{}: {err}", path.display()))?
+                    .components()
+                    .map(|part| part.as_os_str().to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                let text = read_text(&path)?.unwrap_or_default();
+                out.push((relative, text));
+            }
+        }
+        Ok(())
+    }
+    let mut out = Vec::new();
+    walk(dir, dir, &mut out)?;
+    out.sort();
+    Ok(out)
+}
+
+/// Reads the result of one side of one program.
+///
+/// The rule comes from a run of the probe on the XP host with VB6 SP6.
+/// `VB6.EXE /make` gives exit code 0 and writes the line
+/// `Build of '<name>' succeeded.` when it builds the project. It gives exit
+/// code 1 when it does not, and writes no such line. A load error also
+/// writes a `.log` file beside the source file. A side with no `.exit` file
+/// did not run. Any other shape is refused, because the probe did not show
+/// it.
+pub(crate) fn read_side(
+    dir: &Path,
+    program: &Exported,
+    side: &str,
+) -> Result<build_record::Side, String> {
+    let name = format!("{}-{side}", program.short);
+    let logs = dir.join("logs");
+    let Some(exit_text) = read_text(&logs.join(format!("{name}.exit")))? else {
+        return Ok(build_record::Side {
+            outcome: build_record::Outcome::NotRun,
+            messages: Vec::new(),
+        });
+    };
+    let exit: i64 = exit_text.trim().parse().map_err(|_ignored| {
+        format!("logs/{name}.exit holds {exit_text:?}, which is not a number")
+    })?;
+    let out = read_text(&logs.join(format!("{name}.txt")))?.unwrap_or_default();
+    let lines: Vec<String> = out
+        .lines()
+        .map(str::trim_end)
+        .filter(|line| !line.is_empty())
+        .map(|line| cut_paths(line, side, &program.short))
+        .collect();
+    let succeeded = lines
+        .iter()
+        .any(|line| line.starts_with("Build of '") && line.ends_with("' succeeded."));
+    let load_logs = load_logs(&dir.join(side).join(&program.short))?;
+
+    if exit == 0 && succeeded && load_logs.is_empty() {
+        return Ok(build_record::Side {
+            outcome: build_record::Outcome::Built,
+            messages: Vec::new(),
+        });
+    }
+    if exit != 0 && !succeeded {
+        let mut messages = lines;
+        for (path, text) in load_logs {
+            for line in text
+                .lines()
+                .map(str::trim_end)
+                .filter(|line| !line.is_empty())
+            {
+                messages.push(format!("{path}: {}", cut_paths(line, side, &program.short)));
+            }
+        }
+        return Ok(build_record::Side {
+            outcome: build_record::Outcome::Failed,
+            messages,
+        });
+    }
+    Err(format!(
+        "{} {side}: exit code {exit}, a success line {}, and {} load log files do not agree \
+         with the rule that the probe measured",
+        program.key,
+        if succeeded { "present" } else { "absent" },
+        load_logs.len()
+    ))
+}
+
+/// Reads the whole export in `dir` into a record.
+pub(crate) fn import_record(dir: &Path) -> Result<build_record::BuildRecord, String> {
+    let manifest = read_text(&dir.join("manifest.txt"))?
+        .ok_or_else(|| format!("{} holds no manifest.txt", dir.display()))?;
+    let environment = read_text(&dir.join("logs").join("environment.txt"))?
+        .ok_or_else(|| format!("{} holds no logs/environment.txt", dir.display()))?;
+    let (windows, vb6) = parse_environment(&environment)?;
+    let mut record = build_record::BuildRecord {
+        windows,
+        vb6,
+        programs: std::collections::BTreeMap::new(),
+    };
+    for program in parse_manifest(&manifest)? {
+        let built = build_record::ProgramBuild {
+            files: program.files.clone(),
+            original: read_side(dir, &program, "original")?,
+            extracted: read_side(dir, &program, "extracted")?,
+        };
+        record.programs.insert(program.key.clone(), built);
+    }
+    Ok(record)
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -510,7 +819,8 @@ pub(crate) fn render_batch(programs: &[Exported]) -> String {
 )]
 mod tests {
     use super::{
-        Exported, check_batch_name, export, export_args, export_probe, probe_projects,
+        Exported, check_batch_name, check_corpus_keys, cut_paths, export, export_args,
+        export_probe, import_record, parse_environment, parse_manifest, probe_projects, read_side,
         render_batch, render_manifest, run_export, short_name,
     };
     use crate::build_record;
@@ -762,5 +1072,266 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(status, 0);
         assert_eq!(manifest.lines().count(), 5);
+    }
+
+    // --- The importer. The texts below have the shapes that a run of the
+    // probe gave on the XP host with VB6 SP6. Each test builds its own
+    // export directory in the temporary directory.
+
+    /// A new, empty directory in the temporary directory.
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("deform6-import-{name}-{}", std::process::id()));
+        let _ignored = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("logs")).unwrap();
+        dir
+    }
+
+    /// Writes the exit code, the `/out` text and the load logs of one side.
+    fn write_side(
+        dir: &Path,
+        short: &str,
+        side: &str,
+        exit: Option<&str>,
+        out: &str,
+        logs: &[(&str, &str)],
+    ) {
+        if let Some(exit) = exit {
+            std::fs::write(dir.join("logs").join(format!("{short}-{side}.exit")), exit).unwrap();
+        }
+        std::fs::write(dir.join("logs").join(format!("{short}-{side}.txt")), out).unwrap();
+        let project = dir.join(side).join(short);
+        std::fs::create_dir_all(&project).unwrap();
+        for (name, text) in logs {
+            std::fs::write(project.join(name), text).unwrap();
+        }
+    }
+
+    const BLANKS: &str = "\r\n\r\n\r\n";
+
+    /// Reads one side of the program `short`, in a directory that holds only
+    /// that side.
+    fn side_of(
+        name: &str,
+        short: &str,
+        exit: Option<&str>,
+        out: &str,
+        logs: &[(&str, &str)],
+    ) -> Result<build_record::Side, String> {
+        let dir = scratch(name);
+        write_side(&dir, short, "extracted", exit, out, logs);
+        let side = read_side(&dir, &program(short, "k/K.exe", "K.vbp"), "extracted");
+        std::fs::remove_dir_all(&dir).unwrap();
+        side
+    }
+
+    /// A build that VB6 finished gives exit code 0 and a success line, and
+    /// is `built` with no message.
+    #[test]
+    fn a_build_that_vb6_finished_is_built() {
+        let side = side_of(
+            "built",
+            "p01",
+            Some("0\r\n"),
+            &format!("{BLANKS}Build of 'ProbeOk.exe' succeeded.\r\n"),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(side.outcome, build_record::Outcome::Built);
+        assert!(side.messages.is_empty());
+    }
+
+    /// A syntax error gives exit code 1 and two lines. Each path starts at
+    /// the project directory.
+    #[test]
+    fn a_syntax_error_is_failed_with_its_lines() {
+        let out = format!(
+            "{BLANKS}Compile Error in File 'E:\\deform6\\probe\\extracted\\p02\\Module1.bas', \
+             Line 4 : Syntax error\r\nBuild of 'ProbeSyntax.exe' failed.\r\n"
+        );
+        let side = side_of("syntax", "p02", Some("1\r\n"), &out, &[]).unwrap();
+        assert_eq!(side.outcome, build_record::Outcome::Failed);
+        assert_eq!(
+            side.messages,
+            [
+                "Compile Error in File 'Module1.bas', Line 4 : Syntax error",
+                "Build of 'ProbeSyntax.exe' failed.",
+            ]
+        );
+    }
+
+    /// A component that is not on the host gives exit code 1 and one line,
+    /// with no line about the build.
+    #[test]
+    fn a_missing_component_is_failed_with_its_line() {
+        let out = format!(
+            "{BLANKS}'E:\\deform6\\probe\\extracted\\p03\\NOPE.OCX' could not be loaded\r\n"
+        );
+        let side = side_of("ocx", "p03", Some("1\r\n"), &out, &[]).unwrap();
+        assert_eq!(side.outcome, build_record::Outcome::Failed);
+        assert_eq!(side.messages, ["'NOPE.OCX' could not be loaded"]);
+    }
+
+    /// A load error gives exit code 1, three lines, and a `.log` file beside
+    /// the form. The lines of the `.log` file come after the three lines,
+    /// each after the name of its file.
+    #[test]
+    fn a_load_error_is_failed_with_the_lines_of_its_log_file() {
+        let out = format!(
+            "{BLANKS}Errors during load. Refer to \
+             'E:\\deform6\\probe\\extracted\\p04\\Form1.log' for details\r\n\
+             'E:\\deform6\\probe\\extracted\\p04\\Form1.frm' could not be loaded.\r\n\
+             Build of 'ProbeBadProperty.exe' failed.\r\n"
+        );
+        let log = (
+            "Form1.log",
+            "Line 8: The property name BogusProperty in Form1 is invalid.\r\n",
+        );
+        let side = side_of("load", "p04", Some("1\r\n"), &out, &[log]).unwrap();
+        assert_eq!(side.outcome, build_record::Outcome::Failed);
+        assert_eq!(
+            side.messages,
+            [
+                "Errors during load. Refer to 'Form1.log' for details",
+                "'Form1.frm' could not be loaded.",
+                "Build of 'ProbeBadProperty.exe' failed.",
+                "Form1.log: Line 8: The property name BogusProperty in Form1 is invalid.",
+            ]
+        );
+    }
+
+    /// A side with no exit code did not run.
+    #[test]
+    fn a_side_with_no_exit_code_did_not_run() {
+        let side = side_of("notrun", "p05", None, "", &[]).unwrap();
+        assert_eq!(side.outcome, build_record::Outcome::NotRun);
+        assert!(side.messages.is_empty());
+    }
+
+    /// A shape that the probe did not show is refused: exit code 0 with no
+    /// success line, exit code 1 with one, a success with a load log, and an
+    /// exit code that is not a number.
+    #[test]
+    fn a_shape_that_the_probe_did_not_show_is_refused() {
+        let success = format!("{BLANKS}Build of 'A.exe' succeeded.\r\n");
+        let failed = "Build of 'A.exe' failed.\r\n";
+        let log = [("Form1.log", "Line 1: x\r\n")];
+        assert!(side_of("r1", "p01", Some("0"), failed, &[]).is_err());
+        assert!(side_of("r2", "p01", Some("1"), &success, &[]).is_err());
+        assert!(side_of("r3", "p01", Some("0"), &success, &log).is_err());
+        assert!(side_of("r4", "p01", Some("zero"), &success, &[]).is_err());
+    }
+
+    /// Each path through the project directory starts after that directory,
+    /// in any case. A path through another program's directory stays.
+    #[test]
+    fn a_path_is_cut_at_its_own_project_directory() {
+        assert_eq!(
+            cut_paths(
+                r"'E:\x\EXTRACTED\P02\A.frm' and 'e:\y\extracted\p02\B.frx'",
+                "extracted",
+                "p02"
+            ),
+            "'A.frm' and 'B.frx'"
+        );
+        assert_eq!(
+            cut_paths(r"'E:\x\extracted\p03\A.frm'", "extracted", "p02"),
+            r"'E:\x\extracted\p03\A.frm'"
+        );
+        assert_eq!(cut_paths("no path here", "original", "p01"), "no path here");
+    }
+
+    /// The environment gives the line of `ver`, and the line of `dir` for
+    /// `VB6.EXE` with each run of spaces made one.
+    #[test]
+    fn the_environment_gives_the_windows_line_and_the_vb6_line() {
+        let text = "\r\nMicrosoft Windows XP [Version 5.1.2600]\r\n Volume in drive E has no \
+                    label.\r\n\r\n Directory of E:\\Program Files\\Microsoft Visual \
+                    Studio\\VB98\r\n\r\n02/23/2004  12:00 AM         1,895,424 VB6.EXE\r\n      \
+                    1 File(s)      1,895,424 bytes\r\n";
+        assert_eq!(
+            parse_environment(text).unwrap(),
+            (
+                "Microsoft Windows XP [Version 5.1.2600]".to_owned(),
+                "02/23/2004 12:00 AM 1,895,424 VB6.EXE".to_owned()
+            )
+        );
+        assert!(parse_environment("no version\r\n").is_err());
+    }
+
+    /// The manifest reads back what `render_manifest` writes, and a line with
+    /// four fields is refused.
+    #[test]
+    fn the_manifest_reads_back_what_the_export_writes() {
+        let programs = [
+            program("p01", "a/A.exe", "A.vbp"),
+            program("p02", "b/Part 3 - B/B.exe", "B B.vbp"),
+        ];
+        assert_eq!(
+            parse_manifest(&render_manifest(&programs)).unwrap(),
+            programs
+        );
+        assert!(parse_manifest("p01\ta/A.exe\tA.vbp\tA.vbp\n").is_err());
+    }
+
+    /// An import reads each side of each program in the manifest, and takes
+    /// the hash of the files from the manifest.
+    #[test]
+    fn an_import_reads_each_side_of_each_program_in_the_manifest() {
+        let dir = scratch("record");
+        let programs = [
+            program("p01", "a/A.exe", "A.vbp"),
+            program("p02", "b/B.exe", "B.vbp"),
+        ];
+        std::fs::write(dir.join("manifest.txt"), render_manifest(&programs)).unwrap();
+        std::fs::write(
+            dir.join("logs/environment.txt"),
+            "Microsoft Windows XP [Version 5.1.2600]\r\n02/23/2004  12:00 AM  1,895,424 \
+             VB6.EXE\r\n",
+        )
+        .unwrap();
+        let success = format!("{BLANKS}Build of 'A.exe' succeeded.\r\n");
+        let missing = "'x\\extracted\\p02\\N.OCX' could not be loaded\r\n";
+        write_side(&dir, "p01", "original", Some("0"), &success, &[]);
+        write_side(&dir, "p01", "extracted", Some("0"), &success, &[]);
+        write_side(&dir, "p02", "original", Some("0"), &success, &[]);
+        write_side(&dir, "p02", "extracted", Some("1"), missing, &[]);
+
+        let record = import_record(&dir);
+        std::fs::remove_dir_all(&dir).unwrap();
+        let record = record.unwrap();
+
+        assert_eq!(record.windows, "Microsoft Windows XP [Version 5.1.2600]");
+        assert_eq!(record.programs.len(), 2);
+        let b = &record.programs["b/B.exe"];
+        assert_eq!(b.files, programs[1].files);
+        assert_eq!(b.original.outcome, build_record::Outcome::Built);
+        assert_eq!(b.extracted.outcome, build_record::Outcome::Failed);
+        assert_eq!(b.extracted.messages, ["'N.OCX' could not be loaded"]);
+    }
+
+    /// Only a record of exactly the corpus programs is imported.
+    #[test]
+    fn only_a_record_of_the_corpus_programs_is_imported() {
+        let side = build_record::Side {
+            outcome: build_record::Outcome::Built,
+            messages: Vec::new(),
+        };
+        let mut record = build_record::BuildRecord::default();
+        for key in ["a/A.exe", "b/B.exe"] {
+            record.programs.insert(
+                key.to_owned(),
+                build_record::ProgramBuild {
+                    files: format!("sha256:{}", "0".repeat(64)),
+                    original: side.clone(),
+                    extracted: side.clone(),
+                },
+            );
+        }
+        let keys = ["a/A.exe".to_owned(), "b/B.exe".to_owned()];
+        assert!(check_corpus_keys(&record, &keys).is_ok());
+        assert!(check_corpus_keys(&record, &keys[..1]).is_err());
+        let probe = ["probe/ok".to_owned(), "probe/syntax".to_owned()];
+        assert!(check_corpus_keys(&record, &probe).is_err());
     }
 }
