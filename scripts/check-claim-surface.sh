@@ -170,7 +170,7 @@ DeForm6 does not open the Visual Basic 6 IDE and it does not compile anything. N
 # and removing any one of them from a copy must be detectable.
 FACTS='lpNativeCode
 frmHMM.frx
-needs the Visual Basic 6 IDE on'
+No test starts VB6'
 
 is_allowed() {
 	candidate=$1
@@ -412,7 +412,7 @@ echo
 if ! fact_check "$WORK/src-readme.txt"; then
 	echo "FAIL  README.md no longer holds one of the three facts success"
 	echo "      criterion 3 names: lpNativeCode, frmHMM.frx, or the"
-	echo "      recompilation sentence."
+	echo "      sentence that no test starts VB6."
 	exit 1
 fi
 

@@ -160,10 +160,17 @@ A check that passes because it reads the wrong place is worse than no check.
    DeForm6's own test corpus excludes this one file by name, rather than
    papering over the missing byte.
 
-3. **Full recompilation was not tested.**
-   Full recompilation did not run. It needs the Visual Basic 6 IDE on
-   Windows, and this run had neither. A structural check ran in its place,
-   and it never opened this project in the IDE.
+3. **One Windows host built the projects, and no test does.**
+   On the author's Windows XP machine, the Visual Basic 6 IDE built 41 of the
+   44 projects that DeForm6 wrote, and 42 of the 44 projects in the corpus.
+   `tests/builds.toml` holds each result and the lines that VB6 wrote. The
+   three projects of DeForm6 that do not build use the Winsock control:
+   DeForm6 writes an identifier on their `Object=` line that is one byte away
+   from the one that the original project declares. The two corpus projects
+   that do not build are `Edge_Detection`, whose `cCommonDialog.cls` is not in
+   its directory, and `HMM`, whose `frmHMM.frx` is damaged, as fact 2 says.
+   No test starts VB6, because the test machine has no Windows. The gate
+   fails when DeForm6 writes different files than the Windows host built.
 
 ---
 
@@ -457,6 +464,10 @@ cargo test --workspace
 - **The corpus sweep.** All 44 programs are read and report what they hold.
 - **The structural check.** Every extracted project is checked against the
   shape the IDE expects.
+- **The build record.** `tests/builds.toml` holds what the Visual Basic 6 IDE
+  built on the author's Windows host, for each corpus program. The gate fails
+  when DeForm6 writes different files than that host built, until the host
+  builds them again.
 - **The schema check.** Every one of the 44 reports is validated against
   `crates/deform6/schema/report.schema.json`, and a doctored report is proved
   to fail.
