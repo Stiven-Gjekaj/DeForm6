@@ -499,9 +499,43 @@ writes the files again and compares the hashes. When DeForm6 writes
 different files, the gate fails with `STALE` until the host builds the new
 files.
 
-**The exit is not met yet.** Three extracted projects do not build, and none
-of the three is a named limit. Part 2 fixes the `Object=` line, or names the
-limit with VB6's own message beside it.
+#### Part 2, done on 2026-09-25
+
+**Two faults, fixed one at a time.** Each fix changed the files of the three
+Winsock projects. So the host built the 44 programs again after each fix.
+
+1. The `Object=` line. The executable does not hold the type library
+   identifier that the line declares, as `docs/STRUCTURES.md` section 7.3.1
+   records. It holds the class identifier of the control. DeForm6 now keeps a
+   table of one row, measured in the corpus: the class identifier of the
+   Winsock control gives the line that the three corpus projects declare.
+   The line is graded `inferred`. VB6 then loaded the control library, and
+   the next fault showed.
+2. The class of the control. The form gave the class `VB.Control`, which VB6
+   does not know. The form now gives the class name that the file holds,
+   `MSWinsockLib.Winsock`.
+
+**A shape that the probe did not show.** A control class that VB6 cannot load
+does not stop `/make`. VB6 puts a picture box in place of the control, gives
+exit code 0, writes `Build of '<name>' succeeded.`, and writes a `.log` file
+beside the form. The record calls this result `built with load errors`, so
+that a build of a changed project does not count as `built`.
+
+| Run | Built | Built with load errors | Failed |
+|---|---|---|---|
+| After the `Object=` fix | 41 of 44 | 3 | 0 |
+| After the class fix | 44 of 44 | 0 | 0 |
+
+The projects in the corpus gave the same result in each run: 42 of 44 built.
+
+**The exit is met.** VB6 builds each of the 44 projects that DeForm6 writes.
+The two corpus projects that do not build fail because of faults upstream,
+which the first run names.
+
+**What stays open.** The table has one row. For another control, DeForm6
+writes the class identifier on the `Object=` line, and VB6 does not load that
+line. A second control in the corpus can add a row. `--verify-build` waits for
+a Windows 10 host.
 
 ### Phase 9: The P-code corpus
 
@@ -580,7 +614,7 @@ messages name the next action.
 
 ```
 Phase 7  (no dependency, starts today)
-Phase 8  (part 1 done on the author's XP host; part 2 is next)
+Phase 8  (exit met on the author's XP host; --verify-build waits)
    |
    +-- Phase 9  (needs the Phase 8 host)
           |
