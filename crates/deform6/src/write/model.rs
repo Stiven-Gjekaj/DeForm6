@@ -486,6 +486,7 @@ pub struct FormModel {
 /// | `depth` | `write::frm` (indent, and the [`MAX_NESTING_DEPTH`] check) |
 /// | `is_menu` | `write::frm` (the menus-last ordering rule, plan 04-04) |
 /// | `is_external` | `write::frm` (the `Object.` prefix and the OCX colour branch, plan 04-04) |
+/// | `external_class` | `write::frm` (the `Begin` line's own class, for an external control) |
 /// | `properties` | `write::values` (plan 04-02, every property line) |
 #[derive(Clone, Debug, PartialEq)]
 pub struct ControlModel {
@@ -507,6 +508,11 @@ pub struct ControlModel {
     pub is_menu: bool,
     /// `true` for the external (OCX) control kind.
     pub is_external: bool,
+    /// The class name that the file gives for an external (OCX) control,
+    /// such as `MSWinsockLib.Winsock`, as the reader read it. `None` for
+    /// every other control kind. `write::frm` checks its shape before it
+    /// writes it.
+    pub external_class: Option<String>,
     /// Every property this control's own stream decoded, in stream order.
     pub properties: Vec<PropertyValue>,
 }
@@ -835,6 +841,10 @@ fn build_controls(
             depth,
             is_menu: matches!(control.kind, ControlKind::Menu),
             is_external: matches!(control.kind, ControlKind::External),
+            external_class: control
+                .external
+                .as_ref()
+                .map(|external| external.class_name.clone()),
             properties: control.properties.clone(),
         });
     }
@@ -1443,6 +1453,37 @@ mod tests {
         assert!(controls[1].is_menu && !controls[1].is_external);
         assert!(!controls[2].is_menu && controls[2].is_external);
         assert!(!controls[3].is_menu && !controls[3].is_external);
+    }
+
+    /// The model keeps the class name that the reader gives for an external
+    /// control, and gives no class name for another control.
+    #[test]
+    fn the_external_class_is_the_class_name_that_the_reader_gives() {
+        let mut external = minimal_control("wsPop", ControlKind::External, Some(0));
+        external.external = Some(crate::vb::ocx::ExternalControl {
+            class_name: "MSWinsockLib.Winsock".to_owned(),
+            library: "MSWinsockLib".to_owned(),
+            component: "Winsock".to_owned(),
+            offset: 0x40,
+            clsid: None,
+        });
+        let form = FormReport {
+            name: "frmSock".to_owned(),
+            controls: vec![
+                minimal_control("frmSock", ControlKind::Form, None),
+                external,
+                minimal_control("Command1", ControlKind::CommandButton, Some(0)),
+            ],
+            defects: Vec::new(),
+        };
+        let report = minimal_report(Vec::new(), vec![form]);
+        let (model, _items) = from_report(&report, &[]);
+        let classes: Vec<Option<&str>> = model.forms[0]
+            .controls
+            .iter()
+            .map(|control| control.external_class.as_deref())
+            .collect();
+        assert_eq!(classes, [None, Some("MSWinsockLib.Winsock"), None]);
     }
 
     #[test]

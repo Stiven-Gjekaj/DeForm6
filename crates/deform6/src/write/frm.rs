@@ -18,8 +18,10 @@ use crate::write::values;
 use super::model::{ControlModel, FormModel, LineWriter, MAX_NESTING_DEPTH, ProcedureModel};
 
 /// Gives the `VB.<Name>` class this control's own kind writes on its
-/// `Begin` line. An external (OCX) control's real class name is a known
-/// gap; see [`write_form`]'s own module notes.
+/// `Begin` line. [`class_name_for`] never passes an external (OCX) control
+/// or an unknown kind here: an external control takes the class name that
+/// the file gives, and an unknown kind writes no block. Both give
+/// `VB.Control`, a class that Visual Basic 6 does not know.
 fn vb_class_name(kind: &ControlKind) -> String {
     let name = match kind {
         ControlKind::PictureBox => "PictureBox",
@@ -413,8 +415,10 @@ const CORPUS_PROVEN_CLASSES: [&str; 14] = [
     "VScrollBar",
 ];
 
-/// Gives the `VB.<Name>` class `control` writes on its own `Begin` line,
-/// or `None` when the control's own kind could not be named at all.
+/// Gives the class `control` writes on its own `Begin` line: `VB.<Name>`
+/// for an intrinsic control, or the class name that the file gives for an
+/// external (OCX) control, through [`external_class_for`]. `None` when no
+/// block is written for the control.
 ///
 /// A kind the reader could not name at all
 /// ([`ControlKind::Unknown`]) writes no block: a guessed class name
@@ -448,6 +452,10 @@ fn class_name_for(
         return None;
     }
 
+    if control.is_external {
+        return external_class_for(form, control, index, items);
+    }
+
     let class = vb_class_name(&control.kind);
     let bare_name = class.strip_prefix("VB.").unwrap_or(class.as_str());
     if !CORPUS_PROVEN_CLASSES.contains(&bare_name) {
@@ -463,6 +471,59 @@ fn class_name_for(
     }
 
     Some(class)
+}
+
+/// Gives the class an external (OCX) control writes on its own `Begin`
+/// line: the class name that the file gives, such as
+/// `MSWinsockLib.Winsock`. The three corpus programs that hold a Winsock
+/// control declare this class in their own forms.
+///
+/// A class name that [`is_control_class`] refuses, or no class name at
+/// all, writes no block, for the reason [`class_name_for`] gives for an
+/// unknown kind: Visual Basic 6 puts a picture box in place of a control
+/// whose class it does not know. The second build run of the corpus
+/// showed this for the class `VB.Control`. An `unrecoverable` report item
+/// names the gap.
+fn external_class_for(
+    form: &FormModel,
+    control: &ControlModel,
+    index: usize,
+    items: &mut Vec<ReportItem>,
+) -> Option<String> {
+    match control.external_class.as_deref() {
+        Some(class) if is_control_class(class) => Some(class.to_owned()),
+        _ => {
+            items.push(ReportItem {
+                path: control_report_path(form, control, index),
+                confidence: Confidence::Unrecoverable,
+                basis: "this external control's own class name is not two names joined by \
+                        one dot; Visual Basic 6 would load a picture box in place of the \
+                        control, so no block is written for it"
+                    .to_owned(),
+                evidence: Vec::new(),
+            });
+            None
+        }
+    }
+}
+
+/// Tells whether `class` has the shape of the class of an external control:
+/// two names joined by one dot, such as `MSWinsockLib.Winsock`. Each name
+/// starts with an ASCII letter and holds only ASCII letters, digits and
+/// underscores. The class name comes from the file, so a space, a quote or
+/// a line break in it must not reach the `Begin` line.
+fn is_control_class(class: &str) -> bool {
+    let mut parts = class.split('.');
+    let (Some(library), Some(name), None) = (parts.next(), parts.next(), parts.next()) else {
+        return false;
+    };
+    [library, name].into_iter().all(|part| {
+        let mut chars = part.chars();
+        chars
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic())
+            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    })
 }
 
 /// Writes one control's own `Begin ... End` block, its own properties in
@@ -802,7 +863,7 @@ mod support_frm;
 mod tests {
     use super::{
         BlobCursor, ControlKind, EMPTY_PICTURE_RECORD, FRM_INDENT, FRM_NAME_PAD, PropertyValue,
-        pad_name, write_empty_picture_record, write_form,
+        is_control_class, pad_name, write_empty_picture_record, write_form,
     };
     use crate::vb::frx;
     use crate::vb::opcodes::OpcodeTable;
@@ -1003,6 +1064,7 @@ mod tests {
             depth: 0,
             is_menu: false,
             is_external: false,
+            external_class: None,
             properties: vec![PropertyValue::BlobUnreadable {
                 name: "Icon".to_owned(),
                 offset: 0x10,
@@ -1049,6 +1111,7 @@ mod tests {
             depth: 0,
             is_menu: false,
             is_external: false,
+            external_class: None,
             properties: vec![PropertyValue::Boolean {
                 name: "Visible".to_owned(),
                 value: -1,
@@ -1076,6 +1139,7 @@ mod tests {
             depth: 0,
             is_menu: false,
             is_external: false,
+            external_class: None,
             properties: vec![
                 PropertyValue::BlobUnreadable {
                     name: "Icon".to_owned(),
@@ -1131,6 +1195,7 @@ mod tests {
             depth: 0,
             is_menu: false,
             is_external: false,
+            external_class: None,
             properties: vec![
                 // "Icon" sorts before "Picture", so it is processed first;
                 // its declared range (1000..1012) runs past the end of the
@@ -1198,6 +1263,7 @@ mod tests {
             depth: 0,
             is_menu: false,
             is_external: false,
+            external_class: None,
             properties: vec![
                 // Raw stream order: Zebra, then Apple.
                 PropertyValue::Blob {
@@ -1297,6 +1363,7 @@ mod tests {
             depth: 0,
             is_menu: false,
             is_external: false,
+            external_class: None,
             properties: Vec::new(),
         };
         let form = FormModel {
@@ -1338,6 +1405,7 @@ mod tests {
             depth: 0,
             is_menu: false,
             is_external: false,
+            external_class: None,
             properties: vec![PropertyValue::Long {
                 name: "BackColor".to_owned(),
                 value: -2_147_483_643,
@@ -1379,6 +1447,7 @@ mod tests {
                 depth: 0,
                 is_menu: false,
                 is_external: false,
+                external_class: None,
                 properties: Vec::new(),
             },
             ControlModel {
@@ -1389,6 +1458,7 @@ mod tests {
                 depth: 1,
                 is_menu: false,
                 is_external: false,
+                external_class: None,
                 properties: Vec::new(),
             },
             ControlModel {
@@ -1399,6 +1469,7 @@ mod tests {
                 depth: 2,
                 is_menu: false,
                 is_external: false,
+                external_class: None,
                 properties: Vec::new(),
             },
         ];
@@ -1439,6 +1510,7 @@ mod tests {
             depth: 0,
             is_menu: false,
             is_external: false,
+            external_class: None,
             properties: Vec::new(),
         }];
         for level in 1..=8usize {
@@ -1451,6 +1523,7 @@ mod tests {
                 depth: level,
                 is_menu: false,
                 is_external: false,
+                external_class: None,
                 properties: Vec::new(),
             });
         }
@@ -1496,6 +1569,7 @@ mod tests {
             depth: 0,
             is_menu: false,
             is_external: false,
+            external_class: None,
             properties: Vec::new(),
         };
         let form = FormModel {
@@ -1528,6 +1602,7 @@ mod tests {
             depth: 0,
             is_menu: false,
             is_external: false,
+            external_class: None,
             properties: Vec::new(),
         };
         let form = FormModel {
@@ -1559,6 +1634,7 @@ mod tests {
                 depth: 0,
                 is_menu: false,
                 is_external: false,
+                external_class: None,
                 properties: Vec::new(),
             },
             ControlModel {
@@ -1569,6 +1645,7 @@ mod tests {
                 depth: 1,
                 is_menu: false,
                 is_external: false,
+                external_class: None,
                 properties: Vec::new(),
             },
         ];
@@ -1612,6 +1689,7 @@ mod tests {
                 depth: 0,
                 is_menu: false,
                 is_external: false,
+                external_class: None,
                 properties: Vec::new(),
             },
             ControlModel {
@@ -1622,6 +1700,7 @@ mod tests {
                 depth: 1,
                 is_menu: false,
                 is_external: false,
+                external_class: None,
                 properties: Vec::new(),
             },
             ControlModel {
@@ -1632,6 +1711,7 @@ mod tests {
                 depth: 1,
                 is_menu: false,
                 is_external: false,
+                external_class: None,
                 properties: Vec::new(),
             },
         ];
@@ -1660,6 +1740,7 @@ mod tests {
                 depth: 0,
                 is_menu: false,
                 is_external: false,
+                external_class: None,
                 properties: vec![PropertyValue::Text {
                     name: "Caption".to_owned(),
                     value: "Hi".to_owned(),
@@ -1673,6 +1754,7 @@ mod tests {
                 depth: 1,
                 is_menu: false,
                 is_external: false,
+                external_class: None,
                 properties: vec![PropertyValue::Text {
                     name: "Caption".to_owned(),
                     value: "OK".to_owned(),
@@ -1884,6 +1966,7 @@ mod tests {
             depth: 0,
             is_menu: false,
             is_external: false,
+            external_class: None,
             properties: Vec::new(),
         };
         let form = FormModel {
@@ -1903,6 +1986,104 @@ mod tests {
             ),
             "{items:?}"
         );
+    }
+
+    /// Builds a form that holds one external control, `wsPop`, with the
+    /// class name `class`.
+    fn external_control_form(class: Option<&str>) -> FormModel {
+        let (form_name, _faults) = SafeName::new("frmSock", NameKind::Form);
+        let (control_name, _faults) = SafeName::new("wsPop", NameKind::Control);
+        FormModel {
+            name: form_name.clone(),
+            tree_refused: false,
+            controls: vec![
+                ControlModel {
+                    name: form_name,
+                    kind: ControlKind::Form,
+                    array_index: None,
+                    parent: None,
+                    depth: 0,
+                    is_menu: false,
+                    is_external: false,
+                    external_class: None,
+                    properties: Vec::new(),
+                },
+                ControlModel {
+                    name: control_name,
+                    kind: ControlKind::External,
+                    array_index: None,
+                    parent: Some(0),
+                    depth: 1,
+                    is_menu: false,
+                    is_external: true,
+                    external_class: class.map(str::to_owned),
+                    properties: Vec::new(),
+                },
+            ],
+            procedures: Vec::new(),
+            blobs: Vec::new(),
+        }
+    }
+
+    /// An external control writes the class name that the file gives on its
+    /// own `Begin` line, and no report item names the control.
+    #[test]
+    fn an_external_control_writes_the_class_name_that_the_file_gives() {
+        let form = external_control_form(Some("MSWinsockLib.Winsock"));
+        let (files, items) = write_form(&form, &[], &[]).expect("write_form must succeed");
+        let text = frm_text(&files);
+        assert!(
+            text.lines()
+                .any(|line| line == "   Begin MSWinsockLib.Winsock wsPop "),
+            "{text}"
+        );
+        assert!(!text.contains("VB.Control"), "{text}");
+        assert!(
+            !items.iter().any(|item| item.path.contains("wsPop")),
+            "{items:?}"
+        );
+    }
+
+    /// An external control with no class name, or with a class name of
+    /// another shape, writes no block, and an unrecoverable item names the
+    /// control. A line break in the class name does not reach the file.
+    #[test]
+    fn an_external_control_whose_class_has_another_shape_writes_no_block() {
+        for class in [
+            None,
+            Some(""),
+            Some("Winsock"),
+            Some("MSWinsockLib.Winsock.Extra"),
+            Some("MS Winsock.Winsock"),
+            Some("1Lib.Winsock"),
+            Some("MSWinsockLib._Winsock"),
+            Some("MSWinsockLib.Winsock\r\nBegin VB.Form Evil"),
+        ] {
+            let form = external_control_form(class);
+            let (files, items) = write_form(&form, &[], &[]).expect("write_form must succeed");
+            let text = frm_text(&files);
+            assert!(
+                !text
+                    .lines()
+                    .any(|line| line.trim_start().starts_with("Begin ") && line.contains("wsPop")),
+                "{class:?}: {text}"
+            );
+            assert!(!text.contains("Evil"), "{class:?}: {text}");
+            assert!(
+                items.iter().any(|item| item.confidence
+                    == crate::report::Confidence::Unrecoverable
+                    && item.path.contains("wsPop")),
+                "{class:?}: {items:?}"
+            );
+        }
+    }
+
+    /// Two ASCII names joined by one dot have the shape of a control class.
+    #[test]
+    fn two_names_joined_by_one_dot_have_the_shape_of_a_control_class() {
+        for class in ["MSWinsockLib.Winsock", "A.B", "Lib_2.X9"] {
+            assert!(is_control_class(class), "{class}");
+        }
     }
 }
 
@@ -1940,6 +2121,7 @@ mod ordering {
                 depth: 0,
                 is_menu: false,
                 is_external: false,
+                external_class: None,
                 properties: Vec::new(),
             },
             ControlModel {
@@ -1950,6 +2132,7 @@ mod ordering {
                 depth: 1,
                 is_menu: true,
                 is_external: false,
+                external_class: None,
                 properties: Vec::new(),
             },
             ControlModel {
@@ -1960,6 +2143,7 @@ mod ordering {
                 depth: 1,
                 is_menu: false,
                 is_external: false,
+                external_class: None,
                 properties: Vec::new(),
             },
         ];
@@ -1995,6 +2179,7 @@ mod ordering {
             depth: 0,
             is_menu: false,
             is_external: false,
+            external_class: None,
             properties: vec![
                 PropertyValue::Byte {
                     name: "Zulu".to_owned(),
@@ -2053,6 +2238,7 @@ mod ordering {
                 depth: 0,
                 is_menu: false,
                 is_external: false,
+                external_class: None,
                 properties: vec![PropertyValue::Text {
                     name: "Caption".to_owned(),
                     value: "Hi".to_owned(),
@@ -2066,6 +2252,7 @@ mod ordering {
                 depth: 1,
                 is_menu: false,
                 is_external: false,
+                external_class: None,
                 properties: Vec::new(),
             },
         ];
@@ -2101,6 +2288,7 @@ mod ordering {
                 depth: 0,
                 is_menu: false,
                 is_external: false,
+                external_class: None,
                 properties: Vec::new(),
             },
             ControlModel {
@@ -2111,6 +2299,7 @@ mod ordering {
                 depth: 1,
                 is_menu: false,
                 is_external: true,
+                external_class: Some("MSWinsockLib.Winsock".to_owned()),
                 properties: vec![
                     PropertyValue::Byte {
                         name: "Zeta".to_owned(),

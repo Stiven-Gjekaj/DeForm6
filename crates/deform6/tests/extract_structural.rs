@@ -304,15 +304,14 @@ fn check_nesting_depth(file_label: &str, block: &Block, depth: usize, failures: 
 // --- Named assertion 5: properties inside a block are alphabetical --------
 
 /// `true` for a block this repository writes with its own stream order
-/// preserved rather than sorted: the generic `VB.Control` class this
-/// writer gives an external (OCX) control, since only an OCX control's own
-/// class name reaches this bare fallback (an unrecoverable control kind
-/// writes no block at all). This mirrors `write::frm::write_model_control_block`'s
+/// preserved rather than sorted: an external (OCX) control, whose class is
+/// outside the `VB.` library of the intrinsic controls, such as
+/// `MSWinsockLib.Winsock`. This mirrors `write::frm::write_model_control_block`'s
 /// own `is_external` skip, read here as a written fact rather than shared
 /// as code: the independent reader has no `is_external` field of its own,
 /// only the class name the file itself carries.
 fn skips_alphabetical_order(block: &Block) -> bool {
-    block.class == "VB.Control"
+    !block.class.starts_with("VB.")
 }
 
 /// Walks a written form's own parsed control tree and checks that every
@@ -718,6 +717,106 @@ fn each_object_line_is_one_that_the_original_project_declares() {
     );
 }
 
+// --- Each control class is the class that the original form declares ----
+
+/// Adds the class of `block`, and of each block inside it, to `classes`,
+/// by the control name in lower case. The elements of a control array share
+/// one name and one class.
+fn collect_classes(block: &Block, classes: &mut std::collections::BTreeMap<String, String>) {
+    classes.insert(block.name.to_lowercase(), block.class.clone());
+    for child in &block.children {
+        collect_classes(child, classes);
+    }
+}
+
+/// Each `Begin` line that the write path gives for a corpus form names the
+/// class that the original form declares for the control of the same name.
+/// The corpus holds three external controls, one in each program that holds
+/// a Winsock control.
+///
+/// The count holds the check to the corpus. Without it, a writer that gave
+/// no block for an external control would pass.
+#[test]
+fn each_control_class_is_the_class_that_the_original_form_declares() {
+    let root = corpus_root();
+    let projects = vbp::project_files();
+    let mut failures: Vec<String> = Vec::new();
+    let mut names_compared = 0_usize;
+    let mut external_names = 0_usize;
+
+    for (index, exe) in executables().iter().enumerate() {
+        let extracted = extract_one(exe, &root, &format!("class-{index}"));
+        let key = extracted.key.as_str();
+        let original =
+            vbp::select_project_file(exe, &projects).unwrap_or_else(|err| panic!("{key}: {err}"));
+        let declared = vbp::Project::read(&original).declared_objects();
+
+        for file in extracted
+            .files
+            .iter()
+            .filter(|file| file.name.ends_with(".frm"))
+        {
+            let form = frm::Form::read(&extracted.dir.join(&file.name));
+            let Some(name) = attribute_vb_name(&form.text) else {
+                failures.push(format!(
+                    "{key}: {} holds no Attribute VB_Name line",
+                    file.name
+                ));
+                continue;
+            };
+            let Some(source) = declared.iter().find(|object| {
+                object.kind == vbp::ObjectKind::Form
+                    && object
+                        .name
+                        .as_deref()
+                        .is_some_and(|declared_name| declared_name.eq_ignore_ascii_case(&name))
+            }) else {
+                failures.push(format!(
+                    "{key}: {} declares no form named {name}",
+                    original.display()
+                ));
+                continue;
+            };
+
+            let mut original_classes = std::collections::BTreeMap::new();
+            for block in &frm::Form::read(&source.source_file).blocks() {
+                collect_classes(block, &mut original_classes);
+            }
+            let mut written_classes = std::collections::BTreeMap::new();
+            for block in &form.blocks() {
+                collect_classes(block, &mut written_classes);
+            }
+            for (control, class) in &written_classes {
+                names_compared = names_compared.saturating_add(1);
+                if !class.starts_with("VB.") {
+                    external_names = external_names.saturating_add(1);
+                }
+                if original_classes.get(control) != Some(class) {
+                    failures.push(format!(
+                        "{key}: {}: control {control} is written as {class}, and the original \
+                         form declares {:?}",
+                        file.name,
+                        original_classes.get(control)
+                    ));
+                }
+            }
+        }
+        std::fs::remove_dir_all(&extracted.dir).ok();
+    }
+
+    assert!(
+        failures.is_empty(),
+        "{} of {names_compared} control class(es) that the original form does not declare:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+    assert_eq!(
+        external_names, 3,
+        "the corpus forms gave {external_names} external control(s), and three programs hold a \
+         Winsock control"
+    );
+}
+
 /// Reads `path` as Latin-1 bytes, this crate's own read and write
 /// convention: each byte maps to its own code point, never
 /// `String::from_utf8_lossy`. Copied here, not shared with any writing
@@ -900,6 +999,26 @@ mod deliberate_breakages {
             failures[0].contains("Visible") && failures[0].contains("Caption"),
             "{failures:?}"
         );
+    }
+
+    /// An external control keeps the order of its own stream, so the same
+    /// reversed order passes the check for a class outside `VB.`.
+    #[test]
+    fn a_reversed_property_order_passes_for_an_external_control() {
+        let mut block = leaf("MSWinsockLib.Winsock", "wsPop");
+        block.properties = vec![
+            Property {
+                name: "Visible".to_owned(),
+                value: "0".to_owned(),
+            },
+            Property {
+                name: "Caption".to_owned(),
+                value: "\"Hi\"".to_owned(),
+            },
+        ];
+        let mut failures = Vec::new();
+        check_property_order("fixture.frm", &block, &mut failures);
+        assert!(failures.is_empty(), "{failures:?}");
     }
 
     #[test]
