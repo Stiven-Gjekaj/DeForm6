@@ -913,13 +913,20 @@ fn load_logs(dir: &Path) -> Result<Vec<(String, String)>, String> {
 
 /// Reads the result of one side of one program.
 ///
-/// The rule comes from a run of the probe on the XP host with VB6 SP6.
-/// `VB6.EXE /make` gives exit code 0 and writes the line
-/// `Build of '<name>' succeeded.` when it builds the project. It gives exit
-/// code 1 when it does not, and writes no such line. A load error also
-/// writes a `.log` file beside the source file. A side with no `.exit` file
-/// did not run. Any other shape is refused, because the probe did not show
-/// it.
+/// The rule comes from runs on the XP host with VB6 SP6. `VB6.EXE /make`
+/// gives exit code 0 and writes the line `Build of '<name>' succeeded.` when
+/// it builds the project. It gives exit code 1 when it does not, and writes
+/// no such line. A load error also writes a `.log` file beside the source
+/// file. The probe showed these shapes.
+///
+/// VB6 can go past some load errors. For a control whose class it cannot
+/// load, it puts a picture box in place of the control, and it builds the
+/// project. It then gives exit code 0, the success line and a `.log` file.
+/// The second build run of the corpus showed this shape, and the side is
+/// `built with load errors`.
+///
+/// A side with no `.exit` file did not run. Any other shape is refused,
+/// because no run showed it.
 pub(crate) fn read_side(
     dir: &Path,
     program: &Exported,
@@ -948,35 +955,36 @@ pub(crate) fn read_side(
         .any(|line| line.starts_with("Build of '") && line.ends_with("' succeeded."));
     let load_logs = load_logs(&dir.join(side).join(&program.short))?;
 
-    if exit == 0 && succeeded && load_logs.is_empty() {
-        return Ok(build_record::Side {
-            outcome: build_record::Outcome::Built,
-            messages: Vec::new(),
-        });
-    }
-    if exit != 0 && !succeeded {
-        let mut messages = lines;
-        for (path, text) in load_logs {
-            for line in text
-                .lines()
-                .map(str::trim_end)
-                .filter(|line| !line.is_empty())
-            {
-                messages.push(format!("{path}: {}", cut_paths(line, side, &program.short)));
-            }
+    let outcome = match (exit == 0, succeeded, load_logs.is_empty()) {
+        (true, true, true) => {
+            return Ok(build_record::Side {
+                outcome: build_record::Outcome::Built,
+                messages: Vec::new(),
+            });
         }
-        return Ok(build_record::Side {
-            outcome: build_record::Outcome::Failed,
-            messages,
-        });
+        (true, true, false) => build_record::Outcome::BuiltWithLoadErrors,
+        (false, false, _) => build_record::Outcome::Failed,
+        _ => {
+            return Err(format!(
+                "{} {side}: exit code {exit}, a success line {}, and {} load log files do not \
+                 agree with the rule that the runs on the host measured",
+                program.key,
+                if succeeded { "present" } else { "absent" },
+                load_logs.len()
+            ));
+        }
+    };
+    let mut messages = lines;
+    for (path, text) in load_logs {
+        for line in text
+            .lines()
+            .map(str::trim_end)
+            .filter(|line| !line.is_empty())
+        {
+            messages.push(format!("{path}: {}", cut_paths(line, side, &program.short)));
+        }
     }
-    Err(format!(
-        "{} {side}: exit code {exit}, a success line {}, and {} load log files do not agree \
-         with the rule that the probe measured",
-        program.key,
-        if succeeded { "present" } else { "absent" },
-        load_logs.len()
-    ))
+    Ok(build_record::Side { outcome, messages })
 }
 
 /// Reads the whole export in `dir` into a record.
@@ -1270,9 +1278,10 @@ mod tests {
         assert_eq!(manifest.lines().count(), 5);
     }
 
-    // --- The importer. The texts below have the shapes that a run of the
-    // probe gave on the XP host with VB6 SP6. Each test builds its own
-    // export directory in the temporary directory.
+    // --- The importer. The texts below have the shapes that the runs on the
+    // XP host with VB6 SP6 gave: the probe, and the second build run of the
+    // corpus. Each test builds its own export directory in the temporary
+    // directory.
 
     /// A new, empty directory in the temporary directory.
     fn scratch(name: &str) -> std::path::PathBuf {
@@ -1396,6 +1405,34 @@ mod tests {
         );
     }
 
+    /// A control class that VB6 cannot load gives exit code 0, two lines and
+    /// a `.log` file beside the form. VB6 puts a picture box in place of the
+    /// control and builds the project. The lines of the `.log` file come
+    /// after the two lines, each after the name of its file.
+    #[test]
+    fn a_build_after_errors_during_load_is_built_with_load_errors() {
+        let out = format!(
+            "{BLANKS}Errors during load. Refer to \
+             'E:\\deform6\\c2a\\extracted\\p06\\Form1.log' for details\r\n\
+             Build of 'TFTPClient.exe' succeeded.\r\n"
+        );
+        let log = (
+            "Form1.log",
+            "Line 17: Class VB.Control of control WskClient was not a loaded control class.\r\n",
+        );
+        let side = side_of("loadbuilt", "p06", Some("0\r\n"), &out, &[log]).unwrap();
+        assert_eq!(side.outcome, build_record::Outcome::BuiltWithLoadErrors);
+        assert_eq!(
+            side.messages,
+            [
+                "Errors during load. Refer to 'Form1.log' for details",
+                "Build of 'TFTPClient.exe' succeeded.",
+                "Form1.log: Line 17: Class VB.Control of control WskClient was not a loaded \
+                 control class.",
+            ]
+        );
+    }
+
     /// A side with no exit code did not run.
     #[test]
     fn a_side_with_no_exit_code_did_not_run() {
@@ -1404,17 +1441,17 @@ mod tests {
         assert!(side.messages.is_empty());
     }
 
-    /// A shape that the probe did not show is refused: exit code 0 with no
-    /// success line, exit code 1 with one, a success with a load log, and an
+    /// A shape that no run showed is refused: exit code 0 with no success
+    /// line, exit code 1 with one, with a load log or without one, and an
     /// exit code that is not a number.
     #[test]
-    fn a_shape_that_the_probe_did_not_show_is_refused() {
+    fn a_shape_that_no_run_showed_is_refused() {
         let success = format!("{BLANKS}Build of 'A.exe' succeeded.\r\n");
         let failed = "Build of 'A.exe' failed.\r\n";
         let log = [("Form1.log", "Line 1: x\r\n")];
         assert!(side_of("r1", "p01", Some("0"), failed, &[]).is_err());
         assert!(side_of("r2", "p01", Some("1"), &success, &[]).is_err());
-        assert!(side_of("r3", "p01", Some("0"), &success, &log).is_err());
+        assert!(side_of("r3", "p01", Some("1"), &success, &log).is_err());
         assert!(side_of("r4", "p01", Some("zero"), &success, &[]).is_err());
     }
 

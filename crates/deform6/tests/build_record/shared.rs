@@ -68,9 +68,11 @@ pub(crate) const HEADER: &str = r"# The committed build record: what the Visual 
 # executable, relative to `corpus/`. `files` is the hash of the files that
 # DeForm6 wrote for the program and that the host built. `original` is the
 # result for the project in the corpus, and `extracted` is the result for the
-# project that DeForm6 wrote. A result is `built`, `failed` or `not run`. The
-# messages are the lines that VB6 wrote, with each path cut to start at the
-# project directory.
+# project that DeForm6 wrote. A result is `built`, `built with load errors`,
+# `failed` or `not run`. `built with load errors` means that VB6 changed the
+# project to load it, and then built it. For example, VB6 puts a picture box
+# in place of a control whose class it cannot load. The messages are the
+# lines that VB6 wrote, with each path cut to start at the project directory.
 #
 # When DeForm6 writes different files for a program, `files` does not match,
 # and the gate fails until the host builds the new files.
@@ -81,6 +83,10 @@ pub(crate) const HEADER: &str = r"# The committed build record: what the Visual 
 pub(crate) enum Outcome {
     /// VB6 built the project.
     Built,
+    /// VB6 changed the project to load it, and then built it. For example,
+    /// VB6 puts a picture box in place of a control whose class it cannot
+    /// load. The executable is not the project as written.
+    BuiltWithLoadErrors,
     /// VB6 did not build the project.
     Failed,
     /// The host has no result for the project.
@@ -92,6 +98,7 @@ impl Outcome {
     pub(crate) const fn word(self) -> &'static str {
         match self {
             Self::Built => "built",
+            Self::BuiltWithLoadErrors => "built with load errors",
             Self::Failed => "failed",
             Self::NotRun => "not run",
         }
@@ -99,9 +106,14 @@ impl Outcome {
 
     /// Reads a word of the record.
     pub(crate) fn from_word(word: &str) -> Option<Self> {
-        [Self::Built, Self::Failed, Self::NotRun]
-            .into_iter()
-            .find(|outcome| outcome.word() == word)
+        [
+            Self::Built,
+            Self::BuiltWithLoadErrors,
+            Self::Failed,
+            Self::NotRun,
+        ]
+        .into_iter()
+        .find(|outcome| outcome.word() == word)
     }
 }
 
@@ -345,7 +357,10 @@ fn only_fields(
 fn outcome(table: &toml::Table, field: &str, what: &str) -> Result<Outcome, String> {
     let word = text(table, field, what)?;
     Outcome::from_word(word).ok_or_else(|| {
-        format!("{what}.{field} = {word:?} is not one of \"built\", \"failed\" and \"not run\"")
+        format!(
+            "{what}.{field} = {word:?} is not one of \"built\", \"built with load errors\", \
+             \"failed\" and \"not run\""
+        )
     })
 }
 

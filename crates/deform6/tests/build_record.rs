@@ -69,8 +69,12 @@ fn synthetic_record() -> BuildRecord {
         ProgramBuild {
             files: files_hash(&[file("B.vbp", b"Type=Exe\r\n")]),
             original: Side {
-                outcome: Outcome::Failed,
-                messages: vec!["Compile error".to_owned()],
+                outcome: Outcome::BuiltWithLoadErrors,
+                messages: vec![
+                    "Form1.log: Line 5: Class VB.Control of control X was not a loaded control \
+                     class."
+                        .to_owned(),
+                ],
             },
             extracted: Side {
                 outcome: Outcome::NotRun,
@@ -334,16 +338,19 @@ fn each_result_covers_the_files_that_deform6_writes_now() {
     );
 }
 
-/// A failed side holds the lines that VB6 wrote, and no line holds a path
-/// with a drive letter of the host.
+/// A side that failed, or that VB6 built with load errors, holds the lines
+/// that VB6 wrote, and no line holds a path with a drive letter of the host.
 #[test]
-fn a_failed_side_holds_its_messages_and_no_host_path() {
+fn a_side_with_errors_holds_its_messages_and_no_host_path() {
     for (key, program) in &committed().programs {
         for (side, result) in [
             ("original", &program.original),
             ("extracted", &program.extracted),
         ] {
-            if result.outcome == Outcome::Failed {
+            if matches!(
+                result.outcome,
+                Outcome::Failed | Outcome::BuiltWithLoadErrors
+            ) {
                 assert!(!result.messages.is_empty(), "{key} {side}");
             }
             for message in &result.messages {
