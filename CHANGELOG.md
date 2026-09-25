@@ -92,6 +92,16 @@ is therefore 2.0.0, not 1.1.0.
   `ProjectInfo + 0x234`. 1.0.0 gave an empty list and no defect, which said
   that the project declares nothing. A strict run now refuses such a file,
   and a salvage run reports no `Declare` statement and the defect.
+- A component table whose address is in no section, while `wExternalCount`
+  is not zero, now gives `ItemAddressUnmapped` at `VBHeader + 0x50`, the
+  `lpExternalTable` field of the header. 1.0.0 gave an empty list and no
+  defect, which said that the program uses no component. A strict run now
+  refuses such a file, and a salvage run reports no component and the
+  defect.
+- `ComponentTable::read` now takes the `VbHeader` in place of the address
+  and the count of the table, as `DeclareTable::read` takes the
+  `ProjectInfo`. Code that calls it with the address and the count does not
+  compile.
 - Two `Declare` failures now give a defect that states what the file holds.
   A descriptor whose address maps, in a section that ends before its 8
   bytes, gives `ItemCutShort`. A library name or an export name with no NUL
