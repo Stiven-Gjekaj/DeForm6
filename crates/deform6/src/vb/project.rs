@@ -28,6 +28,7 @@
 use crate::error::{Defect, DefectKind, Refusal, Site};
 use crate::read::pe::PeImage;
 use crate::read::region::{Off, Region, Rva, Va};
+use crate::vb::header::VbHeader;
 
 /// The size of the `ProjectInfo` structure.
 ///
@@ -40,6 +41,13 @@ const PROJECT_INFO_SIZE: u32 = 0x23C;
 /// One constant for the read and for the defect that names this field, so the
 /// two cannot come apart.
 const LP_EXTERNAL_TABLE_AT: u32 = 0x234;
+
+/// `STRUCTURES.md` section 2: the `lpExternalTable` of the VB header sits at
+/// `VBHeader + 0x50`. It names the component table, and not the `Declare`
+/// table that [`LP_EXTERNAL_TABLE_AT`] names.
+///
+/// The defect for a component table in no section names this byte.
+const HEADER_LP_EXTERNAL_TABLE_AT: u32 = 0x50;
 
 /// `STRUCTURES.md` section 3: `dwExternalCount` sits at `ProjectInfo + 0x238`.
 ///
@@ -1092,6 +1100,12 @@ impl ComponentTable {
     /// touching `lp_external_table` at all, matching `Mandelbrot.exe` and
     /// `Grayscale.exe`, neither of which references a component.
     ///
+    /// A count that is not zero, with a table address in no section, gives an
+    /// empty list and one [`DefectKind::ItemAddressUnmapped`] at the
+    /// `lpExternalTable` field of the VB header. The whole table is the item
+    /// that is lost. An empty list with no defect would say that the program
+    /// uses no component, which is a different claim.
+    ///
     /// # What this corpus proves and what it does not
     ///
     /// A script run over all 44 vendored programs, this session, found
@@ -1108,18 +1122,42 @@ impl ComponentTable {
     /// and is not reachable from here, so this module builds an independent
     /// synthetic image of the same shape rather than importing one.
     #[must_use]
-    pub fn read(pe: &PeImage<'_>, lp_external_table: Va, w_external_count: u16) -> Self {
+    pub fn read(pe: &PeImage<'_>, header: &VbHeader) -> Self {
         let mut components = Vec::new();
         let mut defects = Vec::new();
 
-        if w_external_count == 0 {
+        if header.w_external_count == 0 {
             return Self {
                 components,
                 defects,
             };
         }
 
-        let Some(table) = pe.region_at_va(lp_external_table) else {
+        let Some(table) = pe.region_at_va(header.lp_external_table) else {
+            // The count says that the table holds entries, and the table's
+            // address maps nowhere. The defect names lpExternalTable, which
+            // lives in the VB header. The site gives the file offset and the
+            // address of that field. The kind carries the address that the
+            // pointer holds.
+            let offset = header
+                .file_offset
+                .checked_add(HEADER_LP_EXTERNAL_TABLE_AT)
+                .map_or(0, Off::get);
+            defects.push(Defect {
+                site: Site {
+                    offset,
+                    rva: header
+                        .rva
+                        .and_then(|rva| rva.checked_add(HEADER_LP_EXTERNAL_TABLE_AT))
+                        .map(Rva::get),
+                    structure: "VBHeader",
+                    field: "lpExternalTable",
+                },
+                kind: DefectKind::ItemAddressUnmapped {
+                    offset,
+                    va: header.lp_external_table.get(),
+                },
+            });
             return Self {
                 components,
                 defects,
@@ -1127,7 +1165,7 @@ impl ComponentTable {
         };
 
         let mut cursor = Off::new(0);
-        for _ in 0..w_external_count {
+        for _ in 0..header.w_external_count {
             let Some(entry_offset) = table.file_offset(cursor) else {
                 break;
             };
@@ -1217,8 +1255,9 @@ impl ComponentTable {
         }
     }
 
-    /// Gives the defects the walk found: a zero or overrunning declared
-    /// length, or an entry whose fixed fields or strings did not resolve.
+    /// Gives the defects the walk found: a table address in no section, a
+    /// zero or overrunning declared length, or an entry whose fixed fields or
+    /// strings did not resolve.
     #[must_use]
     pub fn defects(&self) -> &[Defect] {
         &self.defects
@@ -2792,7 +2831,7 @@ mod tests {
         let image = PeImage::parse(data).unwrap();
         let hdr = header_region(&image).unwrap();
         let header = VbHeader::read(&hdr).unwrap();
-        ComponentTable::read(&image, header.lp_external_table, header.w_external_count)
+        ComponentTable::read(&image, &header)
     }
 
     /// The `.vbp` beside `Server.exe` declares
@@ -2845,7 +2884,7 @@ mod tests {
         );
         let (bytes, va) = a_synthetic_pe_image(&payload);
         let image = PeImage::parse(&bytes).unwrap();
-        let table = ComponentTable::read(&image, va, 1);
+        let table = ComponentTable::read(&image, &header_with_external_table(va, 1));
 
         assert_eq!(table.components.len(), 1, "{:?}", table.defects());
         assert_eq!(table.components[0].guid_text, None);
@@ -2863,7 +2902,7 @@ mod tests {
         );
         let (bytes, va) = a_synthetic_pe_image(&payload);
         let image = PeImage::parse(&bytes).unwrap();
-        let table = ComponentTable::read(&image, va, 1);
+        let table = ComponentTable::read(&image, &header_with_external_table(va, 1));
 
         assert_eq!(table.components.len(), 1, "{:?}", table.defects());
         assert_eq!(table.components[0].guid_text, None);
@@ -2912,7 +2951,7 @@ mod tests {
         );
         let (bytes, va) = a_synthetic_pe_image(&payload);
         let image = PeImage::parse(&bytes).unwrap();
-        let table = ComponentTable::read(&image, va, 1);
+        let table = ComponentTable::read(&image, &header_with_external_table(va, 1));
 
         assert_eq!(table.components.len(), 1, "{:?}", table.defects());
         assert_eq!(
@@ -3136,7 +3175,7 @@ mod tests {
         ));
         let (bytes, va) = a_synthetic_pe_image(&payload);
         let image = PeImage::parse(&bytes).unwrap();
-        let table = ComponentTable::read(&image, va, 2);
+        let table = ComponentTable::read(&image, &header_with_external_table(va, 2));
 
         assert_eq!(table.components.len(), 2, "{:?}", table.defects());
         assert_eq!(
@@ -3168,7 +3207,7 @@ mod tests {
         payload[0x00..0x04].copy_from_slice(&0_u32.to_le_bytes());
         let (bytes, va) = a_synthetic_pe_image(&payload);
         let image = PeImage::parse(&bytes).unwrap();
-        let table = ComponentTable::read(&image, va, 3);
+        let table = ComponentTable::read(&image, &header_with_external_table(va, 3));
 
         assert!(table.components.is_empty());
         assert_eq!(table.defects().len(), 1);
@@ -3201,7 +3240,7 @@ mod tests {
         payload[0x00..0x04].copy_from_slice(&(real_len + 10_000).to_le_bytes());
         let (bytes, va) = a_synthetic_pe_image(&payload);
         let image = PeImage::parse(&bytes).unwrap();
-        let table = ComponentTable::read(&image, va, 1);
+        let table = ComponentTable::read(&image, &header_with_external_table(va, 1));
 
         assert!(table.components.is_empty());
         assert_eq!(table.defects().len(), 1);
@@ -3222,12 +3261,79 @@ mod tests {
         );
     }
 
+    /// Builds a `VbHeader` literal with only the two fields that
+    /// `ComponentTable::read` reads set to a caller-chosen value. The header
+    /// is at file offset `0x100` and at address `0x1100`, a place that these
+    /// tests choose and that the synthetic image does not hold. Every other
+    /// field is zero or empty, because these tests do not read it.
+    fn header_with_external_table(lp_external_table: Va, w_external_count: u16) -> VbHeader {
+        VbHeader {
+            file_offset: Off::new(0x100),
+            rva: Some(Rva::new(0x1100)),
+            signature: *b"VB5!",
+            runtime_build: 0,
+            lp_sub_main: Va::new(0),
+            lp_project_data: Va::new(0),
+            f_mdl_int_ctls: 0,
+            f_mdl_int_ctls2: 0,
+            w_form_count: 0,
+            w_external_count,
+            lp_gui_table: Va::new(0),
+            lp_external_table,
+            o_project_exe_name: Off::new(0),
+            o_project_title: Off::new(0),
+            o_help_file: Off::new(0),
+            o_project_name: Off::new(0),
+            exe_name: String::new(),
+            title: String::new(),
+            help_file: String::new(),
+            project_name: String::new(),
+        }
+    }
+
+    /// A count that is not zero, with a table address in no section, gives
+    /// no component and one defect at the `lpExternalTable` field of the VB
+    /// header, `+ 0x50`. The kind gives the address that the field holds. A
+    /// count of zero gives no defect for the same address, because the walk
+    /// does not read it.
+    #[test]
+    fn a_component_table_in_no_section_gives_a_defect_at_the_header_field() {
+        let (bytes, _va) =
+            a_synthetic_pe_image(&build_component_entry("Lost.ocx", "LostLib.Lost", "Lost"));
+        let image = PeImage::parse(&bytes).unwrap();
+        let nowhere = Va::new(image.image_base() + 0x00F0_0000);
+        assert!(image.region_at_va(nowhere).is_none());
+
+        let table = ComponentTable::read(&image, &header_with_external_table(nowhere, 1));
+        assert!(table.components.is_empty());
+        assert_eq!(
+            table.defects(),
+            [Defect {
+                site: Site {
+                    offset: 0x150,
+                    rva: Some(0x1150),
+                    structure: "VBHeader",
+                    field: "lpExternalTable",
+                },
+                kind: DefectKind::ItemAddressUnmapped {
+                    offset: 0x150,
+                    va: nowhere.get(),
+                },
+            }]
+        );
+        assert_eq!(table.defects()[0].kind.severity(), Severity::Recoverable);
+
+        let none = ComponentTable::read(&image, &header_with_external_table(nowhere, 0));
+        assert!(none.components.is_empty());
+        assert!(none.defects().is_empty(), "{:?}", none.defects());
+    }
+
     /// Reads a table of one entry, built from `payload`, out of a synthetic
     /// image.
     fn one_entry_table(payload: &[u8]) -> ComponentTable {
         let (bytes, va) = a_synthetic_pe_image(payload);
         let image = PeImage::parse(&bytes).unwrap();
-        ComponentTable::read(&image, va, 1)
+        ComponentTable::read(&image, &header_with_external_table(va, 1))
     }
 
     /// Reads the `u32` at `at` of a built entry.

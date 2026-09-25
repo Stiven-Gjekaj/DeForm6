@@ -425,3 +425,91 @@ fn an_unresolvable_declare_table_succeeds_in_salvage_mode_losing_only_the_declar
         deform6::error::Severity::Recoverable
     );
 }
+
+// --- A component table whose own address maps nowhere loses the table, and
+// nothing else ----------------------------------------------------------------
+
+/// `corpus/public-domain/SK-TFTP-Sample__VB6/Client/demo/TFTPClient.exe`,
+/// read once at compile time. It declares one component,
+/// `MSWinsockLib.Winsock`.
+const TFTP_CLIENT: &[u8] =
+    include_bytes!("../../../corpus/public-domain/SK-TFTP-Sample__VB6/Client/demo/TFTPClient.exe");
+
+/// Copies `data` and writes an address that resolves to no section into
+/// `VBHeader.lpExternalTable` (offset `0x50`, `STRUCTURES.md` section 2). The
+/// header's own file offset comes from a salvage run over the unpatched
+/// bytes. The count stays as the file holds it, so the file still declares
+/// its components. Gives the patched bytes and the file offset of the field.
+fn with_component_table_unresolved(data: &[u8], table: &OpcodeTable) -> (Vec<u8>, u32) {
+    let unpatched = inspect(data, table, Mode::Salvage)
+        .expect("the shipped file must inspect cleanly in salvage mode");
+    let at = unpatched
+        .header_offset
+        .get()
+        .checked_add(0x50)
+        .expect("the header offset plus 0x50 must not overflow a u32");
+    let index = usize::try_from(at).expect("a file offset must fit a usize on every host");
+
+    let image = PeImage::parse(data).expect("TFTPClient.exe must parse as a PE image");
+    let nowhere = image.image_base().wrapping_add(0x00F0_0000);
+    let mut patched = data.to_vec();
+    assert_ne!(
+        &patched[index..index + 4],
+        nowhere.to_le_bytes(),
+        "the fixture writes the value the field already holds, so it proves nothing"
+    );
+    patched[index..index + 4].copy_from_slice(&nowhere.to_le_bytes());
+    (patched, at)
+}
+
+#[test]
+fn an_unresolvable_component_table_refuses_in_strict_mode() {
+    let table = OpcodeTable::builtin();
+    let (patched, _at) = with_component_table_unresolved(TFTP_CLIENT, &table);
+
+    let refusal = inspect(&patched, &table, Mode::Strict).expect_err(
+        "a component table whose address resolves to no section must refuse in strict mode",
+    );
+    let message = format!("{refusal}");
+    assert!(
+        message.contains("is in no section"),
+        "the refusal must name what the parser expected there: {message}"
+    );
+}
+
+#[test]
+fn an_unresolvable_component_table_succeeds_in_salvage_mode_losing_only_the_components() {
+    let table = OpcodeTable::builtin();
+    let unpatched = inspect(TFTP_CLIENT, &table, Mode::Salvage)
+        .expect("the shipped file must inspect cleanly in salvage mode");
+    assert_eq!(unpatched.components.len(), 1);
+
+    let (patched, at) = with_component_table_unresolved(TFTP_CLIENT, &table);
+    let salvaged = inspect(&patched, &table, Mode::Salvage)
+        .expect("salvage mode must continue past the recoverable defect");
+
+    assert!(
+        salvaged.components.is_empty(),
+        "the table that resolves nowhere must be lost, not invented: {:?}",
+        salvaged.components
+    );
+    assert_eq!(salvaged.object_count, unpatched.object_count);
+    assert_eq!(salvaged.project_name, unpatched.project_name);
+
+    let at_header_field = |defect: &&deform6::error::Defect| {
+        defect.site.structure == "VBHeader" && defect.site.field == "lpExternalTable"
+    };
+    assert!(
+        !unpatched.defects.iter().any(|d| at_header_field(&d)),
+        "{:?}",
+        unpatched.defects
+    );
+    let reported: Vec<_> = salvaged.defects.iter().filter(at_header_field).collect();
+    assert_eq!(reported.len(), 1, "{:?}", salvaged.defects);
+    // The defect names the byte that was patched.
+    assert_eq!(reported[0].site.offset, at);
+    assert_eq!(
+        reported[0].kind.severity(),
+        deform6::error::Severity::Recoverable
+    );
+}

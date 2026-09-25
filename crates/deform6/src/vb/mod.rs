@@ -393,8 +393,7 @@ pub fn inspect(data: &[u8], opcode_table: &OpcodeTable, mode: Mode) -> Result<Re
     let declare_table = DeclareTable::read(&pe, &info);
     defects.extend(declare_table.defects().iter().cloned());
 
-    let component_table =
-        ComponentTable::read(&pe, header.lp_external_table, header.w_external_count);
+    let component_table = ComponentTable::read(&pe, &header);
     defects.extend(component_table.defects().iter().cloned());
 
     // The event name table ships zero entries by design, per

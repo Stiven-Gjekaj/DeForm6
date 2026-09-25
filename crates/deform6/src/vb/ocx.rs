@@ -737,7 +737,7 @@ mod tests {
         let image = PeImage::parse(data).unwrap();
         let hdr = header_region(&image).unwrap();
         let header = VbHeader::read(&hdr).unwrap();
-        ComponentTable::read(&image, header.lp_external_table, header.w_external_count)
+        ComponentTable::read(&image, &header)
     }
 
     /// `TFTPClient.exe` and `Server.exe` sit one directory deeper

@@ -339,7 +339,8 @@ pub enum DefectKind {
     /// downstream of this item rests on the value this pointer would have
     /// named. The same reader loses the whole `Declare` table when the
     /// table's own address maps nowhere, and the rest of the program still
-    /// reads.
+    /// reads. `vb/project.rs::ComponentTable::read` gives it in the same way
+    /// when the address of the component table maps nowhere.
     #[error("address {va:#x} at offset {offset:#x} is in no section, and the item is skipped")]
     ItemAddressUnmapped {
         /// The absolute file offset of the pointer that held the address.
