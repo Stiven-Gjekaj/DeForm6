@@ -438,6 +438,71 @@ limit with the compiler's own error beside it.
 
 **Estimate.** 4 to 8 weeks. Needs one Windows host and one compiler licence.
 
+#### Part 1, done on 2026-09-25
+
+**The host.** The author's Windows XP virtual machine in UTM (`ver` gives
+5.1.2600), with the Visual Basic 6 IDE (`VB6.EXE` is 1,895,424 bytes, dated
+2004-02-23). The install media beside it are XP Professional with SP3, VB6
+Enterprise Edition, and VB6 SP6. The machine has no network, on purpose.
+
+**DeForm6 does not run on this host.** The Rust standard library needs
+Windows 10, or Windows 7 through tier-3 targets. So `--verify-build`, where
+DeForm6 runs the compiler on the same machine, waits for a Windows 10 host.
+Part 1 splits the work into three steps:
+
+1. `cargo run -p xtask -- export-builds <dir>` writes the 44 corpus programs.
+   For each one, it writes the files that DeForm6 writes, and a copy of the
+   project in the corpus. It also writes a manifest, `build.bat` and
+   `sendlogs.bat`.
+2. The host builds each project with `VB6.EXE /make`. The export goes in on a
+   CD image, which `hdiutil makehybrid -iso -joliet` makes from the export
+   directory. `build.bat` writes one log and one exit code for each build.
+   `sendlogs.bat` sends them out through the serial port `COM1`, which UTM
+   joins to a terminal device on the Mac.
+3. `cargo run -p xtask -- import-builds --capture <file> <dir>` reads the
+   serial capture into `tests/builds.toml`. It checks the size of each file,
+   so a byte that the serial line lost or added stops the import.
+
+**What VB6 reports.** A probe of four small projects, which `export-builds
+--probe` writes, measured the shapes before the importer was written:
+
+| Probe | Exit code | What `/make` writes |
+|---|---|---|
+| A project that builds | 0 | `Build of '<name>' succeeded.` |
+| A syntax error | 1 | the error, then `Build of '<name>' failed.` |
+| A component that is not on the host | 1 | `'<file>' could not be loaded`, and no line about the build |
+| A property that VB6 does not know | 1 | three lines, and a `.log` file beside the form with the line of the property |
+
+Each project gave the same result twice, and no dialog stopped a build.
+
+**The first run.**
+
+| Side | Built | Failed |
+|---|---|---|
+| The projects that DeForm6 writes | 41 of 44 | 3 |
+| The projects in the corpus | 42 of 44 | 2 |
+
+- The three projects of DeForm6 that fail are the three that use the Winsock
+  control. VB6 writes `'MSWINSCK.OCX' could not be loaded`. The `Object=` line
+  gives an identifier that is one byte away from the one that the original
+  project declares, which this section expected.
+- `Edge_Detection` in the corpus fails, because its project names
+  `cCommonDialog.cls`, and that file is not in its directory. DeForm6's
+  project for the same program builds.
+- `HMM` in the corpus fails, because `frmHMM.frx` is damaged upstream, as the
+  README says. VB6 cannot set the `Text` property at line 509 of
+  `frmHMM.frm`. DeForm6's project for the same program builds.
+
+**The record stays true.** `tests/builds.toml` holds a hash of the files that
+the host built, for each program. `cargo test -p deform6 --test build_record`
+writes the files again and compares the hashes. When DeForm6 writes
+different files, the gate fails with `STALE` until the host builds the new
+files.
+
+**The exit is not met yet.** Three extracted projects do not build, and none
+of the three is a named limit. Part 2 fixes the `Object=` line, or names the
+limit with VB6's own message beside it.
+
 ### Phase 9: The P-code corpus
 
 **Goal.** 44 P-code binaries whose exact source is already held.
@@ -515,7 +580,7 @@ messages name the next action.
 
 ```
 Phase 7  (no dependency, starts today)
-Phase 8  (needs a Windows host and a compiler licence)
+Phase 8  (part 1 done on the author's XP host; part 2 is next)
    |
    +-- Phase 9  (needs the Phase 8 host)
           |
@@ -531,19 +596,22 @@ Version 1.1 ships after Phase 8. Version 2.0 ships after Phase 11 and 13.
 
 ## Procurement
 
-Three phases are blocked on hardware and a licence, so start this before the
-code.
+Three phases needed hardware and a licence. The author's host now gives both:
+Windows XP with the Visual Basic 6 IDE, in a virtual machine.
 
-- A Windows host that runs 32-bit programs.
+- A Windows host that runs 32-bit programs. Done.
 - One compiler. The Visual Basic 6 IDE, if a lawful copy is available, or
-  twinBASIC.
+  twinBASIC. Done.
+- A Windows 10 host, for `--verify-build`, where DeForm6 itself must run.
 - For automated builds in a pipeline, twinBASIC requires its Professional
   Edition. The free edition permits commercial use but not unattended command
   line builds.
 
 ## Open questions to close before planning around them
 
-- Does a hosted Windows runner still carry the Visual Basic 6 runtime? If it
-  does not, the build gate needs a different host.
+- Does a hosted Windows runner still carry the Visual Basic 6 runtime? This
+  no longer blocks the build gate: the record is a measurement from the
+  author's host, and the gate checks that it covers the files that DeForm6
+  writes now. It matters only for a gate that builds on each push.
 - Does the twinBASIC command line accept a Visual Basic project file directly,
   or does it need a conversion step first?
