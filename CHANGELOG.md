@@ -56,6 +56,17 @@ heading its version and its date.
   The defect is `Tolerated`, so a strict run reports it and continues. No
   corpus program raises it.
 - `sh scripts/gate.sh` runs the whole gate on a local machine.
+- The build record: `tests/builds.toml` holds what the Visual Basic 6 IDE
+  built for each corpus program, on the author's Windows XP host. It built
+  41 of the 44 projects that DeForm6 wrote, and 42 of the 44 projects in the
+  corpus. `cargo run -p xtask -- export-builds <dir>` writes the projects,
+  `build.bat` and `sendlogs.bat`. `cargo run -p xtask -- import-builds
+  [--capture <file>] <dir>` reads the logs back, from the directory or from a
+  serial capture. `export-builds --probe` writes the four small projects
+  that measured how VB6 reports a build.
+- `cargo test -p deform6 --test build_record` holds the tree to the record.
+  When DeForm6 writes different files for a program than the host built, the
+  gate fails with `STALE`, until the host builds the new files.
 
 ### What changes for a caller
 
@@ -269,6 +280,12 @@ is therefore 2.0.0, not 1.1.0.
 
 ### What stays open
 
+- Three projects that DeForm6 writes do not build: the three that use the
+  Winsock control. VB6 writes `'MSWINSCK.OCX' could not be loaded`, because
+  the `Object=` line gives an identifier that is one byte away from the one
+  that the original project declares.
+- `--verify-build`, where DeForm6 runs the compiler of the user, waits for a
+  Windows 10 host. DeForm6 does not run on Windows XP.
 - The fidelity walk grades thirteen structures. `docs/ROADMAP.md` names
   the work on the other structures that is left.
 - The census does not count the type buffer. The clamp on that array only
