@@ -15,8 +15,9 @@
 //! - `manifest.txt` names each program: its short name, its key, the project
 //!   file of each side, and the hash of the extracted files.
 //! - `build.bat` builds each side of each program with `VB6.EXE /make`, and
-//!   writes `logs\`. VB6 writes each executable into `C:\deform6-out` on the
-//!   host, so no executable comes back into this directory.
+//!   writes `logs\`. VB6 writes each executable into `deform6-out` on the
+//!   system drive of the host, so no executable comes back into this
+//!   directory.
 //!
 //! The short names, `p01` to `p44`, keep the paths short on the host. They
 //! follow the order of the keys.
@@ -38,14 +39,17 @@ use std::path::Path;
 use crate::build_record::{self, corpus_root, executables, program_key};
 use crate::ratios::differential::support::vbp;
 
-/// The default place of `VB6.EXE` on the host. The first argument of
-/// `build.bat` replaces it.
-const DEFAULT_VB6: &str = r"C:\Program Files\Microsoft Visual Studio\VB98\VB6.EXE";
+/// The default place of `VB6.EXE` on the host, from the host's own
+/// `%ProgramFiles%`. The first argument of `build.bat` replaces it.
+///
+/// The XP host of the author has Windows on `E:`, and no `C:\Program Files`
+/// at all. A fixed drive letter is therefore wrong on at least one host.
+const DEFAULT_VB6: &str = r"%ProgramFiles%\Microsoft Visual Studio\VB98\VB6.EXE";
 
 /// The directory on the host that receives the executables that VB6 builds.
-/// It is on the host's own disk, so no executable reaches the shared
-/// directory.
-const HOST_OUT_DIR: &str = r"C:\deform6-out";
+/// It is on the host's system drive, `%SystemDrive%`, so no executable
+/// reaches the shared directory.
+const HOST_OUT_DIR: &str = r"%SystemDrive%\deform6-out";
 
 /// The characters that `cmd` gives a meaning to inside a batch file, even
 /// between quotes, and the characters that end a path or a line. A name
@@ -556,7 +560,16 @@ mod tests {
                 r#"call :build p02 extracted "extracted\p02\B B.vbp""#,
             ]
         );
-        assert!(text.contains(r#"/outdir "C:\deform6-out\%1\%2""#), "{text}");
+        assert!(
+            text.contains(r#"/outdir "%SystemDrive%\deform6-out\%1\%2""#),
+            "{text}"
+        );
+        assert!(
+            text.contains(r"set VB6=%ProgramFiles%\Microsoft Visual Studio\VB98\VB6.EXE"),
+            "{text}"
+        );
+        // No drive letter is fixed.
+        assert!(!text.contains(r"C:\"), "{text}");
         // No path is made from %CD%, which ends with a backslash at the root
         // of a drive.
         assert!(!text.contains(r"%CD%\"), "{text}");
