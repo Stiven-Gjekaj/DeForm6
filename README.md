@@ -161,14 +161,16 @@ A check that passes because it reads the wrong place is worse than no check.
    papering over the missing byte.
 
 3. **One Windows host built the projects, and no test does.**
-   On the author's Windows XP machine, the Visual Basic 6 IDE built 41 of the
-   44 projects that DeForm6 wrote, and 42 of the 44 projects in the corpus.
+   On the author's Windows XP machine, the Visual Basic 6 IDE built all 44
+   projects that DeForm6 wrote, and 42 of the 44 projects in the corpus.
    `tests/builds.toml` holds each result and the lines that VB6 wrote. The
-   three projects of DeForm6 that do not build use the Winsock control:
-   DeForm6 writes an identifier on their `Object=` line that is one byte away
-   from the one that the original project declares. The two corpus projects
-   that do not build are `Edge_Detection`, whose `cCommonDialog.cls` is not in
-   its directory, and `HMM`, whose `frmHMM.frx` is damaged, as fact 2 says.
+   two corpus projects that do not build are `Edge_Detection`, whose
+   `cCommonDialog.cls` is not in its directory, and `HMM`, whose `frmHMM.frx`
+   is damaged, as fact 2 says. DeForm6 knows the `Object=` line of one
+   control only: the Winsock control, which the corpus holds. For another
+   control, it writes the class identifier of the control on that line, and
+   VB6 does not load the line. With such a line, the Winsock projects gave
+   `'MSWINSCK.OCX' could not be loaded`.
    No test starts VB6, because the test machine has no Windows. The gate
    fails when DeForm6 writes different files than the Windows host built.
 
