@@ -18,6 +18,11 @@
 //!   writes `logs\`. VB6 writes each executable into `deform6-out` on the
 //!   system drive of the host, so no executable comes back into this
 //!   directory.
+//! - `sendlogs.bat` sends each log of the build out through the serial port
+//!   `COM1`, for a host that cannot write into this directory. The author's
+//!   XP host is such a host: the export goes in on a CD image, and the logs
+//!   come out through the serial port, which UTM joins to a terminal device
+//!   on this machine. See [`render_sendlogs`] for the format.
 //!
 //! The short names, `p01` to `p44`, keep the paths short on the host. They
 //! follow the order of the keys.
@@ -394,7 +399,52 @@ fn write_lists(dir: &Path, exported: &[Exported]) -> Result<(), String> {
         .map_err(|err| format!("writing {}: {err}", manifest.display()))?;
     let batch = dir.join("build.bat");
     std::fs::write(&batch, render_batch(exported))
-        .map_err(|err| format!("writing {}: {err}", batch.display()))
+        .map_err(|err| format!("writing {}: {err}", batch.display()))?;
+    let sender = dir.join("sendlogs.bat");
+    std::fs::write(&sender, render_sendlogs())
+        .map_err(|err| format!("writing {}: {err}", sender.display()))
+}
+
+/// Renders `sendlogs.bat`, with CRLF at the end of each line.
+///
+/// The file sends each file in `logs\`, then each `.log` file under
+/// `original\` and `extracted\`, out through `COM1`. Each file goes out as
+/// a line `===FILE <size> <path>===`, the bytes of the file as `copy /b`
+/// sends them, and a line `===EOF===` on a line of its own. The size lets
+/// the reader find a byte that the serial line lost or added. The file then sends
+/// `===OUT===`, the list of the executables that VB6 built, and `===END===`.
+/// `mode` turns off each handshake, because a terminal device on this
+/// machine gives no handshake signal.
+pub(crate) fn render_sendlogs() -> String {
+    let lines = [
+        "@echo off",
+        "rem Sends each log of the build out through COM1, for the other machine",
+        "rem to read.",
+        "mode COM1: baud=115200 parity=n data=8 stop=1 to=off xon=off odsr=off \
+         octs=off dtr=on rts=on idsr=off >nul",
+        r#"pushd "%~dp0""#,
+        r#"for %%f in (logs\*.*) do call :send "%%f""#,
+        r#"for /r original %%f in (*.log) do call :send "%%f""#,
+        r#"for /r extracted %%f in (*.log) do call :send "%%f""#,
+        ">COM1 echo ===OUT===",
+        ">COM1 dir /s /b %SystemDrive%\\deform6-out\\*.exe",
+        ">COM1 echo ===END===",
+        "popd",
+        "exit /b 0",
+        "",
+        ":send",
+        ">COM1 echo ===FILE %~z1 %~1===",
+        r#"copy /b "%~1" COM1 >nul"#,
+        ">COM1 echo.",
+        ">COM1 echo ===EOF===",
+        "goto :eof",
+    ];
+    let mut out = String::new();
+    for line in lines {
+        out.push_str(line);
+        out.push_str("\r\n");
+    }
+    out
 }
 
 /// Renders `manifest.txt`: a comment line, then one line for each program,
@@ -821,7 +871,7 @@ mod tests {
     use super::{
         Exported, check_batch_name, check_corpus_keys, cut_paths, export, export_args,
         export_probe, import_record, parse_environment, parse_manifest, probe_projects, read_side,
-        render_batch, render_manifest, run_export, short_name,
+        render_batch, render_manifest, render_sendlogs, run_export, short_name,
     };
     use crate::build_record;
     use std::path::Path;
@@ -945,6 +995,7 @@ mod tests {
         let count = export(&dir).unwrap();
         let manifest = std::fs::read_to_string(dir.join("manifest.txt")).unwrap();
         let batch = std::fs::read_to_string(dir.join("build.bat")).unwrap();
+        let sender = std::fs::read_to_string(dir.join("sendlogs.bat")).unwrap();
         let again = export(&dir);
 
         let root = build_record::corpus_root();
@@ -973,6 +1024,7 @@ mod tests {
         assert_eq!(count, 44);
         assert_eq!(checked, 44);
         assert_eq!(batch.matches("call :build").count(), 88);
+        assert_eq!(sender, super::render_sendlogs());
         assert!(
             executables_in_original.is_empty(),
             "{executables_in_original:?}"
@@ -1333,5 +1385,31 @@ mod tests {
         assert!(check_corpus_keys(&record, &keys[..1]).is_err());
         let probe = ["probe/ok".to_owned(), "probe/syntax".to_owned()];
         assert!(check_corpus_keys(&record, &probe).is_err());
+    }
+
+    /// The log sender has CRLF at the end of each line. It sends each log,
+    /// and each `.log` file of both sides, between the markers that the
+    /// importer reads, with `copy /b`, so no byte changes on the way.
+    #[test]
+    fn the_log_sender_sends_each_log_between_the_markers() {
+        let text = render_sendlogs();
+        assert!(text.ends_with("\r\n"));
+        assert_eq!(text.matches('\n').count(), text.matches("\r\n").count());
+        for line in [
+            r#"for %%f in (logs\*.*) do call :send "%%f""#,
+            r#"for /r original %%f in (*.log) do call :send "%%f""#,
+            r#"for /r extracted %%f in (*.log) do call :send "%%f""#,
+            ">COM1 echo ===FILE %~z1 %~1===",
+            r#"copy /b "%~1" COM1 >nul"#,
+            ">COM1 echo ===EOF===",
+            ">COM1 echo ===OUT===",
+            ">COM1 echo ===END===",
+        ] {
+            assert!(
+                text.split("\r\n").any(|held| held == line),
+                "{line}\n{text}"
+            );
+        }
+        assert!(text.contains("octs=off"), "{text}");
     }
 }
