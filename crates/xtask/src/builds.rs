@@ -552,15 +552,26 @@ pub(crate) fn render_batch(programs: &[Exported]) -> String {
 
 /// Runs `import-builds`.
 pub(crate) fn run_import(args: &[String]) -> i32 {
-    let [dir] = args else {
-        eprintln!("xtask: usage: cargo run -p xtask -- import-builds <dir>");
-        return 1;
+    let (capture, dir) = match import_args(args) {
+        Ok(read) => read,
+        Err(message) => {
+            eprintln!("xtask: {message}");
+            return 1;
+        }
     };
-    if dir.starts_with('-') {
-        eprintln!("xtask: usage: cargo run -p xtask -- import-builds <dir>");
-        return 1;
+    if let Some(capture) = capture {
+        let unpacked = std::fs::read(capture)
+            .map_err(|err| format!("reading {}: {err}", capture.display()))
+            .and_then(|bytes| unpack_capture(&bytes, dir));
+        match unpacked {
+            Ok(count) => println!("xtask: unpacked {count} files into {}", dir.display()),
+            Err(message) => {
+                eprintln!("xtask: {message}");
+                return 1;
+            }
+        }
     }
-    match import_and_write(Path::new(dir)) {
+    match import_and_write(dir) {
         Ok(lines) => {
             for line in lines {
                 println!("{line}");
@@ -576,6 +587,138 @@ pub(crate) fn run_import(args: &[String]) -> i32 {
             1
         }
     }
+}
+
+/// Reads the arguments of `import-builds`: `[--capture <file>] <dir>`. Gives
+/// the capture of `sendlogs.bat`, when there is one, and the directory. A
+/// word that starts with `-` in the place of a path is refused.
+pub(crate) fn import_args(args: &[String]) -> Result<(Option<&Path>, &Path), String> {
+    match args {
+        [dir] if !dir.starts_with('-') => Ok((None, Path::new(dir))),
+        [flag, file, dir]
+            if flag == "--capture" && !file.starts_with('-') && !dir.starts_with('-') =>
+        {
+            Ok((Some(Path::new(file)), Path::new(dir)))
+        }
+        _ => Err("usage: cargo run -p xtask -- import-builds [--capture <file>] <dir>".to_owned()),
+    }
+}
+
+/// Gives the place under the export of a file that `sendlogs.bat` sent.
+///
+/// A path `logs\<name>` goes to `logs/<name>`. Any other path must run
+/// through `original\pNN\` or `extracted\pNN\`, and goes to the same place
+/// under the export. A component `..` or `.`, or an empty one, is refused.
+pub(crate) fn capture_place(path: &str) -> Result<std::path::PathBuf, String> {
+    let parts: Vec<&str> = path.split('\\').collect();
+    let start = if parts
+        .first()
+        .is_some_and(|first| first.eq_ignore_ascii_case("logs"))
+    {
+        0
+    } else {
+        parts
+            .windows(2)
+            .position(|pair| match pair {
+                [side, short] => {
+                    (side.eq_ignore_ascii_case("original")
+                        || side.eq_ignore_ascii_case("extracted"))
+                        && short.len() == 3
+                        && short.starts_with('p')
+                        && short.bytes().skip(1).all(|byte| byte.is_ascii_digit())
+                }
+                _ => false,
+            })
+            .ok_or_else(|| format!("the path {path:?} runs through no project directory"))?
+    };
+    let mut place = std::path::PathBuf::new();
+    for (index, part) in parts.iter().enumerate().skip(start) {
+        if part.is_empty() || *part == "." || *part == ".." {
+            return Err(format!("the path {path:?} holds the component {part:?}"));
+        }
+        // The side is written in lower case, as the export writes it.
+        if index == start {
+            place.push(part.to_ascii_lowercase());
+        } else {
+            place.push(part);
+        }
+    }
+    if place.components().count() < 2 {
+        return Err(format!("the path {path:?} names no file"));
+    }
+    Ok(place)
+}
+
+/// Unpacks a capture of `sendlogs.bat` into `dir`, and gives the number of
+/// files.
+///
+/// Each file is a line `===FILE <size> <path>===`, exactly `<size>` bytes,
+/// and a line `===EOF===`. The capture must hold `===OUT===` and end with
+/// `===END===`, so that an import never reads half of a transfer. A body
+/// that is not `<size>` bytes long is refused, because the serial line lost
+/// or added a byte. The export must hold no `logs` directory yet, so that no
+/// old log mixes with the new ones.
+pub(crate) fn unpack_capture(capture: &[u8], dir: &Path) -> Result<usize, String> {
+    let find = |needle: &[u8], from: usize| -> Option<usize> {
+        capture
+            .get(from..)?
+            .windows(needle.len())
+            .position(|window| window == needle)
+            .and_then(|at| at.checked_add(from))
+    };
+    if dir.join("logs").exists() {
+        return Err(format!(
+            "{} already holds a logs directory, so the capture is not unpacked",
+            dir.display()
+        ));
+    }
+    let out = find(b"===OUT===", 0).ok_or("the capture holds no ===OUT=== line")?;
+    if find(b"===END===", out).is_none() {
+        return Err("the capture holds no ===END=== line, so the transfer is not whole".to_owned());
+    }
+
+    let mut files: Vec<(std::path::PathBuf, &[u8])> = Vec::new();
+    let mut at = 0_usize;
+    while let Some(start) = find(b"===FILE ", at).filter(|start| *start < out) {
+        let head_from = start.checked_add(8).ok_or("the capture is too long")?;
+        let head_end = find(b"===\r\n", head_from).ok_or("a ===FILE line has no end")?;
+        let head = capture
+            .get(head_from..head_end)
+            .ok_or("a ===FILE line has no text")?;
+        let head = String::from_utf8_lossy(head);
+        let (size, path) = head
+            .split_once(' ')
+            .ok_or_else(|| format!("the line ===FILE {head}=== holds no size"))?;
+        let size: usize = size
+            .parse()
+            .map_err(|_ignored| format!("the line ===FILE {head}=== holds no size"))?;
+        let body_from = head_end.checked_add(5).ok_or("the capture is too long")?;
+        let body_end = body_from
+            .checked_add(size)
+            .ok_or("the capture is too long")?;
+        let tail_end = body_end.checked_add(13).ok_or("the capture is too long")?;
+        if capture.get(body_end..tail_end) != Some(&b"\r\n===EOF===\r\n"[..]) {
+            return Err(format!(
+                "the body of {path} is not {size} bytes long: the serial line lost or added a byte"
+            ));
+        }
+        let body = capture
+            .get(body_from..body_end)
+            .ok_or("a body runs past the capture")?;
+        files.push((capture_place(path)?, body));
+        at = tail_end;
+    }
+
+    for (place, body) in &files {
+        let target = dir.join(place);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|err| format!("making {}: {err}", parent.display()))?;
+        }
+        std::fs::write(&target, body)
+            .map_err(|err| format!("writing {}: {err}", target.display()))?;
+    }
+    Ok(files.len())
 }
 
 /// Reads the export in `dir`, checks that it holds the 44 corpus programs,
@@ -869,9 +1012,10 @@ pub(crate) fn import_record(dir: &Path) -> Result<build_record::BuildRecord, Str
 )]
 mod tests {
     use super::{
-        Exported, check_batch_name, check_corpus_keys, cut_paths, export, export_args,
-        export_probe, import_record, parse_environment, parse_manifest, probe_projects, read_side,
-        render_batch, render_manifest, render_sendlogs, run_export, short_name,
+        Exported, capture_place, check_batch_name, check_corpus_keys, cut_paths, export,
+        export_args, export_probe, import_args, import_record, parse_environment, parse_manifest,
+        probe_projects, read_side, render_batch, render_manifest, render_sendlogs, run_export,
+        short_name, unpack_capture,
     };
     use crate::build_record;
     use std::path::Path;
@@ -1411,5 +1555,143 @@ mod tests {
             );
         }
         assert!(text.contains("octs=off"), "{text}");
+    }
+
+    /// Builds a capture as `sendlogs.bat` sends it: each file with its size
+    /// and its path, then the list of executables, then the end line.
+    fn capture_of(files: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for (path, body) in files {
+            out.extend_from_slice(format!("===FILE {} {path}===\r\n", body.len()).as_bytes());
+            out.extend_from_slice(body);
+            out.extend_from_slice(b"\r\n===EOF===\r\n");
+        }
+        out.extend_from_slice(
+            b"===OUT===\r\nE:\\deform6-out\\p01\\original\\A.exe\r\n===END===\r\n",
+        );
+        out
+    }
+
+    /// A capture unpacks each file to its place in the export, with the same
+    /// bytes, and an absolute path keeps only its part from the side on.
+    #[test]
+    fn a_capture_unpacks_each_file_to_its_place_with_the_same_bytes() {
+        let dir = scratch("unpack");
+        std::fs::remove_dir_all(dir.join("logs")).unwrap();
+        let capture = capture_of(&[
+            ("logs\\p01-original.exit", b"0\r\n"),
+            (
+                "logs\\p01-original.txt",
+                b"\r\n\r\nBuild of 'A.exe' succeeded.\r\n",
+            ),
+            (
+                "E:\\deform6\\c1\\Extracted\\p01\\Forms\\Form1.log",
+                b"Line 8: x\r\n\xff",
+            ),
+        ]);
+        let count = unpack_capture(&capture, &dir);
+        let exit = std::fs::read(dir.join("logs/p01-original.exit"));
+        let log = std::fs::read(dir.join("extracted/p01/Forms/Form1.log"));
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        assert_eq!(count.unwrap(), 3);
+        assert_eq!(exit.unwrap(), b"0\r\n");
+        assert_eq!(log.unwrap(), b"Line 8: x\r\n\xff");
+    }
+
+    /// A body that is one byte short or one byte long is refused, and so is
+    /// a capture with no end line.
+    #[test]
+    fn a_capture_with_a_wrong_size_or_no_end_is_refused() {
+        let dir = scratch("sizes");
+        std::fs::remove_dir_all(dir.join("logs")).unwrap();
+        let good = capture_of(&[("logs\\p01-original.exit", b"0\r\n")]);
+        let short =
+            String::from_utf8(good.clone())
+                .unwrap()
+                .replacen("===FILE 3 ", "===FILE 2 ", 1);
+        let long = String::from_utf8(good.clone())
+            .unwrap()
+            .replacen("===FILE 3 ", "===FILE 4 ", 1);
+        let cut = &good[..good.len() - 12];
+        let results = [
+            unpack_capture(short.as_bytes(), &dir),
+            unpack_capture(long.as_bytes(), &dir),
+            unpack_capture(cut, &dir),
+        ];
+        let wrote = dir.join("logs").exists();
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        for result in &results {
+            assert!(result.is_err(), "{result:?}");
+        }
+        assert!(
+            results[0]
+                .as_ref()
+                .unwrap_err()
+                .contains("lost or added a byte")
+        );
+        assert!(results[2].as_ref().unwrap_err().contains("===END==="));
+        assert!(!wrote, "a refused capture writes no file");
+    }
+
+    /// A capture is refused when the export already holds logs, so that no
+    /// old log mixes with the new ones.
+    #[test]
+    fn a_capture_into_an_export_with_logs_is_refused() {
+        let dir = scratch("again");
+        let result = unpack_capture(&capture_of(&[]), &dir);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(
+            result
+                .unwrap_err()
+                .contains("already holds a logs directory")
+        );
+    }
+
+    /// A path goes to `logs/` or to its place under a side. A path through
+    /// no project directory, or with `..`, is refused.
+    #[test]
+    fn a_path_of_the_capture_goes_to_its_place_under_the_export() {
+        assert_eq!(
+            capture_place(r"logs\p02-extracted.txt").unwrap(),
+            Path::new("logs/p02-extracted.txt")
+        );
+        assert_eq!(
+            capture_place(r"E:\deform6\c1\ORIGINAL\p44\Form1.log").unwrap(),
+            Path::new("original/p44/Form1.log")
+        );
+        for refused in [
+            r"E:\deform6\c1\Form1.log",
+            r"E:\x\original\p01\..\..\escape.log",
+            r"E:\x\original\p01\",
+            r"E:\x\original\pAB\Form1.log",
+            r"logs\",
+        ] {
+            assert!(capture_place(refused).is_err(), "{refused}");
+        }
+    }
+
+    /// The command takes a directory, with `--capture <file>` before it or
+    /// not, and refuses any other shape.
+    #[test]
+    fn the_import_takes_a_directory_and_an_optional_capture() {
+        let owned = |words: &[&str]| -> Vec<String> {
+            words.iter().map(|word| (*word).to_owned()).collect()
+        };
+        assert_eq!(import_args(&owned(&["d"])).unwrap(), (None, Path::new("d")));
+        assert_eq!(
+            import_args(&owned(&["--capture", "c.bin", "d"])).unwrap(),
+            (Some(Path::new("c.bin")), Path::new("d"))
+        );
+        for refused in [
+            owned(&[]),
+            owned(&["--capture"]),
+            owned(&["--capture", "c.bin"]),
+            owned(&["--other", "c.bin", "d"]),
+            owned(&["--capture", "--x", "d"]),
+        ] {
+            assert!(import_args(&refused).is_err(), "{refused:?}");
+        }
     }
 }
