@@ -2,6 +2,8 @@
 //!
 //! `cargo run -p xtask -- update-ratios` rewrites `tests/ratios.toml`.
 //! `cargo run -p xtask -- update-fidelity` rewrites `tests/fidelity.toml`.
+//! `cargo run -p xtask -- export-builds <dir>` writes each corpus program for
+//! a build with the Visual Basic 6 IDE on a Windows host; see `builds.rs`.
 //! `cargo run -p xtask -- derive-opcode-table` writes the opcode table
 //! `deform6::vb::opcodes::OpcodeTable::parse` reads, from a type library on
 //! a Windows host; see `opcode_table.rs`'s own doc comment for why this
@@ -61,6 +63,19 @@ mod ratios;
 )]
 mod fidelity_map;
 
+// `crates/deform6/tests/build_record/shared.rs` gives the files that a build
+// covers, their hash, and the text of `tests/builds.toml`. The gate compiles
+// the same file, so the exporter and the gate cannot disagree about which
+// files a build covers.
+#[path = "../../deform6/tests/build_record/shared.rs"]
+#[allow(
+    dead_code,
+    reason = "this module is embedded in two binaries, the build_record test target and this \
+              one, and each uses a different part of it"
+)]
+mod build_record;
+
+mod builds;
 mod fetch_corpus;
 mod fuzz;
 mod licences;
@@ -85,6 +100,7 @@ fn run(args: Vec<String>) -> i32 {
     match args.first().map(String::as_str) {
         Some("update-ratios") => update_ratios(),
         Some("update-fidelity") => update_fidelity(),
+        Some("export-builds") => builds::run_export(args.get(1..).unwrap_or(&[])),
         Some("derive-opcode-table") => {
             opcode_table::derive_opcode_table(args.get(1..).unwrap_or(&[]))
         }
@@ -108,7 +124,7 @@ fn run(args: Vec<String>) -> i32 {
     }
 }
 
-const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | update-fidelity | derive-opcode-table | fetch-corpus | pin-corpus <name> <url> | fuzz-pr | fuzz-cron | licences";
+const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | update-fidelity | export-builds <dir> | derive-opcode-table | fetch-corpus | pin-corpus <name> <url> | fuzz-pr | fuzz-cron | licences";
 
 /// The number of corpus programs `update-ratios` refuses to write fewer
 /// than. Matches `EXPECTED_PROGRAM_COUNT` in `crates/deform6/tests/ratios.rs`
