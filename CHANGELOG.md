@@ -291,6 +291,10 @@ is therefore 2.0.0, not 1.1.0.
   `vb::classify::names_no_private_object` states that rule for both.
 - New public field: `write::model::ControlModel::external_class`. Code that
   builds a `ControlModel` with a struct literal must give it.
+- A component table that ends before the count of `wExternalCount` now
+  gives an `ImplausibleCount` defect at `VBHeader + 0x46`, with the number of
+  entries that the walk found. 1.0.0 gave those entries and no defect. The
+  kind is `Recoverable`, so a strict run now refuses such a file.
 
 ### What stays open
 
