@@ -211,18 +211,56 @@ fn find_code<'m>(model: &'m ProjectModel, kind: CodeKind, raw_name: &str) -> Opt
         .find(|code| code.kind == kind && code.name.raw() == raw_name)
 }
 
-/// Builds the `Object=` line one declared external component gives, and the
-/// report item stating the identifier is not confirmed. `Err` (naming the
-/// reason) when the component's own sixteen byte identifier did not resolve
-/// at all, per [`Component::ouuid_text`]'s own doc comment, or when the
-/// component's own recovered file name holds a line break.
+/// A control library that a corpus project file declares, found by the
+/// class identifier that the executable holds for the control.
+struct CorpusLibrary {
+    /// The class identifier at `oUuid`, in the text that
+    /// [`Component::ouuid_text`] gives.
+    class_id: &'static str,
+    /// The type library identifier, the version and the locale, as the
+    /// `Object=` line of the corpus project file gives them.
+    declaration: &'static str,
+}
+
+/// The control libraries that this repository measured in its own corpus.
 ///
-/// The written identifier is the closest field this repository ever
-/// resolves to a declared `Object=` identifier, never the confirmed one:
-/// plan 03-16's own measurement found it differs from every corpus `.vbp`'s
-/// own declared value by exactly one byte, on every sample it could check.
-/// The version and the locale are IDE defaults; `Component` carries no
-/// field for either, because neither survives compilation into this table.
+/// The executable does not hold the type library identifier that an
+/// `Object=` line declares. `docs/STRUCTURES.md` section 7.3.1 records the
+/// search. The executable holds the class identifier of the control, at the
+/// bytes that `oUuid` names. Each row joins that class identifier to the
+/// `Object=` line of the project file that the executable was built from.
+/// This is the source of the corpus rows of the opcode table: a fact that
+/// this repository measured in its own corpus, not a fact from another
+/// tool.
+///
+/// Measured against:
+/// - `MSWinsockLib.Winsock` in `MSWINSCK.OCX`: the three executables and
+///   the three project files in `corpus/public-domain/SK-TFTP-Sample__VB6/Client`,
+///   `corpus/public-domain/SK-TFTP-Sample__VB6/Server` and
+///   `corpus/public-domain/SK-Winsock-Sample__VB6`. Each executable holds
+///   the class identifier of this row, and each project file declares the
+///   line of this row.
+const CORPUS_LIBRARIES: [CorpusLibrary; 1] = [CorpusLibrary {
+    class_id: "248DD896-BB45-11CF-9ABC-0080C7E7B78D",
+    declaration: "{248DD890-BB45-11CF-9ABC-0080C7E7B78D}#1.0#0",
+}];
+
+/// Builds the `Object=` line of one declared external component, and the
+/// report item that grades it. `Err` (naming the reason) when the
+/// component's own sixteen byte identifier did not resolve at all, per
+/// [`Component::ouuid_text`]'s own doc comment, or when the component's own
+/// recovered file name holds a line break.
+///
+/// A class identifier that [`CORPUS_LIBRARIES`] holds gives the line that
+/// the corpus project files declare, graded `inferred`. Any other class
+/// identifier is written where the type library identifier goes, graded
+/// `unrecoverable`: Visual Basic 6 does not load that line. The first build
+/// run, which `docs/ROADMAP.md` records under phase 8, gave
+/// `'MSWINSCK.OCX' could not be loaded` for each of the three corpus
+/// programs while this function wrote the class identifier for all of
+/// them. The version and the locale of that line are
+/// IDE defaults; `Component` carries no field for either, because neither
+/// survives compilation into this table.
 ///
 /// The file name is written verbatim, never through a [`SafeName`]: it
 /// names a file that already exists on the machine the project rebuilds
@@ -254,23 +292,40 @@ fn object_line(component: &Component) -> Result<(String, ReportItem), ReportItem
             evidence: Vec::new(),
         });
     }
-    let line = format!("Object={{{identifier}}}#1.0#0; {}", component.file_name);
+    // The offset is where the sixteen bytes of the identifier start, which
+    // the `oUuid` field names. A reader checks the identifier there.
+    let evidence = vec![Evidence {
+        offset: component.ouuid_field_offset,
+        structure: "ExternalComponentEntry",
+        field: "oUuid",
+        note: Some("the sixteen bytes that the oUuid field names".to_owned()),
+    }];
+    let library = CORPUS_LIBRARIES
+        .iter()
+        .find(|library| library.class_id == identifier.as_str());
+    let (line, confidence, basis) = match library {
+        Some(library) => (
+            format!("Object={}; {}", library.declaration, component.file_name),
+            Confidence::Inferred,
+            "the executable does not hold the type library identifier, the version or the \
+             locale of this Object= line; the line is the one that the corpus project files \
+             declare for the class identifier that the oUuid field names",
+        ),
+        None => (
+            format!("Object={{{identifier}}}#1.0#0; {}", component.file_name),
+            Confidence::Unrecoverable,
+            "the executable does not hold the type library identifier of this Object= line; \
+             the class identifier that the oUuid field names is written in its place, and \
+             Visual Basic 6 does not load the line until the type library identifier of the \
+             control replaces it; the version and the locale are IDE defaults, never a \
+             recovery",
+        ),
+    };
     let item = ReportItem {
         path: format!("/components/{}", component.name),
-        confidence: Confidence::Unrecoverable,
-        basis: "this component's own declared identifier is not confirmed against the \
-                project file; the closest recovered field is written instead, and its own \
-                version and locale are IDE defaults, never a recovery"
-            .to_owned(),
-        // The offset is where the sixteen bytes of the identifier start,
-        // which the `oUuid` field names. A reader checks the identifier
-        // there.
-        evidence: vec![Evidence {
-            offset: component.ouuid_field_offset,
-            structure: "ExternalComponentEntry",
-            field: "oUuid",
-            note: Some("the sixteen bytes that the oUuid field names".to_owned()),
-        }],
+        confidence,
+        basis: basis.to_owned(),
+        evidence,
     };
     Ok((line, item))
 }
@@ -395,7 +450,7 @@ fn write_settings(
 mod tests {
     use super::{SETTING_ORDER, object_line, write_vbp};
     use crate::read::region::Off;
-    use crate::report::Evidence;
+    use crate::report::{Confidence, Evidence};
     use crate::vb::classify::ObjectKind;
     use crate::vb::controltree::ControlKind;
     use crate::vb::project::Component;
@@ -598,6 +653,34 @@ mod tests {
                 note: Some("the sixteen bytes that the oUuid field names".to_owned()),
             }]
         );
+    }
+
+    /// The class identifier of the Winsock control gives the line that the
+    /// corpus project files declare, and the item says that the line is
+    /// inferred.
+    #[test]
+    fn a_class_identifier_in_the_corpus_table_gives_the_declared_type_library() {
+        let (line, item) = object_line(&resolved_component("Winsock", "MSWINSCK.OCX")).unwrap();
+        assert_eq!(
+            line,
+            "Object={248DD890-BB45-11CF-9ABC-0080C7E7B78D}#1.0#0; MSWINSCK.OCX"
+        );
+        assert_eq!(item.confidence, Confidence::Inferred);
+    }
+
+    /// A class identifier that the table does not hold is written where the
+    /// type library identifier goes, and the item says that the line is
+    /// unrecoverable.
+    #[test]
+    fn a_class_identifier_not_in_the_corpus_table_is_written_and_graded_unrecoverable() {
+        let mut component = resolved_component("Grid", "GRID32.OCX");
+        component.ouuid_text = Some("00000000-0000-0000-0000-0000000000AB".to_owned());
+        let (line, item) = object_line(&component).unwrap();
+        assert_eq!(
+            line,
+            "Object={00000000-0000-0000-0000-0000000000AB}#1.0#0; GRID32.OCX"
+        );
+        assert_eq!(item.confidence, Confidence::Unrecoverable);
     }
 
     #[test]

@@ -195,6 +195,19 @@ impl Project {
         }
         None
     }
+
+    /// Gives the value of each line whose key is `key`, in file order, as
+    /// the file holds it. An `Object=` value has no quotes, so
+    /// [`Project::get`] cannot read it.
+    #[must_use]
+    pub fn values(&self, key: &str) -> Vec<String> {
+        self.text
+            .lines()
+            .filter_map(|line| key_value(line.trim()))
+            .filter(|(k, _)| *k == key)
+            .map(|(_, rest)| rest.to_owned())
+            .collect()
+    }
 }
 
 /// Why [`select_project_file`] could not name exactly one project file

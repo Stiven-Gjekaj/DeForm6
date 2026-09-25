@@ -53,27 +53,33 @@ original = "built"
 extracted = "built"
 
 [program."public-domain/SK-TFTP-Sample__VB6/Client/demo/TFTPClient.exe"]
-files = "sha256:1d22290e38e176c0d287c84c19d080d738b63c284838e739e428d56638fb09fe"
+files = "sha256:4463e5c78eef458382a7210916a5fa3d167f70e55d3a44d436a46b79e280a551"
 original = "built"
-extracted = "failed"
+extracted = "built with load errors"
 extracted_messages = [
-  "'MSWINSCK.OCX' could not be loaded",
+  "Errors during load. Refer to 'Form1.log' for details",
+  "Build of 'TFTPClient.exe' succeeded.",
+  "Form1.log: Line 17: Class VB.Control of control WskClient was not a loaded control class.",
 ]
 
 [program."public-domain/SK-TFTP-Sample__VB6/Server/demo/Server.exe"]
-files = "sha256:19fe1c1390e624dae02de85c09a5bcb59265faac0cff541ed94d9207b90c197a"
+files = "sha256:24b32391cb9362e767e3cef38f4fd0bbda29aba9d70f3c2059d9b3ff1d69de48"
 original = "built"
-extracted = "failed"
+extracted = "built with load errors"
 extracted_messages = [
-  "'MSWINSCK.OCX' could not be loaded",
+  "Errors during load. Refer to 'Form1.log' for details",
+  "Build of 'Server.exe' succeeded.",
+  "Form1.log: Line 5: Class VB.Control of control WskServer was not a loaded control class.",
 ]
 
 [program."public-domain/SK-Winsock-Sample__VB6/demo/SubReality_WinsockSample.exe"]
-files = "sha256:2d614b07b9d0b343cd25b46cb6634c673dda28ad2e0cadd8afb8765548f5e41a"
+files = "sha256:549525e211036dc98a84a0d3e8ab506a859319cef2a88046d870d4c3b9c5158a"
 original = "built"
-extracted = "failed"
+extracted = "built with load errors"
 extracted_messages = [
-  "'MSWINSCK.OCX' could not be loaded",
+  "Errors during load. Refer to 'frmMain.log' for details",
+  "Build of 'SubReality_WinsockSample.exe' succeeded.",
+  "frmMain.log: Line 21: Class VB.Control of control wsPop was not a loaded control class.",
 ]
 
 [program."public-domain/UUID2/VB6/UUID2.exe"]

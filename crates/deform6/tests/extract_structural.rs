@@ -665,6 +665,59 @@ fn the_structural_check_passes_for_all_forty_four_corpus_programs() {
     }
 }
 
+// --- Each Object= line is one that the original project declares --------
+
+/// Each `Object=` line that the write path gives for a corpus program is a
+/// line that the project file of that program declares. The corpus gives
+/// three such lines, one for each program that holds a Winsock control.
+///
+/// The count holds the check to the corpus. Without it, a writer that gave
+/// no `Object=` line at all would pass.
+#[test]
+fn each_object_line_is_one_that_the_original_project_declares() {
+    let root = corpus_root();
+    let projects = vbp::project_files();
+    let mut failures: Vec<String> = Vec::new();
+    let mut written_lines = 0_usize;
+
+    for (index, exe) in executables().iter().enumerate() {
+        let extracted = extract_one(exe, &root, &format!("object-{index}"));
+        let key = extracted.key.as_str();
+        let written_vbp = extracted
+            .files
+            .iter()
+            .find(|file| file.name.ends_with(".vbp"))
+            .unwrap_or_else(|| panic!("{key}: no .vbp file was written"));
+        let written = vbp::Project::read(&extracted.dir.join(&written_vbp.name)).values("Object");
+        let original =
+            vbp::select_project_file(exe, &projects).unwrap_or_else(|err| panic!("{key}: {err}"));
+        let declared = vbp::Project::read(&original).values("Object");
+
+        for line in &written {
+            written_lines = written_lines.saturating_add(1);
+            if !declared.contains(line) {
+                failures.push(format!(
+                    "{key}: writes Object={line}, and {} declares {declared:?}",
+                    original.display()
+                ));
+            }
+        }
+        std::fs::remove_dir_all(&extracted.dir).ok();
+    }
+
+    assert!(
+        failures.is_empty(),
+        "{} Object= line(s) that the original project does not declare:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+    assert_eq!(
+        written_lines, 3,
+        "the corpus programs gave {written_lines} Object= line(s), and three programs hold a \
+         Winsock control"
+    );
+}
+
 /// Reads `path` as Latin-1 bytes, this crate's own read and write
 /// convention: each byte maps to its own code point, never
 /// `String::from_utf8_lossy`. Copied here, not shared with any writing
