@@ -1,6 +1,9 @@
 //! `cargo run -p xtask -- export-pcode [--probe] <dir>` writes each corpus
 //! project in a form that the Visual Basic 6 IDE builds as P-code on a
-//! Windows host.
+//! Windows host. Then
+//! `cargo run -p xtask -- import-pcode [--capture <file>] <dir>` reads the
+//! result back: each executable into `corpus-pcode/`, and the record into
+//! `tests/pcode.toml`.
 //!
 //! Each corpus program is native code: each corpus project file holds the
 //! line `CompilationType=0`. Phase 9 builds the same projects as P-code, with
@@ -31,11 +34,13 @@
 //! serial line must bring it back unchanged. This code writes each file, so
 //! no third party byte is in it.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::Path;
 
-use crate::build_record;
+use crate::build_record::{self, Outcome};
 use crate::builds;
+use crate::pcode_record::{self, PcodeBuild, PcodeRecord, exe_hash};
 use crate::ratios::differential::support::vbp;
 
 /// The name of the side in the export, in the logs and in the capture.
@@ -364,6 +369,267 @@ pub(crate) fn render_sender() -> String {
     )
 }
 
+/// Runs `import-pcode`.
+pub(crate) fn run_import(args: &[String]) -> i32 {
+    let (capture, dir) = match import_args(args) {
+        Ok(read) => read,
+        Err(message) => {
+            eprintln!("xtask: {message}");
+            return 1;
+        }
+    };
+    if let Some(capture) = capture {
+        let unpacked = std::fs::read(capture)
+            .map_err(|err| format!("reading {}: {err}", capture.display()))
+            .and_then(|bytes| builds::unpack_capture(&bytes, dir));
+        match unpacked {
+            Ok(count) => println!("xtask: unpacked {count} files into {}", dir.display()),
+            Err(message) => {
+                eprintln!("xtask: {message}");
+                return 1;
+            }
+        }
+    }
+    match import_and_write(dir) {
+        Ok(changes) => {
+            for line in &changes {
+                println!("{line}");
+            }
+            println!(
+                "xtask: wrote {} and {}",
+                pcode_record::pcode_root().display(),
+                pcode_record::pcode_toml_path().display()
+            );
+            0
+        }
+        Err(message) => {
+            eprintln!("xtask: {message}");
+            1
+        }
+    }
+}
+
+/// Reads the arguments of `import-pcode`: `[--capture <file>] <dir>`.
+pub(crate) fn import_args(args: &[String]) -> Result<(Option<&Path>, &Path), String> {
+    match args {
+        [dir] if !dir.starts_with('-') => Ok((None, Path::new(dir))),
+        [flag, file, dir]
+            if flag == "--capture" && !file.starts_with('-') && !dir.starts_with('-') =>
+        {
+            Ok((Some(Path::new(file)), Path::new(dir)))
+        }
+        _ => Err("usage: cargo run -p xtask -- import-pcode [--capture <file>] <dir>".to_owned()),
+    }
+}
+
+/// Reads `manifest.txt`: a comment line, then one line with four fields for
+/// each project.
+pub(crate) fn parse_manifest(text: &str) -> Result<Vec<PcodeProgram>, String> {
+    text.lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(
+            |line| match line.split('\t').collect::<Vec<_>>().as_slice() {
+                [short, key, vbp, source] => Ok(PcodeProgram {
+                    short: (*short).to_owned(),
+                    key: (*key).to_owned(),
+                    vbp: (*vbp).to_owned(),
+                    source: (*source).to_owned(),
+                }),
+                _ => Err(format!(
+                    "the manifest line {line:?} does not hold four fields"
+                )),
+            },
+        )
+        .collect()
+}
+
+/// Gives the line `CompilationType=...` of the project file of `program` in
+/// the export. The file must hold exactly one such line.
+fn project_line(dir: &Path, program: &PcodeProgram) -> Result<String, String> {
+    let path = dir.join(SIDE).join(&program.short).join(&program.vbp);
+    let bytes = std::fs::read(&path).map_err(|err| format!("reading {}: {err}", path.display()))?;
+    let text: String = bytes.iter().copied().map(char::from).collect();
+    let lines: Vec<&str> = text
+        .split("\r\n")
+        .filter(|line| line.starts_with("CompilationType="))
+        .collect();
+    match lines.as_slice() {
+        [line] => Ok((*line).to_owned()),
+        _ => Err(format!(
+            "{}: the project file holds {} CompilationType lines, and the export writes one",
+            program.key,
+            lines.len()
+        )),
+    }
+}
+
+/// Gives the bytes of the one executable in the directory of `program`. A
+/// build gives one executable, and the batch file deletes an old one first.
+fn built_executable(dir: &Path, program: &PcodeProgram) -> Result<Vec<u8>, String> {
+    let project = dir.join(SIDE).join(&program.short);
+    let exes = build_record::executables(&project)?;
+    match exes.as_slice() {
+        [exe] => std::fs::read(exe).map_err(|err| format!("reading {}: {err}", exe.display())),
+        _ => Err(format!(
+            "{}: the project directory holds {} executables, and a build gives one",
+            program.key,
+            exes.len()
+        )),
+    }
+}
+
+/// Reads the whole export in `dir` into a record, and gives the bytes of
+/// each executable that built, by key.
+///
+/// Each result comes from [`builds::read_side`], the rule that the runs on
+/// the host measured. Only a program that built keeps its executable: a
+/// build with load errors is not the source as written. Each project file
+/// must hold the same `CompilationType` line, and the record holds it.
+pub(crate) fn import_record(
+    dir: &Path,
+) -> Result<(PcodeRecord, BTreeMap<String, Vec<u8>>), String> {
+    let manifest = builds::read_text(&dir.join("manifest.txt"))?
+        .ok_or_else(|| format!("{} holds no manifest.txt", dir.display()))?;
+    let environment = builds::read_text(&dir.join("logs").join("environment.txt"))?
+        .ok_or_else(|| format!("{} holds no logs/environment.txt", dir.display()))?;
+    let (windows, vb6) = builds::parse_environment(&environment)?;
+
+    let mut lines = BTreeSet::new();
+    let mut programs = BTreeMap::new();
+    let mut exes = BTreeMap::new();
+    for program in parse_manifest(&manifest)? {
+        lines.insert(project_line(dir, &program)?);
+        let side = builds::read_side(dir, &program.short, &program.key, SIDE)?;
+        let exe = if side.outcome == Outcome::Built {
+            let bytes = built_executable(dir, &program)?;
+            let hash = exe_hash(&bytes);
+            exes.insert(program.key.clone(), bytes);
+            Some(hash)
+        } else {
+            None
+        };
+        programs.insert(
+            program.key.clone(),
+            PcodeBuild {
+                source: program.source.clone(),
+                result: side.outcome,
+                exe,
+                messages: side.messages,
+            },
+        );
+    }
+    let compilation_type = match lines.into_iter().collect::<Vec<_>>().as_slice() {
+        [line] => line.clone(),
+        other => {
+            return Err(format!(
+                "the project files hold {} different CompilationType lines: {other:?}",
+                other.len()
+            ));
+        }
+    };
+    let record = PcodeRecord {
+        windows,
+        vb6,
+        compilation_type,
+        programs,
+    };
+    Ok((record, exes))
+}
+
+/// Writes each executable into `root`, at the path of its key.
+///
+/// First it checks that `root` holds no executable whose key `exes` does
+/// not hold. Such a file is a build that the new record does not name, and
+/// the import stops and names it, so that no old binary stays in silence.
+pub(crate) fn write_corpus(root: &Path, exes: &BTreeMap<String, Vec<u8>>) -> Result<(), String> {
+    if root.exists() {
+        for held in build_record::executables(root)? {
+            let key = build_record::program_key(&held, root)?;
+            if !exes.contains_key(&key) {
+                return Err(format!(
+                    "{} holds {key}, and the new record names no build of it. Remove the file, \
+                     then import again",
+                    root.display()
+                ));
+            }
+        }
+    }
+    for (key, bytes) in exes {
+        let path = root.join(key);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|err| format!("making {}: {err}", parent.display()))?;
+        }
+        std::fs::write(&path, bytes).map_err(|err| format!("writing {}: {err}", path.display()))?;
+    }
+    Ok(())
+}
+
+/// Describes one program for the list of changes.
+fn describe(program: &PcodeBuild) -> String {
+    match &program.exe {
+        Some(exe) => format!("{} {exe}", program.result.word()),
+        None => program.result.word().to_owned(),
+    }
+}
+
+/// Gives one line for each program whose entry moved from `old` to `new`.
+fn changes(old: &PcodeRecord, new: &PcodeRecord) -> Vec<String> {
+    let mut out = Vec::new();
+    for (key, program) in &new.programs {
+        match old.programs.get(key) {
+            Some(was) if was == program => {}
+            Some(was) => out.push(format!("{key}: {} -> {}", describe(was), describe(program))),
+            None => out.push(format!("{key}: new, {}", describe(program))),
+        }
+    }
+    for key in old.programs.keys() {
+        if !new.programs.contains_key(key) {
+            out.push(format!("{key}: removed"));
+        }
+    }
+    out
+}
+
+/// Reads the export in `dir`, checks that it names exactly the corpus
+/// programs, writes each executable into `corpus-pcode/`, and writes
+/// `tests/pcode.toml`. Gives one line for each program whose entry moved.
+fn import_and_write(dir: &Path) -> Result<Vec<String>, String> {
+    let (record, exes) = import_record(dir)?;
+    let root = build_record::corpus_root();
+    let mut keys = BTreeSet::new();
+    for exe in build_record::executables(&root)? {
+        keys.insert(build_record::program_key(&exe, &root)?);
+    }
+    let held: BTreeSet<String> = record.programs.keys().cloned().collect();
+    if held != keys {
+        return Err(format!(
+            "the export in {} names other programs than the {} of the corpus. A probe is \
+             never written into tests/pcode.toml",
+            dir.display(),
+            keys.len()
+        ));
+    }
+
+    let path = pcode_record::pcode_toml_path();
+    let changes = match std::fs::read_to_string(&path) {
+        Ok(old_text) => match pcode_record::parse(&old_text) {
+            Ok(old) => changes(&old, &record),
+            Err(err) => vec![format!(
+                "the old file does not parse, so no change is listed: {err}"
+            )],
+        },
+        Err(_) => vec!["there is no old file, so no change is listed".to_owned()],
+    };
+    let rendered = pcode_record::render(&record);
+    if pcode_record::parse(&rendered)? != record {
+        return Err("the rendered record does not parse back to the same record".to_owned());
+    }
+    write_corpus(&pcode_record::pcode_root(), &exes)?;
+    std::fs::write(&path, &rendered).map_err(|err| format!("writing {}: {err}", path.display()))?;
+    Ok(changes)
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -374,11 +640,15 @@ pub(crate) fn render_sender() -> String {
 )]
 mod tests {
     use super::{
-        PcodeProgram, export, export_args, export_probe, probe_bytes, probe_projects, render_batch,
-        render_manifest, render_sender, with_compilation_type,
+        PcodeProgram, export, export_args, export_probe, import_args, import_record,
+        parse_manifest, probe_bytes, probe_projects, render_batch, render_manifest, render_sender,
+        with_compilation_type, write_corpus,
     };
     use crate::build_record;
+    use crate::build_record::Outcome;
+    use crate::pcode_record::exe_hash;
     use crate::ratios::differential::support::vbp;
+    use std::collections::BTreeMap;
 
     fn program(short: &str, vbp: &str) -> PcodeProgram {
         PcodeProgram {
@@ -612,5 +882,173 @@ mod tests {
         assert_eq!(sender, render_sender());
         assert!(executables.is_empty(), "{executables:?}");
         assert!(again.unwrap_err().contains("is not empty"));
+    }
+
+    /// The manifest reads back as the projects that it was rendered from. A
+    /// line with another number of fields is refused.
+    #[test]
+    fn the_manifest_reads_back_as_the_projects() {
+        let programs = [program("p01", "A.vbp"), program("p02", "B B.vbp")];
+        assert_eq!(
+            parse_manifest(&render_manifest(&programs)).unwrap(),
+            programs
+        );
+        assert!(parse_manifest("p01\tk/A.exe\tA.vbp\n").is_err());
+    }
+
+    /// Builds an export of four projects as a run on the host leaves it:
+    /// `p01` built, `p02` failed, `p03` did not run, and `p04` built with
+    /// load errors, with an executable.
+    fn host_export(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "deform6-import-pcode-{name}-{}",
+            std::process::id()
+        ));
+        let _ignored = std::fs::remove_dir_all(&dir);
+        let programs = [
+            program("p01", "A.vbp"),
+            program("p02", "B.vbp"),
+            program("p03", "C.vbp"),
+            program("p04", "D.vbp"),
+        ];
+        std::fs::create_dir_all(dir.join("logs")).unwrap();
+        std::fs::write(dir.join("manifest.txt"), render_manifest(&programs)).unwrap();
+        std::fs::write(
+            dir.join("logs/environment.txt"),
+            "\r\nMicrosoft Windows XP [Version 5.1.2600]\r\n02/23/2004  12:00 AM  1,895,424 \
+             VB6.EXE\r\n",
+        )
+        .unwrap();
+        for program in &programs {
+            let project = dir.join("pcode").join(&program.short);
+            std::fs::create_dir_all(&project).unwrap();
+            std::fs::write(
+                project.join(&program.vbp),
+                "Type=Exe\r\nCompilationType=-1\r\n",
+            )
+            .unwrap();
+        }
+        std::fs::write(dir.join("logs/p01-pcode.exit"), "0\r\n").unwrap();
+        std::fs::write(
+            dir.join("logs/p01-pcode.txt"),
+            "\r\n\r\nBuild of 'A.exe' succeeded.\r\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("pcode/p01/A.exe"), b"MZ p01").unwrap();
+        std::fs::write(dir.join("logs/p02-pcode.exit"), "1\r\n").unwrap();
+        std::fs::write(
+            dir.join("logs/p02-pcode.txt"),
+            "\r\nFile not found: 'E:\\deform6\\p9\\pcode\\p02\\c.cls'\r\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("logs/p04-pcode.exit"), "0\r\n").unwrap();
+        std::fs::write(
+            dir.join("logs/p04-pcode.txt"),
+            "\r\nErrors during load. Refer to 'E:\\deform6\\p9\\pcode\\p04\\F.log' for \
+             details\r\nBuild of 'D.exe' succeeded.\r\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("pcode/p04/F.log"),
+            "Line 5: Class X.Y of control Z was not a loaded control class.\r\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("pcode/p04/D.exe"), b"MZ p04").unwrap();
+        dir
+    }
+
+    /// An import gives one entry for each project: the result by the rule
+    /// of the build record, the hash of the executable of a build, and the
+    /// `CompilationType` line. Only a build keeps its executable.
+    #[test]
+    fn an_import_reads_each_result_and_each_executable() {
+        let dir = host_export("read");
+        let (record, exes) = import_record(&dir).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        assert_eq!(record.compilation_type, "CompilationType=-1");
+        assert_eq!(record.windows, "Microsoft Windows XP [Version 5.1.2600]");
+        let built = &record.programs["k/p01.exe"];
+        assert_eq!(built.result, Outcome::Built);
+        assert_eq!(built.exe.as_deref(), Some(exe_hash(b"MZ p01").as_str()));
+        let failed = &record.programs["k/p02.exe"];
+        assert_eq!(failed.result, Outcome::Failed);
+        assert_eq!(failed.exe, None);
+        assert_eq!(failed.messages, ["File not found: 'c.cls'"]);
+        assert_eq!(record.programs["k/p03.exe"].result, Outcome::NotRun);
+        let with_errors = &record.programs["k/p04.exe"];
+        assert_eq!(with_errors.result, Outcome::BuiltWithLoadErrors);
+        assert_eq!(with_errors.exe, None);
+        assert_eq!(exes.keys().collect::<Vec<_>>(), ["k/p01.exe"]);
+        assert_eq!(exes["k/p01.exe"], b"MZ p01");
+    }
+
+    /// A build with no executable, or with two, is refused, and so are
+    /// project files that hold different `CompilationType` lines.
+    #[test]
+    fn an_import_refuses_a_build_without_one_executable_and_mixed_lines() {
+        let dir = host_export("none");
+        std::fs::remove_file(dir.join("pcode/p01/A.exe")).unwrap();
+        let err = import_record(&dir).unwrap_err();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.contains("holds 0 executables"), "{err}");
+
+        let dir = host_export("two");
+        std::fs::write(dir.join("pcode/p01/Old.exe"), b"MZ old").unwrap();
+        let err = import_record(&dir).unwrap_err();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.contains("holds 2 executables"), "{err}");
+
+        let dir = host_export("mixed");
+        std::fs::write(
+            dir.join("pcode/p03/C.vbp"),
+            "Type=Exe\r\nCompilationType=1\r\n",
+        )
+        .unwrap();
+        let err = import_record(&dir).unwrap_err();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.contains("2 different CompilationType lines"), "{err}");
+    }
+
+    /// The corpus writer puts each executable at the path of its key. It
+    /// stops at an executable that it holds and that the new record does not
+    /// name, and it names that file.
+    #[test]
+    fn the_corpus_writer_refuses_a_binary_that_the_record_does_not_name() {
+        let root =
+            std::env::temp_dir().join(format!("deform6-pcode-corpus-{}", std::process::id()));
+        let _ignored = std::fs::remove_dir_all(&root);
+        let mut exes = BTreeMap::new();
+        exes.insert("a/A.exe".to_owned(), b"MZ a".to_vec());
+        write_corpus(&root, &exes).unwrap();
+        assert_eq!(std::fs::read(root.join("a/A.exe")).unwrap(), b"MZ a");
+
+        let mut other = BTreeMap::new();
+        other.insert("b/B.exe".to_owned(), b"MZ b".to_vec());
+        let err = write_corpus(&root, &other).unwrap_err();
+        let written = root.join("b/B.exe").exists();
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(err.contains("a/A.exe"), "{err}");
+        assert!(!written);
+    }
+
+    /// `import-pcode` takes a directory, with `--capture <file>` before it or
+    /// not, and refuses any other shape.
+    #[test]
+    fn the_import_arguments_are_a_directory_and_a_capture() {
+        let args = |list: &[&str]| list.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            import_args(&args(&["out"])).unwrap(),
+            (None, std::path::Path::new("out"))
+        );
+        assert_eq!(
+            import_args(&args(&["--capture", "c.bin", "out"])).unwrap(),
+            (
+                Some(std::path::Path::new("c.bin")),
+                std::path::Path::new("out")
+            )
+        );
+        assert!(import_args(&args(&["--capture", "c.bin"])).is_err());
+        assert!(import_args(&args(&["--capture", "-x", "out"])).is_err());
     }
 }

@@ -650,8 +650,9 @@ pub(crate) fn import_args(args: &[String]) -> Result<(Option<&Path>, &Path), Str
 /// Gives the place under the export of a file that `sendlogs.bat` sent.
 ///
 /// A path `logs\<name>` goes to `logs/<name>`. Any other path must run
-/// through `original\pNN\` or `extracted\pNN\`, and goes to the same place
-/// under the export. A component `..` or `.`, or an empty one, is refused.
+/// through `original\pNN\`, `extracted\pNN\` or `pcode\pNN\`, and goes to
+/// the same place under the export. `pcode` is the side of
+/// `export-pcode`. A component `..` or `.`, or an empty one, is refused.
 pub(crate) fn capture_place(path: &str) -> Result<std::path::PathBuf, String> {
     let parts: Vec<&str> = path.split('\\').collect();
     let start = if parts
@@ -665,7 +666,8 @@ pub(crate) fn capture_place(path: &str) -> Result<std::path::PathBuf, String> {
             .position(|pair| match pair {
                 [side, short] => {
                     (side.eq_ignore_ascii_case("original")
-                        || side.eq_ignore_ascii_case("extracted"))
+                        || side.eq_ignore_ascii_case("extracted")
+                        || side.eq_ignore_ascii_case("pcode"))
                         && short.len() == 3
                         && short.starts_with('p')
                         && short.bytes().skip(1).all(|byte| byte.is_ascii_digit())
@@ -910,7 +912,7 @@ pub(crate) fn cut_paths(line: &str, side: &str, short: &str) -> String {
 
 /// Reads a file of VB6 as text. VB6 writes ANSI text. A byte that is not
 /// UTF-8 becomes U+FFFD, and no line is dropped for it.
-fn read_text(path: &Path) -> Result<Option<String>, String> {
+pub(crate) fn read_text(path: &Path) -> Result<Option<String>, String> {
     match std::fs::read(path) {
         Ok(bytes) => Ok(Some(String::from_utf8_lossy(&bytes).into_owned())),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -972,10 +974,11 @@ fn load_logs(dir: &Path) -> Result<Vec<(String, String)>, String> {
 /// because no run showed it.
 pub(crate) fn read_side(
     dir: &Path,
-    program: &Exported,
+    short: &str,
+    key: &str,
     side: &str,
 ) -> Result<build_record::Side, String> {
-    let name = format!("{}-{side}", program.short);
+    let name = format!("{short}-{side}");
     let logs = dir.join("logs");
     let Some(exit_text) = read_text(&logs.join(format!("{name}.exit")))? else {
         return Ok(build_record::Side {
@@ -991,12 +994,12 @@ pub(crate) fn read_side(
         .lines()
         .map(str::trim_end)
         .filter(|line| !line.is_empty())
-        .map(|line| cut_paths(line, side, &program.short))
+        .map(|line| cut_paths(line, side, short))
         .collect();
     let succeeded = lines
         .iter()
         .any(|line| line.starts_with("Build of '") && line.ends_with("' succeeded."));
-    let load_logs = load_logs(&dir.join(side).join(&program.short))?;
+    let load_logs = load_logs(&dir.join(side).join(short))?;
 
     let outcome = match (exit == 0, succeeded, load_logs.is_empty()) {
         (true, true, true) => {
@@ -1011,7 +1014,7 @@ pub(crate) fn read_side(
             return Err(format!(
                 "{} {side}: exit code {exit}, a success line {}, and {} load log files do not \
                  agree with the rule that the runs on the host measured",
-                program.key,
+                key,
                 if succeeded { "present" } else { "absent" },
                 load_logs.len()
             ));
@@ -1024,7 +1027,7 @@ pub(crate) fn read_side(
             .map(str::trim_end)
             .filter(|line| !line.is_empty())
         {
-            messages.push(format!("{path}: {}", cut_paths(line, side, &program.short)));
+            messages.push(format!("{path}: {}", cut_paths(line, side, short)));
         }
     }
     Ok(build_record::Side { outcome, messages })
@@ -1045,8 +1048,8 @@ pub(crate) fn import_record(dir: &Path) -> Result<build_record::BuildRecord, Str
     for program in parse_manifest(&manifest)? {
         let built = build_record::ProgramBuild {
             files: program.files.clone(),
-            original: read_side(dir, &program, "original")?,
-            extracted: read_side(dir, &program, "extracted")?,
+            original: read_side(dir, &program.short, &program.key, "original")?,
+            extracted: read_side(dir, &program.short, &program.key, "extracted")?,
         };
         record.programs.insert(program.key.clone(), built);
     }
@@ -1368,7 +1371,7 @@ mod tests {
     ) -> Result<build_record::Side, String> {
         let dir = scratch(name);
         write_side(&dir, short, "extracted", exit, out, logs);
-        let side = read_side(&dir, &program(short, "k/K.exe", "K.vbp"), "extracted");
+        let side = read_side(&dir, short, "k/K.exe", "extracted");
         std::fs::remove_dir_all(&dir).unwrap();
         side
     }
@@ -1740,6 +1743,10 @@ mod tests {
         assert_eq!(
             capture_place(r"E:\deform6\c1\ORIGINAL\p44\Form1.log").unwrap(),
             Path::new("original/p44/Form1.log")
+        );
+        assert_eq!(
+            capture_place(r"E:\deform6\p9\pcode\p06\TFTPClient.exe").unwrap(),
+            Path::new("pcode/p06/TFTPClient.exe")
         );
         for refused in [
             r"E:\deform6\c1\Form1.log",

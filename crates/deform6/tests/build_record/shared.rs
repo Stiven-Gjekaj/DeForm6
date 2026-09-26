@@ -304,11 +304,11 @@ pub(crate) fn files_hash(files: &[(String, Vec<u8>)]) -> String {
     format!("sha256:{digest}")
 }
 
-fn quoted(text: &str) -> String {
+pub(crate) fn quoted(text: &str) -> String {
     toml::Value::String(text.to_owned()).to_string()
 }
 
-fn render_messages(field: &str, messages: &[String]) -> String {
+pub(crate) fn render_messages(field: &str, messages: &[String]) -> String {
     if messages.is_empty() {
         return String::new();
     }
@@ -360,13 +360,13 @@ pub(crate) fn render(record: &BuildRecord) -> String {
     out
 }
 
-fn table<'a>(value: &'a toml::Value, what: &str) -> Result<&'a toml::Table, String> {
+pub(crate) fn table<'a>(value: &'a toml::Value, what: &str) -> Result<&'a toml::Table, String> {
     value
         .as_table()
         .ok_or_else(|| format!("{what} is not a table"))
 }
 
-fn text<'a>(table: &'a toml::Table, field: &str, what: &str) -> Result<&'a str, String> {
+pub(crate) fn text<'a>(table: &'a toml::Table, field: &str, what: &str) -> Result<&'a str, String> {
     table
         .get(field)
         .ok_or_else(|| format!("{what} has no {field}"))?
@@ -374,7 +374,7 @@ fn text<'a>(table: &'a toml::Table, field: &str, what: &str) -> Result<&'a str, 
         .ok_or_else(|| format!("{what}.{field} is not a string"))
 }
 
-fn only_fields(
+pub(crate) fn only_fields(
     table: &toml::Table,
     required: &[&str],
     optional: &[&str],
@@ -393,7 +393,7 @@ fn only_fields(
     Ok(())
 }
 
-fn outcome(table: &toml::Table, field: &str, what: &str) -> Result<Outcome, String> {
+pub(crate) fn outcome(table: &toml::Table, field: &str, what: &str) -> Result<Outcome, String> {
     let word = text(table, field, what)?;
     Outcome::from_word(word).ok_or_else(|| {
         format!(
@@ -403,7 +403,11 @@ fn outcome(table: &toml::Table, field: &str, what: &str) -> Result<Outcome, Stri
     })
 }
 
-fn messages(table: &toml::Table, field: &str, what: &str) -> Result<Vec<String>, String> {
+pub(crate) fn messages(
+    table: &toml::Table,
+    field: &str,
+    what: &str,
+) -> Result<Vec<String>, String> {
     let Some(value) = table.get(field) else {
         return Ok(Vec::new());
     };
@@ -421,7 +425,7 @@ fn messages(table: &toml::Table, field: &str, what: &str) -> Result<Vec<String>,
 }
 
 /// True when `value` is `sha256:` and 64 lower case hexadecimal characters.
-fn is_files_hash(value: &str) -> bool {
+pub(crate) fn is_files_hash(value: &str) -> bool {
     value.strip_prefix("sha256:").is_some_and(|hex| {
         hex.len() == 64
             && hex

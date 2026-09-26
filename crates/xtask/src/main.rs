@@ -8,8 +8,9 @@
 //! the logs of that build, from the directory or from a serial capture, into
 //! `tests/builds.toml`; see `builds.rs`.
 //! `cargo run -p xtask -- export-pcode [--probe] <dir>` writes each corpus
-//! project, or the probe, for a build as P-code on the same host; see
-//! `pcode.rs`.
+//! project, or the probe, for a build as P-code on the same host, and
+//! `import-pcode [--capture <file>] <dir>` reads that build into
+//! `corpus-pcode/` and `tests/pcode.toml`; see `pcode.rs`.
 //! `cargo run -p xtask -- derive-opcode-table` writes the opcode table
 //! `deform6::vb::opcodes::OpcodeTable::parse` reads, from a type library on
 //! a Windows host; see `opcode_table.rs`'s own doc comment for why this
@@ -81,6 +82,16 @@ mod fidelity_map;
 )]
 mod build_record;
 
+// `crates/deform6/tests/pcode_record/shared.rs` gives the text and the parser
+// of `tests/pcode.toml`. It uses `build_record` from the root of this crate.
+#[path = "../../deform6/tests/pcode_record/shared.rs"]
+#[allow(
+    dead_code,
+    reason = "this module is embedded in two binaries, the pcode_record test target and this \
+              one, and each uses a different part of it"
+)]
+mod pcode_record;
+
 mod builds;
 mod fetch_corpus;
 mod fuzz;
@@ -110,6 +121,7 @@ fn run(args: Vec<String>) -> i32 {
         Some("export-builds") => builds::run_export(args.get(1..).unwrap_or(&[])),
         Some("import-builds") => builds::run_import(args.get(1..).unwrap_or(&[])),
         Some("export-pcode") => pcode::run_export(args.get(1..).unwrap_or(&[])),
+        Some("import-pcode") => pcode::run_import(args.get(1..).unwrap_or(&[])),
         Some("derive-opcode-table") => {
             opcode_table::derive_opcode_table(args.get(1..).unwrap_or(&[]))
         }
@@ -133,7 +145,7 @@ fn run(args: Vec<String>) -> i32 {
     }
 }
 
-const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | update-fidelity | export-builds [--probe] <dir> | import-builds [--capture <file>] <dir> | export-pcode [--probe] <dir> | derive-opcode-table | fetch-corpus | pin-corpus <name> <url> | fuzz-pr | fuzz-cron | licences";
+const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | update-fidelity | export-builds [--probe] <dir> | import-builds [--capture <file>] <dir> | export-pcode [--probe] <dir> | import-pcode [--capture <file>] <dir> | derive-opcode-table | fetch-corpus | pin-corpus <name> <url> | fuzz-pr | fuzz-cron | licences";
 
 /// The number of corpus programs `update-ratios` refuses to write fewer
 /// than. Matches `EXPECTED_PROGRAM_COUNT` in `crates/deform6/tests/ratios.rs`
