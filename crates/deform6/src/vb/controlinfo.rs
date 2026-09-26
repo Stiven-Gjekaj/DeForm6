@@ -534,11 +534,12 @@ pub fn join_by_name(tree: &ControlTree, table: &ControlInfoTable) -> ControlJoin
 // stub of `cmdStart` in `Fast_Flames.exe`. The stub loads `eax` with a
 // value, compares `ax`, loads `edx` with the address of the handler, pushes
 // the address of the runtime and returns to it. In each of the 382 stubs,
-// `edx` is an entry of the method table of the object, and the pushed
-// address is the import thunk of `MethCallEngine` in `MSVBVM60.DLL`. The
-// compare changes no register that the runtime reads. Its operand holds
-// `33 c0`, `xor eax,eax`, which is where the 13 bytes that `STRUCTURES.md`
-// section 8.6 gives for P-code start. No event slot names that address.
+// `eax` gets the word at `+0x04` of the `ControlInfo` record, `edx` is an
+// entry of the method table of the object, and the pushed address is the
+// import thunk of `MethCallEngine` in `MSVBVM60.DLL`. The compare changes
+// only the flags. Its operand holds `33 c0`, `xor eax,eax`, which is where
+// the 13 bytes that `STRUCTURES.md` section 8.6 gives for P-code start. No
+// event slot names that address.
 //
 // `decode_stub` checks the opcodes before it reads a value. A stub of any
 // other shape gets a `DefectKind::UnknownStubShape` and no handler. Without
