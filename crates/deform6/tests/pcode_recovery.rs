@@ -26,7 +26,8 @@
 //! - **The event handlers.** Each bound event slot of a P-code program
 //!   gives a handler address, as in the native build. It is the entry of the
 //!   method table of the object for the procedure that the source names for
-//!   that control. Each P-code stub returns into `MethCallEngine`.
+//!   that control. Each P-code stub returns into `MethCallEngine`, and it
+//!   loads into `eax` the word at `+0x04` of its `ControlInfo` record.
 
 #[path = "build_record/shared.rs"]
 #[allow(
@@ -558,4 +559,49 @@ fn each_pcode_stub_returns_into_meth_call_engine() {
         stubs, EXPECTED_BOUND_SLOTS,
         "the P-code corpus now holds {stubs} bound event slots"
     );
+}
+
+/// Each stub that a bound event slot of a P-code program names loads into
+/// `eax` the word at `+0x04` of its `ControlInfo` record. A native stub
+/// holds one less than that word (`tests/byte_fidelity.rs`). The word is
+/// read here from the bytes of the file, and not by DeForm6.
+#[test]
+fn each_pcode_stub_loads_the_word_at_four_of_its_control_into_eax() {
+    let mut stubs = 0;
+    let mut failures = Vec::new();
+    for (key, exe) in pcode_programs() {
+        let bytes = read(&exe);
+        let pe = PeImage::parse(&bytes).unwrap_or_else(|err| panic!("{key}: {err}"));
+        for object in objects_by_name(&pe).values() {
+            let controls =
+                ControlInfoTable::read(&pe, object).unwrap_or_else(|err| panic!("{key}: {err}"));
+            for control in &controls.entries {
+                let at = usize::try_from(control.file_offset.get()).unwrap() + 4;
+                let word = u32::from(u16::from_le_bytes([bytes[at], bytes[at + 1]]));
+                let events =
+                    read_event_table(&pe, control).unwrap_or_else(|err| panic!("{key}: {err}"));
+                for slot in &events.slots {
+                    let EventSlot::Bound { index, handler, .. } = *slot else {
+                        continue;
+                    };
+                    stubs += 1;
+                    let eax = handler.map(|handler| handler.imm32);
+                    if eax != Some(word) {
+                        failures.push(format!(
+                            "{key}: {}.{} slot {index} loads {eax:x?}, and the word at 0x04 is \
+                             {word:#x}",
+                            object.name, control.name
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} P-code stubs do not load the word at 0x04 of their control:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+    assert_eq!(stubs, EXPECTED_BOUND_SLOTS);
 }
