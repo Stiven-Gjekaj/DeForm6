@@ -62,7 +62,7 @@ const HOST_OUT_DIR: &str = r"%SystemDrive%\deform6-out";
 const REFUSED_IN_A_NAME: &[char] = &['%', '^', '&', '!', '"', '\\', '/', '\r', '\n'];
 
 /// The files of one project: each name, with its bytes.
-type ProjectFiles = Vec<(String, Vec<u8>)>;
+pub(crate) type ProjectFiles = Vec<(String, Vec<u8>)>;
 
 /// One program as the export wrote it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -149,7 +149,7 @@ pub(crate) fn check_batch_name(name: &str) -> Result<(), String> {
 
 /// Makes `dir`, which must not exist or must be empty. An export into a
 /// directory that holds an old export would mix old logs with new files.
-fn prepare(dir: &Path) -> Result<(), String> {
+pub(crate) fn prepare(dir: &Path) -> Result<(), String> {
     if dir.exists() {
         let mut entries =
             std::fs::read_dir(dir).map_err(|err| format!("reading {}: {err}", dir.display()))?;
@@ -165,7 +165,7 @@ fn prepare(dir: &Path) -> Result<(), String> {
 }
 
 /// Writes `files` into `dir`, which this makes.
-fn write_files(dir: &Path, files: &[(String, Vec<u8>)]) -> Result<(), String> {
+pub(crate) fn write_files(dir: &Path, files: &[(String, Vec<u8>)]) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|err| format!("making {}: {err}", dir.display()))?;
     for (name, bytes) in files {
         check_batch_name(name)?;

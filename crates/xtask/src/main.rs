@@ -7,6 +7,8 @@
 //! IDE on a Windows host, and `import-builds [--capture <file>] <dir>` reads
 //! the logs of that build, from the directory or from a serial capture, into
 //! `tests/builds.toml`; see `builds.rs`.
+//! `cargo run -p xtask -- export-pcode --probe <dir>` writes the probe that
+//! measures how VB6 builds a project as P-code; see `pcode.rs`.
 //! `cargo run -p xtask -- derive-opcode-table` writes the opcode table
 //! `deform6::vb::opcodes::OpcodeTable::parse` reads, from a type library on
 //! a Windows host; see `opcode_table.rs`'s own doc comment for why this
@@ -83,6 +85,7 @@ mod fetch_corpus;
 mod fuzz;
 mod licences;
 mod opcode_table;
+mod pcode;
 
 use std::path::Path;
 
@@ -105,6 +108,7 @@ fn run(args: Vec<String>) -> i32 {
         Some("update-fidelity") => update_fidelity(),
         Some("export-builds") => builds::run_export(args.get(1..).unwrap_or(&[])),
         Some("import-builds") => builds::run_import(args.get(1..).unwrap_or(&[])),
+        Some("export-pcode") => pcode::run_export(args.get(1..).unwrap_or(&[])),
         Some("derive-opcode-table") => {
             opcode_table::derive_opcode_table(args.get(1..).unwrap_or(&[]))
         }
@@ -128,7 +132,7 @@ fn run(args: Vec<String>) -> i32 {
     }
 }
 
-const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | update-fidelity | export-builds [--probe] <dir> | import-builds [--capture <file>] <dir> | derive-opcode-table | fetch-corpus | pin-corpus <name> <url> | fuzz-pr | fuzz-cron | licences";
+const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | update-fidelity | export-builds [--probe] <dir> | import-builds [--capture <file>] <dir> | export-pcode --probe <dir> | derive-opcode-table | fetch-corpus | pin-corpus <name> <url> | fuzz-pr | fuzz-cron | licences";
 
 /// The number of corpus programs `update-ratios` refuses to write fewer
 /// than. Matches `EXPECTED_PROGRAM_COUNT` in `crates/deform6/tests/ratios.rs`
