@@ -46,10 +46,9 @@
 //! The reader keeps the handler address of each stub, not its jump. The
 //! emitter works the jump back out of that address, so a wrong handler
 //! arithmetic shows here as bytes that differ. The emitter also writes the
-//! opcode bytes of the native stub. The reader checks them and decodes no
-//! stub of another shape, so such a stub shows here as a stub that is not
-//! graded.
-//! `a_p_code_stub_that_a_bound_slot_names_is_refused_and_owned_by_its_slot`
+//! opcode bytes of the native stub, and no P-code stub. So a P-code stub, and
+//! a stub of any other shape, shows here as a stub that is not graded.
+//! `the_p_code_tail_that_a_bound_slot_names_is_refused_and_owned_by_its_slot`
 //! shows that case.
 //!
 //! Measured on 2026-09-16: all 390 stubs reproduce all 13 of their bytes.
@@ -1548,12 +1547,13 @@ fn a_bound_slot_whose_stub_maps_nowhere_is_ungraded_and_owned_by_its_slot() {
 }
 
 #[test]
-fn a_p_code_stub_that_a_bound_slot_names_is_refused_and_owned_by_its_slot() {
-    // STRUCTURES.md section 8.6 gives the P-code stub as 13 bytes:
-    // xor eax,eax / mov edx,<addr> / push <addr> / ret. The reader checks
-    // the opcodes, finds another shape, and keeps no handler. The stub then
-    // shows as a refused record, not as bytes that differ. The walk looks at
-    // the stub itself to give the reason.
+fn the_p_code_tail_that_a_bound_slot_names_is_refused_and_owned_by_its_slot() {
+    // STRUCTURES.md section 8.6 gives 13 bytes for a P-code stub:
+    // xor eax,eax / mov edx,<addr> / push <addr> / ret. They are the tail of
+    // a real P-code stub, which is 20 bytes. The reader checks the opcodes,
+    // finds another shape, and keeps no handler. The stub then shows as a
+    // refused record, not as bytes that differ. The walk looks at the stub
+    // itself to give the reason.
     let original = sk_gradient();
     let before = walk(&original).unwrap();
     let (slot, owner) = first_bound_slot(&original, &before);
@@ -1570,7 +1570,7 @@ fn a_p_code_stub_that_a_bound_slot_names_is_refused_and_owned_by_its_slot() {
     patched[at..at + 13].copy_from_slice(&p_code);
     assert!(!opens_a_native_stub(&patched[at..]));
 
-    let after = walk(&patched).expect("one P-code stub must not stop the walk");
+    let after = walk(&patched).expect("one P-code tail must not stop the walk");
     assert_one_refused_stub(
         &before,
         &after,

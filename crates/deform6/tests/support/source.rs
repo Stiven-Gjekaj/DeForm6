@@ -59,16 +59,15 @@ fn continues_to_next_line(line: &str) -> bool {
 }
 
 /// Matches one already-trimmed, non-continuation physical line as a
-/// public procedure declaration, giving its name.
+/// procedure declaration, giving whether it is public and its name.
 ///
-/// Gives `None` for a private or friend declaration, for a declaration
-/// whose name is empty (which does not occur in real VB6 source, but
-/// `Region` has no infallible accessor and neither does a token stream a
-/// hostile or merely unusual file could shape however it likes), and for
-/// any line that opens no declaration at all: a comment, a blank line, a
-/// statement inside a procedure body, or a continuation line the caller
-/// has already filtered out before this runs.
-fn public_declaration_name(line: &str) -> Option<String> {
+/// Gives `None` for a declaration whose name is empty (which does not
+/// occur in real VB6 source, but `Region` has no infallible accessor and
+/// neither does a token stream a hostile or merely unusual file could
+/// shape however it likes), and for any line that opens no declaration at
+/// all: a comment, a blank line, a statement inside a procedure body, or a
+/// continuation line the caller has already filtered out before this runs.
+fn declaration(line: &str) -> Option<(bool, String)> {
     let tokens: Vec<&str> = line.split_whitespace().collect();
 
     let mut idx = 0;
@@ -108,7 +107,38 @@ fn public_declaration_name(line: &str) -> Option<String> {
         return None;
     }
 
-    is_public.then(|| name.to_owned())
+    Some((is_public, name.to_owned()))
+}
+
+/// Gives the name of every procedure that `path` declares and that `keep`
+/// accepts, in the order of the file. `keep` is given whether the
+/// declaration is public.
+fn procedures(path: &Path, keep: fn(bool) -> bool) -> Vec<String> {
+    let Ok(bytes) = std::fs::read(path) else {
+        return Vec::new();
+    };
+    let text: String = bytes.iter().copied().map(char::from).collect();
+
+    let mut out = Vec::new();
+    let mut in_continuation = false;
+    for line in text.lines() {
+        let is_continuation = in_continuation;
+        // Whether *this* line itself trails off onto the next one is
+        // decided before the `continue` below, so a declaration whose
+        // argument list runs to several continuation lines in a row (as
+        // `GetOpenFileName` does) stays skipped for every one of them,
+        // not just the first.
+        in_continuation = continues_to_next_line(line);
+        if is_continuation {
+            continue;
+        }
+        if let Some((is_public, name)) = declaration(line.trim())
+            && keep(is_public)
+        {
+            out.push(name);
+        }
+    }
+    out
 }
 
 /// Gives the ordered list of procedures `path` declares public: a
@@ -129,27 +159,14 @@ fn public_declaration_name(line: &str) -> Option<String> {
 /// zero declared here and then treated as a shortfall.
 #[must_use]
 pub fn declared_public_procedures(path: &Path) -> Vec<String> {
-    let Ok(bytes) = std::fs::read(path) else {
-        return Vec::new();
-    };
-    let text: String = bytes.iter().copied().map(char::from).collect();
+    procedures(path, |is_public| is_public)
+}
 
-    let mut out = Vec::new();
-    let mut in_continuation = false;
-    for line in text.lines() {
-        let is_continuation = in_continuation;
-        // Whether *this* line itself trails off onto the next one is
-        // decided before the `continue` below, so a declaration whose
-        // argument list runs to several continuation lines in a row (as
-        // `GetOpenFileName` does) stays skipped for every one of them,
-        // not just the first.
-        in_continuation = continues_to_next_line(line);
-        if is_continuation {
-            continue;
-        }
-        if let Some(name) = public_declaration_name(line.trim()) {
-            out.push(name);
-        }
-    }
-    out
+/// Gives the ordered list of every procedure `path` declares: public,
+/// private or friend, by the same rules as [`declared_public_procedures`].
+///
+/// Gives an empty list when the file cannot be read.
+#[must_use]
+pub fn declared_procedures(path: &Path) -> Vec<String> {
+    procedures(path, |_is_public| true)
 }

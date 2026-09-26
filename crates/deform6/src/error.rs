@@ -179,14 +179,18 @@ pub enum DefectKind {
         va: u32,
     },
 
-    /// An event slot names a stub that does not have the native shape.
+    /// An event slot names a stub that has neither the native shape nor the
+    /// P-code shape.
     ///
     /// `STRUCTURES.md` section 8.6 gives the native stub as `81 6C 24 04
-    /// <imm32>`, then `E9 <rel32>`. A stub that holds other bytes at one of
-    /// these five places, such as a P-code stub, is not decoded. The slot
-    /// stays bound and keeps its stub address, and it has no handler.
+    /// <imm32>`, then `E9 <rel32>`. A P-code stub holds `B8` at `+0x00`,
+    /// `66 3D 33 C0` at `+0x05`, `BA` at `+0x09`, `68` at `+0x0E` and `C3` at
+    /// `+0x13`. A stub that holds another byte at one of the places of the
+    /// native shape, and at one of the places of the P-code shape, is not
+    /// decoded. The slot stays bound and keeps its stub address, and it has no
+    /// handler. `found` holds the first 13 bytes of the stub.
     #[error(
-        "the event stub at offset {offset:#x} holds {found:02x?}, and a native stub holds 81 6c 24 04 at +0x00 and e9 at +0x08"
+        "the event stub at offset {offset:#x} holds {found:02x?}, and a native stub holds 81 6c 24 04 at +0x00 and e9 at +0x08, and a P-code stub holds b8 at +0x00, 66 3d 33 c0 at +0x05, ba at +0x09, 68 at +0x0e and c3 at +0x13"
     )]
     UnknownStubShape {
         /// The absolute file offset of the stub.

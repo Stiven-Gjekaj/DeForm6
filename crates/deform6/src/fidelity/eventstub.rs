@@ -11,13 +11,15 @@
 //!
 //! The reader keeps `imm32` from `0x04`, and the handler address that it
 //! works out from `rel32` at `0x09`. It keeps no field for the two opcodes.
-//! It checks them, and it decodes no stub of another shape. This emitter
-//! writes the native opcodes at `0x00` and at `0x08`, restated from section
-//! 8.6, so every stub that has a record has these five bytes.
+//! It checks them. This emitter writes the native opcodes at `0x00` and at
+//! `0x08`, restated from section 8.6, so every stub that has a record has
+//! these five bytes.
 //!
-//! A stub of another shape, such as a P-code stub, has no record: the reader
-//! keeps no handler for it, and [`EventStubRecord::of`] gives `None`. The walk
-//! records the stub as refused, and `has_native_shape` gives the reason.
+//! The reader also decodes a P-code stub, which is 20 bytes and holds no
+//! jump. This emitter writes the native stub only, and
+//! [`EventStubRecord::of`] gives `None` for a P-code stub, and for a stub of
+//! any other shape. The walk records the stub as refused, and
+//! `has_native_shape` gives the reason.
 //!
 //! # `rel32` is not verbatim
 //!
@@ -42,7 +44,7 @@
 
 use crate::fidelity::{Emit, Slate};
 use crate::read::region::{Off, Region, Va};
-use crate::vb::controlinfo::{EventSlot, StubHandler};
+use crate::vb::controlinfo::{EventSlot, StubHandler, StubShape};
 
 /// `STRUCTURES.md` section 8.6: the opcode of `sub dword ptr [esp+4], imm32`.
 const SUB_ESP4: [u8; 4] = [0x81, 0x6C, 0x24, 0x04];
@@ -64,8 +66,9 @@ pub struct EventStubRecord {
 }
 
 impl EventStubRecord {
-    /// Gives the record of the stub that `slot` names, or `None` for an
-    /// unbound slot and for a bound slot whose stub did not decode.
+    /// Gives the record of the native stub that `slot` names, or `None` for
+    /// an unbound slot, for a bound slot whose stub did not decode, and for a
+    /// bound slot whose stub is a P-code stub.
     #[must_use]
     pub const fn of(slot: &EventSlot) -> Option<Self> {
         match *slot {
@@ -77,6 +80,7 @@ impl EventStubRecord {
                         is_method: _,
                         imm32,
                         handler_address,
+                        shape: StubShape::Native,
                     }),
             } => Some(Self {
                 stub,
@@ -86,7 +90,14 @@ impl EventStubRecord {
             EventSlot::Bound {
                 index: _,
                 stub: _,
-                handler: None,
+                handler:
+                    Some(StubHandler {
+                        is_method: _,
+                        imm32: _,
+                        handler_address: _,
+                        shape: StubShape::PCode { engine: _ },
+                    })
+                    | None,
             }
             | EventSlot::Unbound { index: _ } => None,
         }
@@ -147,7 +158,7 @@ mod tests {
     use crate::fidelity::ledger::{Span, Verdict};
     use crate::fidelity::{Emit, compare, lay};
     use crate::read::region::{Off, Region, Va};
-    use crate::vb::controlinfo::{EventSlot, StubHandler};
+    use crate::vb::controlinfo::{EventSlot, StubHandler, StubShape};
 
     /// The address the stub below sits at.
     const STUB: u32 = 0x0040_1ED0;
@@ -162,6 +173,7 @@ mod tests {
                 is_method: false,
                 imm32,
                 handler_address,
+                shape: StubShape::Native,
             }),
         })
         .unwrap()
@@ -191,6 +203,27 @@ mod tests {
                 index: 3,
                 stub: Va::new(STUB),
                 handler: None,
+            }),
+            None
+        );
+    }
+
+    /// This emitter writes the native stub only. A P-code stub decodes, and
+    /// it still has no record.
+    #[test]
+    fn a_bound_slot_with_a_p_code_handler_has_no_stub_record() {
+        assert_eq!(
+            EventStubRecord::of(&EventSlot::Bound {
+                index: 3,
+                stub: Va::new(STUB),
+                handler: Some(StubHandler {
+                    is_method: false,
+                    imm32: 0x58,
+                    handler_address: 0x0040_3B90,
+                    shape: StubShape::PCode {
+                        engine: 0x0040_107C,
+                    },
+                }),
             }),
             None
         );

@@ -12,10 +12,10 @@
 //!
 //! `STRUCTURES.md` section 8.6 gives the native stub as `81 6C 24 04
 //! <imm32>`, then `E9 <rel32>`. `inspect` decodes a stub only when it has
-//! that shape. A stub of another shape gives `DefectKind::UnknownStubShape`
-//! at the first byte of the stub, and its slot stays bound with no handler
-//! address. The defect is `Tolerated`, so a strict run reports it and
-//! continues.
+//! that shape or the shape of the 20-byte P-code stub. A stub of another
+//! shape gives `DefectKind::UnknownStubShape` at the first byte of the stub,
+//! and its slot stays bound with no handler address. The defect is
+//! `Tolerated`, so a strict run reports it and continues.
 //!
 //! No corpus program has such a stub, so the tests below patch SK-Gradient
 //! in memory. Its form's `Command1` names one stub, in slot 0. `AGENTS.md`
@@ -24,9 +24,11 @@
 //! # The address comes from the reading API, and the bytes from this file
 //!
 //! The public reading API gives the address that slot 0 holds, as in
-//! `tests/events.rs`. This file resolves that address, writes the P-code
-//! stub of section 8.6 over the native stub, and builds the defect it
-//! expects from its own bytes.
+//! `tests/events.rs`. This file resolves that address, writes the 13 bytes
+//! that section 8.6 gives for a P-code stub over the native stub, and builds
+//! the defect it expects from its own bytes. Those 13 bytes are the tail of
+//! a real P-code stub, from its `xor eax,eax`. No event slot names that
+//! address, and the reader does not decode them.
 //!
 //! # This file keeps its own corpus walk
 //!
@@ -127,9 +129,10 @@ fn command1_stub(data: &[u8]) -> Va {
     }
 }
 
-/// The P-code stub of `STRUCTURES.md` section 8.6: `xor eax,eax`,
-/// `mov edx,<addr>`, `push <addr>`, `ret`, 13 bytes.
-fn p_code_stub(addr: u32) -> [u8; 13] {
+/// The 13 bytes that `STRUCTURES.md` section 8.6 gives for a P-code stub:
+/// `xor eax,eax`, `mov edx,<addr>`, `push <addr>`, `ret`. They are the tail
+/// of a real P-code stub.
+fn p_code_tail(addr: u32) -> [u8; 13] {
     let mut stub = [0_u8; 13];
     stub[0x00..0x03].copy_from_slice(&[0x33, 0xC0, 0xBA]);
     stub[0x03..0x07].copy_from_slice(&addr.to_le_bytes());
@@ -139,7 +142,7 @@ fn p_code_stub(addr: u32) -> [u8; 13] {
     stub
 }
 
-/// SK-Gradient with a P-code stub written over the native stub that slot 0
+/// SK-Gradient with a P-code tail written over the native stub that slot 0
 /// of `Command1` names, and the defect that stub must give.
 fn patched_sk_gradient() -> (Vec<u8>, Defect) {
     let mut data = sk_gradient();
@@ -157,7 +160,7 @@ fn patched_sk_gradient() -> (Vec<u8>, Defect) {
         SUB_OPCODE,
         "the stub must be native before the patch, or this test proves nothing"
     );
-    let p_code = p_code_stub(stub.get());
+    let p_code = p_code_tail(stub.get());
     data[start..start + 13].copy_from_slice(&p_code);
 
     let expected = Defect {
@@ -241,7 +244,7 @@ fn no_corpus_program_raises_an_unknown_stub_shape() {
 }
 
 #[test]
-fn a_p_code_stub_raises_one_unknown_stub_shape_at_the_stub_and_nothing_else() {
+fn a_p_code_tail_raises_one_unknown_stub_shape_at_the_stub_and_nothing_else() {
     // Before the shape check, this stub gave an UnreadablePointer at the
     // slot, because its last byte makes the jump go below address 0.
     let (data, expected) = patched_sk_gradient();
@@ -259,7 +262,7 @@ fn a_strict_run_reports_an_unknown_stub_shape_and_continues() {
 }
 
 #[test]
-fn the_slot_of_a_p_code_stub_stays_bound_and_reports_no_handler_address() {
+fn the_slot_of_a_p_code_tail_stays_bound_and_reports_no_handler_address() {
     let before = command1_slot_zero(&sk_gradient());
     assert!(
         matches!(

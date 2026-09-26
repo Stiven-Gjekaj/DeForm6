@@ -23,10 +23,10 @@
 //!   masked. The lines of the project file are compared in any order,
 //!   because the objects of one native binary are not in the order of its
 //!   source.
-//! - **The event handlers.** DeForm6 does not decode the event stub of a
-//!   P-code program. Each bound event slot has no handler address, and gives
-//!   an `UnknownStubShape` defect. This is a named limit, and its test fails
-//!   when the limit closes.
+//! - **The event handlers.** Each bound event slot of a P-code program
+//!   gives a handler address, as in the native build. It is the entry of the
+//!   method table of the object for the procedure that the source names for
+//!   that control. Each P-code stub returns into `MethCallEngine`.
 
 #[path = "build_record/shared.rs"]
 #[allow(
@@ -44,15 +44,26 @@ mod build_record;
 )]
 mod support;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use deform6::error::DefectKind;
 use deform6::journal::Mode;
+use deform6::read::pe::PeImage;
+use deform6::read::region::{Off, Va};
 use deform6::vb::Report;
 use deform6::vb::classify::ObjectKind as RecoveredKind;
-use deform6::vb::controlinfo::EventReport;
+use deform6::vb::controlinfo::{
+    ControlInfoTable, EventReport, EventSlot, StubShape, read_event_table,
+};
+use deform6::vb::header::{VbHeader, header_region};
+use deform6::vb::object::{Object, ObjectTable};
 use deform6::vb::opcodes::OpcodeTable;
-use support::vbp;
+use deform6::vb::project::{ObjectTableHead, ProjectInfo};
+use object::LittleEndian as LE;
+use object::pe::ImageNtHeaders32;
+use object::read::pe::{ImageNtHeaders, ImageOptionalHeader, Import, PeFile32};
+use support::{source, vbp};
 
 /// The directory of the committed P-code corpus.
 fn pcode_root() -> PathBuf {
@@ -269,46 +280,282 @@ fn bound_slots(report: &Report) -> (usize, usize) {
     (bound, with_address)
 }
 
-/// A named limit: DeForm6 does not decode the event stub of a P-code
-/// program. Each P-code program has the bound event slots of its native
-/// build, none of them gives a handler address, and each handler address of
-/// the native build is one `UnknownStubShape` defect in the P-code build.
+/// The number of bound events whose handler address `inspect` reports across
+/// the P-code corpus. As in the native corpus, this is not a number of stubs:
+/// all the elements of a control array report the events of one
+/// `ControlInfo`.
+const EXPECTED_REPORTED_HANDLERS: usize = 388;
+
+/// The number of bound event slots that the `ControlInfo` records of the
+/// P-code corpus hold. Each names one stub.
+const EXPECTED_BOUND_SLOTS: usize = 382;
+
+/// Each P-code program has the bound event slots of its native build, each
+/// of them gives a handler address, and no stub has an unknown shape.
 #[test]
-fn each_bound_event_slot_of_a_pcode_program_has_no_handler_address() {
+fn each_bound_event_slot_of_a_pcode_program_gives_a_handler_address() {
     let root = build_record::corpus_root();
     let table = OpcodeTable::builtin();
-    let mut native_addresses = 0;
+    let mut addresses = 0;
     let mut failures = Vec::new();
     for (key, exe) in pcode_programs() {
         let native = deform6::inspect(&read(&root.join(&key)), &table, Mode::Salvage)
             .unwrap_or_else(|err| panic!("{key} native: {err}"));
         let pcode = deform6::inspect(&read(&exe), &table, Mode::Salvage)
             .unwrap_or_else(|err| panic!("{key} P-code: {err}"));
-        let (native_bound, addresses) = bound_slots(&native);
+        let (native_bound, native_addresses) = bound_slots(&native);
         let (pcode_bound, pcode_addresses) = bound_slots(&pcode);
         let unknown_stubs = pcode
             .defects
             .iter()
             .filter(|defect| matches!(defect.kind, DefectKind::UnknownStubShape { .. }))
             .count();
-        native_addresses += addresses;
+        addresses += pcode_addresses;
         let found = (pcode_bound, pcode_addresses, unknown_stubs);
-        if found != (native_bound, 0, addresses) {
+        if found != (native_bound, native_addresses, 0) {
             failures.push(format!(
                 "{key}: P-code gives {pcode_bound} bound slots, {pcode_addresses} handler \
                  addresses and {unknown_stubs} unknown stubs; native gives {native_bound} bound \
-                 slots and {addresses} handler addresses"
+                 slots and {native_addresses} handler addresses"
             ));
         }
     }
     assert!(
-        native_addresses > 0,
-        "the native builds give no handler address"
+        failures.is_empty(),
+        "{} P-code programs do not give the handler addresses of their native build:\n{}",
+        failures.len(),
+        failures.join("\n")
     );
+    assert_eq!(
+        addresses, EXPECTED_REPORTED_HANDLERS,
+        "the P-code corpus now gives {addresses} handler addresses"
+    );
+}
+
+/// The objects of one image, by name, read through the public reading API.
+fn objects_by_name(pe: &PeImage<'_>) -> BTreeMap<String, Object> {
+    let header = VbHeader::read(&header_region(pe).unwrap()).unwrap();
+    let info = ProjectInfo::read(pe, header.lp_project_data).unwrap();
+    let head = ObjectTableHead::read(pe, info.lp_object_table).unwrap();
+    ObjectTable::walk(pe, info.lp_object_table, &head)
+        .unwrap()
+        .objects
+        .into_iter()
+        .map(|object| (object.name.clone(), object))
+        .collect()
+}
+
+/// The method table of one object: the `wMethodCount` values at
+/// `lpMethods`. `STRUCTURES.md` section 5.2 puts `wMethodCount` at
+/// `ObjectInfo + 0x20` and `lpMethods` at `ObjectInfo + 0x24`. DeForm6 does
+/// not read this table, so this test reads it.
+fn method_table(pe: &PeImage<'_>, object: &Object) -> Vec<u32> {
+    let info = pe.region_at_va(object.lp_object_info).unwrap();
+    let count = info.u16_le(Off::new(0x20)).unwrap();
+    if count == 0 {
+        return Vec::new();
+    }
+    let methods = pe
+        .region_at_va(info.va_le(Off::new(0x24)).unwrap())
+        .unwrap();
+    (0..u32::from(count))
+        .map(|at| methods.u32_le(Off::new(4 * at)).unwrap())
+        .collect()
+}
+
+/// Tells whether `procedure` is an event procedure of `owner`: the name of
+/// the owner, then `_`, in any case.
+fn is_named_for(procedure: &str, owner: &str) -> bool {
+    procedure
+        .to_ascii_lowercase()
+        .starts_with(&format!("{}_", owner.to_ascii_lowercase()))
+}
+
+/// Each handler address of a P-code program is an entry of the method table
+/// of its object, and the procedure of the source at that entry is named for
+/// the control of the event: the name of the control, or `Form` for the form
+/// itself, then `_`.
+///
+/// The last entries of the method table are the procedures of the source
+/// file, in the order of the file. The entries before them are not
+/// procedures of the file, and their number is not the same in each object.
+/// So the test counts the procedures of the source file, and it takes that
+/// many entries from the end of the table.
+#[test]
+fn each_pcode_handler_is_the_method_of_a_source_procedure_of_its_control() {
+    let root = build_record::corpus_root();
+    let projects = vbp::project_files();
+    let table = OpcodeTable::builtin();
+    let mut checked = 0;
+    let mut failures = Vec::new();
+    for (key, exe) in pcode_programs() {
+        let bytes = read(&exe);
+        let pe = PeImage::parse(&bytes).unwrap_or_else(|err| panic!("{key}: {err}"));
+        let objects = objects_by_name(&pe);
+        let project = vbp::select_project_file(&root.join(&key), &projects)
+            .unwrap_or_else(|err| panic!("{key}: {err}"));
+        let sources: BTreeMap<String, PathBuf> = vbp::Project::read(&project)
+            .declared_objects()
+            .into_iter()
+            .filter_map(|object| Some((object.name?, object.source_file)))
+            .collect();
+        let report = deform6::inspect(&bytes, &table, Mode::Strict)
+            .unwrap_or_else(|err| panic!("{key}: {err}"));
+        for form in &report.forms {
+            let methods = method_table(&pe, &objects[&form.name]);
+            let procedures = source::declared_procedures(&sources[&form.name]);
+            let Some(first) = methods.len().checked_sub(procedures.len()) else {
+                failures.push(format!(
+                    "{key}: {} has {} methods and {} source procedures",
+                    form.name,
+                    methods.len(),
+                    procedures.len()
+                ));
+                continue;
+            };
+            for control in &form.controls {
+                let owner = if control.parent.is_none() {
+                    "Form"
+                } else {
+                    control.name.as_str()
+                };
+                for event in &control.events {
+                    let (EventReport::Named {
+                        index,
+                        handler_address: Some(address),
+                        ..
+                    }
+                    | EventReport::BoundUnnamed {
+                        index,
+                        handler_address: Some(address),
+                        ..
+                    }) = event
+                    else {
+                        continue;
+                    };
+                    checked += 1;
+                    let procedure = methods
+                        .iter()
+                        .position(|method| method == address)
+                        .and_then(|at| at.checked_sub(first))
+                        .and_then(|at| procedures.get(at));
+                    if !procedure.is_some_and(|name| is_named_for(name, owner)) {
+                        failures.push(format!(
+                            "{key}: {}.{} slot {index} gives {address:#x}, which names the \
+                             procedure {procedure:?}",
+                            form.name, control.name
+                        ));
+                    }
+                }
+            }
+        }
+    }
     assert!(
         failures.is_empty(),
-        "The limit on P-code event stubs moved. If DeForm6 now decodes a P-code stub, the limit \
-         is closed: change this test and the README.\n{}",
+        "{} P-code handlers do not name a source procedure of their control:\n{}",
+        failures.len(),
         failures.join("\n")
+    );
+    assert_eq!(
+        checked, EXPECTED_REPORTED_HANDLERS,
+        "the test checked {checked} handler addresses"
+    );
+}
+
+/// The function that each import slot of `bytes` imports, by the address
+/// of the slot. Read with the `object` crate, not with DeForm6.
+fn imports_by_slot(bytes: &[u8]) -> BTreeMap<u32, (String, String)> {
+    let file = PeFile32::parse(bytes).unwrap();
+    let base = u32::try_from(file.nt_headers().optional_header().image_base()).unwrap();
+    let table = file.import_table().unwrap().unwrap();
+    let mut out = BTreeMap::new();
+    let mut descriptors = table.descriptors().unwrap();
+    while let Some(descriptor) = descriptors.next().unwrap() {
+        let dll =
+            String::from_utf8_lossy(table.name(descriptor.name.get(LE)).unwrap()).into_owned();
+        let first_thunk = descriptor.first_thunk.get(LE);
+        let names = match descriptor.original_first_thunk.get(LE) {
+            0 => first_thunk,
+            original => original,
+        };
+        let mut thunks = table.thunks(names).unwrap();
+        let mut slot = base + first_thunk;
+        while let Some(thunk) = thunks.next::<ImageNtHeaders32>().unwrap() {
+            if let Import::Name(_hint, name) = table.import::<ImageNtHeaders32>(thunk).unwrap() {
+                out.insert(
+                    slot,
+                    (dll.clone(), String::from_utf8_lossy(name).into_owned()),
+                );
+            }
+            slot += 4;
+        }
+    }
+    out
+}
+
+/// Each stub that a bound event slot of a P-code program names has the
+/// P-code shape, and it returns into `MethCallEngine`. The address that the
+/// stub pushes holds `ff 25` and the address of an import slot, which is
+/// `jmp dword ptr [slot]`, and that slot imports `MethCallEngine` from
+/// `MSVBVM60.DLL`.
+#[test]
+fn each_pcode_stub_returns_into_meth_call_engine() {
+    let mut stubs = 0;
+    let mut failures = Vec::new();
+    for (key, exe) in pcode_programs() {
+        let bytes = read(&exe);
+        let pe = PeImage::parse(&bytes).unwrap_or_else(|err| panic!("{key}: {err}"));
+        let imports = imports_by_slot(&bytes);
+        for object in objects_by_name(&pe).values() {
+            let controls =
+                ControlInfoTable::read(&pe, object).unwrap_or_else(|err| panic!("{key}: {err}"));
+            for control in &controls.entries {
+                let events =
+                    read_event_table(&pe, control).unwrap_or_else(|err| panic!("{key}: {err}"));
+                for slot in &events.slots {
+                    let EventSlot::Bound {
+                        index,
+                        stub,
+                        handler,
+                    } = *slot
+                    else {
+                        continue;
+                    };
+                    stubs += 1;
+                    let what = format!("{key}: {}.{} slot {index}", object.name, control.name);
+                    let Some(StubShape::PCode { engine }) = handler.map(|handler| handler.shape)
+                    else {
+                        failures.push(format!(
+                            "{what}: the stub at {:#x} gives {handler:?}",
+                            stub.get()
+                        ));
+                        continue;
+                    };
+                    let target = pe
+                        .region_at_va(Va::new(engine))
+                        .and_then(|region| region.take(Off::new(0), 6))
+                        .filter(|thunk| thunk[..2] == [0xFF, 0x25])
+                        .map(|thunk| u32::from_le_bytes(thunk[2..6].try_into().unwrap()));
+                    let import = target.and_then(|slot| imports.get(&slot));
+                    if import.map(|(dll, name)| (dll.as_str(), name.as_str()))
+                        != Some(("MSVBVM60.DLL", "MethCallEngine"))
+                    {
+                        failures.push(format!(
+                            "{what}: the stub returns into {engine:#x}, which imports {import:?}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} P-code stubs do not return into MethCallEngine:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+    assert_eq!(
+        stubs, EXPECTED_BOUND_SLOTS,
+        "the P-code corpus now holds {stubs} bound event slots"
     );
 }
