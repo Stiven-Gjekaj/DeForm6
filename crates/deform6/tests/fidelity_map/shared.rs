@@ -114,9 +114,9 @@ pub(crate) const HEADER: &str = r#"# The committed fidelity map: what the fideli
 # keeps what 8 of them hold: `imm32`, and the handler address that it works
 # out from the jump. The emitter works the jump back out of that address. The
 # other 5 bytes are the opcodes of the native stub. The reader checks them and
-# keeps no field for them. The emitter writes no P-code stub, which the
-# reader also decodes, so a P-code stub shows as a refused record, as a stub
-# of any other shape does.
+# keeps no field for them. The reader also decodes a P-code stub, which is not
+# an `EventStub` record, so it shows as absent. It decodes no stub of any
+# other shape, so such a stub shows as a refused record.
 "#;
 
 /// The ranges of one structure that the emitter does not write, and the

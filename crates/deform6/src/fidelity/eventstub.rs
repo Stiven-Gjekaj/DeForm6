@@ -17,9 +17,10 @@
 //!
 //! The reader also decodes a P-code stub, which is 20 bytes and holds no
 //! jump. This emitter writes the native stub only, and
-//! [`EventStubRecord::of`] gives `None` for a P-code stub, and for a stub of
-//! any other shape. The walk records the stub as refused, and
-//! `has_native_shape` gives the reason.
+//! [`EventStubRecord::of`] gives `None` for a P-code stub. The walk records
+//! a P-code stub as absent, because it is not an `EventStub` record. The
+//! reader decodes no stub of any other shape. `of` gives `None` for it too,
+//! the walk records it as refused, and `has_native_shape` gives the reason.
 //!
 //! # `rel32` is not verbatim
 //!

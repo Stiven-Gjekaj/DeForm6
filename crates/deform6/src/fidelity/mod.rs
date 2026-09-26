@@ -44,9 +44,9 @@
 //!
 //! An emitter can also write constant bytes that the reader checks and does
 //! not keep. The event stub emitter writes the opcode bytes of the native
-//! stub, and no P-code stub, which the reader also decodes. So a P-code stub
-//! shows as a refused record, as a stub of any other shape does, and never
-//! as bytes that differ.
+//! stub. A P-code stub, which the reader also decodes, shows as an absent
+//! record. The reader decodes no stub of any other shape, so such a stub
+//! shows as a refused record, and never as bytes that differ.
 //!
 //! The clamps on `dwExternalCount`, `wFormCount`, `dwControlCount` and
 //! `wEventCount` do not work that way. They only bound a loop: the reader returns fewer entries, and no

@@ -43,7 +43,8 @@ use crate::fidelity::{Emit, Fault, compare};
 use crate::read::pe::PeImage;
 use crate::read::region::{Off, Region, Va};
 use crate::vb::controlinfo::{
-    ControlInfo, ControlInfoTable, EventSlot, EventTable, OptionalObjectInfo, read_event_table,
+    ControlInfo, ControlInfoTable, EventSlot, EventTable, OptionalObjectInfo, StubShape,
+    read_event_table,
 };
 use crate::vb::gui::{GuiObjectInfo, GuiTable, GuiTableEntry};
 use crate::vb::header::{VbHeader, header_region};
@@ -663,6 +664,10 @@ fn count_event_slots(
 /// what a hostile file can make the walk keep: one ledger or one row for each
 /// address, never one for each slot.
 ///
+/// A slot whose stub the reader decoded as a P-code stub gets the reason
+/// `Absent`. A P-code stub is not an `EventStub` record, and this walk has no
+/// emitter for it.
+///
 /// A refused stub gets one of four reasons: its address is in no section,
 /// the file ends inside it, it does not have the native shape, or its handler
 /// address leaves the `u32` range. The reader keeps no handler in the last two
@@ -677,10 +682,28 @@ fn grade_event_stubs(
     found: &mut Walk,
 ) -> Result<(), WalkError> {
     for slot in &table.slots {
-        let EventSlot::Bound { index, stub, .. } = *slot else {
+        let EventSlot::Bound {
+            index,
+            stub,
+            handler,
+        } = *slot
+        else {
             continue;
         };
         if !stubs.insert(stub) {
+            continue;
+        }
+        let owner = Owner::Slot {
+            object,
+            control,
+            slot: index,
+        };
+        if handler.is_some_and(|handler| matches!(handler.shape, StubShape::PCode { .. })) {
+            found.ungraded.push(Ungraded {
+                structure: EventStubRecord::STRUCTURE,
+                owner,
+                reason: Reason::Absent,
+            });
             continue;
         }
         let graded = pe
@@ -703,11 +726,7 @@ fn grade_event_stubs(
             Ok((record, window)) => found.ledgers.push(compare(&record, &window)?),
             Err(reason) => found.ungraded.push(Ungraded {
                 structure: EventStubRecord::STRUCTURE,
-                owner: Owner::Slot {
-                    object,
-                    control,
-                    slot: index,
-                },
+                owner,
                 reason: Reason::Refused(reason),
             }),
         }

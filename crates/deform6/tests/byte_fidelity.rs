@@ -46,8 +46,11 @@
 //! The reader keeps the handler address of each stub, not its jump. The
 //! emitter works the jump back out of that address, so a wrong handler
 //! arithmetic shows here as bytes that differ. The emitter also writes the
-//! opcode bytes of the native stub, and no P-code stub. So a P-code stub, and
-//! a stub of any other shape, shows here as a stub that is not graded.
+//! opcode bytes of the native stub. The reader checks them. It also decodes a
+//! P-code stub, which is not an `EventStub` record, so such a stub shows here
+//! as absent: `a_p_code_stub_that_a_bound_slot_names_is_absent_and_owned_by_its_slot`
+//! shows that case. The reader decodes no stub of any other shape, so such a
+//! stub shows here as a stub that is not graded:
 //! `the_p_code_tail_that_a_bound_slot_names_is_refused_and_owned_by_its_slot`
 //! shows that case.
 //!
@@ -1578,6 +1581,45 @@ fn the_p_code_tail_that_a_bound_slot_names_is_refused_and_owned_by_its_slot() {
         owner,
         "an event stub does not have the native shape",
     );
+}
+
+#[test]
+fn a_p_code_stub_that_a_bound_slot_names_is_absent_and_owned_by_its_slot() {
+    // A P-code stub is 20 bytes: mov eax,<imm32> / cmp ax,0xC033 /
+    // mov edx,<addr> / push <addr> / ret. The reader decodes it, and the
+    // emitter writes the native stub only. So the walk records the stub as an
+    // absent EventStub record, not as a refused one, and grades nothing else
+    // differently.
+    let original = sk_gradient();
+    let before = walk(&original).unwrap();
+    let (slot, owner) = first_bound_slot(&original, &before);
+    let at = file_offset_of(&PeImage::parse(&original).unwrap(), slot.stub);
+
+    let mut p_code = vec![0xB8, 0x58, 0x00, 0x00, 0x00, 0x66, 0x3D, 0x33, 0xC0, 0xBA];
+    p_code.extend_from_slice(&slot.stub.to_le_bytes());
+    p_code.push(0x68);
+    p_code.extend_from_slice(&slot.stub.to_le_bytes());
+    p_code.push(0xC3);
+    assert_eq!(p_code.len(), 20);
+    let mut patched = original.clone();
+    assert!(opens_a_native_stub(&patched[at..]));
+    patched[at..at + 20].copy_from_slice(&p_code);
+    assert!(!opens_a_native_stub(&patched[at..]));
+
+    let after = walk(&patched).expect("one P-code stub must not stop the walk");
+    let added: Vec<_> = after
+        .ungraded
+        .iter()
+        .filter(|row| !before.ungraded.contains(row))
+        .collect();
+    assert_eq!(added.len(), 1, "{added:?}");
+    assert_eq!(added[0].structure, "EventStub");
+    assert_eq!(added[0].owner, owner);
+    assert_eq!(added[0].reason, Reason::Absent);
+    assert_eq!(after.ledgers.len() + 1, before.ledgers.len());
+    let at = u32::try_from(at).unwrap();
+    assert!(after.ledgers.iter().all(|l| l.base.get() != at));
+    assert_eq!(after.counts, before.counts);
 }
 
 #[test]
