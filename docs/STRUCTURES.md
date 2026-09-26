@@ -1366,12 +1366,30 @@ handler address is at stub + 0x8 as a `jmp rel32`. IDC computes it as
 `stub + 0x0D + dword(stub + 0x09)`. The corpus agrees with this shape and
 this arithmetic in all 390 of its event stubs. It also has 311 native stubs
 that hold `0xFFFF` and that no slot names (§19). DeForm6 decodes the native
-shape only. A stub of another shape gets an `UnknownStubShape` defect
-(§19).
+shape and the P-code shape below. A stub of any other shape gets an
+`UnknownStubShape` defect (§19).
 
-In a **P-code** build the stub is a 13-byte sequence
-`xor eax,eax / mov edx,<addr> / push <addr> / ret` (SVBD `MethodLinkPCode`), and
-there is also a 5-byte `jmp rel32` variant (SVBD `MethodLinkNative`). **[L]**
+The stub itself, in a **P-code** build: **[C]** (§22)
+
+```
+B8 <imm32>              mov  eax, imm32
+66 3D 33 C0             cmp  ax, 0xC033
+BA <imm32>              mov  edx, <method>
+68 <imm32>              push <engine>
+C3                      ret
+```
+
+`<method>` is the entry of `ObjectInfo.lpMethods` (§5.2) for the handler
+procedure. `<engine>` is the import thunk of `MethCallEngine` in
+`MSVBVM60.DLL`, and `push` then `ret` go to it. `imm32` is 0 for a method, and
+the word at `ControlInfo` + 0x04 for an event. DeForm6 gives `<method>` as the
+handler address. It is not the address of machine code.
+
+SVBD `MethodLinkPCode` gives 13 bytes: `xor eax,eax / mov edx,<addr> / push
+<addr> / ret`. They are the tail of this stub, from `+0x07`, because the
+operand of the `cmp` holds `33 C0`, which is `xor eax,eax`. No event slot of
+the corpus names that address. SVBD also gives a 5-byte `jmp rel32` variant
+(`MethodLinkNative`). No corpus program holds one. **[L]**
 
 ### 8.7 External (OCX) controls in the form stream
 
@@ -1657,7 +1675,7 @@ and sets `AppData.CompileType` from it.)
 |---|---|---|---|
 | `ProjectInfo.lpNativeCode` | VA of the native code / `.data` | `0` | **[C]** |
 | `ObjectInfo.lpMethods` entries | point into code | point at a `ProcDscInfo` (§10.3) | **[C]** |
-| Event handler stub | `sub [esp+4], imm32` + `jmp rel32`, 13 bytes | `xor eax,eax / mov edx,addr / push addr / ret`, 13 bytes | **[L]** |
+| Event handler stub | `sub [esp+4], imm32` + `jmp rel32`, 13 bytes (§19) | `mov eax,imm32 / cmp ax,0xC033 / mov edx,<method> / push <engine> / ret`, 20 bytes (§22) | **[C]** |
 | Form data, GUI table, control tree, properties, `.frx` blobs | **identical** | **identical** | **[C]** |
 | `FuncTypDesc` / `PubVarDesc` / `EventDesc` | present | present | **[C]** |
 
@@ -1684,6 +1702,10 @@ SEK is the only source that documents it, at
 The P-code body occupies the `ProcSize` bytes **immediately before** the
 descriptor, that is `[descriptor - ProcSize, descriptor)`. Out of scope for this
 milestone but recorded here because it is not documented anywhere else found.
+
+Each P-code event stub loads `edx` with an entry of `lpMethods` (§22). So the
+handler address that DeForm6 gives for a P-code event is the address of the
+descriptor of the handler procedure. The layout above stays **[L]**.
 
 ---
 
@@ -2035,7 +2057,7 @@ words change places.
 **What the measurement did not settle.** Every corpus record is kind `0x40`.
 The corpus holds no COM control (`0x2E`), so the `0x28` byte header of §8.6
 stays **[L]**. All 390 stubs are native, so the P-code stub shapes of §8.6
-are not measured.
+were not measured here. Section 22 measures the P-code stub.
 
 ---
 
@@ -2137,29 +2159,30 @@ in `tests/byte_fidelity.rs` keep the other facts of this section true:
   for the second row, for the one address of each stub, and for the 311
   stubs that no slot names.
 
-**A stub of another shape.** The reader checks the two opcodes before it
-reads a value. A stub that does not hold `81 6C 24 04` at 0x00 and `E9` at
-0x08 gets an `UnknownStubShape` defect at the first byte of the stub, and
-the defect gives the 13 bytes that the stub holds. The slot stays bound and
+**A stub of another shape.** The reader checks the opcodes before it reads
+a value. A stub that has neither the native shape nor the P-code shape of
+§22 gets an `UnknownStubShape` defect at the first byte of the stub, and the
+defect gives the first 13 bytes that the stub holds. The slot stays bound and
 keeps no handler address. The fidelity walk records the stub as refused,
 and it gives as the reason that the stub does not have the native shape.
 The defect is `Tolerated`, so a strict run reports it and continues.
 
-Before this check, the reader decoded every stub as native. A P-code stub
-(§8.6) at an address in a corpus program then gave an `UnreadablePointer`
+Before this check, the reader decoded every stub as native. The 13 bytes
+that SVBD gives for a P-code stub (§8.6) at an address in a corpus program
+then gave an `UnreadablePointer`
 defect at the slot. Its last byte, `0xC3`, is the high byte of what the
 reader took as `rel32`, so the handler address went below 0. The address of
 the stub was readable, so that defect named the wrong fault. At a high
 address, the same bytes stayed inside the `u32` range and gave a wrong
 handler address with no defect.
 
-`tests/stub_shapes.rs` patches a P-code stub into one corpus program in
+`tests/stub_shapes.rs` patches those 13 bytes into one corpus program in
 memory and requires the defect. It also requires that no corpus program
 raises one. Unit tests in `vb/controlinfo.rs` change each of the five
-opcode bytes, and put a P-code stub at a low and at a high address.
+opcode bytes, and put those 13 bytes at a low and at a high address.
 
-**What the measurement did not settle.** All 390 stubs are native, so the
-P-code stub shapes of §8.6 stay **[L]**.
+**What the measurement did not settle.** All 390 stubs are native. Section
+22 measures the P-code stub on the P-code corpus.
 
 ---
 
@@ -2318,7 +2341,88 @@ that an entry of type 6 names.
 
 ---
 
-## 22. Practical parse order for DeForm6
+## 22. The P-code event stub, measured on the P-code corpus, 2026-09-27
+
+`corpus-pcode/` holds a P-code build of 42 corpus programs (`ROADMAP.md`,
+phase 9). The Visual Basic 6 IDE built each one from the committed source,
+with only `CompilationType` changed. A script read the stubs of the 42
+programs. The tests at the end of this section keep most of the result true.
+
+**The shape.** The `ControlInfo` records of the 42 programs have 382 bound
+slots, and each slot names a stub of 20 bytes:
+
+```
+B8 <imm32>              mov  eax, imm32
+66 3D 33 C0             cmp  ax, 0xC033
+BA <imm32>              mov  edx, <method>
+68 <imm32>              push <engine>
+C3                      ret
+```
+
+The stub of `cmdStart` in `Fast_Flames.exe` is at file offset `0x3218`. It
+holds `b8 58 00 00 00 66 3d 33 c0 ba 90 3b 40 00 68 7c 10 40 00 c3`.
+
+| Check | Stubs |
+|---|---|
+| The 8 opcode bytes agree with the shape | 382 of 382 |
+| `<engine>` holds `FF 25` and the address of an import slot, and the slot imports `MethCallEngine` from `MSVBVM60.DLL` | 382 of 382 |
+| `<method>` is an entry of `ObjectInfo.lpMethods` of the object (§5.2) | 382 of 382 |
+| `imm32` is the word at `ControlInfo` + 0x04 | 382 of 382 |
+
+A native stub holds one less than the word at `ControlInfo` + 0x04 (§19).
+The P-code stub holds the word itself. This document does not know what the
+value is.
+
+**`<method>` names the handler procedure.** The last entries of `lpMethods`
+are the procedures of the source file, in the order of the file. The number
+of entries before them is not the same in each object, and this document
+does not know what they are. `inspect` reports 388 events with a handler
+address, because all the elements of a control array report the events of
+one `ControlInfo`. For each event, a test counts the procedures of the
+source file and takes that many entries from the end of `lpMethods`. Then it
+finds the entry that the handler address names. In 388 of 388 events, the
+procedure of the source at that entry has the name of the control, or `Form`
+for the form itself, then `_`. For `cmdStart`, the entry `0x403B90` is
+`cmdStart_Click`.
+
+**The method marker.** The `.text` sections of the 42 programs hold 663
+P-code stubs. The slots name 382 of them, and none of the 382 holds `imm32`
+0. Each of the other 281 holds `imm32` 0. So a P-code stub marks a method
+with 0, where a native stub holds `0xFFFF` (§19). The stubs sit in 93 runs.
+In a run, each stub starts 20 bytes after the stub before it. The 663
+stubs, the 281, the value 0 and the runs were measured one time, and no test
+keeps them true.
+
+**The `cmp`.** It changes only the flags. Its operand holds `33 C0`, which is
+`xor eax,eax`. So the 13 bytes from `+0x07` are the stub that SVBD gives as
+`MethodLinkPCode` (§8.6), with `eax` 0. No event slot names that address.
+
+**What the reader does.** DeForm6 decodes the stub. It gives `<method>` as
+the handler address, and it keeps `imm32` and `<engine>`. It sets
+`is_method` when `imm32` is 0. The fidelity walk writes back the native
+stub only, so it records a P-code stub as an absent `EventStub` record.
+
+These tests keep the other facts of this section true:
+
+- `each_bound_event_slot_of_a_pcode_program_gives_a_handler_address` in
+  `tests/pcode_recovery.rs`, for the 388 events;
+- `each_pcode_handler_is_the_method_of_a_source_procedure_of_its_control`,
+  for `<method>` and the procedures of the source;
+- `each_pcode_stub_returns_into_meth_call_engine`, for the shape, the 382
+  slots and `<engine>`;
+- `each_pcode_stub_loads_the_word_at_four_of_its_control_into_eax`, for
+  `imm32`;
+- `fast_flames_p_code_cmd_start_slot_zero_decodes_to_the_measured_stub` in
+  `vb/controlinfo.rs`, for the bytes of `cmdStart`.
+
+**What the measurement did not settle.** What `imm32` is, and what the
+entries of `lpMethods` before the procedures are. The P-code corpus holds no
+5-byte `jmp rel32` stub of SVBD and no COM control (`0x2E`), so neither is
+measured.
+
+---
+
+## 23. Practical parse order for DeForm6
 
 1. Parse the PE. Reject anything that is not 32-bit x86. Record `ImageBase` and
    build the RVA-to-file-offset map from the section table.
