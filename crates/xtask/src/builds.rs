@@ -405,46 +405,78 @@ fn write_lists(dir: &Path, exported: &[Exported]) -> Result<(), String> {
         .map_err(|err| format!("writing {}: {err}", sender.display()))
 }
 
-/// Renders `sendlogs.bat`, with CRLF at the end of each line.
-///
-/// The file sends each file in `logs\`, then each `.log` file under
-/// `original\` and `extracted\`, out through `COM1`. Each file goes out as
-/// a line `===FILE <size> <path>===`, the bytes of the file as `copy /b`
-/// sends them, and a line `===EOF===` on a line of its own. The size lets
-/// the reader find a byte that the serial line lost or added. The file then sends
-/// `===OUT===`, the list of the executables that VB6 built, and `===END===`.
-/// `mode` turns off each handshake, because a terminal device on this
-/// machine gives no handshake signal.
-pub(crate) fn render_sendlogs() -> String {
-    let lines = [
-        "@echo off",
-        "rem Sends each log of the build out through COM1, for the other machine",
-        "rem to read.",
-        "mode COM1: baud=115200 parity=n data=8 stop=1 to=off xon=off odsr=off \
-         octs=off dtr=on rts=on idsr=off >nul",
-        r#"pushd "%~dp0""#,
-        r#"for %%f in (logs\*.*) do call :send "%%f""#,
-        r#"for /r original %%f in (*.log) do call :send "%%f""#,
-        r#"for /r extracted %%f in (*.log) do call :send "%%f""#,
-        ">COM1 echo ===OUT===",
-        ">COM1 dir /s /b %SystemDrive%\\deform6-out\\*.exe",
-        ">COM1 echo ===END===",
-        "popd",
-        "exit /b 0",
-        "",
-        ":send",
-        ">COM1 echo ===FILE %~z1 %~1===",
-        r#"copy /b "%~1" COM1 >nul"#,
-        ">COM1 echo.",
-        ">COM1 echo ===EOF===",
-        "goto :eof",
-    ];
+/// Joins `lines` into one text, with CRLF at the end of each line. `cmd` on
+/// Windows XP finds a label only in a file with CRLF line ends.
+pub(crate) fn crlf_text<S: AsRef<str>>(lines: &[S]) -> String {
     let mut out = String::new();
     for line in lines {
-        out.push_str(line);
+        out.push_str(line.as_ref());
         out.push_str("\r\n");
     }
     out
+}
+
+/// Renders a file that sends files out through `COM1`, with CRLF at the end
+/// of each line.
+///
+/// `rems` are the `rem` lines at the head of the file. Each line of `sends`
+/// calls `:send` for some files. Each file goes out as a line
+/// `===FILE <size> <path>===`, the bytes of the file as `copy /b` sends them,
+/// and a line `===EOF===` on a line of its own. The size lets the reader find
+/// a byte that the serial line lost or added. The file then sends
+/// `===OUT===`, the list of the executables that `listing` names, and
+/// `===END===`. `mode` turns off each handshake, because a terminal device on
+/// the other machine gives no handshake signal.
+pub(crate) fn render_sender(rems: &[&str], sends: &[&str], listing: &str) -> String {
+    let mut lines = vec!["@echo off".to_owned()];
+    lines.extend(rems.iter().map(|line| (*line).to_owned()));
+    lines.push(
+        "mode COM1: baud=115200 parity=n data=8 stop=1 to=off xon=off odsr=off octs=off \
+         dtr=on rts=on idsr=off >nul"
+            .to_owned(),
+    );
+    lines.push(r#"pushd "%~dp0""#.to_owned());
+    lines.extend(sends.iter().map(|line| (*line).to_owned()));
+    lines.push(">COM1 echo ===OUT===".to_owned());
+    lines.push(format!(">COM1 dir /s /b {listing}"));
+    lines.extend(
+        [
+            ">COM1 echo ===END===",
+            "popd",
+            "exit /b 0",
+            "",
+            ":send",
+            ">COM1 echo ===FILE %~z1 %~1===",
+            r#"copy /b "%~1" COM1 >nul"#,
+            ">COM1 echo.",
+            ">COM1 echo ===EOF===",
+            "goto :eof",
+        ]
+        .iter()
+        .map(|line| (*line).to_owned()),
+    );
+    crlf_text(&lines)
+}
+
+/// Renders `sendlogs.bat`, with CRLF at the end of each line.
+///
+/// The file sends each file in `logs\`, then each `.log` file under
+/// `original\` and `extracted\`, out through `COM1`, in the frame that
+/// [`render_sender`] gives. After `===OUT===` it lists the executables that
+/// VB6 built into [`HOST_OUT_DIR`].
+pub(crate) fn render_sendlogs() -> String {
+    render_sender(
+        &[
+            "rem Sends each log of the build out through COM1, for the other machine",
+            "rem to read.",
+        ],
+        &[
+            r#"for %%f in (logs\*.*) do call :send "%%f""#,
+            r#"for /r original %%f in (*.log) do call :send "%%f""#,
+            r#"for /r extracted %%f in (*.log) do call :send "%%f""#,
+        ],
+        &format!(r"{HOST_OUT_DIR}\*.exe"),
+    )
 }
 
 /// Renders `manifest.txt`: a comment line, then one line for each program,
@@ -462,33 +494,16 @@ pub(crate) fn render_manifest(programs: &[Exported]) -> String {
     out
 }
 
-/// Renders `build.bat`, with CRLF at the end of each line.
-///
-/// `cmd` on Windows XP finds a label only in a file with CRLF line ends. The
-/// file does not use a block in parentheses, because a path can hold a
-/// parenthesis. `start "" /wait` makes the file wait for `VB6.EXE`, which is
-/// a windowed program, and it gives its exit code in `%ERRORLEVEL%`. Each
-/// redirection comes first on its line, so that a digit before `>` is not
-/// read as a handle number.
+/// The head of a `build.bat`: the `rem` lines `rems`, the place of
+/// `VB6.EXE`, the directory `BASE`, and the log of the environment.
 ///
 /// `BASE` is the directory of the file with no `\` at its end. `pushd`
 /// gives a share a drive letter, and `%CD%` is then the root of that drive,
 /// which ends with `\`. A path made from it would hold `\\`.
-///
-/// Before each build, the file deletes the log, the exit code and each
-/// `.log` file beside the project, so that a second run of the file leaves
-/// no old result. The corpus holds no `.log` file.
-pub(crate) fn render_batch(programs: &[Exported]) -> String {
-    let mut lines: Vec<String> = [
-        "@echo off",
-        "rem Builds each project that DeForm6 exported, with the Visual Basic 6 IDE.",
-        "rem Run this file on the Windows host. The first argument, when you give",
-        "rem one, is the path of VB6.EXE.",
-        "setlocal",
-    ]
-    .iter()
-    .map(|line| (*line).to_owned())
-    .collect();
+pub(crate) fn batch_head(rems: &[&str]) -> Vec<String> {
+    let mut lines = vec!["@echo off".to_owned()];
+    lines.extend(rems.iter().map(|line| (*line).to_owned()));
+    lines.push("setlocal".to_owned());
     lines.push(format!("set VB6={DEFAULT_VB6}"));
     lines.extend(
         [
@@ -504,6 +519,66 @@ pub(crate) fn render_batch(programs: &[Exported]) -> String {
         .iter()
         .map(|line| (*line).to_owned()),
     );
+    lines
+}
+
+/// The end of a `build.bat`, after its `call :build` lines, with the
+/// routine `:build`. The routine takes the short name as `%1`, the side as
+/// `%2`, and the project file, from `BASE`, as `%3`.
+///
+/// `out_dir` is the directory that receives the executable, and it can use
+/// `%1` and `%2`. `before_build` holds lines that run after the old logs are
+/// deleted, and before VB6 starts.
+///
+/// `start "" /wait` makes the file wait for `VB6.EXE`, which is a windowed
+/// program, and it gives its exit code in `%ERRORLEVEL%`. Each redirection
+/// comes first on its line, so that a digit before `>` is not read as a
+/// handle number. Before each build, the routine deletes the log, the exit
+/// code and each `.log` file beside the project, so that a second run of
+/// the file leaves no old result.
+pub(crate) fn batch_tail(out_dir: &str, before_build: &[String]) -> Vec<String> {
+    let mut lines: Vec<String> = [
+        "popd",
+        "echo The builds are done. The logs are in the logs directory.",
+        "exit /b 0",
+        "",
+        ":novb6",
+        "echo VB6.EXE is not at %VB6%. Give its path as the first argument.",
+        "exit /b 1",
+        "",
+        ":build",
+        "echo Building %1 %2",
+        r#"if exist "logs\%1-%2.txt" del "logs\%1-%2.txt""#,
+        r#"if exist "logs\%1-%2.exit" del "logs\%1-%2.exit""#,
+        r#"if exist "%~dp3*.log" del /q "%~dp3*.log""#,
+    ]
+    .iter()
+    .map(|line| (*line).to_owned())
+    .collect();
+    lines.extend(before_build.iter().cloned());
+    lines.push(format!(r#"if not exist "{out_dir}" mkdir "{out_dir}""#));
+    lines.push(format!(
+        r#"start "" /wait "%VB6%" /make "%BASE%\%~3" /outdir "{out_dir}" /out "%BASE%\logs\%1-%2.txt""#
+    ));
+    lines.push(r#">"logs\%1-%2.exit" echo %ERRORLEVEL%"#.to_owned());
+    lines.push("goto :eof".to_owned());
+    lines
+}
+
+/// Renders `build.bat`, with CRLF at the end of each line.
+///
+/// The file builds the original side, then the extracted side, of each
+/// program, with the head of [`batch_head`] and the routine of
+/// [`batch_tail`]. The file does not use a block in parentheses, because a
+/// path can hold a parenthesis. VB6 writes each executable into
+/// [`HOST_OUT_DIR`], so no executable comes back into the export. The corpus
+/// holds no `.log` file.
+pub(crate) fn render_batch(programs: &[Exported]) -> String {
+    let mut lines = batch_head(&[
+        "rem Builds each project that DeForm6 exported, with the Visual Basic 6 IDE.",
+        "rem Run this file on the Windows host. The first argument, when you give",
+        "rem one, is the path of VB6.EXE.",
+    ]);
     for program in programs {
         lines.push(format!(
             r#"call :build {} original "original\{}\{}""#,
@@ -514,40 +589,8 @@ pub(crate) fn render_batch(programs: &[Exported]) -> String {
             program.short, program.short, program.extracted_vbp
         ));
     }
-    lines.extend(
-        [
-            "popd",
-            "echo The builds are done. The logs are in the logs directory.",
-            "exit /b 0",
-            "",
-            ":novb6",
-            "echo VB6.EXE is not at %VB6%. Give its path as the first argument.",
-            "exit /b 1",
-            "",
-            ":build",
-            "echo Building %1 %2",
-            r#"if exist "logs\%1-%2.txt" del "logs\%1-%2.txt""#,
-            r#"if exist "logs\%1-%2.exit" del "logs\%1-%2.exit""#,
-            r#"if exist "%~dp3*.log" del /q "%~dp3*.log""#,
-        ]
-        .iter()
-        .map(|line| (*line).to_owned()),
-    );
-    lines.push(format!(
-        r#"if not exist "{HOST_OUT_DIR}\%1\%2" mkdir "{HOST_OUT_DIR}\%1\%2""#
-    ));
-    lines.push(format!(
-        r#"start "" /wait "%VB6%" /make "%BASE%\%~3" /outdir "{HOST_OUT_DIR}\%1\%2" /out "%BASE%\logs\%1-%2.txt""#
-    ));
-    lines.push(r#">"logs\%1-%2.exit" echo %ERRORLEVEL%"#.to_owned());
-    lines.push("goto :eof".to_owned());
-
-    let mut out = String::new();
-    for line in lines {
-        out.push_str(&line);
-        out.push_str("\r\n");
-    }
-    out
+    lines.extend(batch_tail(&format!(r"{HOST_OUT_DIR}\%1\%2"), &[]));
+    crlf_text(&lines)
 }
 
 /// Runs `import-builds`.
