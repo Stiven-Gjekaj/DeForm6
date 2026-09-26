@@ -28,11 +28,21 @@ heading its version and its date.
 - The first run of the P-code branch: `ProjectInfo.lpNativeCode` is 0 in each
   of the 42 binaries, and DeForm6 reports each one as P-code. The no-panic
   sweep reads the 42 binaries as a fourth source.
+- What DeForm6 recovers from P-code: `cargo test -p deform6 --test
+  pcode_recovery` holds each P-code binary to its source and to the native
+  build of the same source. Each one gives the objects of its source project
+  file, by name and by kind, in the order of that file, and DeForm6 writes
+  the same project from it as from the native build. Over the 42 programs,
+  the P-code builds recover 179 of 871 public procedure names, 50 forms, 626
+  controls and 741 property records, which are the numbers of the native
+  builds.
 
 ### What stays open
 
-- No test compares what DeForm6 recovers from a P-code program with its
-  source. The second part of phase 9 does this.
+- DeForm6 does not decode the event stub of a P-code program, so no bound
+  event slot of a P-code program gives a handler address. Each one gives an
+  `UnknownStubShape` defect with the 13 bytes of its stub: 388 in the 42
+  programs.
 - Two corpus programs have no P-code build, because their source does not
   build: `Edge_Detection` and `HMM`.
 
