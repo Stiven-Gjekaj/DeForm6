@@ -140,15 +140,14 @@ A check that passes because it reads the wrong place is worse than no check.
 
 ## Three facts to read before you run it
 
-1. **The P-code branch is untested.**
+1. **The P-code branch is only partly tested.**
    `ProjectInfo.lpNativeCode` decides whether DeForm6 reports a project as
-   native code or P-code, and nothing else does. Every program in the test
-   corpus this project measures against carries `CompilationType` zero in its
-   own `.vbp` file, which is native, so `lpNativeCode` is non-zero in every
-   one of them. The P-code branch of that field has never run against a real
-   P-code program. This states what was run, not what is supported:
-   DeForm6 reads `lpNativeCode` and branches on it, and only the native
-   branch has a real program behind it.
+   native code or P-code, and nothing else does. `corpus-pcode/` holds a
+   P-code build of 42 corpus programs, which the author built from the
+   corpus source on a Windows host. A test reads `lpNativeCode` in each of
+   them, finds 0, and DeForm6 reports each one as P-code. No test yet
+   compares what DeForm6 recovers from a P-code program with its source.
+   That is the second part of phase 9 in `docs/ROADMAP.md`.
 
 2. **`corpus/vb6-code/Hidden-Markov-model/frmHMM.frx` is damaged upstream and
    is excluded by name.**
@@ -470,14 +469,18 @@ cargo test --workspace
   built on the author's Windows host, for each corpus program. The gate fails
   when DeForm6 writes different files than that host built, until the host
   builds them again.
+- **The P-code record.** `tests/pcode.toml` holds what the same host built as
+  P-code for each corpus program, and `corpus-pcode/` holds each binary. The
+  gate checks each binary against its hash, finds P-code in each one, and
+  fails when a corpus source changes, until the host builds it again.
 - **The schema check.** Every one of the 44 reports is validated against
   `crates/deform6/schema/report.schema.json`, and a doctored report is proved
   to fail.
 - **The ratio gate.** Every pinned figure in `tests/ratios.toml` must hold
   unchanged.
-- **The no-panic proof.** Every corpus input is swept through both modes, the
-  writer and the byte fidelity walk. Every public entry point that takes
-  untrusted bytes belongs in that sweep.
+- **The no-panic proof.** Every corpus input, native and P-code, is swept
+  through both modes, the writer and the byte fidelity walk. Every public
+  entry point that takes untrusted bytes belongs in that sweep.
 - **The hostile corpus.** Mutated and crafted inputs, including a form count
   of `0xFFFF` in a 4096 byte file, which must allocate nothing.
 - **The byte fidelity map.** The thirteen structures in the table above are
