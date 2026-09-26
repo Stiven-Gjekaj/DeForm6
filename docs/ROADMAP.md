@@ -637,6 +637,31 @@ for each P-code binary:
   program, and a P-code stub has another shape. The 388 bound slots of the
   42 programs give 388 `UnknownStubShape` defects, each with the 13 bytes of
   its stub. This is a named limit, and its test fails when the limit closes.
+  Part 3 closes it.
+
+#### Part 3, done on 2026-09-27
+
+**The P-code event stub is decoded.** A P-code stub is 20 bytes, not the 13
+bytes of the literature. It loads `edx` with the entry of the method table of
+the object for the handler procedure, and then it goes to `MethCallEngine` in
+`MSVBVM60.DLL`. Section 22 of `STRUCTURES.md` gives the shape and the
+measurement.
+
+DeForm6 now decodes the stub, and it gives the value of `edx` as the handler
+address. The 42 programs give 388 handler addresses, as many as their native
+builds, and no `UnknownStubShape` defect. Four tests replace the test of the
+named limit:
+
+- Each bound event slot gives a handler address, as in the native build.
+- At the method table entry of each handler address, the source has a
+  procedure with the name of the control, then `_`. This is true for 388 of
+  388 events.
+- Each stub goes to `MethCallEngine`, in 382 of 382 stubs.
+- Each stub loads `eax` with the word at `ControlInfo` + 0x04, in 382 of 382
+  stubs.
+
+The fidelity walk writes back the native stub only. It records a P-code stub
+as an absent `EventStub` record.
 
 **The exit is met.** Phase 9 gives 42 P-code binaries whose exact source the
 repository holds, and it names the two corpus programs that do not build.
