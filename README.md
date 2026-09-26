@@ -140,14 +140,17 @@ A check that passes because it reads the wrong place is worse than no check.
 
 ## Three facts to read before you run it
 
-1. **The P-code branch is only partly tested.**
+1. **From P-code, DeForm6 recovers the metadata, but no event handler
+   address.**
    `ProjectInfo.lpNativeCode` decides whether DeForm6 reports a project as
    native code or P-code, and nothing else does. `corpus-pcode/` holds a
    P-code build of 42 corpus programs, which the author built from the
-   corpus source on a Windows host. A test reads `lpNativeCode` in each of
-   them, finds 0, and DeForm6 reports each one as P-code. No test yet
-   compares what DeForm6 recovers from a P-code program with its source.
-   That is the second part of phase 9 in `docs/ROADMAP.md`.
+   corpus source on a Windows host. Tests find `lpNativeCode` 0 in each of
+   them. From each one, DeForm6 recovers the objects of the source, in their
+   order, and writes the same project that it writes from the native build
+   of the same source. It does not decode the event stub of a P-code
+   program, so no bound event slot of a P-code program gives a handler
+   address.
 
 2. **`corpus/vb6-code/Hidden-Markov-model/frmHMM.frx` is damaged upstream and
    is excluded by name.**
@@ -476,6 +479,9 @@ cargo test --workspace
   P-code for each corpus program, and `corpus-pcode/` holds each binary. The
   gate checks each binary against its hash, finds P-code in each one, and
   fails when a corpus source changes, until the host builds it again.
+- **The P-code recovery.** Each P-code binary gives the objects of its source
+  in their order, and DeForm6 writes the same project from it as from the
+  native build. A named limit holds the missing event handler addresses.
 - **The schema check.** Every one of the 44 reports is validated against
   `crates/deform6/schema/report.schema.json`, and a doctored report is proved
   to fail.
