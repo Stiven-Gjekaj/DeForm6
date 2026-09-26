@@ -204,7 +204,7 @@ checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
 
 [[package]]
 name = "deform6"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "jsonschema",
  "object",
@@ -217,7 +217,7 @@ dependencies = [
 
 [[package]]
 name = "deform6-cli"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "clap",
  "deform6",
@@ -1213,7 +1213,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "xtask"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "deform6",
  "serde",
