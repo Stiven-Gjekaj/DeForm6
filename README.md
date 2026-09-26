@@ -427,7 +427,7 @@ crates/
     src/error.rs    the defect vocabulary and its three severities
     src/journal.rs  the one place a severity decides whether a run continues
     schema/         the JSON Schema every report is validated against
-    tests/          25 integration suites, including the corpus sweep
+    tests/          26 integration suites, including the corpus sweep
   deform6-cli/      the command line: it owns the file system
   xtask/            build tasks, including the licence audit
 docs/               the reverse engineering surveys the source cites
@@ -466,7 +466,7 @@ collected.
 cargo test --workspace
 ```
 
-1437 tests run. The suite includes:
+1455 tests run. The suite includes:
 
 - **The corpus sweep.** All 44 programs are read and report what they hold.
 - **The structural check.** Every extracted project is checked against the
