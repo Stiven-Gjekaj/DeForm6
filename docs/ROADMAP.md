@@ -546,17 +546,67 @@ a Windows 10 host.
 
 **Goal.** 44 P-code binaries whose exact source is already held.
 
-Every corpus program is native. 38 project files declare `CompilationType=0`
-and none declares P-code. Statement recovery cannot be measured without P-code
-inputs, and scavenging them gives binaries with no matching source.
+Every corpus program is native. All 45 project files declare
+`CompilationType=0`, and none declares P-code. Statement recovery cannot be
+measured without P-code inputs, and scavenging them gives binaries with no
+matching source.
 
-Rebuild the existing corpus projects with `CompilationType=1` on the Phase 8
-host. The ground truth is already in the repository.
+Rebuild the existing corpus projects as P-code, with `CompilationType=-1`, on
+the Phase 8 host. The ground truth is already in the repository.
 
 This is also the first real exercise of the `lpNativeCode` P-code branch, which
 the README records as never having run against a real P-code program.
 
 **Estimate.** Days to 2 weeks, once the Phase 8 host exists.
+
+#### Part 1, done on 2026-09-26
+
+**The route.** The Phase 8 route, with one side, and with a way back for the
+binaries:
+
+1. `cargo run -p xtask -- export-pcode <dir>` copies each corpus project, and
+   changes one line of its project file: `CompilationType=0` becomes
+   `CompilationType=-1`.
+2. The host builds each project with `VB6.EXE /make`, into the directory of
+   the project. `sendpcode.bat` sends the logs and each executable out
+   through `COM1`.
+3. `cargo run -p xtask -- import-pcode --capture <file> <dir>` copies the
+   executable of each clean build into `corpus-pcode/`, and writes
+   `tests/pcode.toml`.
+
+**What the probe measured.** `export-pcode --probe` builds one small project
+three times. `CompilationType=0` gives native code, and both `-1` and `1` give
+P-code: `lpNativeCode` is 0. The IDE writes `-1`: of the 19 project files in
+the VB6 install of the host that hold the key, one holds `-1`, and none holds
+`1`. A file of each byte value came back over the serial line unchanged.
+
+**The run.**
+
+| Result | Programs |
+|---|---|
+| Built as P-code | 42 of 44 |
+| Failed | 2 |
+
+- The two that fail are the two corpus projects that do not build as native
+  code either: `Edge_Detection`, whose `cCommonDialog.cls` is missing, and
+  `HMM`, whose `frmHMM.frx` is damaged. `tests/pcode.toml` holds the lines
+  that VB6 wrote for each. A repair would invent source, so these two stay
+  named limits.
+- The 42 binaries are 1.4 MB. The builds took about one minute on the host,
+  and the transfer about one minute more.
+
+**The first run of the P-code branch.** `ProjectInfo.lpNativeCode` is 0 in
+each of the 42 binaries, and DeForm6 reports each one as P-code. The no-panic
+sweep reads the 42 binaries in both modes, with the writer and the fidelity
+walk.
+
+**The record stays true.** `cargo test -p deform6 --test pcode_record` checks
+each binary against its hash. It fails with `STALE` when a corpus source
+changes, until the host builds the program again.
+
+**Part 2 is next.** It measures what `inspect` and `extract` recover from a
+P-code program, against its source, with the differential harness of the
+native corpus.
 
 ### Phase 10: The P-code opcode table
 
@@ -621,7 +671,7 @@ messages name the next action.
 Phase 7  (no dependency, starts today)
 Phase 8  (exit met on the author's XP host; --verify-build waits)
    |
-   +-- Phase 9  (needs the Phase 8 host)
+   +-- Phase 9  (part 1 done on the same host; part 2 is next)
           |
           +-- Phase 10 (needs the Phase 9 corpus to verify widths)
                  |
