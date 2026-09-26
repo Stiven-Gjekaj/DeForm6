@@ -608,6 +608,41 @@ changes, until the host builds the program again.
 P-code program, against its source, with the differential harness of the
 native corpus.
 
+#### Part 2, done on 2026-09-27
+
+**What DeForm6 recovers from P-code.** Over the 42 programs, the native
+harness gives the same recovery for the P-code builds as for the native
+builds of the same source:
+
+| Measured | P-code | Native |
+|---|---|---|
+| Public procedure names recovered | 179 of 871 | 179 of 871 |
+| Forms recovered | 50 | 50 |
+| Controls recovered | 626 | 626 |
+| Property records | 741 | 741 |
+
+Each count is the same for each program, not only in total.
+
+**The gate.** `cargo test -p deform6 --test pcode_recovery` holds three facts
+for each P-code binary:
+
+- It gives the objects of its source project file, by name and by kind, in
+  the order of that file. All 42 do. The native `Grayscale.exe` does not:
+  its objects are in another order than its source.
+- DeForm6 writes the same project from it as from the native binary, when
+  the byte offsets in the report comments are masked. The files differ in
+  nothing else, except the order of the objects of `Grayscale`.
+- Its bound event slots are those of the native build, and none of them
+  gives a handler address. DeForm6 decodes the event stub of a native
+  program, and a P-code stub has another shape. The 388 bound slots of the
+  42 programs give 388 `UnknownStubShape` defects, each with the 13 bytes of
+  its stub. This is a named limit, and its test fails when the limit closes.
+
+**The exit is met.** Phase 9 gives 42 P-code binaries whose exact source the
+repository holds, and it names the two corpus programs that do not build.
+Phases 10 and 11 can now check an argument width, and a recovered statement,
+against known source.
+
 ### Phase 10: The P-code opcode table
 
 **Goal.** A table that names each opcode and gives its argument width.
@@ -671,7 +706,7 @@ messages name the next action.
 Phase 7  (no dependency, starts today)
 Phase 8  (exit met on the author's XP host; --verify-build waits)
    |
-   +-- Phase 9  (part 1 done on the same host; part 2 is next)
+   +-- Phase 9  (exit met: 42 P-code binaries with their source)
           |
           +-- Phase 10 (needs the Phase 9 corpus to verify widths)
                  |
