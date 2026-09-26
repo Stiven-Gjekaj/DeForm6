@@ -424,14 +424,17 @@ crates/
     src/error.rs    the defect vocabulary and its three severities
     src/journal.rs  the one place a severity decides whether a run continues
     schema/         the JSON Schema every report is validated against
-    tests/          23 integration suites, including the corpus sweep
+    tests/          25 integration suites, including the corpus sweep
   deform6-cli/      the command line: it owns the file system
   xtask/            build tasks, including the licence audit
 docs/               the reverse engineering surveys the source cites
 scripts/            the walls: each one proves a property and fails loudly
 corpus/             44 Visual Basic 6 programs, with sources, and a manifest
+corpus-pcode/       a P-code build of 42 of those programs, with notices
 tests/ratios.toml   the pinned recovery figures the gate asserts
 tests/fidelity.toml the committed fidelity map the gate asserts
+tests/builds.toml   the build record the gate holds the tree to
+tests/pcode.toml    the P-code record the gate holds the tree to
 ```
 
 Two ideas carry the design.
