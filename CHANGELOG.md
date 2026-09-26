@@ -8,6 +8,39 @@ does not do. A change that no release holds yet goes under one
 `## [Unreleased]` heading above the newest release. A release gives that
 heading its version and its date.
 
+## [Unreleased]
+
+### What this delivers
+
+- The P-code corpus: `corpus-pcode/` holds a P-code build of 42 of the 44
+  corpus programs. The Visual Basic 6 IDE built each one on the author's
+  Windows XP host from the corpus source, with one changed line in the
+  project file: `CompilationType=-1`. `corpus-pcode/NOTICES` gives the origin
+  and the licence of each one.
+- `tests/pcode.toml` records the result of each build, the hash of each
+  source and the SHA-256 of each binary. `cargo test -p deform6 --test
+  pcode_record` holds the tree to it, and fails with `STALE` when a corpus
+  source changes.
+- `cargo run -p xtask -- export-pcode [--probe] <dir>` writes the projects for
+  the host, and `cargo run -p xtask -- import-pcode [--capture <file>] <dir>`
+  reads the build back. The probe measured that `-1` and `1` both give
+  P-code, and that the serial line carries a binary unchanged.
+- The first run of the P-code branch: `ProjectInfo.lpNativeCode` is 0 in each
+  of the 42 binaries, and DeForm6 reports each one as P-code. The no-panic
+  sweep reads the 42 binaries as a fourth source.
+
+### What stays open
+
+- No test compares what DeForm6 recovers from a P-code program with its
+  source. The second part of phase 9 does this.
+- Two corpus programs have no P-code build, because their source does not
+  build: `Edge_Detection` and `HMM`.
+
+### What this does not do
+
+- It does not change the version in `Cargo.toml`, and it has no tag.
+- It changes nothing that a caller of the library uses.
+
 ## [2.0.0] - 2026-09-26
 
 ### What this release delivers
