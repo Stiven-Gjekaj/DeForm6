@@ -35,7 +35,7 @@ use std::collections::BTreeMap;
 
 use shared::{
     BuildRecord, Outcome, ProgramBuild, Side, build_files, builds_toml_path, corpus_root,
-    executables, files_hash, parse, program_key, project_files, render,
+    executables, files_hash, parse, program_key, project_files, render, source_files,
 };
 
 /// A file with a name and bytes, built here.
@@ -170,6 +170,31 @@ fn the_length_keeps_the_boundary_between_two_files() {
 /// The filter keeps the five kinds of file that VB6 reads, in any case, and
 /// drops the JSON report. A changed report therefore does not change the
 /// hash.
+/// The source of a project is each file that VB6 reads, in the directory
+/// and in each directory in it, named by its path from the directory. An
+/// executable and a text file are not source.
+#[test]
+fn the_source_files_are_the_build_files_of_the_directory_and_its_subdirectories() {
+    let dir = std::env::temp_dir().join(format!("deform6-source-{}", std::process::id()));
+    let _ignored = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    for (name, bytes) in [
+        ("A.vbp", &b"Type=Exe"[..]),
+        ("F.frm", b"VERSION 5.00"),
+        ("F.FRX", b"\x00"),
+        ("sub/M.bas", b"Attribute VB_Name"),
+        ("A.exe", b"MZ"),
+        ("notes.txt", b"x"),
+    ] {
+        std::fs::write(dir.join(name), bytes).unwrap();
+    }
+    let files = source_files(&dir).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let names: Vec<&str> = files.iter().map(|(name, _bytes)| name.as_str()).collect();
+    assert_eq!(names, ["A.vbp", "F.FRX", "F.frm", "sub/M.bas"]);
+    assert_eq!(files[3].1, b"Attribute VB_Name");
+}
+
 #[test]
 fn build_files_keeps_the_five_extensions_and_drops_the_report() {
     let files = vec![

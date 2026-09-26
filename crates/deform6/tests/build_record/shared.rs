@@ -218,6 +218,45 @@ pub(crate) fn build_files(files: Vec<(String, Vec<u8>)>) -> Vec<(String, Vec<u8>
         .collect()
 }
 
+/// Gives the files of the project directory `dir`, and of each directory
+/// in it, that the Visual Basic 6 IDE reads: the files of [`build_files`].
+/// Each file is named by its path from `dir`, with `/` between the parts,
+/// and the list is in the order of the names.
+///
+/// This is the source of a corpus program. A build of the P-code corpus
+/// holds the hash of these files, so that a change to the source shows.
+pub(crate) fn source_files(dir: &Path) -> Result<Vec<(String, Vec<u8>)>, String> {
+    fn walk(base: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>)>) -> Result<(), String> {
+        let entries =
+            std::fs::read_dir(dir).map_err(|err| format!("reading {}: {err}", dir.display()))?;
+        for entry in entries {
+            let path = entry
+                .map_err(|err| format!("reading an entry of {}: {err}", dir.display()))?
+                .path();
+            if path.is_dir() {
+                walk(base, &path, out)?;
+            } else {
+                let name = path
+                    .strip_prefix(base)
+                    .map_err(|err| format!("{}: {err}", path.display()))?
+                    .components()
+                    .map(|part| part.as_os_str().to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                let bytes = std::fs::read(&path)
+                    .map_err(|err| format!("reading {}: {err}", path.display()))?;
+                out.push((name, bytes));
+            }
+        }
+        Ok(())
+    }
+    let mut files = Vec::new();
+    walk(dir, dir, &mut files)?;
+    let mut kept = build_files(files);
+    kept.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(kept)
+}
+
 /// Gives the files that DeForm6 writes for the executable `exe_bytes`, and
 /// that the Visual Basic 6 IDE reads: the files of a strict run of `inspect`
 /// and `write::project` with the built-in opcode table, through

@@ -177,7 +177,7 @@ pub(crate) fn write_files(dir: &Path, files: &[(String, Vec<u8>)]) -> Result<(),
 
 /// Copies the directory `from` into `to`, with each subdirectory, and with
 /// no file whose extension is `exe`.
-fn copy_without_executables(from: &Path, to: &Path) -> Result<(), String> {
+pub(crate) fn copy_without_executables(from: &Path, to: &Path) -> Result<(), String> {
     std::fs::create_dir_all(to).map_err(|err| format!("making {}: {err}", to.display()))?;
     let entries =
         std::fs::read_dir(from).map_err(|err| format!("reading {}: {err}", from.display()))?;

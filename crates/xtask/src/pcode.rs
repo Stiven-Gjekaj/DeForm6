@@ -1,15 +1,17 @@
-//! `cargo run -p xtask -- export-pcode --probe <dir>` writes a probe that the
-//! Visual Basic 6 IDE builds as P-code on a Windows host.
+//! `cargo run -p xtask -- export-pcode [--probe] <dir>` writes each corpus
+//! project in a form that the Visual Basic 6 IDE builds as P-code on a
+//! Windows host.
 //!
 //! Each corpus program is native code: each corpus project file holds the
 //! line `CompilationType=0`. Phase 9 builds the same projects as P-code, with
-//! only that line changed. The probe measures which value of the line gives
-//! P-code, and whether the serial line brings an executable back unchanged.
+//! only that line changed: its value becomes [`PCODE_VALUE`].
 //!
 //! # The export directory
 //!
-//! - `pcode/pNN/` holds one project. VB6 writes its executable into the same
-//!   directory, so that the executable comes back with the logs.
+//! - `pcode/pNN/` holds a copy of the directory of the corpus project file
+//!   for program `NN`, with no executable, and with the one line changed in
+//!   the project file. VB6 writes its executable into the same directory, so
+//!   that the executable comes back with the logs.
 //! - `manifest.txt` names each project: its short name, its key, its project
 //!   file, and the hash of its files.
 //! - `build.bat` builds each project with `VB6.EXE /make`, and writes
@@ -18,18 +20,23 @@
 //!   each `.bin` file out through the serial port `COM1`, in the frame of
 //!   [`builds::render_sender`].
 //!
+//! The short names, `p01` to `p44`, are the names of `export-builds`, in the
+//! order of the keys, so that `p06` names the same program in both.
+//!
 //! # The probe
 //!
-//! The probe writes the project `probe/ok` of the build probe three times,
-//! with `CompilationType` 0, -1 and 1. `pcode/p01/bytes.bin` holds each byte
-//! value from 0 to 255 four times. The serial line must bring it back
-//! unchanged. This code writes each file, so no third party byte is in it.
+//! `export-pcode --probe <dir>` writes the project `probe/ok` of the build
+//! probe three times, with `CompilationType` 0, -1 and 1.
+//! `pcode/p01/bytes.bin` holds each byte value from 0 to 255 four times. The
+//! serial line must bring it back unchanged. This code writes each file, so
+//! no third party byte is in it.
 
 use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::build_record;
 use crate::builds;
+use crate::ratios::differential::support::vbp;
 
 /// The name of the side in the export, in the logs and in the capture.
 const SIDE: &str = "pcode";
@@ -37,6 +44,16 @@ const SIDE: &str = "pcode";
 /// The line that each corpus project file holds, which makes VB6 build
 /// native code.
 const NATIVE_LINE: &str = "CompilationType=0";
+
+/// The value of `CompilationType` that the export writes, which makes VB6
+/// build P-code.
+///
+/// Measured on the author's XP host with VB6 SP6, by the probe: the values
+/// `-1` and `1` both give an executable whose `lpNativeCode` is 0, and `0`
+/// gives native code. The IDE writes `-1`: of the 19 project files in the
+/// VB6 install of that host that hold the key, 18 hold `0`, 1 holds `-1`,
+/// and none holds `1`.
+const PCODE_VALUE: &str = "-1";
 
 /// The values of `CompilationType` that the probe builds, each with the key
 /// of its project and the name of its executable.
@@ -65,14 +82,19 @@ pub(crate) struct PcodeProgram {
 
 /// Runs `export-pcode`.
 pub(crate) fn run_export(args: &[String]) -> i32 {
-    let dir = match export_args(args) {
-        Ok(dir) => dir,
+    let (probe, dir) = match export_args(args) {
+        Ok(read) => read,
         Err(message) => {
             eprintln!("xtask: {message}");
             return 1;
         }
     };
-    match export_probe(dir) {
+    let exported = if probe {
+        export_probe(dir)
+    } else {
+        export(dir)
+    };
+    match exported {
         Ok(count) => {
             println!(
                 "xtask: exported {count} projects to {}. Run build.bat there on the Windows \
@@ -88,13 +110,14 @@ pub(crate) fn run_export(args: &[String]) -> i32 {
     }
 }
 
-/// Reads the arguments of `export-pcode`: `--probe <dir>`. A directory that
-/// starts with `-` is refused, so that a flag is never read as the name of
-/// a directory.
-pub(crate) fn export_args(args: &[String]) -> Result<&Path, String> {
+/// Reads the arguments of `export-pcode`: `[--probe] <dir>`. Gives whether
+/// the probe is asked for, and the directory. A directory that starts with
+/// `-` is refused, so that a flag is never read as the name of a directory.
+pub(crate) fn export_args(args: &[String]) -> Result<(bool, &Path), String> {
     match args {
-        [flag, dir] if flag == "--probe" && !dir.starts_with('-') => Ok(Path::new(dir)),
-        _ => Err("usage: cargo run -p xtask -- export-pcode --probe <dir>".to_owned()),
+        [dir] if !dir.starts_with('-') => Ok((false, Path::new(dir))),
+        [flag, dir] if flag == "--probe" && !dir.starts_with('-') => Ok((true, Path::new(dir))),
+        _ => Err("usage: cargo run -p xtask -- export-pcode [--probe] <dir>".to_owned()),
     }
 }
 
@@ -181,6 +204,65 @@ pub(crate) fn probe_projects() -> Result<Vec<(&'static str, builds::ProjectFiles
         ));
     }
     Ok(out)
+}
+
+/// Writes the whole export into `dir`, and gives the number of programs.
+///
+/// The `source` of each program is the hash of the files of the corpus
+/// project, from [`build_record::source_files`], before the one line
+/// changes.
+fn export(dir: &Path) -> Result<usize, String> {
+    builds::prepare(dir)?;
+    let root = build_record::corpus_root();
+    let projects = vbp::project_files();
+    let exes = build_record::executables(&root)?;
+    if exes.len() != build_record::EXPECTED_PROGRAM_COUNT {
+        return Err(format!(
+            "found {} corpus programs, and the record holds {}",
+            exes.len(),
+            build_record::EXPECTED_PROGRAM_COUNT
+        ));
+    }
+
+    let mut exported = Vec::new();
+    for (index, exe) in exes.iter().enumerate() {
+        let short = builds::short_name(index.checked_add(1).ok_or("too many programs")?)?;
+        let key = build_record::program_key(exe, &root)?;
+        let original = vbp::select_project_file(exe, &projects)
+            .map_err(|err| format!("{key}: no project file: {err:?}"))?;
+        let original_dir = original
+            .parent()
+            .ok_or_else(|| format!("{key}: the project file has no directory"))?;
+        let vbp_name = original
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .ok_or_else(|| format!("{key}: the project file has no name"))?;
+        builds::check_batch_name(&vbp_name).map_err(|err| format!("{key}: {err}"))?;
+        let source = build_record::files_hash(
+            &build_record::source_files(original_dir).map_err(|err| format!("{key}: {err}"))?,
+        );
+
+        let project = dir.join(SIDE).join(&short);
+        builds::copy_without_executables(original_dir, &project)
+            .map_err(|err| format!("{key}: {err}"))?;
+        let copied = project.join(&vbp_name);
+        let bytes =
+            std::fs::read(&copied).map_err(|err| format!("reading {}: {err}", copied.display()))?;
+        let changed =
+            with_compilation_type(&bytes, PCODE_VALUE).map_err(|err| format!("{key}: {err}"))?;
+        std::fs::write(&copied, changed)
+            .map_err(|err| format!("writing {}: {err}", copied.display()))?;
+
+        exported.push(PcodeProgram {
+            short,
+            key,
+            vbp: vbp_name,
+            source,
+        });
+    }
+
+    write_lists(dir, &exported)?;
+    Ok(exported.len())
 }
 
 /// Writes the probe into `dir`, and gives the number of projects.
@@ -292,9 +374,11 @@ pub(crate) fn render_sender() -> String {
 )]
 mod tests {
     use super::{
-        PcodeProgram, export_args, export_probe, probe_bytes, probe_projects, render_batch,
+        PcodeProgram, export, export_args, export_probe, probe_bytes, probe_projects, render_batch,
         render_manifest, render_sender, with_compilation_type,
     };
+    use crate::build_record;
+    use crate::ratios::differential::support::vbp;
 
     fn program(short: &str, vbp: &str) -> PcodeProgram {
         PcodeProgram {
@@ -465,14 +549,68 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// The arguments are `--probe <dir>`. A flag with no directory is
+    /// The arguments are `[--probe] <dir>`. A flag with no directory is
     /// refused.
     #[test]
-    fn the_arguments_are_the_probe_flag_and_a_directory() {
+    fn the_arguments_are_a_directory_and_the_probe_flag() {
         let args = |list: &[&str]| list.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
-        assert!(export_args(&args(&["--probe", "out"])).is_ok());
+        assert_eq!(
+            export_args(&args(&["out"])).unwrap(),
+            (false, std::path::Path::new("out"))
+        );
+        assert_eq!(
+            export_args(&args(&["--probe", "out"])).unwrap(),
+            (true, std::path::Path::new("out"))
+        );
         assert!(export_args(&args(&["--probe"])).is_err());
         assert!(export_args(&args(&["--probe", "--x"])).is_err());
         assert!(export_args(&args(&[])).is_err());
+    }
+
+    /// An export of the whole corpus writes 44 projects. Each one holds the
+    /// P-code line once and the native line not at all, and no executable.
+    /// The source hash of each one is the hash of the corpus files, before
+    /// the change. An export into a directory that is not empty is refused.
+    #[test]
+    fn an_export_writes_each_corpus_project_as_p_code() {
+        let dir = std::env::temp_dir().join(format!("deform6-export-pcode-{}", std::process::id()));
+        let _ignored = std::fs::remove_dir_all(&dir);
+
+        let count = export(&dir).unwrap();
+        let manifest = std::fs::read_to_string(dir.join("manifest.txt")).unwrap();
+        let batch = std::fs::read_to_string(dir.join("build.bat")).unwrap();
+        let sender = std::fs::read_to_string(dir.join("sendpcode.bat")).unwrap();
+        let again = export(&dir);
+
+        let root = build_record::corpus_root();
+        let projects = vbp::project_files();
+        let exes = build_record::executables(&root).unwrap();
+        let mut checked = 0;
+        for (line, exe) in manifest.lines().skip(1).zip(&exes) {
+            let fields: Vec<&str> = line.split('\t').collect();
+            assert_eq!(fields[1], build_record::program_key(exe, &root).unwrap());
+            let original = vbp::select_project_file(exe, &projects).unwrap();
+            let corpus_files = build_record::source_files(original.parent().unwrap()).unwrap();
+            assert_eq!(fields[3], build_record::files_hash(&corpus_files), "{line}");
+
+            let copied = std::fs::read(dir.join("pcode").join(fields[0]).join(fields[2])).unwrap();
+            let text = String::from_utf8_lossy(&copied);
+            let lines: Vec<&str> = text.split("\r\n").collect();
+            // The line that the probe measured, as a literal, so that a
+            // change of the value in the code fails here.
+            let pcode = lines.iter().filter(|l| **l == "CompilationType=-1").count();
+            let native = lines.iter().filter(|l| **l == "CompilationType=0").count();
+            assert_eq!((pcode, native), (1, 0), "{line}");
+            checked += 1;
+        }
+        let executables = build_record::executables(&dir.join("pcode")).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        assert_eq!(count, 44);
+        assert_eq!(checked, 44);
+        assert_eq!(batch.matches("call :build").count(), 44);
+        assert_eq!(sender, render_sender());
+        assert!(executables.is_empty(), "{executables:?}");
+        assert!(again.unwrap_err().contains("is not empty"));
     }
 }
