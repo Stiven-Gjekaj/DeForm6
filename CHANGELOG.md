@@ -8,9 +8,9 @@ does not do. A change that no release holds yet goes under one
 `## [Unreleased]` heading above the newest release. A release gives that
 heading its version and its date.
 
-## [Unreleased]
+## [2.0.0] - 2026-09-26
 
-### What this delivers
+### What this release delivers
 
 - Byte fidelity: `deform6::fidelity::walk::walk` writes thirteen
   structures back over the bytes they were read from. It grades each byte as
@@ -82,8 +82,8 @@ heading its version and its date.
 
 ### What changes for a caller
 
-These changes break code that was written against 1.0.0. The next release
-is therefore 2.0.0, not 1.1.0.
+These changes break code that was written against 1.0.0. This release is
+therefore 2.0.0, not 1.1.0.
 
 - New public fields: `VbHeader::file_offset`, `VbHeader::rva`,
   `ProjectInfo::file_offset`, `ProjectInfo::rva`,
@@ -311,9 +311,15 @@ is therefore 2.0.0, not 1.1.0.
   The scheduled fuzz job is held to a measured peak resident set, not to a
   model of the leak.
 
-### What this does not do
+### What this release does not do
 
-- It does not change the version in `Cargo.toml`, and it has no tag.
+- DeForm6 does not recover statements. The code inside a procedure does not
+  come back.
+- The P-code branch was never run. Every program in the test corpus is
+  native, so this release has never proved the P-code branch against a real
+  program.
+- No test starts VB6. The author's Windows host built the projects, and
+  `tests/builds.toml` holds the result.
 
 ## [1.0.0] - 2026-09-14
 
