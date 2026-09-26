@@ -36,20 +36,27 @@ heading its version and its date.
   the P-code builds recover 179 of 871 public procedure names, 50 forms, 626
   controls and 741 property records, which are the numbers of the native
   builds.
+- The P-code event stub: DeForm6 decodes it. The stub is 20 bytes, and each
+  bound event slot of a P-code program now gives a handler address: the
+  value that the stub loads into `edx`. In each P-code corpus program, that
+  value is the entry of the method table of the object for the handler
+  procedure, and the stub goes to `MethCallEngine`. The 42 programs give 388
+  handler addresses and no `UnknownStubShape` defect.
+- The fidelity walk records a P-code stub as an absent `EventStub` record,
+  because its emitter writes the native stub only.
 
 ### What stays open
 
-- DeForm6 does not decode the event stub of a P-code program, so no bound
-  event slot of a P-code program gives a handler address. Each one gives an
-  `UnknownStubShape` defect with the 13 bytes of its stub: 388 in the 42
-  programs.
 - Two corpus programs have no P-code build, because their source does not
   build: `Edge_Detection` and `HMM`.
 
 ### What this does not do
 
 - It does not change the version in `Cargo.toml`, and it has no tag.
-- It changes nothing that a caller of the library uses.
+- It adds `StubShape` and the field `StubHandler::shape` to the library. It
+  removes no public item, and it changes the type of none. For a P-code
+  program, a report now gives a handler address where it gave none, and the
+  text of an `UnknownStubShape` defect names both shapes.
 
 ## [2.0.0] - 2026-09-26
 
