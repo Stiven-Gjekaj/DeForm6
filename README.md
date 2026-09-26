@@ -140,17 +140,18 @@ A check that passes because it reads the wrong place is worse than no check.
 
 ## Three facts to read before you run it
 
-1. **From P-code, DeForm6 recovers the metadata, but no event handler
-   address.**
+1. **In a P-code program, a handler address is not the address of machine
+   code.**
    `ProjectInfo.lpNativeCode` decides whether DeForm6 reports a project as
    native code or P-code, and nothing else does. `corpus-pcode/` holds a
    P-code build of 42 corpus programs, which the author built from the
    corpus source on a Windows host. Tests find `lpNativeCode` 0 in each of
    them. From each one, DeForm6 recovers the objects of the source, in their
    order, and writes the same project that it writes from the native build
-   of the same source. It does not decode the event stub of a P-code
-   program, so no bound event slot of a P-code program gives a handler
-   address.
+   of the same source. Each bound event slot gives a handler address, as in
+   the native build. In a P-code program, that address is the entry of the
+   method table of the object for the handler procedure. The event stub
+   gives it to `MethCallEngine` in the runtime.
 
 2. **`corpus/vb6-code/Hidden-Markov-model/frmHMM.frx` is damaged upstream and
    is excluded by name.**
@@ -481,7 +482,8 @@ cargo test --workspace
   fails when a corpus source changes, until the host builds it again.
 - **The P-code recovery.** Each P-code binary gives the objects of its source
   in their order, and DeForm6 writes the same project from it as from the
-  native build. A named limit holds the missing event handler addresses.
+  native build. Each handler address names the method of a source procedure
+  of its control, and each event stub goes to `MethCallEngine`.
 - **The schema check.** Every one of the 44 reports is validated against
   `crates/deform6/schema/report.schema.json`, and a doctored report is proved
   to fail.
