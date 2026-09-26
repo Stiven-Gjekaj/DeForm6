@@ -31,11 +31,11 @@
 //! `AGENTS.md`'s "What to measure" states the discipline this file is held
 //! to twice over: measure the thing you tell the human, not something near
 //! it, and give the number you can prove, not a number calculated from a
-//! part. Three sources means three counts, each taken from its own
-//! directory or its own manifest, and the total is the sum of the three,
+//! part. Four sources means four counts, each taken from its own
+//! directory or its own manifest, and the total is the sum of the four,
 //! never a number derived from one of them.
 //!
-//! All three walks below are sorted, for the same reason
+//! All four walks below are sorted, for the same reason
 //! `crates/deform6/tests/regressions.rs` sorts its own walk: an unsorted
 //! directory read gives a different order on a different file system, so a
 //! failure would name a different first file on a different machine.
@@ -83,6 +83,20 @@ fn fetched_root() -> PathBuf {
 /// and write.
 fn manifest_path() -> PathBuf {
     corpus_root().join("manifest.toml")
+}
+
+/// Gives the directory that holds the committed P-code corpus: a P-code build
+/// of each corpus program that builds, which `import-pcode` writes.
+fn pcode_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus-pcode")
+}
+
+/// Gives every `.exe` file under [`pcode_root`], sorted.
+fn pcode_executables() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    walk_vendored(&pcode_root(), &mut out);
+    out.sort();
+    out
 }
 
 /// Gives the directory that holds the committed regression inputs.
@@ -197,9 +211,10 @@ fn manifest_entry_count(manifest_path: &Path) -> usize {
     table.len()
 }
 
-/// The three counts this proof takes, each where its own source lives.
+/// The four counts this proof takes, each where its own source lives.
 struct Counts {
     vendored: usize,
+    pcode: usize,
     fetched: FetchedCount,
     regression: usize,
 }
@@ -215,17 +230,21 @@ impl Counts {
             FetchedCount::Present(n) => n,
             FetchedCount::Absent => 0,
         };
-        self.vendored + fetched + self.regression
+        self.vendored + self.pcode + fetched + self.regression
     }
 }
 
 /// Prints one line per source, naming the source and its count, and one
-/// total line. The total line always adds the three counts this run took;
+/// total line. The total line always adds the four counts this run took;
 /// it never derives one count from another.
 fn print_report(counts: &Counts) {
     println!(
         "no_panic_proof: vendored corpus (corpus/, excluding corpus/fetched/): {} files",
         counts.vendored
+    );
+    println!(
+        "no_panic_proof: P-code corpus (corpus-pcode/): {} files",
+        counts.pcode
     );
     match counts.fetched {
         FetchedCount::Present(n) => {
@@ -254,6 +273,18 @@ fn the_vendored_walk_finds_the_pinned_forty_four() {
         "found {} vendored executables, wanted the same {EXPECTED_VENDORED_COUNT} every other \
          gate in this workspace pins",
         files.len()
+    );
+}
+
+/// The P-code corpus is committed, so its walk finds binaries. A walk that
+/// found none would let the sweep pass without one P-code input.
+#[test]
+fn the_pcode_walk_finds_the_committed_binaries() {
+    let files = pcode_executables();
+    assert!(
+        !files.is_empty(),
+        "found no executable under {}",
+        pcode_root().display()
     );
 }
 
@@ -305,23 +336,25 @@ fn fetched_programs_of_the_populated_directory_matches_the_manifest_when_present
 }
 
 #[test]
-fn the_total_is_the_sum_of_the_three_counts_taken() {
+fn the_total_is_the_sum_of_the_four_counts_taken() {
     let counts = Counts {
         vendored: 44,
+        pcode: 2,
         fetched: FetchedCount::Present(3),
         regression: 1,
     };
-    assert_eq!(counts.total(), 48);
+    assert_eq!(counts.total(), 50);
 }
 
 #[test]
 fn an_absent_fetched_set_still_reports_as_absent_while_the_total_counts_it_as_zero_files() {
     let counts = Counts {
         vendored: 44,
+        pcode: 2,
         fetched: FetchedCount::Absent,
         regression: 1,
     };
-    assert_eq!(counts.total(), 45);
+    assert_eq!(counts.total(), 47);
     assert_eq!(counts.fetched, FetchedCount::Absent);
 }
 
@@ -334,33 +367,36 @@ fn the_counted_report_prints_a_line_per_source_and_a_total_line() {
     // against.
     let counts = Counts {
         vendored: EXPECTED_VENDORED_COUNT,
+        pcode: 1,
         fetched: FetchedCount::Present(EXPECTED_MANIFEST_ENTRIES),
         regression: MINIMUM_REGRESSION_INPUTS,
     };
     print_report(&counts);
     let absent_counts = Counts {
         vendored: EXPECTED_VENDORED_COUNT,
+        pcode: 1,
         fetched: FetchedCount::Absent,
         regression: MINIMUM_REGRESSION_INPUTS,
     };
     print_report(&absent_counts);
 }
 
-/// One input this proof reads, tagged with which of the three sources it
+/// One input this proof reads, tagged with which of the four sources it
 /// came from, for the per-input log line the sweep below prints.
 struct Input {
     source: &'static str,
     path: PathBuf,
 }
 
-/// Gathers every input from all three sources, sorted within each source,
+/// Gathers every input from all four sources, sorted within each source,
 /// alongside the [`Counts`] this run took while gathering them. The
-/// vendored and regression sources are always gathered; the fetched
+/// vendored, P-code and regression sources are always gathered; the fetched
 /// source is gathered only when [`fetched_programs`] reports it present,
 /// matching the same absent-is-not-zero rule the counting functions
 /// above hold to.
 fn gather_inputs() -> (Vec<Input>, Counts) {
     let vendored = vendored_executables();
+    let pcode = pcode_executables();
     let fetched_dir = fetched_root();
     let fetched_count = fetched_programs(&fetched_dir);
     let fetched_files = match fetched_count {
@@ -376,14 +412,22 @@ fn gather_inputs() -> (Vec<Input>, Counts) {
 
     let counts = Counts {
         vendored: vendored.len(),
+        pcode: pcode.len(),
         fetched: fetched_count,
         regression: regression.len(),
     };
 
-    let mut inputs = Vec::with_capacity(vendored.len() + fetched_files.len() + regression.len());
+    let mut inputs =
+        Vec::with_capacity(vendored.len() + pcode.len() + fetched_files.len() + regression.len());
     for path in vendored {
         inputs.push(Input {
             source: "vendored",
+            path,
+        });
+    }
+    for path in pcode {
+        inputs.push(Input {
+            source: "pcode",
             path,
         });
     }
@@ -440,13 +484,14 @@ fn drive_one(source: &str, path: &Path, opcode_table: &OpcodeTable) {
 }
 
 /// Roadmap success criterion 5, and SAF-01: one run reads every file in
-/// the vendored corpus, every file in the fetched robustness set and
-/// every file in the regression directory, drives each one through
+/// the vendored corpus, every file in the P-code corpus, every file in the
+/// fetched robustness set and every file in the regression directory,
+/// drives each one through
 /// `Mode::Strict` and `Mode::Salvage`, calls the writer on every
 /// successful salvage result, and drives the fidelity walk over the same
 /// bytes. No process aborts, and the number of
 /// inputs read equals the total [`gather_inputs`] counted, which in turn
-/// is the sum of the three counts each source's own function above took.
+/// is the sum of the four counts each source's own function above took.
 ///
 /// This test proves what `cargo test` can prove: the test profile does
 /// not set `panic = "abort"`, so a panic here unwinds and `cargo test`
@@ -469,7 +514,7 @@ fn every_input_this_repository_can_reach_runs_through_both_modes_the_writer_and_
     assert_eq!(
         inputs.len(),
         counts.total(),
-        "read {} inputs across all three sources, but the sources counted to {}",
+        "read {} inputs across all four sources, but the sources counted to {}",
         inputs.len(),
         counts.total()
     );
