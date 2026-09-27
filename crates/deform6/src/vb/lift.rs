@@ -1106,8 +1106,9 @@ fn constant(arguments: &[u8], len: u8) -> Option<i64> {
     })
 }
 
-/// The Basic conversions whose result is 4 bytes on the stack.
-const WORD_CONVERSIONS: &[&str] = &["CByte", "CInt", "CLng", "CStr"];
+/// The Basic conversions whose result is 4 bytes on the stack. `CVar`
+/// writes a `Variant` into its frame slot and pushes the address of it.
+const WORD_CONVERSIONS: &[&str] = &["CByte", "CInt", "CLng", "CStr", "CVar"];
 
 /// The name of a default member, which the lift names only when the
 /// interface gives no other name at the offset.
@@ -2442,6 +2443,9 @@ names = ["FDupVar"]
 [primary.41]
 width = 4
 names = ["ForStepI2"]
+[primary.42]
+width = 2
+names = ["CVarStr"]
 [lead1.C8]
 width = 0
 names = ["End"]
@@ -3155,6 +3159,14 @@ result = false
                 "       local_88 = local_78.field_34",
                 "       Exit"
             ]
+        );
+        // import_2(CVar(local_64)): CVarStr pushes the address of its slot.
+        let variant = [
+            0x0F, 0x9C, 0xFF, 0x42, 0x90, 0xFF, 0x12, 0x02, 0x00, 0x04, 0x00, 0x0C,
+        ];
+        assert_eq!(
+            lines(&variant).unwrap()[0],
+            "       Call import_2(CVar(local_64))"
         );
         // For local_64 = 1 To 9 Step 2
         let step = [
