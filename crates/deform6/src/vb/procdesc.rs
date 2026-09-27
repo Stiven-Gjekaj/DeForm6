@@ -60,6 +60,10 @@ pub struct ProcDescriptor {
     /// `Variant`), and 4 for the address of the result of a `Function` or a
     /// `Property Get`. Each of the 680 descriptors of the P-code corpus
     /// agrees with the declaration of its procedure in the source.
+    ///
+    /// A procedure of a standard module has no `Me`, and its word still
+    /// counts those 4 bytes: the 17 procedures of the 8 standard modules of
+    /// the corpus agree with the same rule.
     pub arg_size: u16,
     /// `FrameSize` at `+0x06`.
     pub frame_size: u16,
