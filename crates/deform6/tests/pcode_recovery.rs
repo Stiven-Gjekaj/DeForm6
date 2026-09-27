@@ -824,15 +824,21 @@ const EXPECTED_METHOD_SLOTS: usize = 663;
 /// the 8 standard modules.
 const EXPECTED_LINK_TABLES: usize = 91;
 
+/// The accessor slots of the public variables in the link tables of the
+/// P-code corpus.
+const EXPECTED_ACCESSOR_SLOTS: usize = 124;
+
 /// The link table of each object of a P-code program holds a method slot
 /// for each procedure of its source. The public procedures come first, then
 /// the private ones, each group in the order of the file. Before them come
-/// two other slots for each public variable of the source.
+/// two accessor slots for each public variable of the source, and the two of
+/// a pair name the same field.
 #[test]
 fn each_link_table_of_a_pcode_program_gives_the_procedures_of_its_source() {
     let root = build_record::corpus_root();
     let projects = vbp::project_files();
     let mut methods_found = 0;
+    let mut accessors = 0;
     let mut tables = 0;
     let mut failures = Vec::new();
     for (key, exe) in pcode_programs() {
@@ -874,16 +880,29 @@ fn each_link_table_of_a_pcode_program_gives_the_procedures_of_its_source() {
                 .iter()
                 .filter_map(|slot| match slot {
                     LinkSlot::Method(va) => Some(va.get()),
-                    LinkSlot::Other => None,
+                    LinkSlot::Variable { .. } | LinkSlot::Other => None,
+                })
+                .collect();
+            let fields: Vec<u32> = links
+                .slots
+                .iter()
+                .filter_map(|slot| match slot {
+                    LinkSlot::Variable { field } => Some(*field),
+                    LinkSlot::Method(_) | LinkSlot::Other => None,
                 })
                 .collect();
             let others = links.slots.len() - found.len();
             let variables = source::declared_public_variables(path);
             methods_found += found.len();
-            if found != expected || others != 2 * variables {
+            accessors += fields.len();
+            let paired = fields
+                .chunks(2)
+                .all(|pair| pair.len() == 2 && pair[0] == pair[1]);
+            if found != expected || others != 2 * variables || fields.len() != others || !paired {
                 failures.push(format!(
-                    "{key}: {} gives the methods {found:x?} and {others} other slots; the source \
-                     gives {expected:x?} and {variables} public variables",
+                    "{key}: {} gives the methods {found:x?}, {others} other slots and the \
+                     accessor fields {fields:x?}; the source gives {expected:x?} and {variables} \
+                     public variables",
                     object.name
                 ));
             }
@@ -896,8 +915,12 @@ fn each_link_table_of_a_pcode_program_gives_the_procedures_of_its_source() {
         failures.join("\n")
     );
     assert_eq!(
-        (tables, methods_found),
-        (EXPECTED_LINK_TABLES, EXPECTED_METHOD_SLOTS)
+        (tables, methods_found, accessors),
+        (
+            EXPECTED_LINK_TABLES,
+            EXPECTED_METHOD_SLOTS,
+            EXPECTED_ACCESSOR_SLOTS
+        )
     );
 }
 

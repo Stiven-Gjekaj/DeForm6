@@ -249,6 +249,7 @@ pub struct Callees {
     methods: Vec<(u16, CalledMethod)>,
     controls: Vec<(u16, String, String)>,
     strings: Vec<(u16, String)>,
+    variables: Vec<(u16, u32, bool)>,
 }
 
 /// A method that [`Callees`] gives.
@@ -278,6 +279,24 @@ impl Callees {
         self.controls
             .push((vtable_offset, name.to_owned(), interface.to_owned()));
         self
+    }
+
+    /// Adds the accessor of a public variable at `vtable_offset`: the get
+    /// when `get` is true, else the let, of the field at `field`.
+    #[must_use]
+    pub fn with_variable(mut self, vtable_offset: u16, field: u32, get: bool) -> Self {
+        self.variables.push((vtable_offset, field, get));
+        self
+    }
+
+    /// Gives the field and whether it is the get of the accessor at
+    /// `vtable_offset`.
+    #[must_use]
+    pub fn variable(&self, vtable_offset: u16) -> Option<(u32, bool)> {
+        self.variables
+            .iter()
+            .find(|(offset, _, _)| *offset == vtable_offset)
+            .map(|(_, field, get)| (*field, *get))
     }
 
     /// Adds the string `text` at `index` of the constant table.

@@ -65,8 +65,15 @@ const STUB_TAIL_LEN: u32 = 13;
 pub enum LinkSlot {
     /// The slot names a P-code stub, and the stub names this descriptor.
     Method(Va),
-    /// The slot names something else, such as the accessor of a public
-    /// variable.
+    /// The slot names the accessor of a public variable:
+    /// `add dword ptr [esp+4], <field>`, `mov ecx, <thunk>`, `jmp ecx`. The
+    /// accessor adds the offset of the field of the variable to the object,
+    /// and goes to a function of the runtime that gets or lets the field.
+    Variable {
+        /// The offset of the field in the object.
+        field: u32,
+    },
+    /// The slot names something else.
     Other,
 }
 
@@ -104,7 +111,7 @@ impl MethodLinks {
             .checked_sub(self.first_slot)?;
         match self.slots.get(usize::try_from(index).ok()?)? {
             LinkSlot::Method(descriptor) => Some(*descriptor),
-            LinkSlot::Other => None,
+            LinkSlot::Variable { .. } | LinkSlot::Other => None,
         }
     }
 }
@@ -114,18 +121,29 @@ impl MethodLinks {
     /// each method slot whose descriptor `methods` holds, by its vtable
     /// offset, with the index and the argument size of the descriptor. A
     /// slot whose offset does not fit in 16 bits is left out.
+    ///
+    /// It also gives the accessors of the public variables. They come in
+    /// pairs, the get and then the let of one variable, and the two of a
+    /// pair name the same field.
     #[must_use]
     pub fn callees(&self, methods: &MethodTable) -> Callees {
         let mut callees = Callees::default();
+        let mut variables = 0_u32;
         for (slot, link) in (self.first_slot..).zip(&self.slots) {
-            let LinkSlot::Method(va) = link else {
-                continue;
-            };
             let Some(offset) = slot
                 .checked_mul(SLOT_SIZE)
                 .and_then(|offset| u16::try_from(offset).ok())
             else {
                 continue;
+            };
+            let va = match link {
+                LinkSlot::Method(va) => va,
+                LinkSlot::Variable { field } => {
+                    callees = callees.with_variable(offset, *field, variables.is_multiple_of(2));
+                    variables = variables.saturating_add(1);
+                    continue;
+                }
+                LinkSlot::Other => continue,
             };
             let found = methods.entries.iter().find_map(|entry| match entry {
                 MethodEntry::Descriptor { index, descriptor } if descriptor.va == *va => {
@@ -143,17 +161,44 @@ impl MethodLinks {
     }
 }
 
+/// The bytes of the accessor of a public variable.
+const ACCESSOR_LEN: u32 = 15;
+
 /// Reads the slot that `entry` names.
 fn slot(pe: &PeImage<'_>, entry: Va) -> LinkSlot {
-    let tail = pe
-        .region_at_va(entry)
-        .and_then(|region| region.take(Off::new(0), STUB_TAIL_LEN));
-    match tail {
-        Some([0x33, 0xC0, 0xBA, d0, d1, d2, d3, 0x68, _, _, _, _, 0xC3]) => {
-            LinkSlot::Method(Va::new(u32::from_le_bytes([*d0, *d1, *d2, *d3])))
-        }
-        _ => LinkSlot::Other,
+    let Some(region) = pe.region_at_va(entry) else {
+        return LinkSlot::Other;
+    };
+    if let Some([0x33, 0xC0, 0xBA, d0, d1, d2, d3, 0x68, _, _, _, _, 0xC3]) =
+        region.take(Off::new(0), STUB_TAIL_LEN)
+    {
+        return LinkSlot::Method(Va::new(u32::from_le_bytes([*d0, *d1, *d2, *d3])));
     }
+    if let Some(
+        [
+            0x81,
+            0x44,
+            0x24,
+            0x04,
+            f0,
+            f1,
+            f2,
+            f3,
+            0xB9,
+            _,
+            _,
+            _,
+            _,
+            0xFF,
+            0xE1,
+        ],
+    ) = region.take(Off::new(0), ACCESSOR_LEN)
+    {
+        return LinkSlot::Variable {
+            field: u32::from_le_bytes([*f0, *f1, *f2, *f3]),
+        };
+    }
+    LinkSlot::Other
 }
 
 /// Reads the method link table of `object`.
@@ -253,6 +298,7 @@ mod tests {
     use crate::read::pe::PeImage;
     use crate::read::region::{Off, Va};
     use crate::vb::object::Object;
+    use crate::vb::procdesc::MethodTable;
 
     /// A one-section image: the section starts at RVA `0x1000` and file
     /// offset `0x400`, and holds `extra`. A local copy of the helper in
@@ -327,7 +373,9 @@ mod tests {
         put_u32(&mut extra, 0x80, 0x0040_10A0);
         put_u32(&mut extra, 0x84, 0x0040_10B0);
         put_u32(&mut extra, 0x88, 0x0040_10C0);
-        extra[0xA0..0xA8].copy_from_slice(&[0x81, 0x44, 0x24, 0x04, 0x34, 0, 0, 0]);
+        extra[0xA0..0xAF].copy_from_slice(&[
+            0x81, 0x44, 0x24, 0x04, 0x34, 0, 0, 0, 0xB9, 0, 0x11, 0x40, 0, 0xFF, 0xE1,
+        ]);
         for (at, descriptor) in [(0xB0, 0x0040_1200_u32), (0xC0, 0x0040_1300)] {
             extra[at..at + 3].copy_from_slice(&[0x33, 0xC0, 0xBA]);
             put_u32(&mut extra, at + 3, descriptor);
@@ -348,7 +396,7 @@ mod tests {
             MethodLinks {
                 first_slot: 9,
                 slots: vec![
-                    LinkSlot::Other,
+                    LinkSlot::Variable { field: 0x34 },
                     LinkSlot::Method(Va::new(0x0040_1200)),
                     LinkSlot::Method(Va::new(0x0040_1300)),
                 ],
@@ -370,6 +418,21 @@ mod tests {
         assert_eq!(links.method_at(0x30), None, "after the table");
         assert_eq!(links.method_at(0x29), None, "not a multiple of 4");
         assert_eq!(links.method_at(u16::MAX), None);
+    }
+
+    #[test]
+    fn the_accessors_of_a_variable_give_a_get_then_a_let() {
+        let mut extra = three_slots();
+        // The second slot is an accessor too, of the same field.
+        put_u32(&mut extra, 0x84, 0x0040_10A0);
+        let bytes = synthetic_image(&extra);
+        let pe = PeImage::parse(&bytes).unwrap();
+        let callees = read_method_links(&pe, &object())
+            .unwrap()
+            .callees(&MethodTable::default());
+        assert_eq!(callees.variable(0x24), Some((0x34, true)));
+        assert_eq!(callees.variable(0x28), Some((0x34, false)));
+        assert_eq!(callees.variable(0x2C), None);
     }
 
     #[test]
