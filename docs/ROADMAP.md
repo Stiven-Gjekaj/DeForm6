@@ -785,10 +785,22 @@ A committed test cannot hold the lift of the corpus, because that needs the
 derived table. The tests of `vb::lift` use tables with placeholder opcode
 numbers.
 
-**Next: the calls.** The stack effect of a call, such as `VCallHresult`,
-depends on the method that it calls, and 611 bodies hold one. The operand of
-a call probably names the method in a table of the object. That table is the
-next structure to measure.
+**The calls of `Me` and of the constant table.** A called procedure removes
+its own arguments, so the lift must know how many bytes they are. The word at
+`+0x04` of a descriptor is that size, and it agrees with the source in 680 of
+680 descriptors. The method link table of an object turns the vtable offset
+of a `ThisVCallHresult` into the descriptor of its method, in 465 of 465
+calls. An `ImpAdCall` holds the size as an argument, which its handler checks
+against `esp`. With these, 104 of the 680 bodies lift. A read of 12 lifted
+calls against the source found each to be the call of its source, such as
+`UpdateEffect` from four scroll bar events of `Image Levels.exe`, and
+`LoadImageAutosized vbNullString` in `Sepia.exe`.
+
+**Next.** The first opcode with no family is now most often `FLdPrThis` (152
+bodies) or `ILdPr` (91), which load the object register. A call of a method
+of another object, such as `VCallHresult`, needs the type library of that
+object. The type libraries of the runtime and of each control are not in
+this repository, and they must be fetched as the P-code table is.
 
 **The gate.** The recovered code compiles, which Phase 8 already measures, and
 the rebuilt program behaves the same as the original.
