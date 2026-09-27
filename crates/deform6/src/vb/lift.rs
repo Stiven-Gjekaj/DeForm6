@@ -121,7 +121,8 @@
 //!
 //! The lift pops values until their sizes add up to the bytes of the call.
 //! It steps over the result of an import call on the floating point unit,
-//! which is not on the stack. It refuses the call when a popped value has no known size on the stack,
+//! which is not on the stack, and so does each opcode that takes no value
+//! of the floating point unit. It refuses the call when a popped value has no known size on the stack,
 //! such as a value of the floating point unit, or when the sizes do not add
 //! up to the bytes. A value of 4 bytes is a value of a type of 4 bytes or
 //! less, or an address; `PopAdLdVar` gives a `Variant` of 16 bytes. An
@@ -1122,6 +1123,24 @@ fn is_word(names: &[String]) -> bool {
             .any(|name| !reference(name) && WIDE_TYPES.iter().any(|kind| name.ends_with(kind)))
 }
 
+/// Tells whether an opcode of the name `name` takes a value of the floating
+/// point unit: a name that ends in a floating point type, such as `MulR4`,
+/// `CI4R4` or `FStFPR8`. A load, a literal and a call end in the type of
+/// the value that they give, and take none.
+fn takes_a_float(name: &str) -> bool {
+    const GIVE_A_FLOAT: [&str; 7] = [
+        "FLd",
+        "ILd",
+        "MemLd",
+        "ImpAdLd",
+        "Lit",
+        "ImpAdCall",
+        "VCall",
+    ];
+    ["R4", "R8"].iter().any(|kind| name.ends_with(kind))
+        && !GIVE_A_FLOAT.iter().any(|prefix| name.starts_with(prefix))
+}
+
 /// Reads an unsigned 16-bit argument.
 fn u16_at(arguments: &[u8], at: usize) -> Option<u16> {
     let bytes = arguments.get(at..at.checked_add(2)?)?;
@@ -1610,11 +1629,15 @@ fn run(
         let short = || LiftFault::ShortArguments(at);
         let offset16 = || i16_at(arguments, 0).ok_or_else(short);
         let word16 = |from: usize| u16_at(arguments, from).ok_or_else(short);
+        let float = names.iter().any(|name| takes_a_float(name));
         let pop = |state: &mut State| {
-            state
-                .stack
-                .pop()
-                .map(|value| value.expr)
+            let at_top = if float {
+                state.stack.len().checked_sub(1)
+            } else {
+                state.stack.iter().rposition(|value| !value.is_float_call())
+            };
+            at_top
+                .map(|index| state.stack.remove(index).expr)
                 .ok_or(LiftFault::StackShort(at))
         };
         let stmt = match family {
@@ -2583,6 +2606,9 @@ names = ["CStrVarTmp"]
 [primary.47]
 width = 2
 names = ["FnLenVar"]
+[primary.48]
+width = 0
+names = ["CI4R4"]
 [primary.44]
 width = 4
 names = ["LateMemCall"]
@@ -3288,6 +3314,27 @@ result = false
                 "       Call import_3(local_64)",
                 "       Exit"
             ]
+        );
+        // An operator that takes no float steps over such a call:
+        // import_2(local_64), whose result goes into its argument, then
+        // local_64 & local_60.
+        let concat = [
+            0x15, 0xA0, 0xFF, 0x15, 0x9C, 0xFF, 0x12, 0x02, 0x00, 0x04, 0x00, 0x15, 0x9C, 0xFF,
+            0x3F, 0x90, 0xFF, 0x05, 0x78, 0xFF, 0x0C,
+        ];
+        assert_eq!(
+            lines(&concat).unwrap(),
+            [
+                "       Call import_2(local_64)",
+                "       local_88 = (local_60 & local_64)",
+                "       Exit"
+            ]
+        );
+        // CI4R4 takes a float, so it takes the result of the call.
+        let convert = [0x12, 0x02, 0x00, 0x00, 0x00, 0x48, 0x05, 0x78, 0xFF, 0x0C];
+        assert_eq!(
+            lines(&convert).unwrap()[0],
+            "       local_88 = CLng(import_2())"
         );
         // A store after such a call comes after it.
         let store = [
