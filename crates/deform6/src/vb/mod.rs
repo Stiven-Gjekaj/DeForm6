@@ -26,6 +26,7 @@ pub mod header;
 pub mod object;
 pub mod ocx;
 pub mod opcodes;
+pub mod pcode;
 pub mod privateobj;
 pub mod procdesc;
 pub mod project;

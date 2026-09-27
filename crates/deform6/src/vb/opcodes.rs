@@ -283,7 +283,7 @@ const PARSED_TABLE_SOURCE: &str = "a user supplied table";
 /// number is the more useful "where", and both this module's own error
 /// paths (invalid UTF-8, a `toml` parse or key error) give a byte offset
 /// this turns into one.
-fn line_at(bytes: &[u8], at: usize) -> usize {
+pub(crate) fn line_at(bytes: &[u8], at: usize) -> usize {
     let end = at.min(bytes.len());
     let prefix = bytes.get(..end).unwrap_or(&[]);
     prefix
