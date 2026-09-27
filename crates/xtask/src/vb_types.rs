@@ -23,7 +23,8 @@
 //!   for a pointer and for each type of 4 bytes or less, 8 for a `Double`,
 //!   a `Currency` and a `Date`, and 16 for a `Variant`. It leaves out the
 //!   4 bytes of the object itself. `result` tells whether the last
-//!   parameter receives the result.
+//!   parameter receives the result, and `result_interface` gives the
+//!   interface of an object result when the library holds it.
 //!
 //! Two functions can share a vtable offset: a property let and a property
 //! set of the same name. The tool writes the offset one time, and it stops
@@ -76,6 +77,8 @@ pub(crate) struct Slot {
     #[serde(skip_serializing_if = "Option::is_none")]
     arg_bytes: Option<u16>,
     result: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result_interface: Option<String>,
 }
 
 /// One interface.
@@ -93,8 +96,27 @@ pub(crate) struct Types {
     interfaces: BTreeMap<String, Interface>,
 }
 
+/// The name of the interface of the type info at `index`: the interface of
+/// the same name with `_` before it when the library holds one, as for a
+/// class, else the type info itself when it is an interface.
+fn interface_name(infos: &[TypeInfo], index: usize) -> Option<String> {
+    let info = infos.get(index)?;
+    let name = info.name.as_ref()?;
+    let underscored = format!("_{name}");
+    let is_interface = |name: &str| {
+        infos
+            .iter()
+            .any(|info| info.kind == Kind::Interface && info.name.as_deref() == Some(name))
+    };
+    if is_interface(&underscored) {
+        Some(underscored)
+    } else {
+        is_interface(name).then(|| name.clone())
+    }
+}
+
 /// The slot of one function.
-fn slot(function: &Function) -> Slot {
+fn slot(function: &Function, infos: &[TypeInfo]) -> Slot {
     let arg_bytes = function
         .parameters
         .iter()
@@ -109,6 +131,11 @@ fn slot(function: &Function) -> Slot {
             .parameters
             .last()
             .is_some_and(|parameter| parameter.flags & PARAMFLAG_FRETVAL != 0),
+        result_interface: function
+            .parameters
+            .last()
+            .filter(|parameter| parameter.flags & PARAMFLAG_FRETVAL != 0)
+            .and_then(|parameter| interface_name(infos, parameter.user_type?)),
     }
 }
 
@@ -130,7 +157,7 @@ pub(crate) fn derive(infos: &[TypeInfo]) -> Result<Types, String> {
         let mut functions: BTreeMap<String, Slot> = BTreeMap::new();
         for function in &info.functions {
             let key = format!("{:04X}", function.vtable_offset);
-            let new = slot(function);
+            let new = slot(function, infos);
             match functions.get_mut(&key) {
                 None => {
                     functions.insert(key, new);
@@ -256,6 +283,14 @@ mod tests {
         assert_eq!(interface.functions["0028"].arg_bytes, Some(20));
         assert!(!interface.functions["0028"].result);
         assert!(!types.interfaces.contains_key("BoxEvents"));
+        // The result of Text points to BoxEvents, which is not an interface
+        // that the file keeps a name for: no _BoxEvents, and BoxEvents is an
+        // interface of the library.
+        assert_eq!(
+            interface.functions["0024"].result_interface.as_deref(),
+            Some("BoxEvents")
+        );
+        assert_eq!(interface.functions["0028"].result_interface, None);
     }
 
     fn function(name: &str, invoke_kind: u8, vt: u16) -> Function {
