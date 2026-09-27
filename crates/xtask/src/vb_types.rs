@@ -14,6 +14,9 @@
 //!   interface of the control. The record names the events interface of the
 //!   control, such as `PictureBoxEvents`, and the interface of the control
 //!   is `_PictureBox`.
+//! - `[iids]` maps the GUID of each interface to its name. A class
+//!   reference of a constant table, such as the one of the global object of
+//!   the runtime, names an interface by its GUID.
 //! - `[interfaces.<name>]` gives `vtable_size`, and for each vtable offset
 //!   the names of the functions there, the kinds, `arg_bytes` and `result`.
 //!   `arg_bytes` is the sum of the sizes of the parameters on the stack: 4
@@ -86,6 +89,7 @@ pub(crate) struct Interface {
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub(crate) struct Types {
     controls: BTreeMap<String, String>,
+    iids: BTreeMap<String, String>,
     interfaces: BTreeMap<String, Interface>,
 }
 
@@ -142,6 +146,9 @@ pub(crate) fn derive(infos: &[TypeInfo]) -> Result<Types, String> {
                 }
             }
         }
+        if let Some(guid) = &info.guid {
+            types.iids.insert(guid_text(guid), name.clone());
+        }
         types.interfaces.insert(
             name.clone(),
             Interface {
@@ -172,7 +179,7 @@ pub(crate) fn render(types: &Types) -> Result<String, String> {
     Ok(format!(
         "# The interfaces of the Visual Basic 6 controls, written by\n# `cargo run -p xtask -- \
          derive-vb-types`. Do not commit this file.\n#\n# `controls` maps the GUID of the events \
-         interface that a ControlInfo record\n# names to the interface of the control. Each \
+         interface that a ControlInfo record\n# names to the interface of the control. `iids` maps the GUID of each\n# interface to its name. Each \
          function is keyed by its vtable\n# offset in hexadecimal. `arg_bytes` leaves out the 4 \
          bytes of the object.\n\n{body}"
     ))
@@ -286,6 +293,22 @@ mod tests {
                 function("Picture", 8, 12),
             ])])
             .is_err()
+        );
+    }
+
+    #[test]
+    fn the_guid_of_an_interface_names_it() {
+        let mut info = interface(vec![function("Picture", 4, 9)]);
+        info.guid = Some([
+            0x22, 0x3D, 0xFB, 0xFC, 0xFA, 0xA0, 0x68, 0x10, 0xA7, 0x38, 0x08, 0x00, 0x2B, 0x33,
+            0x71, 0xB5,
+        ]);
+        let types = derive(&[info]).unwrap();
+        assert_eq!(types.iids["{FCFB3D22-A0FA-1068-A738-08002B3371B5}"], "_Box");
+        let text = render(&types).unwrap();
+        assert!(
+            text.contains("\"{FCFB3D22-A0FA-1068-A738-08002B3371B5}\" = \"_Box\""),
+            "{text}"
         );
     }
 
