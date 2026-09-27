@@ -37,6 +37,8 @@ pub struct TypeFunction {
     pub arg_bytes: Option<u16>,
     /// Whether the last argument receives the result.
     pub result: bool,
+    /// The interface of an object result, when the file gives it.
+    pub result_interface: Option<String>,
 }
 
 /// One interface.
@@ -94,6 +96,8 @@ struct RawFunction {
     arg_bytes: Option<u16>,
     #[serde(default)]
     result: bool,
+    #[serde(default)]
+    result_interface: Option<String>,
 }
 
 /// Formats a GUID in the registry form, such as
@@ -145,6 +149,7 @@ impl VbTypes {
                         kinds: function.kinds,
                         arg_bytes: function.arg_bytes,
                         result: function.result,
+                        result_interface: function.result_interface,
                     },
                 );
             }
@@ -259,6 +264,7 @@ names = ["Text"]
 kinds = ["get"]
 arg_bytes = 4
 result = true
+result_interface = "_Box"
 
 [interfaces._Box.functions.0028]
 names = ["Odd"]
@@ -287,6 +293,7 @@ result = false
         assert_eq!(text.kinds, ["get"]);
         assert_eq!(text.arg_bytes, Some(4));
         assert!(text.result);
+        assert_eq!(text.result_interface.as_deref(), Some("_Box"));
         assert_eq!(interface.function(0x28).unwrap().arg_bytes, None);
         assert!(interface.function(0x2C).is_none());
         assert!(types.interface("_Other").is_none());
