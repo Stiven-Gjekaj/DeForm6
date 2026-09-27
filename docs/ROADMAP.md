@@ -756,6 +756,19 @@ occupies the `ProcSize` bytes immediately before its descriptor (section 23).
 Then: disassemble, lift to an intermediate form, recover control flow, and emit
 Basic.
 
+#### Part 1, done on 2026-09-27
+
+**The listing.** `vb::pcode` reads the table that `derive-pcode-table`
+writes, from bytes that the caller gives, and decodes a body with it.
+`deform6 disasm <exe> --pcode-table <table>` prints each procedure of each
+method table: each opcode, its bytes and the name of its handler, and how the
+decode ended. `check-pcode-table` now uses the same decoder. The listing is
+not Basic, and the README says so.
+
+**Part 2 is next: the lift.** P-code is a stack machine. The lift follows
+the stack through a body and builds an expression for each statement,
+starting with the procedures of the corpus whose source is shortest.
+
 **The gate.** The recovered code compiles, which Phase 8 already measures, and
 the rebuilt program behaves the same as the original.
 
@@ -793,7 +806,7 @@ Phase 8  (exit met on the author's XP host; --verify-build waits)
           |
           +-- Phase 10 (exit met: names and widths, 680 of 680 bodies decode)
                  |
-                 +-- Phase 11 (needs the Phase 10 table)
+                 +-- Phase 11 (part 1 done: the listing)
 
 Phase 12 runs beside 10 and 11.
 Phase 13 closes the milestone.
