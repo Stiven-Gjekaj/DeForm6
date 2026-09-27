@@ -3060,6 +3060,12 @@ result = false
                 "       Exit"
             ]
         );
+        // The statement after such a call keeps its own offset.
+        let after = [0x12, 0x02, 0x00, 0x00, 0x00, 0x0B, 0x05, 0x00, 0x0C];
+        assert_eq!(
+            lines(&after).unwrap(),
+            ["       Call import_2()", "L0005: GoTo L0005", "       Exit"]
+        );
     }
 
     #[test]
