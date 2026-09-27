@@ -115,8 +115,9 @@
 //! less, or an address; `PopAdLdVar` gives a `Variant` of 16 bytes. An
 //! `ImpAdCall` handler that serves `ImpAdCallFPR4` and `ImpAdCallFPR8` too
 //! can leave a result on the floating point unit, which is not the stack.
-//! The lift gives it no result, so an opcode that uses the result finds an
-//! empty stack and the lift stops there.
+//! The lift gives it a result on the floating point unit. When no opcode,
+//! such as `MulR4`, takes that result before the end of the statement, the
+//! call becomes a call statement of its own, at its own offset.
 //!
 //! # Objects
 //!
@@ -1064,15 +1065,6 @@ fn is_word(names: &[String]) -> bool {
             .any(|name| !reference(name) && WIDE_TYPES.iter().any(|kind| name.ends_with(kind)))
 }
 
-/// Tells whether an opcode of the name `name` takes a value of the floating
-/// point unit: a name that ends in a floating point type, or `CVarR4`,
-/// `CVarR8` and the conversions from them.
-fn takes_a_float(name: &str) -> bool {
-    ["R4", "R8", "FPR4", "FPR8"]
-        .iter()
-        .any(|kind| name.ends_with(kind))
-}
-
 /// Reads an unsigned 16-bit argument.
 fn u16_at(arguments: &[u8], at: usize) -> Option<u16> {
     let bytes = arguments.get(at..at.checked_add(2)?)?;
@@ -1118,6 +1110,13 @@ struct Value {
 }
 
 impl Value {
+    /// Tells whether the value is the result of an import call on the
+    /// floating point unit. When no opcode takes it before the end of the
+    /// statement, the call is a statement of its own.
+    fn is_float_call(&self) -> bool {
+        self.bytes == 0 && matches!(self.expr, Expr::Call(Callee::Import(_), _))
+    }
+
     /// A value with no slot and no class.
     const fn plain(expr: Expr, word: bool) -> Self {
         Self {
@@ -1185,6 +1184,11 @@ struct State {
     /// before an `FFree`: they stay.
     kept: Vec<PendingSet>,
     stores: u32,
+    /// The depth on the stack and the first offset of each import call
+    /// whose result is on the floating point unit.
+    floats: Vec<(usize, u32)>,
+    /// The offset of the opcode after the last of those calls.
+    resume: Option<u32>,
 }
 
 /// Reads the frame slots that an `FFree` opcode frees: one slot, or a 16-bit
@@ -1508,11 +1512,10 @@ fn run(
     let mut out = Vec::new();
     let mut start: Option<u32> = None;
     for (position, instruction) in listing.instructions.iter().enumerate() {
-        let next_takes_a_float = listing
+        let next_offset = listing
             .instructions
             .get(position.saturating_add(1))
-            .and_then(|next| table.slot(next.lead, next.opcode))
-            .is_some_and(|slot| slot.names.iter().any(|name| takes_a_float(name)));
+            .map(|next| next.offset);
         let PcodeInstruction {
             offset,
             lead,
@@ -1659,7 +1662,16 @@ fn run(
                         .stack
                         .push(Value::plain(Expr::Call(callee, args), true));
                     None
-                } else if float && next_takes_a_float {
+                } else if float {
+                    let depth = state.stack.len();
+                    let begin = if depth > 0 && state.stack.iter().all(Value::is_float_call) {
+                        state.resume.unwrap_or(first)
+                    } else {
+                        first
+                    };
+                    state.floats.retain(|(below, _)| *below < depth);
+                    state.floats.push((depth, begin));
+                    state.resume = next_offset;
                     state
                         .stack
                         .push(Value::plain(Expr::Call(callee, args), false));
@@ -2033,13 +2045,27 @@ fn run(
             })),
         };
         if let Some(stmt) = stmt {
-            if !state.stack.is_empty() {
+            if !state.stack.iter().all(Value::is_float_call) {
                 return Err(LiftFault::StackLeft(at));
             }
-            out.push(LiftedStmt {
-                offset: first,
-                stmt,
-            });
+            let mut offset = first;
+            for (depth, value) in std::mem::take(&mut state.stack).into_iter().enumerate() {
+                if let Expr::Call(callee, args) = value.expr {
+                    let begin = state
+                        .floats
+                        .iter()
+                        .find(|(below, _)| *below == depth)
+                        .map_or(first, |(_, begin)| *begin);
+                    out.push(LiftedStmt {
+                        offset: begin,
+                        stmt: Stmt::Call(callee, args),
+                    });
+                    offset = state.resume.unwrap_or(first);
+                }
+            }
+            state.floats.clear();
+            state.resume = None;
+            out.push(LiftedStmt { offset, stmt });
             start = None;
         }
     }
@@ -3019,6 +3045,20 @@ result = false
         assert_eq!(
             lines(&float).unwrap()[0],
             "       local_A0 = (import_2() * import_3())"
+        );
+        // Two calls whose results nothing takes, and a GoTo to the
+        // second: each call is a statement at its own offset.
+        let calls = [
+            0x12, 0x02, 0x00, 0x00, 0x00, 0x12, 0x03, 0x00, 0x00, 0x00, 0x0B, 0x05, 0x00, 0x0C,
+        ];
+        assert_eq!(
+            lines(&calls).unwrap(),
+            [
+                "       Call import_2()",
+                "L0005: Call import_3()",
+                "       GoTo L0005",
+                "       Exit"
+            ]
         );
     }
 
