@@ -444,6 +444,8 @@ mod tests {
                 flags: 1,
                 user_type: None,
             }],
+            ordinal: None,
+            result_type: None,
         }
     }
 

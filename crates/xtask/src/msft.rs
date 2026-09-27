@@ -67,6 +67,8 @@ pub(crate) enum Kind {
     Dispatch,
     /// `TKIND_COCLASS`: a class.
     Coclass,
+    /// `TKIND_MODULE`: a module of functions that a DLL exports.
+    Module,
     /// Any other kind.
     Other,
 }
@@ -99,7 +101,21 @@ pub(crate) struct Function {
     pub invoke_kind: u8,
     /// Each parameter, first parameter first.
     pub parameters: Vec<Parameter>,
+    /// The ordinal of the DLL export of a function of a module, when the
+    /// record gives its entry as an ordinal.
+    pub ordinal: Option<u16>,
+    /// The index of the type info that the return type names, through
+    /// pointers, when it is a type of this library.
+    pub result_type: Option<usize>,
 }
+
+/// The bit of the `FKCCIC` field of a function record that tells that the
+/// entry field holds an ordinal, not the offset of a name.
+const ENTRY_IS_ORDINAL: u32 = 0x2000;
+
+/// The index of the entry field among the optional fields of a function
+/// record, after the help context and the help string.
+const ENTRY_FIELD: usize = 2;
 
 /// One type info.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -246,7 +262,8 @@ fn functions(
                 .ok_or_else(|| format!("the record at {at:#x} is cut"))
         };
         let vtable_offset = u16::try_from(field(0x0C)? & 0xFFFE).unwrap_or(0);
-        let invoke_kind = u8::try_from((field(0x10)? >> 3) & 0xF).unwrap_or(0);
+        let fkccic = field(0x10)?;
+        let invoke_kind = u8::try_from((fkccic >> 3) & 0xF).unwrap_or(0);
         let count = usize::from(u16::try_from(field(0x14)? & 0xFFFF).unwrap_or(0));
         let parameter_bytes = count
             .checked_mul(PARAMETER_LEN)
@@ -256,6 +273,31 @@ fn functions(
                 "the record at {at:#x} is too short for {count} parameters"
             ));
         }
+        let optional_bytes = size
+            .checked_sub(FUNCTION_FIXED_LEN)
+            .and_then(|rest| rest.checked_sub(parameter_bytes))
+            .unwrap_or(0);
+        let entry_at = ENTRY_FIELD
+            .checked_mul(4)
+            .and_then(|at| at.checked_add(FUNCTION_FIXED_LEN))
+            .ok_or("an entry offset overflows")?;
+        let ordinal = if fkccic & ENTRY_IS_ORDINAL != 0
+            && optional_bytes
+                >= entry_at
+                    .saturating_sub(FUNCTION_FIXED_LEN)
+                    .saturating_add(4)
+        {
+            u16::try_from(field(entry_at)? & 0xFFFF).ok()
+        } else {
+            None
+        };
+        let return_type = i32_at(bytes, add(at, 4, "a return type")?)
+            .ok_or_else(|| format!("the record at {at:#x} is cut"))?;
+        let result_type = if return_type < 0 {
+            None
+        } else {
+            parameter_user_type(bytes, descs, return_type)
+        };
         let mut parameters = Vec::new();
         let start = add(
             at,
@@ -292,6 +334,8 @@ fn functions(
             vtable_offset,
             invoke_kind,
             parameters,
+            ordinal,
+            result_type,
         });
         at = add(at, size, "a record")?;
     }
@@ -343,6 +387,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<Vec<TypeInfo>, String> {
         let field =
             |offset: usize| i32_at(bytes, at.saturating_add(offset)).ok_or("a type info is cut");
         let kind = match field(0x00)? & 0xF {
+            2 => Kind::Module,
             3 => Kind::Interface,
             4 => Kind::Dispatch,
             5 => Kind::Coclass,
@@ -429,9 +474,11 @@ pub(crate) mod tests {
     /// A type library built here, with two type infos. The first is the
     /// interface `_Box` with a vtable of 0x30 bytes, no GUID, and two
     /// functions: `Text` at 0x24, a property get with one parameter, a
-    /// pointer that receives the result; and `Move` at 0x29 with the low
-    /// bit set, a method with a `Single` and a `Variant`. The second is the
-    /// interface `BoxEvents` with [`GUID`] and no function.
+    /// pointer that receives the result, whose return type points to
+    /// `BoxEvents` and whose entry is the ordinal 685; and `Move` at 0x29
+    /// with the low bit set, a method with a `Single` and a `Variant` that
+    /// returns an `HRESULT`. The second is the interface `BoxEvents` with
+    /// [`GUID`] and no function.
     ///
     /// Layout: the header at 0, the 2 type info offsets at 0x54, the
     /// segment directory at 0x5C, the type infos at 0x200, the GUIDs at
@@ -474,17 +521,19 @@ pub(crate) mod tests {
         put_u32(&mut out, 0x50C, 0x10);
         put_u16(&mut out, 0x510, 29);
         put_u32(&mut out, 0x514, 0x64);
-        // Text: 0x18 + 12 bytes.
+        // Text: 0x18 + 3 optional fields + 12 bytes.
         let text = 0x604;
-        put_u16(&mut out, text, 0x24);
+        put_u16(&mut out, text, 0x30);
         put_u32(&mut out, text + 0x0C, 0x24);
-        put_u32(&mut out, text + 0x10, 2 << 3);
+        put_u32(&mut out, text + 0x10, (2 << 3) | 0x2000);
         put_u32(&mut out, text + 0x14, 1);
-        put_u32(&mut out, text + 0x18, 0);
-        put_u32(&mut out, text + 0x20, 0xA);
+        put_u32(&mut out, text + 0x20, 685);
+        put_u32(&mut out, text + 0x24, 0);
+        put_u32(&mut out, text + 0x2C, 0xA);
         // Move: 0x18 + 24 bytes.
-        let moving = text + 0x24;
+        let moving = text + 0x30;
         put_u16(&mut out, moving, 0x30);
+        put_u32(&mut out, moving + 0x04, 0x8000_0019);
         put_u32(&mut out, moving + 0x0C, 0x29);
         put_u32(&mut out, moving + 0x10, 1 << 3);
         put_u32(&mut out, moving + 0x14, 2);
@@ -492,9 +541,9 @@ pub(crate) mod tests {
         put_u32(&mut out, moving + 0x20, 1);
         put_u32(&mut out, moving + 0x24, 0x8000_000C);
         put_u32(&mut out, moving + 0x2C, 1);
-        put_u32(&mut out, 0x600, 0x24 + 0x30);
+        put_u32(&mut out, 0x600, 0x30 + 0x30);
         // The member ids, then the names.
-        let names = 0x604 + 0x24 + 0x30 + 8;
+        let names = 0x604 + 0x30 + 0x30 + 8;
         put_u32(&mut out, names, 0x40);
         put_u32(&mut out, names + 4, 0x60);
         out
@@ -520,6 +569,8 @@ pub(crate) mod tests {
                         flags: 0xA,
                         user_type: Some(1)
                     }],
+                    ordinal: Some(685),
+                    result_type: Some(1),
                 },
                 Function {
                     name: Some("Move".to_owned()),
@@ -537,9 +588,14 @@ pub(crate) mod tests {
                             user_type: None
                         }
                     ],
+                    ordinal: None,
+                    result_type: None,
                 },
             ]
         );
+        let mut module = library();
+        put_u32(&mut module, 0x200, 2);
+        assert_eq!(parse(&module).unwrap()[0].kind, Kind::Module);
         assert_eq!(infos[1].name.as_deref(), Some("BoxEvents"));
         assert_eq!(infos[1].guid, Some(GUID));
         assert!(infos[1].functions.is_empty());
