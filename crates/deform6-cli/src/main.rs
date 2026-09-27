@@ -421,7 +421,7 @@ fn print_pcode(
             };
             let listing = disassemble(&body, table);
             if lift {
-                match deform6::vb::lift::lift(&listing, table, callees, types) {
+                match deform6::vb::lift::lift_method(&listing, table, callees, types, *index) {
                     Ok(stmts) => {
                         for line in deform6::vb::lift::render(&stmts) {
                             println!("    {line}");

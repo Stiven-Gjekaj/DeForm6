@@ -14,10 +14,10 @@
 use deform6::read::pe::PeImage;
 use deform6::vb::context::callees_of_project;
 use deform6::vb::header::{VbHeader, header_region};
-use deform6::vb::lift::lift;
+use deform6::vb::lift::lift_method;
 use deform6::vb::object::ObjectTable;
 use deform6::vb::pcode::{PcodeTable, disassemble};
-use deform6::vb::procdesc::read_method_table;
+use deform6::vb::procdesc::{MethodEntry, read_method_table};
 use deform6::vb::project::{ObjectTableHead, ProjectInfo};
 use deform6::vb::types::VbTypes;
 
@@ -89,13 +89,16 @@ fn check(path: &str, types_path: Option<&str>) -> Result<(usize, Vec<String>, us
         for (object, callees) in objects.objects.iter().zip(&all_callees) {
             let methods = read_method_table(&pe, object.lp_object_info)
                 .map_err(|err| format!("{key}: {}: {err}", object.name))?;
-            for descriptor in methods.descriptors() {
+            for entry in &methods.entries {
+                let MethodEntry::Descriptor { index, descriptor } = entry else {
+                    continue;
+                };
                 bodies = bodies.saturating_add(1);
                 let body = descriptor
                     .body(&pe)
                     .ok_or_else(|| format!("{key}: a body cannot be read"))?;
                 let listing = disassemble(&body, &table);
-                if lift(&listing, &table, callees, types.as_ref()).is_ok() {
+                if lift_method(&listing, &table, callees, types.as_ref(), *index).is_ok() {
                     lifted = lifted.saturating_add(1);
                 }
                 if !listing.end.is_complete() {
