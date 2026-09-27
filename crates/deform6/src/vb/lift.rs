@@ -30,6 +30,9 @@
 //! | `ImpAdCall`, `ImpAdCallHresult`, `ImpAdCallFPR4`, `ImpAdCallFPR8` | Call the procedure at an index of the constant table |
 //! | `ImpAdCall` + `Ad`, `I2`, `I4`, `Str` or `UI1` | The same, and push the result |
 //! | `FFree1Ad`, `FFree1Str`, `FFree1Var`, `FFreeAd`, `FFreeStr`, `FFreeVar` | Free temporary frame slots; the stack does not change, and the lift gives no statement |
+//! | `FStAdFunc` | Pop an object into the frame slot |
+//! | `VCallAd`, `VCallI2`, `VCallI4`, `VCallStr` | Call through the object register, and push the result: the lift knows only the control accessors of a form |
+//! | `VCallHresult` | Call a function of the interface of the object in the object register |
 //!
 //! All the names of one slot must give one family. A conversion whose names
 //! give both `CSng` and `CDbl` gives no conversion: one handler serves both,
@@ -48,6 +51,11 @@
 //!   the method at that offset and the argument size of its descriptor. The
 //!   handler pushes `Me` itself, so the opcodes before it push 4 bytes less.
 //!
+//! - A `VCallHresult` opcode holds a vtable offset in the interface of the
+//!   object in the object register. The file that `derive-vb-types` writes
+//!   ([`VbTypes`]) gives the argument bytes of the function there. The
+//!   handler pushes the object itself.
+//!
 //! The lift pops one value for each 4 bytes. It refuses the call when a
 //! popped value is not known to be 4 bytes on the stack: a value of the
 //! floating point unit, a `Double`, a `Currency` or a `Variant`. An
@@ -55,6 +63,21 @@
 //! can leave a result on the floating point unit, which is not the stack.
 //! The lift gives it no result, so an opcode that uses the result finds an
 //! empty stack and the lift stops there.
+//!
+//! # Objects
+//!
+//! The lift keeps the class of a value when it knows it: the interface of
+//! a control. `VCallAd` on `Me` at a control accessor of a form gives the
+//! control, with the interface that [`Callees`] names for it. `FStAdFunc`
+//! stores an object in a frame slot, and the lift binds the slot to the
+//! object: a later load of the slot gives the object. When values stay on
+//! the stack, the slot is a temporary one of the expression, and the lift
+//! gives no statement. When the stack is empty, the slot is a temporary one
+//! when an `FFree` frees it later, as the compiler does after a call of a
+//! control. Else the lift gives `Set` at the place of the store. A property
+//! get writes
+//! its result through its last argument, the address of a frame slot, and
+//! the lift binds that slot to the call in the same way.
 //!
 //! # What the lift checks
 //!
@@ -69,7 +92,10 @@
 //! `GoTo` to a label at the offset of a statement. This is not the Basic of
 //! the source, and no claim is made that it compiles.
 
+use std::collections::BTreeMap;
+
 use crate::vb::pcode::{PcodeEnd, PcodeInstruction, PcodeListing, PcodeTable};
+use crate::vb::types::{TypeFunction, VbTypes};
 
 /// A binary operator.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,23 +174,29 @@ pub enum Expr {
     Convert(&'static str, Box<Expr>),
     /// A call and its arguments, first argument first.
     Call(Callee, Vec<Expr>),
+    /// A named member of an object, such as a control of a form or a
+    /// property.
+    Member(Box<Expr>, String),
 }
 
 /// The procedure that a call names.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Callee {
     /// A method of `Me`, by its index in the method table of the object.
     Method(u16),
     /// A procedure, by its index in the constant table of the object.
     Import(u16),
+    /// A named function of an object.
+    Member(Box<Expr>, String),
 }
 
 impl Callee {
     /// The text of the callee.
-    fn text(self) -> String {
+    fn text(&self) -> String {
         match self {
             Self::Method(index) => format!("Me.method_{index}"),
             Self::Import(index) => format!("import_{index:X}"),
+            Self::Member(object, name) => format!("{}.{name}", object.text()),
         }
     }
 }
@@ -174,6 +206,7 @@ impl Callee {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Callees {
     methods: Vec<(u16, CalledMethod)>,
+    controls: Vec<(u16, String, String)>,
 }
 
 /// A method that [`Callees`] gives.
@@ -194,6 +227,24 @@ impl Callees {
         self.methods
             .push((vtable_offset, CalledMethod { index, arg_size }));
         self
+    }
+
+    /// Adds the control accessor of a form at `vtable_offset`: the control
+    /// `name`, of the interface `interface`.
+    #[must_use]
+    pub fn with_control(mut self, vtable_offset: u16, name: &str, interface: &str) -> Self {
+        self.controls
+            .push((vtable_offset, name.to_owned(), interface.to_owned()));
+        self
+    }
+
+    /// Gives the name and the interface of the control at `vtable_offset`.
+    #[must_use]
+    pub fn control(&self, vtable_offset: u16) -> Option<(&str, &str)> {
+        self.controls
+            .iter()
+            .find(|(offset, _, _)| *offset == vtable_offset)
+            .map(|(_, name, interface)| (name.as_str(), interface.as_str()))
     }
 
     /// Gives the method at `vtable_offset`.
@@ -231,6 +282,7 @@ impl Expr {
             }
             Self::Convert(function, value) => format!("{function}({})", value.text()),
             Self::Call(callee, args) => format!("{}({})", callee.text(), arguments_text(args)),
+            Self::Member(object, name) => format!("{}.{name}", object.text()),
         }
     }
 }
@@ -265,6 +317,13 @@ pub enum Stmt {
     Exit,
     /// A call whose result is not used.
     Call(Callee, Vec<Expr>),
+    /// A store of an object.
+    Set {
+        /// Where the object goes.
+        target: Expr,
+        /// The object.
+        value: Expr,
+    },
 }
 
 impl Stmt {
@@ -280,6 +339,7 @@ impl Stmt {
             Self::End => "End".to_owned(),
             Self::Exit => "Exit".to_owned(),
             Self::Call(callee, args) => format!("Call {}({})", callee.text(), arguments_text(args)),
+            Self::Set { target, value } => format!("Set {} = {}", target.text(), value.text()),
         }
     }
 }
@@ -314,6 +374,13 @@ pub enum LiftFault {
     /// The argument bytes of a call are not a whole number of values that
     /// are 4 bytes on the stack.
     CallArguments(u32),
+    /// A call through the object register names a function that the lift
+    /// cannot find: the class of the object is not known, or its interface
+    /// holds no function at the offset.
+    NoFunction(u32),
+    /// A property get gives its result through an argument that is not the
+    /// address of a frame slot.
+    NoResultSlot(u32),
 }
 
 /// What an opcode does, from the names of its handler.
@@ -337,6 +404,8 @@ enum Family {
     ThisCall,
     ImportCall { result: bool },
     Free,
+    ObjectStore,
+    ObjectCall { pushes: bool },
 }
 
 /// The type suffixes of the names, and the Basic conversion to each.
@@ -432,6 +501,9 @@ fn family_of(name: &str) -> Option<Family> {
         "ImpAdCallAd" | "ImpAdCallI2" | "ImpAdCallI4" | "ImpAdCallStr" | "ImpAdCallUI1" => {
             Family::ImportCall { result: true }
         }
+        "FStAdFunc" => Family::ObjectStore,
+        "VCallAd" | "VCallI2" | "VCallI4" | "VCallStr" => Family::ObjectCall { pushes: true },
+        "VCallHresult" => Family::ObjectCall { pushes: false },
         "FFree1Ad" | "FFree1Str" | "FFree1Var" | "FFreeAd" | "FFreeStr" | "FFreeVar" => {
             Family::Free
         }
@@ -526,20 +598,50 @@ fn constant(arguments: &[u8], len: u8) -> Option<i64> {
 /// The Basic conversions whose result is 4 bytes on the stack.
 const WORD_CONVERSIONS: &[&str] = &["CByte", "CInt", "CLng", "CStr"];
 
-/// A value on the stack, and whether it is known to be 4 bytes there.
-type Value = (Expr, bool);
+/// The name of a default member, which the lift names only when the
+/// interface gives no other name at the offset.
+const DEFAULT_MEMBER: &str = "_Default";
+
+/// A value on the stack.
+#[derive(Clone, Debug)]
+struct Value {
+    /// The expression.
+    expr: Expr,
+    /// Whether the value is known to be 4 bytes on the stack.
+    word: bool,
+    /// The frame slot that the opcode addressed, for a load of a slot.
+    slot: Option<i16>,
+    /// The interface of the object, when the value is an object whose class
+    /// the lift knows.
+    class: Option<String>,
+}
+
+impl Value {
+    /// A value with no slot and no class.
+    const fn plain(expr: Expr, word: bool) -> Self {
+        Self {
+            expr,
+            word,
+            slot: None,
+            class: None,
+        }
+    }
+}
+
+/// An object and its interface, when the lift knows it.
+type Object = (Expr, Option<String>);
 
 /// Pops the arguments of a call of `bytes` bytes: one value of 4 bytes for
 /// each 4 bytes, first argument first.
-fn call_arguments(stack: &mut Vec<Value>, bytes: u16, at: u32) -> Result<Vec<Expr>, LiftFault> {
+fn call_arguments(stack: &mut Vec<Value>, bytes: u16, at: u32) -> Result<Vec<Value>, LiftFault> {
     if bytes.checked_rem(4) != Some(0) {
         return Err(LiftFault::CallArguments(at));
     }
     let count = bytes.checked_div(4).ok_or(LiftFault::CallArguments(at))?;
     let mut args = Vec::new();
     for _ in 0..count {
-        let (value, word) = stack.pop().ok_or(LiftFault::StackShort(at))?;
-        if !word {
+        let value = stack.pop().ok_or(LiftFault::StackShort(at))?;
+        if !value.word {
             return Err(LiftFault::CallArguments(at));
         }
         args.push(value);
@@ -547,8 +649,134 @@ fn call_arguments(stack: &mut Vec<Value>, bytes: u16, at: u32) -> Result<Vec<Exp
     Ok(args)
 }
 
+/// The expressions of the arguments.
+fn expressions(args: Vec<Value>) -> Vec<Expr> {
+    args.into_iter().map(|value| value.expr).collect()
+}
+
+/// The name that the lift gives the functions at one offset: the first name
+/// that is not the default member, or else the first name.
+fn member_name(function: &TypeFunction) -> String {
+    function
+        .names
+        .iter()
+        .find(|name| *name != DEFAULT_MEMBER)
+        .or_else(|| function.names.first())
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// A `Set` that the lift gives only when no `FFree` frees its slot: the
+/// index of the statement that it goes before, and the statement.
+type PendingSet = (usize, LiftedStmt);
+
+/// The things that the lift keeps between opcodes.
+#[derive(Default)]
+struct State {
+    stack: Vec<Value>,
+    object: Option<Object>,
+    bindings: BTreeMap<i16, Object>,
+    pending: BTreeMap<i16, PendingSet>,
+}
+
+/// Reads the frame slots that an `FFree` opcode frees: one slot, or a 16-bit
+/// byte count and that many bytes of slots.
+fn freed_slots(names: &[String], arguments: &[u8]) -> Option<Vec<i16>> {
+    if names.iter().any(|name| name.starts_with("FFree1")) {
+        return Some(vec![i16_at(arguments, 0)?]);
+    }
+    let bytes = usize::from(u16_at(arguments, 0)?);
+    let slots = arguments.get(2..bytes.checked_add(2)?)?;
+    slots
+        .chunks(2)
+        .map(|pair| Some(i16::from_le_bytes(pair.try_into().ok()?)))
+        .collect()
+}
+
+impl State {
+    /// The value of a load of the frame slot at `offset`: the object that a
+    /// temporary slot is bound to, or the slot.
+    fn load(&self, offset: i16, word: bool) -> Value {
+        let (expr, class) = self
+            .bindings
+            .get(&offset)
+            .cloned()
+            .unwrap_or_else(|| (Expr::frame(offset), None));
+        Value {
+            expr,
+            word,
+            slot: Some(offset),
+            class,
+        }
+    }
+}
+
+/// Lifts a call through the object register at `vtable_offset`.
+fn object_call(
+    state: &mut State,
+    callees: &Callees,
+    types: Option<&VbTypes>,
+    vtable_offset: u16,
+    pushes: bool,
+    at: u32,
+) -> Result<Option<Stmt>, LiftFault> {
+    let (object, class) = state.object.clone().ok_or(LiftFault::NoObject(at))?;
+    if object == Expr::Arg(8)
+        && let Some((name, interface)) = callees.control(vtable_offset)
+    {
+        if !pushes {
+            return Err(LiftFault::NoFunction(at));
+        }
+        state.stack.push(Value {
+            expr: Expr::Member(Box::new(object), name.to_owned()),
+            word: true,
+            slot: None,
+            class: Some(interface.to_owned()),
+        });
+        return Ok(None);
+    }
+    if pushes {
+        return Err(LiftFault::NoFunction(at));
+    }
+    let function = class
+        .as_deref()
+        .and_then(|class| types?.interface(class)?.function(vtable_offset))
+        .ok_or(LiftFault::NoFunction(at))?;
+    let bytes = function.arg_bytes.ok_or(LiftFault::CallArguments(at))?;
+    let mut args = call_arguments(&mut state.stack, bytes, at)?;
+    let name = member_name(function);
+    let has = |kind: &str| function.kinds.iter().any(|one| one == kind);
+    if function.result {
+        let slot = args
+            .pop()
+            .and_then(|value| value.slot)
+            .ok_or(LiftFault::NoResultSlot(at))?;
+        let value = if args.is_empty() && has("get") {
+            Expr::Member(Box::new(object), name)
+        } else {
+            Expr::Call(Callee::Member(Box::new(object), name), expressions(args))
+        };
+        state.bindings.insert(slot, (value, None));
+        return Ok(None);
+    }
+    let target = Expr::Member(Box::new(object.clone()), name.clone());
+    Ok(Some(match (args.as_slice(), has("let"), has("set")) {
+        ([_], true, _) => Stmt::Assign {
+            target,
+            value: expressions(args).remove(0),
+        },
+        ([_], false, true) => Stmt::Set {
+            target,
+            value: expressions(args).remove(0),
+        },
+        _ => Stmt::Call(Callee::Member(Box::new(object), name), expressions(args)),
+    }))
+}
+
 /// Lifts a listing to statements. `callees` gives the methods that a
-/// `ThisVCallHresult` can call.
+/// `ThisVCallHresult` can call and the control accessors of the form.
+/// `types` gives the interfaces of the controls, when the user derived
+/// them.
 ///
 /// # Errors
 ///
@@ -557,12 +785,12 @@ pub fn lift(
     listing: &PcodeListing,
     table: &PcodeTable,
     callees: &Callees,
+    types: Option<&VbTypes>,
 ) -> Result<Vec<LiftedStmt>, LiftFault> {
     if !listing.end.is_complete() {
         return Err(LiftFault::NotDecoded(listing.end));
     }
-    let mut stack: Vec<Value> = Vec::new();
-    let mut object: Option<Expr> = None;
+    let mut state = State::default();
     let mut out = Vec::new();
     let mut start: Option<u32> = None;
     for instruction in &listing.instructions {
@@ -583,75 +811,79 @@ pub fn lift(
         let short = || LiftFault::ShortArguments(at);
         let offset16 = || i16_at(arguments, 0).ok_or_else(short);
         let word16 = |from: usize| u16_at(arguments, from).ok_or_else(short);
-        let mut pop = || {
-            stack
+        let pop = |state: &mut State| {
+            state
+                .stack
                 .pop()
-                .map(|(value, _)| value)
+                .map(|value| value.expr)
                 .ok_or(LiftFault::StackShort(at))
         };
         let stmt = match family {
             Family::Lit(len) => {
                 let value = constant(arguments, len).ok_or_else(short)?;
-                stack.push((Expr::Const(value), true));
+                state.stack.push(Value::plain(Expr::Const(value), true));
                 None
             }
             Family::FrameLoad | Family::ArgRef => {
-                let slot = Expr::frame(offset16()?);
-                stack.push((slot, is_word(names)));
+                let value = state.load(offset16()?, is_word(names));
+                state.stack.push(value);
                 None
             }
             Family::ObjectRegister => {
-                object = Some(Expr::frame(offset16()?));
+                let value = state.load(offset16()?, true);
+                state.object = Some((value.expr, value.class));
                 None
             }
             Family::ObjectRegisterThis => {
-                object = Some(Expr::Arg(8));
+                state.object = Some((Expr::Arg(8), None));
                 None
             }
             Family::Binary(op) => {
-                let right = pop()?;
-                let left = pop()?;
-                stack.push((
+                let right = pop(&mut state)?;
+                let left = pop(&mut state)?;
+                state.stack.push(Value::plain(
                     Expr::Binary(op, Box::new(left), Box::new(right)),
                     is_word(names),
                 ));
                 None
             }
             Family::Convert(function) => {
-                let value = pop()?;
-                stack.push(match function {
-                    Some(function) => (
+                let value = pop(&mut state)?;
+                state.stack.push(match function {
+                    Some(function) => Value::plain(
                         Expr::Convert(function, Box::new(value)),
                         WORD_CONVERSIONS.contains(&function),
                     ),
-                    None => (value, false),
+                    None => Value::plain(value, false),
                 });
                 None
             }
             Family::FrameStore | Family::IndirectStore => {
-                let value = pop()?;
+                let value = pop(&mut state)?;
+                let slot = offset16()?;
+                state.bindings.remove(&slot);
                 Some(Stmt::Assign {
-                    target: Expr::frame(offset16()?),
+                    target: Expr::frame(slot),
                     value,
                 })
             }
             Family::FieldStore => {
-                let value = pop()?;
-                let base = object.clone().ok_or(LiftFault::NoObject(at))?;
+                let value = pop(&mut state)?;
+                let (base, _) = state.object.clone().ok_or(LiftFault::NoObject(at))?;
                 Some(Stmt::Assign {
                     target: Expr::Field(Box::new(base), word16(0)?),
                     value,
                 })
             }
             Family::GlobalStore => {
-                let value = pop()?;
+                let value = pop(&mut state)?;
                 Some(Stmt::Assign {
                     target: Expr::Global(word16(0)?),
                     value,
                 })
             }
             Family::BranchFalse => {
-                let condition = pop()?;
+                let condition = pop(&mut state)?;
                 let target = offset16()?;
                 Some(Stmt::IfNotGoTo {
                     condition,
@@ -661,29 +893,56 @@ pub fn lift(
             Family::Branch => Some(Stmt::GoTo(offset16()?.cast_unsigned())),
             Family::End => Some(Stmt::End),
             Family::Exit => Some(Stmt::Exit),
-            Family::Free => None,
+            Family::Free => {
+                for slot in freed_slots(names, arguments).ok_or_else(short)? {
+                    state.pending.remove(&slot);
+                    state.bindings.remove(&slot);
+                }
+                None
+            }
             Family::ThisCall => {
                 let method = callees.method(word16(0)?).ok_or(LiftFault::NoCallee(at))?;
                 let bytes = method
                     .arg_size
                     .checked_sub(4)
                     .ok_or(LiftFault::CallArguments(at))?;
-                let args = call_arguments(&mut stack, bytes, at)?;
-                Some(Stmt::Call(Callee::Method(method.index), args))
+                let args = call_arguments(&mut state.stack, bytes, at)?;
+                Some(Stmt::Call(Callee::Method(method.index), expressions(args)))
             }
             Family::ImportCall { result } => {
                 let callee = Callee::Import(word16(0)?);
-                let args = call_arguments(&mut stack, word16(2)?, at)?;
+                let args = expressions(call_arguments(&mut state.stack, word16(2)?, at)?);
                 if result {
-                    stack.push((Expr::Call(callee, args), true));
+                    state
+                        .stack
+                        .push(Value::plain(Expr::Call(callee, args), true));
                     None
                 } else {
                     Some(Stmt::Call(callee, args))
                 }
             }
+            Family::ObjectStore => {
+                let value = state.stack.pop().ok_or(LiftFault::StackShort(at))?;
+                let slot = offset16()?;
+                if state.stack.is_empty() {
+                    let set = LiftedStmt {
+                        offset: first,
+                        stmt: Stmt::Set {
+                            target: Expr::frame(slot),
+                            value: value.expr.clone(),
+                        },
+                    };
+                    state.pending.insert(slot, (out.len(), set));
+                }
+                state.bindings.insert(slot, (value.expr, value.class));
+                None
+            }
+            Family::ObjectCall { pushes } => {
+                object_call(&mut state, callees, types, word16(0)?, pushes, at)?
+            }
         };
         if let Some(stmt) = stmt {
-            if !stack.is_empty() {
+            if !state.stack.is_empty() {
                 return Err(LiftFault::StackLeft(at));
             }
             out.push(LiftedStmt {
@@ -692,6 +951,11 @@ pub fn lift(
             });
             start = None;
         }
+    }
+    let mut pending: Vec<PendingSet> = state.pending.into_values().collect();
+    pending.sort_by_key(|(index, _)| std::cmp::Reverse(*index));
+    for (index, set) in pending {
+        out.insert(index.min(out.len()), set);
     }
     Ok(out)
 }
@@ -705,16 +969,20 @@ pub fn render(stmts: &[LiftedStmt]) -> Vec<String> {
         .iter()
         .filter_map(|lifted| match lifted.stmt {
             Stmt::IfNotGoTo { target, .. } | Stmt::GoTo(target) => Some(target),
-            Stmt::Assign { .. } | Stmt::End | Stmt::Exit | Stmt::Call(..) => None,
+            Stmt::Assign { .. } | Stmt::Set { .. } | Stmt::End | Stmt::Exit | Stmt::Call(..) => {
+                None
+            }
         })
         .collect();
     targets.sort_unstable();
     targets.dedup();
     let mut lines = Vec::new();
+    let mut labelled = Vec::new();
     for lifted in stmts {
         let label = u16::try_from(lifted.offset)
             .ok()
-            .filter(|offset| targets.contains(offset));
+            .filter(|offset| targets.contains(offset) && !labelled.contains(offset));
+        labelled.extend(label);
         match label {
             Some(offset) => lines.push(format!("L{offset:04X}: {}", lifted.stmt.text())),
             None => lines.push(format!("       {}", lifted.stmt.text())),
@@ -741,6 +1009,7 @@ mod tests {
     use super::{Callees, LiftFault, lift, render};
     use crate::read::region::{Off, Region};
     use crate::vb::pcode::{PcodeTable, disassemble};
+    use crate::vb::types::VbTypes;
 
     /// A table built here. The opcode numbers are placeholders, chosen for
     /// this test: a table that a runtime gives must not enter this
@@ -822,6 +1091,15 @@ names = ["FFree1Ad"]
 [primary.19]
 width = "counted"
 names = ["FFreeStr"]
+[primary.1A]
+width = 2
+names = ["VCallAd", "VCallI2", "VCallI4", "VCallStr"]
+[primary.1B]
+width = 2
+names = ["FStAdFunc"]
+[primary.1C]
+width = 4
+names = ["VCallHresult"]
 [lead1.C8]
 width = 0
 names = ["End"]
@@ -834,7 +1112,106 @@ names = ["End"]
     fn lines_with(body: &[u8], callees: &Callees) -> Result<Vec<String>, LiftFault> {
         let table = PcodeTable::parse(TABLE.as_bytes()).unwrap();
         let listing = disassemble(&Region::new(body, Off::new(0)), &table);
-        lift(&listing, &table, callees).map(|stmts| render(&stmts))
+        lift(&listing, &table, callees, None).map(|stmts| render(&stmts))
+    }
+
+    /// Interfaces built here, in the form that `derive-vb-types` writes. The
+    /// interface `_Box` and its offsets are placeholders.
+    const TYPES: &str = r#"
+[interfaces._Box]
+vtable_size = 64
+[interfaces._Box.functions.00A8]
+names = ["_Default", "Text"]
+kinds = ["get", "get"]
+arg_bytes = 4
+result = true
+[interfaces._Box.functions.00AC]
+names = ["_Default", "Text"]
+kinds = ["let", "let"]
+arg_bytes = 4
+result = false
+[interfaces._Box.functions.00B0]
+names = ["Cls"]
+kinds = ["method"]
+arg_bytes = 0
+result = false
+"#;
+
+    /// Lifts `body` with the control `box1` at the accessor offset `0x32C`
+    /// of `Me`, of the interface `_Box`.
+    fn object_lines(body: &[u8]) -> Result<Vec<String>, LiftFault> {
+        let table = PcodeTable::parse(TABLE.as_bytes()).unwrap();
+        let types = VbTypes::parse(TYPES.as_bytes()).unwrap();
+        let callees = Callees::default().with_control(0x32C, "box1", "_Box");
+        let listing = disassemble(&Region::new(body, Off::new(0)), &table);
+        lift(&listing, &table, &callees, Some(&types)).map(|stmts| render(&stmts))
+    }
+
+    /// `FLdPrThis`, then `VCallAd` of the accessor `0x32C`, then `FStAdFunc`
+    /// into `local_68`, then `FLdPr` of `local_68`.
+    const BOX1_IN_LOCAL_68: [u8; 9] = [0x16, 0x1A, 0x2C, 0x03, 0x1B, 0x98, 0xFF, 0x06, 0x98];
+
+    #[test]
+    fn a_property_get_of_a_control_binds_its_result_slot() {
+        // local_88 = box1.Text: push the address of local_64 for the result,
+        // get the control into a temporary slot, call the get, then load
+        // local_64 and store it.
+        let mut body = vec![0x15, 0x9C, 0xFF];
+        body.extend_from_slice(&BOX1_IN_LOCAL_68);
+        body.extend_from_slice(&[
+            0xFF, 0x1C, 0xA8, 0x00, 0x00, 0x00, 0x03, 0x9C, 0xFF, 0x05, 0x78, 0xFF, 0x18, 0x98,
+            0xFF, 0x0C,
+        ]);
+        assert_eq!(
+            object_lines(&body).unwrap(),
+            ["       local_88 = Me.box1.Text", "       Exit"]
+        );
+    }
+
+    #[test]
+    fn a_let_and_a_method_of_a_control_give_statements_and_a_freed_slot_no_set() {
+        let mut body = vec![0x02, 0x05];
+        body.extend_from_slice(&BOX1_IN_LOCAL_68);
+        body.extend_from_slice(&[0xFF, 0x1C, 0xAC, 0x00, 0x00, 0x00, 0x18, 0x98, 0xFF]);
+        body.extend_from_slice(&BOX1_IN_LOCAL_68);
+        body.extend_from_slice(&[0xFF, 0x1C, 0xB0, 0x00, 0x00, 0x00, 0x18, 0x98, 0xFF, 0x0C]);
+        assert_eq!(
+            object_lines(&body).unwrap(),
+            [
+                "       Me.box1.Text = 5",
+                "       Call Me.box1.Cls()",
+                "       Exit"
+            ]
+        );
+    }
+
+    #[test]
+    fn an_object_slot_that_no_free_frees_gives_a_set() {
+        let mut body = BOX1_IN_LOCAL_68.to_vec();
+        body.extend_from_slice(&[0xFF, 0x1C, 0xB0, 0x00, 0x00, 0x00, 0x0C]);
+        assert_eq!(
+            object_lines(&body).unwrap(),
+            [
+                "       Set local_68 = Me.box1",
+                "       Call Me.box1.Cls()",
+                "       Exit"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_call_of_an_object_that_the_lift_cannot_type_gives_its_fault() {
+        // FLdPr of local_88, which holds no known object, then a call.
+        let unknown = [0x06, 0x78, 0xFF, 0x1C, 0xB0, 0x00, 0x00, 0x00, 0x0C];
+        assert_eq!(object_lines(&unknown), Err(LiftFault::NoFunction(3)));
+        // The accessor of an offset that no control has.
+        let accessor = [0x16, 0x1A, 0x30, 0x03, 0x0C];
+        assert_eq!(object_lines(&accessor), Err(LiftFault::NoFunction(1)));
+        // A get whose result pointer is a constant.
+        let mut constant = vec![0x02, 0x00];
+        constant.extend_from_slice(&BOX1_IN_LOCAL_68);
+        constant.extend_from_slice(&[0xFF, 0x1C, 0xA8, 0x00, 0x00, 0x00, 0x0C]);
+        assert_eq!(object_lines(&constant), Err(LiftFault::NoResultSlot(12)));
     }
 
     #[test]

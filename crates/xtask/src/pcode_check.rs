@@ -83,7 +83,7 @@ fn check(path: &str) -> Result<(usize, Vec<String>, usize), String> {
                     .body(&pe)
                     .ok_or_else(|| format!("{key}: a body cannot be read"))?;
                 let listing = disassemble(&body, &table);
-                if lift(&listing, &table, &callees).is_ok() {
+                if lift(&listing, &table, &callees, None).is_ok() {
                     lifted = lifted.saturating_add(1);
                 }
                 if !listing.end.is_complete() {

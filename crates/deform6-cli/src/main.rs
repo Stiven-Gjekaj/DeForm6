@@ -393,7 +393,7 @@ fn print_pcode(data: &[u8], table: &PcodeTable, lift: bool) -> Result<(), deform
             };
             let listing = disassemble(&body, table);
             if lift {
-                match deform6::vb::lift::lift(&listing, table, &callees) {
+                match deform6::vb::lift::lift(&listing, table, &callees, None) {
                     Ok(stmts) => {
                         for line in deform6::vb::lift::render(&stmts) {
                             println!("    {line}");
