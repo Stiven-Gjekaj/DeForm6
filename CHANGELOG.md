@@ -56,6 +56,9 @@ heading its version and its date.
   Neither file enters the repository. `cargo run -p xtask --
   check-pcode-table` decodes each P-code body of the corpus with that table:
   680 of 680 decode to their end.
+- `vb::pcode` decodes a P-code body with that table, and `deform6 disasm
+  <exe> --pcode-table <table>` prints the P-code of each procedure. The
+  listing gives opcodes, not Basic.
 
 ### What stays open
 
@@ -65,8 +68,8 @@ heading its version and its date.
 ### What this does not do
 
 - It does not change the version in `Cargo.toml`, and it has no tag.
-- It adds `StubShape`, the field `StubHandler::shape` and the module
-  `vb::procdesc` to the library. It
+- It adds `StubShape`, the field `StubHandler::shape`, and the modules
+  `vb::procdesc` and `vb::pcode` to the library. It
   removes no public item, and it changes the type of none. For a P-code
   program, a report now gives a handler address where it gave none, and the
   text of an `UnknownStubShape` defect names both shapes.
