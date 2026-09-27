@@ -17,6 +17,7 @@
 //! two plans in one wave.
 
 pub mod classify;
+pub mod constants;
 pub mod controlinfo;
 pub mod controltree;
 pub mod frx;
