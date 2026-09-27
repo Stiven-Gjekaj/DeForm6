@@ -34,6 +34,7 @@ pub mod procdesc;
 pub mod project;
 pub mod propstream;
 pub mod runtime;
+pub mod types;
 pub mod vbstr;
 
 pub use crate::error::Refusal;
