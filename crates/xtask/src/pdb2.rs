@@ -314,12 +314,12 @@ impl Omap {
     clippy::arithmetic_side_effects,
     reason = "a test builds the state it needs and must fail loudly when that state is wrong"
 )]
-mod tests {
+pub(crate) mod tests {
     use super::{Dbi, Omap, Pdb2, Public, SIGNATURE, publics};
 
     /// Builds a program database 2.00 with a page size of 0x40, holding
     /// `streams`. The directory is on page 1, and each stream follows it.
-    fn pdb(streams: &[&[u8]]) -> Vec<u8> {
+    pub(crate) fn pdb(streams: &[&[u8]]) -> Vec<u8> {
         const PAGE: usize = 0x40;
         let pages_of = |len: usize| len.div_ceil(PAGE);
         let mut next = 2_u16;

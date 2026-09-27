@@ -12,6 +12,7 @@
 # committed instead; the table it writes is not.
 derived/opcode-table.toml
 derived/pcode-table.toml
+derived/symbols/
 
 # macOS.
 .DS_Store
