@@ -1073,7 +1073,9 @@ fn object_call(
         } else {
             Expr::Call(Callee::Member(Box::new(object), name), expressions(args))
         };
-        state.bindings.insert(slot, (value, None));
+        state
+            .bindings
+            .insert(slot, (value, function.result_interface.clone()));
         return Ok(None);
     }
     let target = Expr::Member(Box::new(object.clone()), name.clone());
@@ -1748,6 +1750,12 @@ names = ["_Default", "Text"]
 kinds = ["let", "let"]
 arg_bytes = 4
 result = false
+[interfaces._Box.functions.00B4]
+names = ["Container"]
+kinds = ["get"]
+arg_bytes = 4
+result = true
+result_interface = "_Box"
 [interfaces._Box.functions.00B0]
 names = ["Cls"]
 kinds = ["method"]
@@ -1814,6 +1822,22 @@ result = false
                 "       Call Me.box1.Cls()",
                 "       Exit"
             ]
+        );
+    }
+
+    #[test]
+    fn the_result_of_a_get_keeps_its_interface() {
+        // Me.box1.Container.Cls: the get of Container writes local_64, whose
+        // interface is _Box, and FLdPr of local_64 calls Cls on it.
+        let mut body = vec![0x15, 0x9C, 0xFF];
+        body.extend_from_slice(&BOX1_IN_LOCAL_68);
+        body.extend_from_slice(&[
+            0xFF, 0x1C, 0xB4, 0x00, 0x00, 0x00, 0x06, 0x9C, 0xFF, 0x1C, 0xB0, 0x00, 0x00, 0x00,
+            0x0C,
+        ]);
+        assert_eq!(
+            object_lines(&body).unwrap()[0],
+            "       Call Me.box1.Container.Cls()"
         );
     }
 
