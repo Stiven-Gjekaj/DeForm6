@@ -89,7 +89,8 @@
 //! | `LateMemCallLdVar`, `LateMemLdVar` | As `LateMemCall`, or with no arguments, into a frame slot, and push the address of the slot |
 //! | `ImpAdStAdFunc` | Pop an object, and `Set` a global at a 16-bit index to it |
 //! | `LdPrVar` | Pop the address of a `Variant`, and load its object into the object register |
-//! | `CStrVarVal`, `CBoolVarNull` | Convert the `Variant` at the popped address |
+//! | `CStrVarVal`, `CStrVarTmp`, `CBoolVarNull`, `FnLenVar` | Convert the `Variant` at the popped address, or give its `Len` |
+//! | `NextStepI2` | As `NextI2` |
 //! | `ConcatVar` | Pop the addresses of two `Variant` values, push the address of their `&` |
 //! | `FDupVar` | Copy the `Variant` of the first frame slot into the second |
 //! | `ForStepI2` | As `ForStepI4` |
@@ -1002,7 +1003,9 @@ fn family_of(name: &str) -> Option<Family> {
             arguments: false,
         },
         "LdPrVar" => Family::VariantObjectRegister,
-        "CStrVarVal" => Family::Function("CStr"),
+        "CStrVarVal" | "CStrVarTmp" => Family::Function("CStr"),
+        "FnLenVar" => Family::Function("Len"),
+        "NextStepI2" => Family::Next,
         "CBoolVarNull" => Family::Function("CBool"),
         "ConcatVar" => Family::VariantBinary(BinaryOp::Concat),
         "FDupVar" => Family::VariantCopy,
@@ -2574,6 +2577,12 @@ names = ["CVarStr"]
 [primary.43]
 width = 2
 names = ["FLdVar"]
+[primary.46]
+width = 0
+names = ["CStrVarTmp"]
+[primary.47]
+width = 2
+names = ["FnLenVar"]
 [primary.44]
 width = 4
 names = ["LateMemCall"]
@@ -3343,6 +3352,15 @@ result = false
         // import_2(local_64): FLdVar pushes the 16 bytes of the Variant.
         let copy = [0x43, 0x9C, 0xFF, 0x12, 0x02, 0x00, 0x10, 0x00, 0x0C];
         assert_eq!(lines(&copy).unwrap()[0], "       Call import_2(local_64)");
+        // import_2(CStr(local_64), Len(local_60))
+        let text = [
+            0x15, 0xA0, 0xFF, 0x47, 0x90, 0xFF, 0x15, 0x9C, 0xFF, 0x46, 0x12, 0x02, 0x00, 0x08,
+            0x00, 0x0C,
+        ];
+        assert_eq!(
+            lines(&text).unwrap()[0],
+            "       Call import_2(CStr(local_64), Len(local_60))"
+        );
         // For local_64 = 1 To 9 Step 2
         let step = [
             0x02, 0x01, 0x15, 0x9C, 0xFF, 0x02, 0x09, 0x02, 0x02, 0x41, 0x9C, 0xFF, 0x0E, 0x00,
