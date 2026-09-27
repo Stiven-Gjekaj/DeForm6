@@ -52,8 +52,10 @@ heading its version and its date.
 - `cargo run -p xtask -- fetch-pcode-symbols <dll>` fetches the symbol file
   of a copy of `MSVBVM60.DLL` from the symbol server of Microsoft, and
   `cargo run -p xtask -- derive-pcode-table <dll> <pdb>` writes the P-code
-  dispatch table with the name of each handler. Neither file enters the
-  repository.
+  dispatch table with the name and the argument width of each handler.
+  Neither file enters the repository. `cargo run -p xtask --
+  check-pcode-table` decodes each P-code body of the corpus with that table:
+  680 of 680 decode to their end.
 
 ### What stays open
 
