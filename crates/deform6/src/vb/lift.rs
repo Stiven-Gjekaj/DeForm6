@@ -76,6 +76,10 @@
 //! | `NewIfNullAd` | As `NewIfNullPr`, and push the object in the place of setting the object register |
 //! | `MemStStrCopy` | Pop a string into a field of the object register |
 //! | `Redim` | Pop an array, then a lower and an upper bound for each dimension, and `ReDim` it |
+//! | `RedimPreserve` | As `Redim`, and keep the elements |
+//! | `Open` | Pop the record length, the file number and the file name, and open the file in the mode of a 16-bit argument |
+//! | `CRec2Ansi` | As `CStr2Ansi`, for a record |
+//! | `IStDarg` | As `IStStrCopy` |
 //! | `AryLdRf`, `Ary1LdRf` | Pop an array and its indexes, and push the address of the element |
 //! | an operator and `VarBool`, such as `EqVarBool` | Pop two `Variant` values, push the Boolean of the comparison |
 //! | `UMiI2`, `UMiI4`, `UMiR4`, `UMiR8` | The negative of the top value |
@@ -817,7 +821,8 @@ enum Family {
     VariantObjectRegister,
     VariantBinary(BinaryOp),
     VariantCopy,
-    Redim,
+    Redim { preserve: bool },
+    Open,
     ArrayReference { dimensions_argument: bool },
     LitSingle,
     CopyBytes,
@@ -969,7 +974,11 @@ fn family_of(name: &str) -> Option<Family> {
         }
         "ConcatStr" => Family::Binary(BinaryOp::Concat),
         "LateIdLdVar" => Family::LateGet,
-        "Redim" => Family::Redim,
+        "Redim" => Family::Redim { preserve: false },
+        "RedimPreserve" => Family::Redim { preserve: true },
+        "Open" => Family::Open,
+        "CRec2Ansi" => Family::StringCopy,
+        "IStDarg" => Family::IndirectStore,
         "AryLdRf" => Family::ArrayReference {
             dimensions_argument: true,
         },
@@ -2091,7 +2100,24 @@ fn run(
                 ));
                 None
             }
-            Family::Redim => {
+            Family::Open => {
+                let length = pop(&mut state)?;
+                let number = pop(&mut state)?;
+                let file = pop(&mut state)?;
+                let mode = match word16(0)? & 0xFF {
+                    0x01 => Expr::Word("Input"),
+                    0x02 => Expr::Word("Output"),
+                    0x04 => Expr::Word("Random"),
+                    0x08 => Expr::Word("Append"),
+                    0x20 => Expr::Word("Binary"),
+                    other => Expr::Const(i64::from(other)),
+                };
+                Some(Stmt::Call(
+                    Callee::Member(Box::new(Expr::Word("VBA")), "Open".to_owned()),
+                    vec![file, mode, number, length],
+                ))
+            }
+            Family::Redim { preserve } => {
                 let array = pop(&mut state)?;
                 let mut bounds = Vec::new();
                 for _ in 0..word16(0)?.saturating_mul(2) {
@@ -2110,7 +2136,10 @@ fn run(
                     })
                     .collect();
                 Some(Stmt::Call(
-                    Callee::Member(Box::new(Expr::Word("VBA")), "ReDim".to_owned()),
+                    Callee::Member(
+                        Box::new(Expr::Word("VBA")),
+                        if preserve { "ReDimPreserve" } else { "ReDim" }.to_owned(),
+                    ),
                     vec![Expr::Index(Box::new(array), ranges)],
                 ))
             }
@@ -2654,6 +2683,18 @@ names = ["CI4R4"]
 [primary.49]
 width = 2
 names = ["FLdCy", "FLdR8"]
+[primary.4A]
+width = 2
+names = ["Open"]
+[primary.4B]
+width = 8
+names = ["RedimPreserve"]
+[primary.4C]
+width = 2
+names = ["IStDarg"]
+[primary.4D]
+width = 2
+names = ["CRec2Ansi"]
 [primary.44]
 width = 4
 names = ["LateMemCall"]
@@ -3470,6 +3511,40 @@ result = false
         assert_eq!(
             render(&lift(&listing, &table, &callees, None).unwrap())[0],
             "       Call VBA.ReDim(arg_10((0 To Me.method_2(arg_C))))"
+        );
+        // Open "a" For Binary As #1, with the length -1 of no Len clause.
+        let open = [
+            0x21, 0x04, 0x00, 0x02, 0x01, 0x02, 0xFF, 0x4A, 0x20, 0x00, 0x0C,
+        ];
+        let table = PcodeTable::parse(TABLE.as_bytes()).unwrap();
+        let listing = disassemble(&Region::new(&open, Off::new(0)), &table);
+        let callees = Callees::default().with_string(4, "a");
+        assert_eq!(
+            render(&lift(&listing, &table, &callees, None).unwrap())[0],
+            "       Call VBA.Open(\"a\", Binary, 1, -1)"
+        );
+        // ReDim Preserve arg_C(0 To 7)
+        let preserve = [
+            0x02, 0x00, 0x02, 0x07, 0x15, 0x0C, 0x00, 0x4B, 0x01, 0x00, 0x11, 0x00, 0x01, 0x00,
+            0x80, 0x00, 0x0C,
+        ];
+        assert_eq!(
+            lines(&preserve).unwrap()[0],
+            "       Call VBA.ReDimPreserve(arg_C((0 To 7)))"
+        );
+        // arg_C = 5; then import_2(local_54) through an ANSI copy of the
+        // record into local_88.
+        let darg = [
+            0x02, 0x05, 0x4C, 0x0C, 0x00, 0x15, 0xAC, 0xFF, 0x15, 0x78, 0xFF, 0x4D, 0x03, 0x00,
+            0x15, 0x78, 0xFF, 0x12, 0x02, 0x00, 0x04, 0x00, 0x0C,
+        ];
+        assert_eq!(
+            lines(&darg).unwrap(),
+            [
+                "       arg_C = 5",
+                "       Call import_2(local_54)",
+                "       Exit"
+            ]
         );
         // For local_64 = 1 To 9 Step 2
         let step = [
