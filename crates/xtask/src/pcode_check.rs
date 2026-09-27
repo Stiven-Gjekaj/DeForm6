@@ -12,8 +12,9 @@
 //! the interfaces of the controls that `derive-vb-types` wrote.
 
 use deform6::read::pe::PeImage;
+use deform6::vb::constants::constant_string;
 use deform6::vb::header::{VbHeader, header_region};
-use deform6::vb::lift::lift;
+use deform6::vb::lift::{lift, string_indexes};
 use deform6::vb::links::read_method_links;
 use deform6::vb::object::ObjectTable;
 use deform6::vb::pcode::{PcodeTable, disassemble};
@@ -93,6 +94,16 @@ fn check(path: &str, types_path: Option<&str>) -> Result<(usize, Vec<String>, us
                 .callees(&methods);
             if let Some(types) = &types {
                 callees = types.with_controls(callees, &pe, object);
+            }
+            for descriptor in methods.descriptors() {
+                let Some(body) = descriptor.body(&pe) else {
+                    continue;
+                };
+                for index in string_indexes(&disassemble(&body, &table), &table) {
+                    if let Some(text) = constant_string(&pe, object.lp_object_info, index) {
+                        callees = callees.with_string(index, &text);
+                    }
+                }
             }
             for descriptor in methods.descriptors() {
                 bodies = bodies.saturating_add(1);

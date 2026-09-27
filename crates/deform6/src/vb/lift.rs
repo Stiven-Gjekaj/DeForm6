@@ -1328,6 +1328,32 @@ pub fn lift(
     Ok(out)
 }
 
+/// Gives the index of each string of the constant table that `listing`
+/// names: the argument of each `LitStr`, and the second argument of each
+/// `LitVarStr`. A caller reads those strings with
+/// `vb::constants::constant_string` and gives them to [`Callees`].
+#[must_use]
+pub fn string_indexes(listing: &PcodeListing, table: &PcodeTable) -> Vec<u16> {
+    let mut out = Vec::new();
+    for instruction in &listing.instructions {
+        let names = table
+            .slot(instruction.lead, instruction.opcode)
+            .map(|slot| slot.names.as_slice())
+            .unwrap_or_default();
+        let at = match family(names) {
+            Some(Family::LitString) => 0,
+            Some(Family::LitVariant(VariantKind::Str)) => 2,
+            _ => continue,
+        };
+        if let Some(index) = u16_at(&instruction.arguments, at)
+            && !out.contains(&index)
+        {
+            out.push(index);
+        }
+    }
+    out
+}
+
 /// Renders statements as lines, with a label before each statement that a
 /// branch names. A label whose offset starts no statement is given on a
 /// line of its own at the end.
@@ -1378,7 +1404,7 @@ pub fn render(stmts: &[LiftedStmt]) -> Vec<String> {
     reason = "a test builds the state it needs and must fail loudly when that state is wrong"
 )]
 mod tests {
-    use super::{Callees, LiftFault, lift, render};
+    use super::{Callees, LiftFault, lift, render, string_indexes};
     use crate::read::region::{Off, Region};
     use crate::vb::pcode::{PcodeTable, disassemble};
     use crate::vb::types::VbTypes;
@@ -1913,6 +1939,14 @@ result = false
                 "L0022: Exit",
             ]
         );
+    }
+
+    #[test]
+    fn the_string_indexes_are_the_arguments_of_lit_str() {
+        let table = PcodeTable::parse(TABLE.as_bytes()).unwrap();
+        let body = [0x21, 0x05, 0x00, 0x21, 0x02, 0x00, 0x21, 0x05, 0x00, 0x0C];
+        let listing = disassemble(&Region::new(&body, Off::new(0)), &table);
+        assert_eq!(string_indexes(&listing, &table), [5, 2]);
     }
 
     #[test]
