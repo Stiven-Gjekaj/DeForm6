@@ -84,6 +84,13 @@
 //! | `IStStrCopy` | Pop a string into what the frame slot points to |
 //! | `LitR4FP` | Push a 4-byte floating point constant on the floating point unit |
 //! | `PopTmpLdAdFPR4`, `CVarBoolI2` | Pop a value into a temporary slot, and push its address |
+//! | `ImpAdStAdFunc` | Pop an object, and `Set` a global at a 16-bit index to it |
+//! | `LdPrVar` | Pop the address of a `Variant`, and load its object into the object register |
+//! | `CStrVarVal`, `CBoolVarNull` | Convert the `Variant` at the popped address |
+//! | `ConcatVar` | Pop the addresses of two `Variant` values, push the address of their `&` |
+//! | `FDupVar` | Copy the `Variant` of the first frame slot into the second |
+//! | `ForStepI2` | As `ForStepI4` |
+//! | `FnFixR4`, `FnFixR8` | `Fix` of a value of the floating point unit |
 //! | `OnErrorGoto` | `On Error GoTo` a label, `On Error Resume Next` for `0xFFFF`, or `On Error GoTo 0` for `0xFFFE` |
 //!
 //! All the names of one slot must give one family. A conversion whose names
@@ -782,6 +789,10 @@ enum Family {
     FunctionOf(&'static str, u8),
     FloatFunction(&'static str),
     ArrayErase,
+    GlobalObjectStore,
+    VariantObjectRegister,
+    VariantBinary(BinaryOp),
+    VariantCopy,
     Redim,
     ArrayReference { dimensions_argument: bool },
     LitSingle,
@@ -954,6 +965,14 @@ fn family_of(name: &str) -> Option<Family> {
         "IStStrCopy" => Family::IndirectStore,
         "LitR4FP" => Family::LitSingle,
         "PopTmpLdAdFPR4" | "CVarBoolI2" => Family::PopTemp,
+        "ImpAdStAdFunc" => Family::GlobalObjectStore,
+        "LdPrVar" => Family::VariantObjectRegister,
+        "CStrVarVal" => Family::Function("CStr"),
+        "CBoolVarNull" => Family::Function("CBool"),
+        "ConcatVar" => Family::VariantBinary(BinaryOp::Concat),
+        "FDupVar" => Family::VariantCopy,
+        "ForStepI2" => Family::For { step: true },
+        "FnFixR4" | "FnFixR8" => Family::FloatFunction("Fix"),
         "FnAbsI2" | "FnAbsI4" => Family::Function("Abs"),
         "FnAbsR4" | "FnAbsR8" => Family::FloatFunction("Abs"),
         "FnIntR4" | "FnIntR8" => Family::FloatFunction("Int"),
@@ -1609,6 +1628,40 @@ fn run(
                     target: Expr::Field(Box::new(base), word16(0)?),
                     value,
                 })
+            }
+            Family::GlobalObjectStore => {
+                let value = pop(&mut state)?;
+                Some(Stmt::Set {
+                    target: Expr::Global(word16(0)?),
+                    value,
+                })
+            }
+            Family::VariantObjectRegister => {
+                let value = state.stack.pop().ok_or(LiftFault::StackShort(at))?;
+                state.object = Some((value.expr, value.class));
+                None
+            }
+            Family::VariantBinary(op) => {
+                let right = pop(&mut state)?;
+                let left = pop(&mut state)?;
+                state.stack.push(Value::plain(
+                    Expr::Binary(op, Box::new(left), Box::new(right)),
+                    true,
+                ));
+                None
+            }
+            Family::VariantCopy => {
+                let source = state.load(offset16()?, true);
+                let slot = i16_at(arguments, 2).ok_or_else(short)?;
+                let copy = LiftedStmt {
+                    offset: first,
+                    stmt: Stmt::Assign {
+                        target: Expr::frame(slot),
+                        value: source.expr.clone(),
+                    },
+                };
+                state.bind_pending(slot, source, out.len(), copy);
+                None
             }
             Family::GlobalStore => {
                 let value = pop(&mut state)?;
@@ -2374,6 +2427,21 @@ names = ["Redim"]
 [primary.3C]
 width = 0
 names = ["MulR4", "MulR8"]
+[primary.3D]
+width = 2
+names = ["ImpAdStAdFunc"]
+[primary.3E]
+width = 0
+names = ["LdPrVar"]
+[primary.3F]
+width = 2
+names = ["ConcatVar"]
+[primary.40]
+width = 4
+names = ["FDupVar"]
+[primary.41]
+width = 4
+names = ["ForStepI2"]
 [lead1.C8]
 width = 0
 names = ["End"]
@@ -3065,6 +3133,37 @@ result = false
         assert_eq!(
             lines(&after).unwrap(),
             ["       Call import_2()", "L0005: GoTo L0005", "       Exit"]
+        );
+    }
+
+    #[test]
+    fn variants_a_global_object_and_a_step_of_integers_give_statements() {
+        // Set global_5 = New class_9
+        let set = [0x27, 0x09, 0x00, 0x3D, 0x05, 0x00, 0x0C];
+        assert_eq!(lines(&set).unwrap()[0], "       Set global_5 = New class_9");
+        // local_68 = local_64; local_88 = local_68 & local_60;
+        // local_88 = local_78.field_34
+        let variants = [
+            0x40, 0x9C, 0xFF, 0x98, 0xFF, 0x15, 0x98, 0xFF, 0x15, 0xA0, 0xFF, 0x3F, 0x90, 0xFF,
+            0x05, 0x78, 0xFF, 0x15, 0x88, 0xFF, 0x3E, 0x1E, 0x34, 0x00, 0x05, 0x78, 0xFF, 0x0C,
+        ];
+        assert_eq!(
+            lines(&variants).unwrap(),
+            [
+                "       local_68 = local_64",
+                "       local_88 = (local_68 & local_60)",
+                "       local_88 = local_78.field_34",
+                "       Exit"
+            ]
+        );
+        // For local_64 = 1 To 9 Step 2
+        let step = [
+            0x02, 0x01, 0x15, 0x9C, 0xFF, 0x02, 0x09, 0x02, 0x02, 0x41, 0x9C, 0xFF, 0x0E, 0x00,
+            0x0C,
+        ];
+        assert_eq!(
+            lines(&step).unwrap()[0],
+            "       For local_64 = 1 To 9 Step 2  ' past the end: GoTo L000E"
         );
     }
 
