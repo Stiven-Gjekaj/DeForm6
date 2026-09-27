@@ -29,6 +29,7 @@
 //! | `ThisVCallHresult` | Call a method of `Me` at a vtable offset |
 //! | `ImpAdCall`, `ImpAdCallHresult`, `ImpAdCallFPR4`, `ImpAdCallFPR8` | Call the procedure at an index of the constant table |
 //! | `ImpAdCall` + `Ad`, `I2`, `I4`, `Str` or `UI1` | The same, and push the result |
+//! | `FFree1Ad`, `FFree1Str`, `FFree1Var`, `FFreeAd`, `FFreeStr`, `FFreeVar` | Free temporary frame slots; the stack does not change, and the lift gives no statement |
 //!
 //! All the names of one slot must give one family. A conversion whose names
 //! give both `CSng` and `CDbl` gives no conversion: one handler serves both,
@@ -335,6 +336,7 @@ enum Family {
     Exit,
     ThisCall,
     ImportCall { result: bool },
+    Free,
 }
 
 /// The type suffixes of the names, and the Basic conversion to each.
@@ -429,6 +431,9 @@ fn family_of(name: &str) -> Option<Family> {
         }
         "ImpAdCallAd" | "ImpAdCallI2" | "ImpAdCallI4" | "ImpAdCallStr" | "ImpAdCallUI1" => {
             Family::ImportCall { result: true }
+        }
+        "FFree1Ad" | "FFree1Str" | "FFree1Var" | "FFreeAd" | "FFreeStr" | "FFreeVar" => {
+            Family::Free
         }
         _ if name.starts_with("ExitProc") => Family::Exit,
         _ if typed("FLd") => Family::FrameLoad,
@@ -656,6 +661,7 @@ pub fn lift(
             Family::Branch => Some(Stmt::GoTo(offset16()?.cast_unsigned())),
             Family::End => Some(Stmt::End),
             Family::Exit => Some(Stmt::Exit),
+            Family::Free => None,
             Family::ThisCall => {
                 let method = callees.method(word16(0)?).ok_or(LiftFault::NoCallee(at))?;
                 let bytes = method
@@ -810,6 +816,12 @@ names = ["FLdPrThis"]
 [primary.17]
 width = 2
 names = ["ILdPr"]
+[primary.18]
+width = 2
+names = ["FFree1Ad"]
+[primary.19]
+width = "counted"
+names = ["FFreeStr"]
 [lead1.C8]
 width = 0
 names = ["End"]
@@ -920,6 +932,19 @@ names = ["End"]
                 "       arg_C.field_40 = 1",
                 "       Exit"
             ]
+        );
+    }
+
+    #[test]
+    fn a_free_of_temporary_slots_changes_no_stack_and_gives_no_statement() {
+        // Push 1, free one slot and two slots, store the 1.
+        let body = [
+            0x02, 0x01, 0x18, 0x78, 0xFF, 0x19, 0x04, 0x00, 0x70, 0xFF, 0x6C, 0xFF, 0x05, 0x78,
+            0xFF, 0x0C,
+        ];
+        assert_eq!(
+            lines(&body).unwrap(),
+            ["       local_88 = 1", "       Exit"]
         );
     }
 
