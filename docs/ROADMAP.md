@@ -686,14 +686,28 @@ source rather than guessed.
 
 **Estimate.** 4 to 8 months.
 
+#### Part 1, done on 2026-09-27
+
+**The bodies.** A width can be checked only against a body whose ends are
+known. `vb::procdesc` reads the method table of an object and each
+`ProcDscInfo` that it names. The body of a procedure is the `ProcSize` bytes
+before its descriptor. The 42 P-code programs give 680 descriptors, and each
+body ends at its descriptor. Section 23 of `STRUCTURES.md` gives the counts.
+
+`inspect` does not report the bodies yet. `Report` and `ObjectReport` are not
+`#[non_exhaustive]`, so a new field breaks the library interface. It waits
+for the release that decodes the bodies.
+
+**Part 2 is next.** It derives the table from the runtime and its debug
+symbols, on a copy that the user owns.
+
 ### Phase 11: P-code statement recovery
 
 **Goal.** Procedure bodies come back as Visual Basic.
 
-Retire one risk in week one: `STRUCTURES.md` section 10.3 has a single source at
-confidence `[L]`, and the claim that a body occupies the `ProcSize` bytes
-immediately before its descriptor is unverified. Check it against a real file
-before anything is built on it.
+Phase 10 part 1 retired the first risk: `STRUCTURES.md` section 10.3 had a
+single source at confidence `[L]`. The P-code corpus confirms that a body
+occupies the `ProcSize` bytes immediately before its descriptor (section 23).
 
 Then: disassemble, lift to an intermediate form, recover control flow, and emit
 Basic.
