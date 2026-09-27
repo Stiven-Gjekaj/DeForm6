@@ -13,6 +13,7 @@
 use deform6::read::pe::PeImage;
 use deform6::vb::header::{VbHeader, header_region};
 use deform6::vb::lift::lift;
+use deform6::vb::links::read_method_links;
 use deform6::vb::object::ObjectTable;
 use deform6::vb::pcode::{PcodeTable, disassemble};
 use deform6::vb::procdesc::read_method_table;
@@ -73,13 +74,16 @@ fn check(path: &str) -> Result<(usize, Vec<String>, usize), String> {
         for object in &objects.objects {
             let methods = read_method_table(&pe, object.lp_object_info)
                 .map_err(|err| format!("{key}: {}: {err}", object.name))?;
+            let callees = read_method_links(&pe, object)
+                .map_err(|err| format!("{key}: {}: {err}", object.name))?
+                .callees(&methods);
             for descriptor in methods.descriptors() {
                 bodies = bodies.saturating_add(1);
                 let body = descriptor
                     .body(&pe)
                     .ok_or_else(|| format!("{key}: a body cannot be read"))?;
                 let listing = disassemble(&body, &table);
-                if lift(&listing, &table).is_ok() {
+                if lift(&listing, &table, &callees).is_ok() {
                     lifted = lifted.saturating_add(1);
                 }
                 if !listing.end.is_complete() {

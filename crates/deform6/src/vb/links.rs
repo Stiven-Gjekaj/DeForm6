@@ -30,7 +30,9 @@ use crate::error::{Defect, DefectKind, Refusal, Site};
 use crate::read::pe::PeImage;
 use crate::read::region::{Off, Rva, Va};
 use crate::vb::classify::has_optional_info;
+use crate::vb::lift::Callees;
 use crate::vb::object::Object;
+use crate::vb::procdesc::{MethodEntry, MethodTable};
 
 /// `STRUCTURES.md` section 5.3: `OptionalObjectInfo` sits at
 /// `Object.lpObjectInfo + 0x38`.
@@ -104,6 +106,40 @@ impl MethodLinks {
             LinkSlot::Method(descriptor) => Some(*descriptor),
             LinkSlot::Other => None,
         }
+    }
+}
+
+impl MethodLinks {
+    /// Gives the methods of `methods` that a `ThisVCallHresult` can call:
+    /// each method slot whose descriptor `methods` holds, by its vtable
+    /// offset, with the index and the argument size of the descriptor. A
+    /// slot whose offset does not fit in 16 bits is left out.
+    #[must_use]
+    pub fn callees(&self, methods: &MethodTable) -> Callees {
+        let mut callees = Callees::default();
+        for (slot, link) in (self.first_slot..).zip(&self.slots) {
+            let LinkSlot::Method(va) = link else {
+                continue;
+            };
+            let Some(offset) = slot
+                .checked_mul(SLOT_SIZE)
+                .and_then(|offset| u16::try_from(offset).ok())
+            else {
+                continue;
+            };
+            let found = methods.entries.iter().find_map(|entry| match entry {
+                MethodEntry::Descriptor { index, descriptor } if descriptor.va == *va => {
+                    Some((*index, descriptor.arg_size))
+                }
+                MethodEntry::Descriptor { .. }
+                | MethodEntry::NotAnAddress { .. }
+                | MethodEntry::Unreadable { .. } => None,
+            });
+            if let Some((index, arg_size)) = found {
+                callees = callees.with_method(offset, index, arg_size);
+            }
+        }
+        callees
     }
 }
 

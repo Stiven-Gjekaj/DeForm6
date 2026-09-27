@@ -40,6 +40,7 @@ use deform6::vb::controlinfo::EventReport;
 use deform6::vb::controltree::ControlKind;
 use deform6::vb::functyp::{Argument, DefaultValue, Prototype, TypeEntry, VbType};
 use deform6::vb::header::{VbHeader, header_region};
+use deform6::vb::links::read_method_links;
 use deform6::vb::object::ObjectTable;
 use deform6::vb::ocx::{Clsid, ExternalControl, OcxHeader};
 use deform6::vb::opcodes::OpcodeTable;
@@ -374,6 +375,9 @@ fn print_pcode(data: &[u8], table: &PcodeTable, lift: bool) -> Result<(), deform
                 continue;
             }
         };
+        let callees = read_method_links(&pe, object)
+            .map(|links| links.callees(&methods))
+            .unwrap_or_default();
         for entry in &methods.entries {
             let MethodEntry::Descriptor { index, descriptor } = entry else {
                 continue;
@@ -389,7 +393,7 @@ fn print_pcode(data: &[u8], table: &PcodeTable, lift: bool) -> Result<(), deform
             };
             let listing = disassemble(&body, table);
             if lift {
-                match deform6::vb::lift::lift(&listing, table) {
+                match deform6::vb::lift::lift(&listing, table, &callees) {
                     Ok(stmts) => {
                         for line in deform6::vb::lift::render(&stmts) {
                             println!("    {line}");
