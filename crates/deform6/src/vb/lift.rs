@@ -119,7 +119,8 @@
 //!   handler pushes the object itself.
 //!
 //! The lift pops values until their sizes add up to the bytes of the call.
-//! It refuses the call when a popped value has no known size on the stack,
+//! It steps over the result of an import call on the floating point unit,
+//! which is not on the stack. It refuses the call when a popped value has no known size on the stack,
 //! such as a value of the floating point unit, or when the sizes do not add
 //! up to the bytes. A value of 4 bytes is a value of a type of 4 bytes or
 //! less, or an address; `PopAdLdVar` gives a `Variant` of 16 bytes. An
@@ -1194,14 +1195,20 @@ fn call_arguments(stack: &mut Vec<Value>, bytes: u16, at: u32) -> Result<Vec<Val
     }
     let mut left = bytes;
     let mut args = Vec::new();
+    let mut floats = Vec::new();
     while left > 0 {
         let value = stack.pop().ok_or(LiftFault::StackShort(at))?;
+        if value.is_float_call() {
+            floats.push(value);
+            continue;
+        }
         left = left
             .checked_sub(u16::from(value.bytes))
             .filter(|_| value.bytes > 0)
             .ok_or(LiftFault::CallArguments(at))?;
         args.push(value);
     }
+    stack.extend(floats.into_iter().rev());
     Ok(args)
 }
 
@@ -1238,9 +1245,9 @@ struct State {
     /// before an `FFree`: they stay.
     kept: Vec<PendingSet>,
     stores: u32,
-    /// The depth on the stack and the first offset of each import call
-    /// whose result is on the floating point unit.
-    floats: Vec<(usize, u32)>,
+    /// The first offset of each import call whose result is on the
+    /// floating point unit, in the order of the stack.
+    floats: Vec<u32>,
     /// The offset of the opcode after the last of those calls.
     resume: Option<u32>,
 }
@@ -1797,14 +1804,20 @@ fn run(
                         .push(Value::plain(Expr::Call(callee, args), true));
                     None
                 } else if float {
-                    let depth = state.stack.len();
-                    let begin = if depth > 0 && state.stack.iter().all(Value::is_float_call) {
+                    let begin = if !state.stack.is_empty()
+                        && state.stack.iter().all(Value::is_float_call)
+                    {
                         state.resume.unwrap_or(first)
                     } else {
                         first
                     };
-                    state.floats.retain(|(below, _)| *below < depth);
-                    state.floats.push((depth, begin));
+                    let below = state
+                        .stack
+                        .iter()
+                        .filter(|value| value.is_float_call())
+                        .count();
+                    state.floats.truncate(below);
+                    state.floats.push(begin);
                     state.resume = next_offset;
                     state
                         .stack
@@ -2183,13 +2196,9 @@ fn run(
                 return Err(LiftFault::StackLeft(at));
             }
             let mut offset = first;
-            for (depth, value) in std::mem::take(&mut state.stack).into_iter().enumerate() {
+            for (count, value) in std::mem::take(&mut state.stack).into_iter().enumerate() {
                 if let Expr::Call(callee, args) = value.expr {
-                    let begin = state
-                        .floats
-                        .iter()
-                        .find(|(below, _)| *below == depth)
-                        .map_or(first, |(_, begin)| *begin);
+                    let begin = state.floats.get(count).copied().unwrap_or(first);
                     out.push(LiftedStmt {
                         offset: begin,
                         stmt: Stmt::Call(callee, args),
@@ -3241,6 +3250,20 @@ result = false
                 "       Call import_2()",
                 "L0005: Call import_3()",
                 "       GoTo L0005",
+                "       Exit"
+            ]
+        );
+        // The argument of the second call comes before the first call, and
+        // the pop steps over the result of the first, which is not on the
+        // stack.
+        let over = [
+            0x0F, 0x9C, 0xFF, 0x12, 0x02, 0x00, 0x00, 0x00, 0x12, 0x03, 0x00, 0x04, 0x00, 0x0C,
+        ];
+        assert_eq!(
+            lines(&over).unwrap(),
+            [
+                "       Call import_2()",
+                "       Call import_3(local_64)",
                 "       Exit"
             ]
         );
