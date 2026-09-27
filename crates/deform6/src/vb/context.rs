@@ -5,7 +5,9 @@
 //! form when the user derived the control types, the strings of its
 //! constant table that its P-code names, and the profile of each object of
 //! the project that its P-code names with `NewIfNullPr`, or the interface
-//! of a class of the runtime that it names so.
+//! of a class of the runtime that it names so. For the GUID that a
+//! `VCallHresult` names, it gives the object of the project whose default
+//! interface has that GUID, or else the interface that [`VbTypes`] names.
 //!
 //! A public method has a `FuncTypDesc` record (`STRUCTURES.md` section
 //! 6.3). An argument of an external class in it names a side structure,
@@ -22,11 +24,16 @@
 
 use crate::read::pe::PeImage;
 use crate::read::region::{Off, Va};
-use crate::vb::constants::{class_reference_iid, constant, constant_name, constant_string};
+use crate::vb::classify::has_optional_info;
+use crate::vb::constants::{
+    class_reference_iid, constant, constant_guid, constant_name, constant_string,
+};
 use crate::vb::functyp::{FuncTypeWalk, ProcedureSignature, PrototypeList, TypeEntry, VbType};
 use std::collections::BTreeMap;
 
-use crate::vb::lift::{Callees, class_indexes, method_calls, name_indexes, string_indexes};
+use crate::vb::lift::{
+    Callees, class_indexes, interface_indexes, method_calls, name_indexes, string_indexes,
+};
 use crate::vb::links::read_method_links;
 use crate::vb::object::Object;
 use crate::vb::pcode::{PcodeListing, PcodeTable, disassemble};
@@ -124,6 +131,32 @@ fn with_declared_arguments(
     callees
 }
 
+/// `STRUCTURES.md` section 5.3: `OptionalObjectInfo` sits at `ObjectInfo +
+/// 0x38`. It holds the count of default IIDs at `0x10`, and at `0x1C` the
+/// address of an array of addresses of them.
+const OPTIONAL_OBJECT_INFO_AT: u32 = 0x38;
+const DEFAULT_IID_COUNT_AT: u32 = 0x10;
+const DEFAULT_IID_TABLE_AT: u32 = 0x1C;
+
+/// Gives the GUID of the first default interface of `object`, when it has
+/// an `OptionalObjectInfo` that names one.
+fn default_iid(pe: &PeImage<'_>, object: &Object) -> Option<[u8; 16]> {
+    if !has_optional_info(object.f_object_type) {
+        return None;
+    }
+    let at = object
+        .lp_object_info
+        .get()
+        .checked_add(OPTIONAL_OBJECT_INFO_AT)?;
+    let optional = pe.region_at_va(Va::new(at))?;
+    if optional.u32_le(Off::new(DEFAULT_IID_COUNT_AT))? == 0 {
+        return None;
+    }
+    let table = optional.va_le(Off::new(DEFAULT_IID_TABLE_AT))?;
+    let iid = pe.region_at_va(table)?.va_le(Off::new(0))?;
+    pe.region_at_va(iid)?.take(Off::new(0), 16)?.try_into().ok()
+}
+
 /// Gives the vtable of `object`: its methods and accessors, and its control
 /// accessors when `types` is given.
 fn profile(pe: &PeImage<'_>, object: &Object, types: Option<&VbTypes>) -> Callees {
@@ -169,6 +202,21 @@ pub fn callees_of_project(
             for index in name_indexes(listing, table) {
                 if let Some(name) = constant_name(pe, object.lp_object_info, index) {
                     callees = callees.with_name(index, &name);
+                }
+            }
+            for index in interface_indexes(listing, table) {
+                let Some(iid) = constant_guid(pe, object.lp_object_info, index) else {
+                    continue;
+                };
+                if let Some((_, profile)) = objects
+                    .iter()
+                    .zip(&profiles)
+                    .find(|(other, _)| default_iid(pe, other) == Some(iid))
+                {
+                    callees = callees.with_class(index, profile.clone());
+                } else if let Some(interface) = types.and_then(|types| types.interface_of_iid(&iid))
+                {
+                    callees = callees.with_class_interface(index, interface);
                 }
             }
             for index in class_indexes(listing, table) {
@@ -237,4 +285,48 @@ fn with_arguments(
         }
     }
     all
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "a test reads a file of the corpus and must fail loudly when it cannot"
+)]
+mod tests {
+    use super::default_iid;
+    use crate::read::pe::PeImage;
+    use crate::vb::constants::constant_guid;
+    use crate::vb::header::{VbHeader, header_region};
+    use crate::vb::object::ObjectTable;
+    use crate::vb::project::{ObjectTableHead, ProjectInfo};
+
+    const DIFFUSE_P_CODE: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus-pcode/vb6-code/Diffuse-effect/Diffuse.exe"
+    ));
+
+    /// `frmDiffuse` in the P-code `Diffuse.exe` calls the methods of its
+    /// `FastDrawing` object with `VCallHresult`, whose second argument names
+    /// entry 9 of its constant table. That entry holds the GUID of the
+    /// default interface of `FastDrawing`, and of no other object.
+    #[test]
+    fn a_call_names_the_default_interface_of_an_object_of_the_project() {
+        let pe = PeImage::parse(DIFFUSE_P_CODE).unwrap();
+        let header = VbHeader::read(&header_region(&pe).unwrap()).unwrap();
+        let info = ProjectInfo::read(&pe, header.lp_project_data).unwrap();
+        let head = ObjectTableHead::read(&pe, info.lp_object_table).unwrap();
+        let objects = ObjectTable::walk(&pe, info.lp_object_table, &head)
+            .unwrap()
+            .objects;
+        let form = objects.iter().find(|o| o.name == "frmDiffuse").unwrap();
+        let called = constant_guid(&pe, form.lp_object_info, 9);
+        assert!(called.is_some());
+        let named: Vec<&str> = objects
+            .iter()
+            .filter(|object| default_iid(&pe, object) == called)
+            .map(|object| object.name.as_str())
+            .collect();
+        assert_eq!(named, ["FastDrawing"]);
+    }
 }
