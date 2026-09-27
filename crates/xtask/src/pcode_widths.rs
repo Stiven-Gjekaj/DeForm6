@@ -21,7 +21,19 @@
 //!   reads;
 //! - another write to `esi`, such as the reload of a branch: the width is
 //!   the end of the last argument read;
-//! - a return, or a jump through a register or another table: the same.
+//! - a return, or a jump through a register: the same.
+//!
+//! At a jump through another table, such as the table of the `Variant`
+//! types of `ForVar` and `NextVar`, [`fall_through`] follows each entry of
+//! the table from the same state. A path that reaches the dispatch jump
+//! gives the width; when two do, the larger one. When no path reaches it,
+//! the path that reloads `esi` with the largest end of an argument gives
+//! the width, as the loop of `NextVar` does with its target. A return is an
+//! error path and gives nothing. The table has no end mark, so the entries
+//! can run on into the next table: the table of `ForVar` runs on into the
+//! table of `NextVar`, whose paths reload `esi`. The dispatch paths come
+//! first for this reason. It follows one table on a path, and at a table
+//! inside a table it stops as at a jump through a register.
 //!
 //! A `call` keeps `esi`, because `esi` is a callee-saved register.
 //!
@@ -52,6 +64,9 @@ const STEP_LIMIT: usize = 400;
 
 /// The largest number of states that [`next_offsets`] visits.
 const STATE_LIMIT: usize = 4000;
+
+/// The largest number of entries of a table that [`fall_through`] follows.
+const TABLE_LIMIT: u32 = 64;
 
 /// The length of the longest x86 instruction.
 const MAX_INSTRUCTION: usize = 15;
@@ -113,6 +128,9 @@ enum Step {
     Go(Vec<State>),
     /// The path ends.
     End(Trace),
+    /// A jump through the table at this address, relative to the image base,
+    /// with the state before the jump.
+    Table(u32, State),
 }
 
 /// Decodes the instruction at `rva`.
@@ -249,7 +267,18 @@ fn step(image: &Image, tables: &BTreeSet<u32>, state: State) -> Step {
             Some(rva) => Step::Go(vec![State { rva, ..next }]),
             None => Step::End(Trace::Lost),
         },
-        FlowControl::IndirectBranch => Step::End(Trace::Indirect(width_of(next.ext))),
+        FlowControl::IndirectBranch => {
+            let table = (instruction.op_kind(0) == OpKind::Memory
+                && instruction.memory_base() == Register::None
+                && instruction.memory_index() != Register::None
+                && instruction.memory_index_scale() == 4)
+                .then(|| instruction.memory_displacement32().checked_sub(image.base))
+                .flatten();
+            match table {
+                Some(table) => Step::Table(table, next),
+                None => Step::End(Trace::Indirect(width_of(next.ext))),
+            }
+        }
         FlowControl::ConditionalBranch => match target() {
             Some(rva) => Step::Go(vec![next, State { rva, ..next }]),
             None => Step::End(Trace::Lost),
@@ -263,12 +292,18 @@ fn step(image: &Image, tables: &BTreeSet<u32>, state: State) -> Step {
 
 /// Follows the fall-through path from `entry`.
 pub(crate) fn fall_through(image: &Image, tables: &BTreeSet<u32>, entry: u32) -> Trace {
-    let mut state = State {
+    let state = State {
         rva: entry,
         off: 0,
         ext: 0,
         al: None,
     };
+    follow(image, tables, state, false)
+}
+
+/// Follows the fall-through path from `state`. A jump through a table is
+/// followed through each entry, unless the path is already inside a table.
+fn follow(image: &Image, tables: &BTreeSet<u32>, mut state: State, in_table: bool) -> Trace {
     let mut seen = BTreeSet::new();
     for _ in 0..STEP_LIMIT {
         if !seen.insert((state.rva, state.off)) {
@@ -276,6 +311,8 @@ pub(crate) fn fall_through(image: &Image, tables: &BTreeSet<u32>, entry: u32) ->
         }
         match step(image, tables, state) {
             Step::End(trace) => return trace,
+            Step::Table(_, at) if in_table => return Trace::Indirect(width_of(at.ext)),
+            Step::Table(table, at) => return through_table(image, tables, table, at),
             Step::Go(states) => match states.first() {
                 Some(first) => state = *first,
                 None => return Trace::Lost,
@@ -283,6 +320,43 @@ pub(crate) fn fall_through(image: &Image, tables: &BTreeSet<u32>, entry: u32) ->
         }
     }
     Trace::Lost
+}
+
+/// Follows each entry of the table at `table` from `state`, up to the first
+/// entry that is not an address in the image, and gives the largest width
+/// of a dispatch path, or else of a path that reloads `esi`.
+fn through_table(image: &Image, tables: &BTreeSet<u32>, table: u32, state: State) -> Trace {
+    let mut next: Option<u32> = None;
+    let mut reset: Option<u32> = None;
+    let wider = |old: Option<u32>, new: u32| Some(old.map_or(new, |old| old.max(new)));
+    for index in 0..TABLE_LIMIT {
+        let Some(entry) = index
+            .checked_mul(4)
+            .and_then(|offset| table.checked_add(offset))
+            .and_then(|at| image.bytes(at, 4))
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u32::from_le_bytes)
+            .and_then(|address| address.checked_sub(image.base))
+            .filter(|entry| image.bytes(*entry, 1).is_some())
+        else {
+            break;
+        };
+        let path = follow(
+            image,
+            tables,
+            State {
+                rva: entry,
+                ..state
+            },
+            true,
+        );
+        match path {
+            Trace::Next(width) => next = wider(next, width),
+            Trace::Reset(width) => reset = wider(reset, width),
+            Trace::Ret(_) | Trace::Indirect(_) | Trace::Lost => {}
+        }
+    }
+    Trace::Indirect(next.or(reset).unwrap_or_else(|| width_of(state.ext)))
 }
 
 /// Follows each path from `entry`, and gives each offset of the next opcode
@@ -307,7 +381,7 @@ pub(crate) fn next_offsets(image: &Image, tables: &BTreeSet<u32>, entry: u32) ->
             Step::End(Trace::Next(offset)) => {
                 out.insert(offset);
             }
-            Step::End(_) => {}
+            Step::End(_) | Step::Table(..) => {}
             Step::Go(states) => {
                 let steps = steps.saturating_add(1);
                 stack.extend(states.into_iter().rev().map(|state| (state, steps)));
@@ -404,6 +478,58 @@ mod tests {
         code.extend(dispatch());
         let (image, tables) = image(&code);
         assert_eq!(fall_through(&image, &tables, CODE), Trace::Reset(2));
+    }
+
+    #[test]
+    fn a_jump_through_another_table_follows_its_entries_to_a_dispatch() {
+        // add esi,2 / jmp [4*eax + 0x1800]; the table holds a path that
+        // reads a 16-bit target and dispatches after it, a path that returns,
+        // and then a word that is not an address.
+        let mut section = vec![0xCC_u8; 0x2000];
+        let mut code = vec![0x83, 0xC6, 0x02, 0xFF, 0x24, 0x85];
+        code.extend_from_slice(&(BASE + 0x1800).to_le_bytes());
+        section[0x1000..0x1000 + code.len()].copy_from_slice(&code);
+        for (at, entry) in [(0x800, 0x2100_u32), (0x804, 0x2200), (0x808, 0)] {
+            let value = if entry == 0 { 0 } else { BASE + entry };
+            section[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        let mut read = vec![0x8A, 0x46, 0x02, 0x83, 0xC6, 0x03];
+        read.extend(dispatch());
+        section[0x1100..0x1100 + read.len()].copy_from_slice(&read);
+        section[0x1200] = 0xC3;
+        let image = Image {
+            base: BASE,
+            sections: vec![(0x1000, section)],
+            exports: BTreeMap::new(),
+        };
+        let tables: BTreeSet<u32> = [TABLE].into_iter().collect();
+        assert_eq!(width(&image, &tables, CODE), Some(Width::Fixed(4)));
+    }
+
+    #[test]
+    fn a_dispatch_path_of_a_table_comes_before_a_path_that_reloads_esi() {
+        // add esi,2 / jmp [4*eax + 0x1800]; the table holds a dispatch path
+        // after a 16-bit argument, and a path that reads a wider argument
+        // and reloads esi, as the next table does.
+        let mut section = vec![0xCC_u8; 0x2000];
+        let mut code = vec![0x83, 0xC6, 0x02, 0xFF, 0x24, 0x85];
+        code.extend_from_slice(&(BASE + 0x1800).to_le_bytes());
+        section[0x1000..0x1000 + code.len()].copy_from_slice(&code);
+        for (at, entry) in [(0x800, 0x2100_u32), (0x804, 0x2200)] {
+            section[at..at + 4].copy_from_slice(&(BASE + entry).to_le_bytes());
+        }
+        let mut read = vec![0x8A, 0x46, 0x02, 0x83, 0xC6, 0x03];
+        read.extend(dispatch());
+        section[0x1100..0x1100 + read.len()].copy_from_slice(&read);
+        // mov esi, dword [esi+2]: an argument of 4 bytes that reloads esi.
+        section[0x1200..0x1203].copy_from_slice(&[0x8B, 0x76, 0x02]);
+        let image = Image {
+            base: BASE,
+            sections: vec![(0x1000, section)],
+            exports: BTreeMap::new(),
+        };
+        let tables: BTreeSet<u32> = [TABLE].into_iter().collect();
+        assert_eq!(width(&image, &tables, CODE), Some(Width::Fixed(4)));
     }
 
     #[test]
