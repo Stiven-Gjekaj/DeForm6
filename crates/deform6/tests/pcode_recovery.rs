@@ -54,6 +54,7 @@ use deform6::read::pe::PeImage;
 use deform6::read::region::{Off, Va};
 use deform6::vb::Report;
 use deform6::vb::classify::ObjectKind as RecoveredKind;
+use deform6::vb::context::callees_of_project;
 use deform6::vb::controlinfo::{
     ControlInfoTable, EventReport, EventSlot, StubShape, read_event_table,
 };
@@ -62,6 +63,7 @@ use deform6::vb::lift::Callees;
 use deform6::vb::links::{LinkSlot, read_method_links};
 use deform6::vb::object::{Object, ObjectTable};
 use deform6::vb::opcodes::OpcodeTable;
+use deform6::vb::pcode::PcodeTable;
 use deform6::vb::procdesc::{MethodEntry, read_method_table};
 use deform6::vb::project::{ObjectTableHead, ProjectInfo};
 use deform6::vb::types::{VbTypes, guid_text};
@@ -1122,4 +1124,56 @@ fn each_control_of_a_pcode_form_gets_the_accessor_of_its_source_position() {
         failures.join("\n")
     );
     assert_eq!(accessors, EXPECTED_ACCESSORS);
+}
+
+/// The GUID of the interface of a `PictureBox`, as the side structure of an
+/// argument names it.
+const PICTURE_BOX_IID: &str = "{33AD4ED1-6699-11CF-B70C-00AA0060D393}";
+
+/// Each public method of `FastDrawing` in the P-code `Realtime_Brightness.exe`
+/// takes a `PictureBox` as its first argument in the source, and
+/// `callees_of_project` gives that argument, at frame offset `0x0C`, the
+/// interface that the types file names for its GUID. The types file is
+/// built here, with a placeholder name.
+#[test]
+fn a_public_method_gives_the_interface_of_its_control_argument() {
+    let key = "vb6-code/Brightness-effect/Part 4 - Even faster DIBs/Realtime_Brightness.exe";
+    let bytes = read(&pcode_root().join(key));
+    let pe = PeImage::parse(&bytes).unwrap();
+    let header = VbHeader::read(&header_region(&pe).unwrap()).unwrap();
+    let info = ProjectInfo::read(&pe, header.lp_project_data).unwrap();
+    let head = ObjectTableHead::read(&pe, info.lp_object_table).unwrap();
+    let objects = ObjectTable::walk(&pe, info.lp_object_table, &head)
+        .unwrap()
+        .objects;
+    let types =
+        VbTypes::parse(format!("[iids]\n\"{PICTURE_BOX_IID}\" = \"_Picture\"\n").as_bytes())
+            .unwrap();
+    let callees = callees_of_project(&pe, &objects, &PcodeTable::default(), Some(&types));
+    let (at, object) = objects
+        .iter()
+        .enumerate()
+        .find(|(_, object)| object.name == "FastDrawing")
+        .unwrap();
+    let source = build_record::corpus_root()
+        .join("vb6-code/Brightness-effect/Part 4 - Even faster DIBs/FastDrawing.cls");
+    let declared = source::declared_procedure_scopes(&source);
+    let indexes: Vec<u16> = read_method_table(&pe, object.lp_object_info)
+        .unwrap()
+        .entries
+        .iter()
+        .filter_map(|entry| match entry {
+            MethodEntry::Descriptor { index, .. } => Some(*index),
+            MethodEntry::NotAnAddress { .. } | MethodEntry::Unreadable { .. } => None,
+        })
+        .collect();
+    assert_eq!(indexes.len(), declared.len());
+    for ((is_public, name), index) in declared.iter().zip(&indexes) {
+        assert!(is_public, "{name}");
+        assert_eq!(
+            callees[at].arguments_of(*index),
+            [(0x0C, "_Picture".to_owned())],
+            "{name}"
+        );
+    }
 }
