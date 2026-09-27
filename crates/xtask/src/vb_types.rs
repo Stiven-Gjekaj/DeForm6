@@ -2,6 +2,9 @@
 //! with the vtable offset and the argument bytes of each function, from a
 //! copy of `VB6.OLB` that the user owns.
 //!
+//! It keeps each interface and each dual dispinterface, whose type info
+//! gives the vtable offsets.
+//!
 //! It takes more type libraries after the first one: a file that is a type
 //! library, or a PE file whose `TYPELIB` resources hold them, such as
 //! `MSVBVM60.DLL` for the `VBA` library or an OCX for its controls. When
@@ -101,6 +104,20 @@ pub(crate) struct Types {
     interfaces: BTreeMap<String, Interface>,
 }
 
+/// The bytes of the vtable of `IDispatch`: seven functions of 4 bytes.
+const IDISPATCH_VTABLE: u16 = 0x1C;
+
+/// Tells whether `info` is an interface with a vtable: an interface, or a
+/// dual dispinterface, whose vtable holds more than `IDispatch`. The type
+/// info of a dual dispinterface gives the vtable offset of each function.
+fn has_vtable(info: &TypeInfo) -> bool {
+    match info.kind {
+        Kind::Interface => true,
+        Kind::Dispatch => info.vtable_size > IDISPATCH_VTABLE,
+        _ => false,
+    }
+}
+
 /// The name of the interface of the type info at `index`: the interface of
 /// the same name with `_` before it when the library holds one, as for a
 /// class, else the type info itself when it is an interface.
@@ -111,7 +128,7 @@ fn interface_name(infos: &[TypeInfo], index: usize) -> Option<String> {
     let is_interface = |name: &str| {
         infos
             .iter()
-            .any(|info| info.kind == Kind::Interface && info.name.as_deref() == Some(name))
+            .any(|info| has_vtable(info) && info.name.as_deref() == Some(name))
     };
     if is_interface(&underscored) {
         Some(underscored)
@@ -153,7 +170,7 @@ fn slot(function: &Function, infos: &[TypeInfo]) -> Slot {
 pub(crate) fn derive(infos: &[TypeInfo]) -> Result<Types, String> {
     let mut types = Types::default();
     for info in infos {
-        let (Kind::Interface, Some(name)) = (info.kind, &info.name) else {
+        let (true, Some(name)) = (has_vtable(info), &info.name) else {
             continue;
         };
         if name.ends_with(EVENTS_SUFFIX) {
@@ -396,6 +413,18 @@ mod tests {
         assert_eq!(merged.interfaces["_Box"].vtable_size, 0x30);
         assert_eq!(merged.interfaces["_Other"].vtable_size, 0x99);
         assert_eq!(merged.interfaces.len(), first.interfaces.len() + 1);
+    }
+
+    #[test]
+    fn a_dual_dispinterface_is_kept_and_a_pure_one_is_not() {
+        let mut dual = interface(vec![function("Picture", 4, 9)]);
+        dual.kind = Kind::Dispatch;
+        let mut pure = dual.clone();
+        pure.name = Some("_Pure".to_owned());
+        pure.vtable_size = 0x1C;
+        let types = derive(&[dual, pure]).unwrap();
+        assert!(types.interfaces.contains_key("_Box"));
+        assert!(!types.interfaces.contains_key("_Pure"));
     }
 
     #[test]
