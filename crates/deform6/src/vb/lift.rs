@@ -13,7 +13,7 @@
 //! | Names | What the opcode does |
 //! |---|---|
 //! | `LitI4`, `LitR4`, `LitI2`, `LitI2_Byte` | Push a constant |
-//! | `FLd` or `ILd` + a type, `FLdRf`, `ILdRf` | Push the frame slot at a signed 16-bit offset; the lift does not yet tell a slot from what it points to, and one handler serves names of both kinds |
+//! | `FLd` or `ILd` + a type, `FLdRf`, `FLdRfVar`, `ILdRf` | Push the frame slot at a signed 16-bit offset; the lift does not yet tell a slot from what it points to, and one handler serves names of both kinds |
 //! | `ILdRfDarg` | Push the argument at a 16-bit offset |
 //! | `FSt` + a type, `FStVarCopy` | Pop into the frame slot |
 //! | `ISt` + a type | Pop into what the frame slot points to |
@@ -414,7 +414,7 @@ fn family_of(name: &str) -> Option<Family> {
         "LitI2" => Family::Lit(2),
         "LitI2_Byte" => Family::Lit(1),
         "ILdRfDarg" => Family::ArgRef,
-        "FLdRf" | "ILdRf" => Family::FrameLoad,
+        "FLdRf" | "FLdRfVar" | "ILdRf" => Family::FrameLoad,
         "FStVarCopy" => Family::FrameStore,
         "FLdPr" => Family::ObjectRegister,
         "BranchF" => Family::BranchFalse,
@@ -796,7 +796,7 @@ width = 2
 names = ["FLdFPR8"]
 [primary.15]
 width = 2
-names = ["FLdRf"]
+names = ["FLdRf", "FLdRfVar"]
 [lead1.C8]
 width = 0
 names = ["End"]
