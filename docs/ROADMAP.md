@@ -796,11 +796,21 @@ calls against the source found each to be the call of its source, such as
 `UpdateEffect` from four scroll bar events of `Image Levels.exe`, and
 `LoadImageAutosized vbNullString` in `Sepia.exe`.
 
-**Next.** The first opcode with no family is now most often `FLdPrThis` (152
-bodies) or `ILdPr` (91), which load the object register. A call of a method
-of another object, such as `VCallHresult`, needs the type library of that
-object. The type libraries of the runtime and of each control are not in
-this repository, and they must be fetched as the P-code table is.
+**The calls of the controls.** `FLdPrThis` and `ILdPr` load the object
+register, and the `FFree` opcodes free temporary slots: 115 of the 680
+bodies lift. `VB6.OLB` of the XP host gives the interfaces of the controls,
+and `derive-vb-types` writes them to a file that the repository does not
+hold. `wIndex` of a `ControlInfo` record gives the control accessor of a
+form, in 613 of 613 records. With the file, 143 of the 680 bodies lift, and
+the statements name the controls and their properties, such as
+`If Not (Me.chkAutomatic.Value = 1) Then GoTo L0035` for
+`If chkAutomatic.Value = 1 Then` in `UUID2.exe`.
+
+**Next.** The first stop is now most often a call on an object argument of
+a procedure (91 bodies), such as `srcPic As PictureBox`, whose class the
+binary does not seem to give. The class could come from the calls of the
+procedure, when each call gives an object of one class. After it come
+`ImpAdLdRf` (82 bodies), `FStStrCopy` (36) and `FLdZeroAd` (35).
 
 **The gate.** The recovered code compiles, which Phase 8 already measures, and
 the rebuilt program behaves the same as the original.
