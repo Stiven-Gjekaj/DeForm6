@@ -2503,16 +2503,16 @@ holds an address of other code: in `Organism.cls`, `81 44 24 04 <offset> B9
 
 | Check | Count |
 |---|---|
-| Objects of the corpus with source and a link table | 86 |
-| Of them, whose method slots are the public procedures of the source, then the private ones, each group in the order of the file | 86 |
-| Of them, whose other slots number two for each public variable of the source | 86 |
+| Objects of the corpus with a link table: all but the 8 standard modules | 91 |
+| Of them, whose method slots are the public procedures of the source, then the private ones, each group in the order of the file | 91 |
+| Of them, whose other slots number two for each public variable of the source | 91 |
 | Method slots | 663: the 680 descriptors, less the 17 of the 8 standard modules |
 | `ThisVCallHresult` offsets that name a method slot of their own object | 465 of 465 |
 
 The other slots come before the method slots. A standard module has no
 `OptionalObjectInfo`, and no link table. `vb::links` reads the table, and
 `each_link_table_of_a_pcode_program_gives_the_procedures_of_its_source` in
-`tests/pcode_recovery.rs` keeps the first three rows true. The count of
+`tests/pcode_recovery.rs` keeps the first four rows true. The count of
 `ThisVCallHresult` offsets needs the P-code table, and no test keeps it true.
 
 ---
