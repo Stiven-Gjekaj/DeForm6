@@ -23,6 +23,7 @@ pub mod frx;
 pub mod functyp;
 pub mod gui;
 pub mod header;
+pub mod lift;
 pub mod object;
 pub mod ocx;
 pub mod opcodes;
