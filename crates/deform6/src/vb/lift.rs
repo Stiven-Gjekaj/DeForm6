@@ -2027,7 +2027,7 @@ fn run(
 }
 
 /// Gives the index of each class of the constant table that `listing`
-/// names with `NewIfNullPr`. A caller gives [`Callees`] the profile of each
+/// names with `NewIfNullPr` or `New`. A caller gives [`Callees`] the profile of each
 /// one that is an object of the project.
 #[must_use]
 pub fn class_indexes(listing: &PcodeListing, table: &PcodeTable) -> Vec<u16> {
@@ -2037,7 +2037,7 @@ pub fn class_indexes(listing: &PcodeListing, table: &PcodeTable) -> Vec<u16> {
             .slot(instruction.lead, instruction.opcode)
             .map(|slot| slot.names.as_slice())
             .unwrap_or_default();
-        if family(names) == Some(Family::NewIfNull)
+        if matches!(family(names), Some(Family::NewIfNull | Family::NewObject))
             && let Some(index) = u16_at(&instruction.arguments, 0)
             && !out.contains(&index)
         {
@@ -2865,6 +2865,7 @@ result = false
             0x00, 0x00, 0x00, 0x03, 0x9C, 0xFF, 0x05, 0x78, 0xFF, 0x0C,
         ];
         let listing_new = disassemble(&Region::new(&new, Off::new(0)), &table);
+        assert_eq!(class_indexes(&listing_new, &table), [9]);
         assert_eq!(
             render(&lift(&listing_new, &table, &runtime, Some(&types)).unwrap()),
             [
