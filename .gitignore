@@ -11,6 +11,7 @@
 # AGENTS.md bars it from this repository. The tool that produces it is
 # committed instead; the table it writes is not.
 derived/opcode-table.toml
+derived/pcode-table.toml
 
 # macOS.
 .DS_Store

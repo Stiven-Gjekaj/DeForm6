@@ -1216,6 +1216,7 @@ name = "xtask"
 version = "2.0.0"
 dependencies = [
  "deform6",
+ "object",
  "serde",
  "serde_json",
  "sha2",
