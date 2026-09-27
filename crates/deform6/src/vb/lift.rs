@@ -115,6 +115,12 @@
 //! class of the runtime, such as its global object, [`Callees`] can give
 //! its interface, and a call finds its function in [`VbTypes`].
 //!
+//! The class of an object argument of a procedure is not in the binary.
+//! [`method_calls`] gives the classes of the arguments of each call of a
+//! method of `Me`. When every call gives an argument one class,
+//! `vb::context` gives it to [`Callees`], and [`lift_method`] lifts the
+//! procedure with it.
+//!
 //! # What the lift checks
 //!
 //! The stack must hold the values that each opcode pops, and it must be
@@ -260,6 +266,7 @@ pub struct Callees {
     variables: Vec<(u16, u32, bool)>,
     classes: Vec<(u16, Callees)>,
     class_interfaces: Vec<(u16, String)>,
+    arguments: Vec<(u16, i16, String)>,
 }
 
 /// A method that [`Callees`] gives.
@@ -315,6 +322,25 @@ impl Callees {
     pub fn with_class(mut self, index: u16, profile: Self) -> Self {
         self.classes.push((index, profile));
         self
+    }
+
+    /// Adds the interface `interface` of the argument at the frame offset
+    /// `slot` of the method `method`.
+    #[must_use]
+    pub fn with_argument(mut self, method: u16, slot: i16, interface: &str) -> Self {
+        self.arguments.push((method, slot, interface.to_owned()));
+        self
+    }
+
+    /// Gives the frame offset and the interface of each argument of the
+    /// method `method` whose interface [`Callees`] gives.
+    #[must_use]
+    pub fn arguments_of(&self, method: u16) -> Vec<(i16, String)> {
+        self.arguments
+            .iter()
+            .filter(|(at, _, _)| *at == method)
+            .map(|(_, slot, interface)| (*slot, interface.clone()))
+            .collect()
     }
 
     /// Adds the class at `index` of the constant table that is a class of
@@ -1092,6 +1118,11 @@ fn object_call(
     }))
 }
 
+/// The classes of the arguments of one call of a method of `Me`: the index
+/// of the method, and for each argument, first argument first, its bytes on
+/// the stack and its interface when the lift knows it.
+pub type MethodCall = (u16, Vec<(u8, Option<String>)>);
+
 /// Lifts a listing to statements. `callees` gives the methods that a
 /// `ThisVCallHresult` can call and the control accessors of the form.
 /// `types` gives the interfaces of the controls, when the user derived
@@ -1106,10 +1137,63 @@ pub fn lift(
     callees: &Callees,
     types: Option<&VbTypes>,
 ) -> Result<Vec<LiftedStmt>, LiftFault> {
+    run(listing, table, callees, types, &[], &mut Vec::new())
+}
+
+/// Lifts the listing of the method `method` of the object, as [`lift`]
+/// does. The arguments of the method that [`Callees`] gives an interface
+/// have that interface.
+///
+/// # Errors
+///
+/// Gives the first [`LiftFault`].
+pub fn lift_method(
+    listing: &PcodeListing,
+    table: &PcodeTable,
+    callees: &Callees,
+    types: Option<&VbTypes>,
+    method: u16,
+) -> Result<Vec<LiftedStmt>, LiftFault> {
+    let arguments = callees.arguments_of(method);
+    run(listing, table, callees, types, &arguments, &mut Vec::new())
+}
+
+/// Gives the calls of methods of `Me` that the lift of the listing of the
+/// method `method` meets before its first fault, with the classes of their
+/// arguments.
+#[must_use]
+pub fn method_calls(
+    listing: &PcodeListing,
+    table: &PcodeTable,
+    callees: &Callees,
+    types: Option<&VbTypes>,
+    method: u16,
+) -> Vec<MethodCall> {
+    let arguments = callees.arguments_of(method);
+    let mut calls = Vec::new();
+    let _ = run(listing, table, callees, types, &arguments, &mut calls);
+    calls
+}
+
+/// The lift of [`lift`], with the interfaces of some argument slots, and
+/// each call of a method of `Me` recorded in `calls`.
+fn run(
+    listing: &PcodeListing,
+    table: &PcodeTable,
+    callees: &Callees,
+    types: Option<&VbTypes>,
+    arguments: &[(i16, String)],
+    calls: &mut Vec<MethodCall>,
+) -> Result<Vec<LiftedStmt>, LiftFault> {
     if !listing.end.is_complete() {
         return Err(LiftFault::NotDecoded(listing.end));
     }
     let mut state = State::default();
+    for (slot, interface) in arguments {
+        state
+            .bindings
+            .insert(*slot, (Expr::frame(*slot), Some(interface.clone())));
+    }
     let mut out = Vec::new();
     let mut start: Option<u32> = None;
     for instruction in &listing.instructions {
@@ -1226,6 +1310,12 @@ pub fn lift(
                     .checked_sub(4)
                     .ok_or(LiftFault::CallArguments(at))?;
                 let args = call_arguments(&mut state.stack, bytes, at)?;
+                calls.push((
+                    method.index,
+                    args.iter()
+                        .map(|value| (value.bytes, value.class.clone()))
+                        .collect(),
+                ));
                 Some(Stmt::Call(Callee::Method(method.index), expressions(args)))
             }
             Family::ImportCall { result } => {
@@ -1560,7 +1650,9 @@ pub fn render(stmts: &[LiftedStmt]) -> Vec<String> {
     reason = "a test builds the state it needs and must fail loudly when that state is wrong"
 )]
 mod tests {
-    use super::{Callees, LiftFault, class_indexes, lift, render, string_indexes};
+    use super::{
+        Callees, LiftFault, class_indexes, lift, lift_method, method_calls, render, string_indexes,
+    };
     use crate::read::region::{Off, Region};
     use crate::vb::pcode::{PcodeTable, disassemble};
     use crate::vb::types::VbTypes;
@@ -1838,6 +1930,45 @@ result = false
         assert_eq!(
             object_lines(&body).unwrap()[0],
             "       Call Me.box1.Container.Cls()"
+        );
+    }
+
+    #[test]
+    fn an_argument_of_a_known_class_is_an_object_of_that_class() {
+        // ILdPr of arg_C, then Cls: with the interface _Box for arg_C of
+        // method 3, the call finds Cls.
+        let table = PcodeTable::parse(TABLE.as_bytes()).unwrap();
+        let types = VbTypes::parse(TYPES.as_bytes()).unwrap();
+        let body = [0x17, 0x0C, 0x00, 0x1C, 0xB0, 0x00, 0x00, 0x00, 0x0C];
+        let listing = disassemble(&Region::new(&body, Off::new(0)), &table);
+        let callees = Callees::default().with_argument(3, 0x0C, "_Box");
+        assert_eq!(
+            render(&lift_method(&listing, &table, &callees, Some(&types), 3).unwrap())[0],
+            "       Call arg_C.Cls()"
+        );
+        assert_eq!(
+            lift_method(&listing, &table, &callees, Some(&types), 4),
+            Err(LiftFault::NoFunction(3))
+        );
+    }
+
+    #[test]
+    fn a_call_of_a_method_of_me_records_the_classes_of_its_arguments() {
+        // Call Me.method_5(Me.box1, 1): the control is passed by the address
+        // of its temporary slot.
+        let table = PcodeTable::parse(TABLE.as_bytes()).unwrap();
+        let types = VbTypes::parse(TYPES.as_bytes()).unwrap();
+        let body = [
+            0x02, 0x01, 0x16, 0x1A, 0x2C, 0x03, 0x1B, 0x98, 0xFF, 0x15, 0x98, 0xFF, 0x11, 0xF8,
+            0x06, 0x00, 0x00, 0x0C,
+        ];
+        let listing = disassemble(&Region::new(&body, Off::new(0)), &table);
+        let callees = Callees::default()
+            .with_control(0x32C, "box1", "_Box")
+            .with_method(0x6F8, 5, 12);
+        assert_eq!(
+            method_calls(&listing, &table, &callees, Some(&types), 0),
+            [(5, vec![(4, Some("_Box".to_owned())), (4, None)])]
         );
     }
 
