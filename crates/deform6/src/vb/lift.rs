@@ -33,6 +33,23 @@
 //! | `FStAdFunc` | Pop an object into the frame slot |
 //! | `VCallAd`, `VCallI2`, `VCallI4`, `VCallStr` | Call through the object register, and push the result: the lift knows only the control accessors of a form |
 //! | `VCallHresult` | Call a function of the interface of the object in the object register |
+//! | `ImpAdLd` + a type, `ImpAdLdRf`, `ImpAdLdRfVar` | Push a global, or its address, at an index of the constant table |
+//! | `ImpAdLdPr` | Set the object register to a global |
+//! | `MemLd` + a type, `MemLdRf`, `MemLdRfVar` | Push a field of the object register, or its address |
+//! | `MemLdPr` | Set the object register to a field of the object register |
+//! | `FMemLd` + a type, `FMemLdRf`, `FMemLdRfVar` | Push a field of the object in a frame slot |
+//! | `FMemLdPr` | Set the object register to a field of the object in a frame slot |
+//! | `FMemSt` + a type | Pop into a field of the object in a frame slot |
+//! | `FStStrCopy` | Pop a string into the frame slot |
+//! | `FLdZeroAd`, `FLdZeroStr` | Push the frame slot, and clear it |
+//! | `FStStrNoPop`, `FStAdNoPop` | Store the top value into the frame slot, and keep it on the stack |
+//! | `PopTmpLdAd` + a size or `Str` | Pop a value into a temporary frame slot, and push its address |
+//! | `LitStr` | Push the string at an index of the constant table |
+//! | `LitVar_` + `Missing`, `Empty`, `Null`, `TRUE` or `FALSE`, and `LitVar` + `I2`, `I4`, `UI1`, `R4` or `Str` | Write a `Variant` constant into a temporary frame slot, and push its address |
+//! | `LitDate`, `LitR8FP` | Push an 8-byte constant on the floating point unit |
+//! | `New` | Push a new object of a class at an index of the constant table |
+//! | `NewIfNullPr` | Pop the address of an object variable, create the object when the variable is empty, and set the object register to it |
+//! | `Bos`, `LargeBos`, `ZeroRetVal`, `ZeroRetValVar`, `SetLastSystemError` | Change no stack and give no statement |
 //!
 //! All the names of one slot must give one family. A conversion whose names
 //! give both `CSng` and `CDbl` gives no conversion: one handler serves both,
@@ -177,6 +194,16 @@ pub enum Expr {
     /// A named member of an object, such as a control of a form or a
     /// property.
     Member(Box<Expr>, String),
+    /// A Basic word: `Missing`, `Empty` or `Null`.
+    Word(&'static str),
+    /// An 8-byte floating point constant, by its bits.
+    Real(u64),
+    /// A string of the constant table.
+    Str(String),
+    /// An entry of the constant table whose text the lift does not know.
+    Constant(u16),
+    /// A new object of the class at an index of the constant table.
+    New(u16),
 }
 
 /// The procedure that a call names.
@@ -207,6 +234,7 @@ impl Callee {
 pub struct Callees {
     methods: Vec<(u16, CalledMethod)>,
     controls: Vec<(u16, String, String)>,
+    strings: Vec<(u16, String)>,
 }
 
 /// A method that [`Callees`] gives.
@@ -236,6 +264,21 @@ impl Callees {
         self.controls
             .push((vtable_offset, name.to_owned(), interface.to_owned()));
         self
+    }
+
+    /// Adds the string `text` at `index` of the constant table.
+    #[must_use]
+    pub fn with_string(mut self, index: u16, text: &str) -> Self {
+        self.strings.push((index, text.to_owned()));
+        self
+    }
+
+    /// Gives the expression of the string at `index` of the constant table.
+    fn string(&self, index: u16) -> Expr {
+        self.strings
+            .iter()
+            .find(|(at, _)| *at == index)
+            .map_or(Expr::Constant(index), |(_, text)| Expr::Str(text.clone()))
     }
 
     /// Gives the name and the interface of the control at `vtable_offset`.
@@ -283,6 +326,11 @@ impl Expr {
             Self::Convert(function, value) => format!("{function}({})", value.text()),
             Self::Call(callee, args) => format!("{}({})", callee.text(), arguments_text(args)),
             Self::Member(object, name) => format!("{}.{name}", object.text()),
+            Self::Word(word) => (*word).to_owned(),
+            Self::Real(bits) => format!("{:?}", f64::from_bits(*bits)),
+            Self::Str(text) => format!("\"{}\"", text.replace('"', "\"\"")),
+            Self::Constant(index) => format!("const_{index:X}"),
+            Self::New(index) => format!("New class_{index:X}"),
         }
     }
 }
@@ -406,6 +454,31 @@ enum Family {
     Free,
     ObjectStore,
     ObjectCall { pushes: bool },
+    GlobalLoad,
+    GlobalObjectRegister,
+    FieldLoad,
+    FieldObjectRegister,
+    FrameFieldLoad,
+    FrameFieldObjectRegister,
+    FrameFieldStore,
+    StoreKeep { object: bool },
+    PopTemp,
+    LitString,
+    LitVariant(VariantKind),
+    LitReal,
+    NewObject,
+    NewIfNull,
+    Nop,
+}
+
+/// The constant of a `Variant` literal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VariantKind {
+    Word(&'static str),
+    Byte,
+    Int(u8),
+    Single,
+    Str,
 }
 
 /// The type suffixes of the names, and the Basic conversion to each.
@@ -502,6 +575,36 @@ fn family_of(name: &str) -> Option<Family> {
             Family::ImportCall { result: true }
         }
         "FStAdFunc" => Family::ObjectStore,
+        "ImpAdLdRf" | "ImpAdLdRfVar" => Family::GlobalLoad,
+        "ImpAdLdPr" => Family::GlobalObjectRegister,
+        "MemLdRf" | "MemLdRfVar" => Family::FieldLoad,
+        "MemLdPr" => Family::FieldObjectRegister,
+        "FMemLdRf" | "FMemLdRfVar" => Family::FrameFieldLoad,
+        "FMemLdPr" => Family::FrameFieldObjectRegister,
+        "FStStrCopy" => Family::FrameStore,
+        "FLdZeroAd" | "FLdZeroStr" => Family::FrameLoad,
+        "FStStrNoPop" => Family::StoreKeep { object: false },
+        "FStAdNoPop" => Family::StoreKeep { object: true },
+        "PopTmpLdAd1" | "PopTmpLdAd2" | "PopTmpLdAd4" | "PopTmpLdAdStr" => Family::PopTemp,
+        "LitStr" => Family::LitString,
+        "LitVar_Missing" => Family::LitVariant(VariantKind::Word("Missing")),
+        "LitVar_Empty" => Family::LitVariant(VariantKind::Word("Empty")),
+        "LitVar_Null" => Family::LitVariant(VariantKind::Word("Null")),
+        "LitVar_TRUE" => Family::LitVariant(VariantKind::Word("True")),
+        "LitVar_FALSE" => Family::LitVariant(VariantKind::Word("False")),
+        "LitVarUI1" => Family::LitVariant(VariantKind::Byte),
+        "LitVarI2" => Family::LitVariant(VariantKind::Int(2)),
+        "LitVarI4" => Family::LitVariant(VariantKind::Int(4)),
+        "LitVarR4" => Family::LitVariant(VariantKind::Single),
+        "LitVarStr" => Family::LitVariant(VariantKind::Str),
+        "LitDate" | "LitR8FP" => Family::LitReal,
+        "New" => Family::NewObject,
+        "NewIfNullPr" => Family::NewIfNull,
+        "Bos" | "LargeBos" | "ZeroRetVal" | "ZeroRetValVar" | "SetLastSystemError" => Family::Nop,
+        _ if typed("ImpAdLd") => Family::GlobalLoad,
+        _ if typed("MemLd") => Family::FieldLoad,
+        _ if typed("FMemLd") => Family::FrameFieldLoad,
+        _ if typed("FMemSt") => Family::FrameFieldStore,
         "VCallAd" | "VCallI2" | "VCallI4" | "VCallStr" => Family::ObjectCall { pushes: true },
         "VCallHresult" => Family::ObjectCall { pushes: false },
         "FFree1Ad" | "FFree1Str" | "FFree1Var" | "FFreeAd" | "FFreeStr" | "FFreeVar" => {
@@ -940,6 +1043,137 @@ pub fn lift(
             Family::ObjectCall { pushes } => {
                 object_call(&mut state, callees, types, word16(0)?, pushes, at)?
             }
+            Family::GlobalLoad => {
+                state
+                    .stack
+                    .push(Value::plain(Expr::Global(word16(0)?), is_word(names)));
+                None
+            }
+            Family::GlobalObjectRegister => {
+                state.object = Some((Expr::Global(word16(0)?), None));
+                None
+            }
+            Family::FieldLoad | Family::FieldObjectRegister => {
+                let (base, _) = state.object.clone().ok_or(LiftFault::NoObject(at))?;
+                let field = Expr::Field(Box::new(base), word16(0)?);
+                if family == Family::FieldLoad {
+                    state.stack.push(Value::plain(field, is_word(names)));
+                } else {
+                    state.object = Some((field, None));
+                }
+                None
+            }
+            Family::FrameFieldLoad | Family::FrameFieldObjectRegister => {
+                let base = state.load(offset16()?, true).expr;
+                let field = Expr::Field(Box::new(base), word16(2)?);
+                if family == Family::FrameFieldLoad {
+                    state.stack.push(Value::plain(field, is_word(names)));
+                } else {
+                    state.object = Some((field, None));
+                }
+                None
+            }
+            Family::FrameFieldStore => {
+                let value = pop(&mut state)?;
+                let base = state.load(offset16()?, true).expr;
+                Some(Stmt::Assign {
+                    target: Expr::Field(Box::new(base), word16(2)?),
+                    value,
+                })
+            }
+            Family::StoreKeep { object } => {
+                let value = state
+                    .stack
+                    .last()
+                    .cloned()
+                    .ok_or(LiftFault::StackShort(at))?;
+                let slot = offset16()?;
+                let target = Expr::frame(slot);
+                let stmt = if object {
+                    Stmt::Set {
+                        target,
+                        value: value.expr.clone(),
+                    }
+                } else {
+                    Stmt::Assign {
+                        target,
+                        value: value.expr.clone(),
+                    }
+                };
+                state.pending.insert(
+                    slot,
+                    (
+                        out.len(),
+                        LiftedStmt {
+                            offset: first,
+                            stmt,
+                        },
+                    ),
+                );
+                state.bindings.insert(slot, (value.expr, value.class));
+                None
+            }
+            Family::PopTemp => {
+                let value = state.stack.pop().ok_or(LiftFault::StackShort(at))?;
+                state.stack.push(Value {
+                    word: true,
+                    slot: Some(offset16()?),
+                    ..value
+                });
+                None
+            }
+            Family::LitString => {
+                state
+                    .stack
+                    .push(Value::plain(callees.string(word16(0)?), true));
+                None
+            }
+            Family::LitVariant(kind) => {
+                let slot = offset16()?;
+                let rest = arguments.get(2..).unwrap_or_default();
+                let expr = match kind {
+                    VariantKind::Word("True") => Expr::Const(-1),
+                    VariantKind::Word("False") => Expr::Const(0),
+                    VariantKind::Word(word) => Expr::Word(word),
+                    VariantKind::Byte => Expr::Const(i64::from(*rest.first().ok_or_else(short)?)),
+                    VariantKind::Int(len) => Expr::Const(constant(rest, len).ok_or_else(short)?),
+                    VariantKind::Single => {
+                        let bytes: [u8; 4] = rest
+                            .get(..4)
+                            .and_then(|bytes| bytes.try_into().ok())
+                            .ok_or_else(short)?;
+                        Expr::Real(f64::from(f32::from_le_bytes(bytes)).to_bits())
+                    }
+                    VariantKind::Str => callees.string(u16_at(rest, 0).ok_or_else(short)?),
+                };
+                state.stack.push(Value {
+                    expr,
+                    word: true,
+                    slot: Some(slot),
+                    class: None,
+                });
+                None
+            }
+            Family::LitReal => {
+                let bytes: [u8; 8] = arguments
+                    .get(..8)
+                    .and_then(|bytes| bytes.try_into().ok())
+                    .ok_or_else(short)?;
+                state
+                    .stack
+                    .push(Value::plain(Expr::Real(u64::from_le_bytes(bytes)), false));
+                None
+            }
+            Family::NewObject => {
+                state.stack.push(Value::plain(Expr::New(word16(0)?), true));
+                None
+            }
+            Family::NewIfNull => {
+                let reference = state.stack.pop().ok_or(LiftFault::StackShort(at))?;
+                state.object = Some((reference.expr, reference.class));
+                None
+            }
+            Family::Nop => None,
         };
         if let Some(stmt) = stmt {
             if !state.stack.is_empty() {
@@ -1100,6 +1334,51 @@ names = ["FStAdFunc"]
 [primary.1C]
 width = 4
 names = ["VCallHresult"]
+[primary.1D]
+width = 2
+names = ["ImpAdLdRf", "ImpAdLdRfVar"]
+[primary.1E]
+width = 2
+names = ["MemLdAd", "MemLdI4", "MemLdR4", "MemLdStr"]
+[primary.1F]
+width = 4
+names = ["FMemStI4", "FMemStR4"]
+[primary.20]
+width = 4
+names = ["FMemLdI2"]
+[primary.21]
+width = 2
+names = ["LitStr"]
+[primary.22]
+width = 2
+names = ["LitVar_Missing"]
+[primary.23]
+width = 4
+names = ["LitVarI2"]
+[primary.24]
+width = 8
+names = ["LitDate", "LitR8FP"]
+[primary.25]
+width = 2
+names = ["FStStrNoPop"]
+[primary.26]
+width = 2
+names = ["PopTmpLdAd2"]
+[primary.27]
+width = 2
+names = ["New"]
+[primary.28]
+width = 2
+names = ["NewIfNullPr"]
+[primary.29]
+width = 1
+names = ["Bos", "LargeBos"]
+[primary.2A]
+width = 2
+names = ["FStStrCopy"]
+[primary.2B]
+width = 2
+names = ["FStR8"]
 [lead1.C8]
 width = 0
 names = ["End"]
@@ -1322,6 +1601,91 @@ result = false
         assert_eq!(
             lines(&body).unwrap(),
             ["       local_88 = 1", "       Exit"]
+        );
+    }
+
+    #[test]
+    fn globals_fields_and_strings_give_their_expressions() {
+        // local_88 = Me.field_54; local_68.field_10 = local_88.field_C;
+        // local_88 = "x", with the string at index 2.
+        let body = [
+            0x16, 0x1E, 0x54, 0x00, 0x05, 0x78, 0xFF, 0x20, 0x78, 0xFF, 0x0C, 0x00, 0x1F, 0x98,
+            0xFF, 0x10, 0x00, 0x21, 0x02, 0x00, 0x2A, 0x78, 0xFF, 0x0C,
+        ];
+        let table = PcodeTable::parse(TABLE.as_bytes()).unwrap();
+        let listing = disassemble(&Region::new(&body, Off::new(0)), &table);
+        let callees = Callees::default().with_string(2, "x");
+        let lines = render(&lift(&listing, &table, &callees, None).unwrap());
+        assert_eq!(
+            lines,
+            [
+                "       local_88 = Me.field_54",
+                "       local_68.field_10 = local_88.field_C",
+                "       local_88 = \"x\"",
+                "       Exit"
+            ]
+        );
+    }
+
+    #[test]
+    fn literals_give_their_constants() {
+        // local_A0 = 2.5, then Call import_1(Missing, 7, New class_4), with a
+        // Bos before it.
+        let mut body = vec![0x24];
+        body.extend_from_slice(&2.5_f64.to_le_bytes());
+        body.extend_from_slice(&[0x2B, 0x60, 0xFF, 0x29, 0x00, 0x27, 0x04, 0x00]);
+        body.extend_from_slice(&[
+            0x23, 0x70, 0xFF, 0x07, 0x00, 0x22, 0x68, 0xFF, 0x12, 0x01, 0x00, 0x0C, 0x00, 0x0C,
+        ]);
+        assert_eq!(
+            lines(&body).unwrap(),
+            [
+                "       local_A0 = 2.5",
+                "       Call import_1(Missing, 7, New class_4)",
+                "       Exit"
+            ]
+        );
+        assert_eq!(
+            lines(&[0x21, 0x05, 0x00, 0x2A, 0x78, 0xFF, 0x0C]).unwrap()[0],
+            "       local_88 = const_5"
+        );
+    }
+
+    #[test]
+    fn a_store_that_keeps_its_value_gives_an_assignment_unless_freed() {
+        // import_2(local_88 = arg_C): the store keeps arg_C, and PopTmpLdAd2
+        // passes it by reference.
+        let kept = [
+            0x03, 0x0C, 0x00, 0x25, 0x78, 0xFF, 0x26, 0x70, 0xFF, 0x12, 0x02, 0x00, 0x04, 0x00,
+            0x0C,
+        ];
+        assert_eq!(
+            lines(&kept).unwrap(),
+            [
+                "       local_88 = arg_C",
+                "       Call import_2(arg_C)",
+                "       Exit"
+            ]
+        );
+        let freed = [
+            0x03, 0x0C, 0x00, 0x25, 0x78, 0xFF, 0x12, 0x02, 0x00, 0x04, 0x00, 0x18, 0x78, 0xFF,
+            0x0C,
+        ];
+        assert_eq!(
+            lines(&freed).unwrap(),
+            ["       Call import_2(arg_C)", "       Exit"]
+        );
+    }
+
+    #[test]
+    fn new_if_null_sets_the_object_register_to_the_variable() {
+        // NewIfNullPr of global_3, then a field store through the register.
+        let body = [
+            0x1D, 0x03, 0x00, 0x28, 0x01, 0x00, 0x02, 0x01, 0x07, 0x40, 0x00, 0x0C,
+        ];
+        assert_eq!(
+            lines(&body).unwrap(),
+            ["       global_3.field_40 = 1", "       Exit"]
         );
     }
 
