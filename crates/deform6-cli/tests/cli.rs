@@ -1605,3 +1605,23 @@ fn disasm_names_a_native_program_and_refuses_a_missing_table() {
     ]);
     assert_eq!(code, 5, "{stderr}");
 }
+
+/// `disasm --lift` gives the reason when a body does not lift, and then the
+/// listing. The small table holds placeholder names, which give no family,
+/// so each body of `Fast_Flames.exe` gives the reason.
+#[test]
+fn disasm_lift_names_the_reason_and_prints_the_listing() {
+    let table = write_pcode_table("lift");
+    let (code, stdout, stderr) = run(&[
+        OsStr::new("disasm"),
+        fast_flames_pcode_path().as_os_str(),
+        OsStr::new("--pcode-table"),
+        table.as_os_str(),
+        OsStr::new("--lift"),
+    ]);
+    fs::remove_file(&table).unwrap();
+    assert_eq!(code, 0, "{stderr}");
+    let expected = "  method 6  descriptor 0x00403438  12 bytes\n    no statements: NoFamily(0)\n    \
+                    0000  F4 00                     OpA\n";
+    assert!(stdout.contains(expected), "{stdout}");
+}

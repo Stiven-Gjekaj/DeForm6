@@ -105,6 +105,12 @@ enum Command {
         /// The P-code table. This repository does not ship one.
         #[arg(long)]
         pcode_table: PathBuf,
+
+        /// Prints each procedure as statements where the lift succeeds, and
+        /// as the listing with the reason where it does not. The statements
+        /// name slots by their offsets, and they are not the source.
+        #[arg(long)]
+        lift: bool,
     },
 
     Extract {
@@ -217,7 +223,11 @@ fn run(cli: &Cli) -> Exit {
             opcode_table,
             salvage,
         } => run_inspect(input, opcode_table.as_deref(), mode_for(*salvage)),
-        Command::Disasm { input, pcode_table } => run_disasm(input, pcode_table),
+        Command::Disasm {
+            input,
+            pcode_table,
+            lift,
+        } => run_disasm(input, pcode_table, *lift),
         Command::Extract {
             input,
             output,
@@ -295,7 +305,7 @@ fn load_opcode_table(opcode_table_path: Option<&Path>) -> Result<(OpcodeTable, S
 /// refuses gets the same exit code as from `inspect`. A native program holds
 /// no P-code: the command says so and exits with 0. A table that cannot be
 /// read is [`Exit::Internal`], as a bad `--opcode-table` is.
-fn run_disasm(path: &Path, table_path: &Path) -> Exit {
+fn run_disasm(path: &Path, table_path: &Path, lift: bool) -> Exit {
     let table = match std::fs::read(table_path) {
         Ok(bytes) => match PcodeTable::parse(&bytes) {
             Ok(table) => table,
@@ -337,7 +347,7 @@ fn run_disasm(path: &Path, table_path: &Path) -> Exit {
         println!("This program is native code, and it holds no P-code.");
         return Exit::Ok;
     }
-    match print_pcode(&data, &table) {
+    match print_pcode(&data, &table, lift) {
         Ok(()) => Exit::Ok,
         Err(refusal) => {
             eprintln!("{refusal}");
@@ -348,7 +358,7 @@ fn run_disasm(path: &Path, table_path: &Path) -> Exit {
 
 /// Prints the P-code of each procedure of each object, in the order of the
 /// object table and of each method table.
-fn print_pcode(data: &[u8], table: &PcodeTable) -> Result<(), deform6::Refusal> {
+fn print_pcode(data: &[u8], table: &PcodeTable, lift: bool) -> Result<(), deform6::Refusal> {
     let pe = PeImage::parse(data)?;
     let header = VbHeader::read(&header_region(&pe)?)?;
     let info = ProjectInfo::read(&pe, header.lp_project_data)?;
@@ -378,6 +388,17 @@ fn print_pcode(data: &[u8], table: &PcodeTable) -> Result<(), deform6::Refusal> 
                 continue;
             };
             let listing = disassemble(&body, table);
+            if lift {
+                match deform6::vb::lift::lift(&listing, table) {
+                    Ok(stmts) => {
+                        for line in deform6::vb::lift::render(&stmts) {
+                            println!("    {line}");
+                        }
+                        continue;
+                    }
+                    Err(fault) => println!("    no statements: {fault:?}"),
+                }
+            }
             for instruction in &listing.instructions {
                 println!("    {}", format_instruction(instruction, table));
             }
