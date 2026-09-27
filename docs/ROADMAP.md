@@ -698,8 +698,32 @@ body ends at its descriptor. Section 23 of `STRUCTURES.md` gives the counts.
 `#[non_exhaustive]`, so a new field breaks the library interface. It waits
 for the release that decodes the bodies.
 
-**Part 2 is next.** It derives the table from the runtime and its debug
-symbols, on a copy that the user owns.
+#### Part 2, done on 2026-09-27
+
+**The names.** The symbol server of Microsoft serves the symbol file of the
+runtime of the XP host, `MSVBVM60.DLL` 6.0.98.2 of 2008-04-14. Two commands
+use it, and neither writes into the repository:
+
+- `cargo run -p xtask -- fetch-pcode-symbols <dll>` reads the `NB10` record
+  of the DLL, fetches the file that it names, and keeps it only when its
+  signature and its age agree. It writes below `derived/symbols/`.
+- `cargo run -p xtask -- derive-pcode-table <dll> <pdb>` writes
+  `derived/pcode-table.toml`: the handler address and the names of each
+  slot of the primary table and of the five lead tables.
+
+The symbol file is of the format 2.00, and the runtime was reordered after
+the link. So `xtask` reads the OMAP of the file, and it finds the base of
+each segment from the exports, which must all agree. On this runtime the
+table has 1351 slots: 256 in the primary table, 256 in each of the lead
+tables of `0xFB` to `0xFE`, and 71 in the table of `0xFF`, which refuses
+each higher byte. 1346 slots have a name, and 775 different handlers serve
+them. The public count of 1531 slots counts the 185 refused bytes of `0xFF`
+too.
+
+**Part 3 is next: the argument widths.** A handler ends with
+`xor eax,eax / mov al,[esi+k] / add esi,k+1 / jmp [table]`, and `k` is the
+width of its arguments. Where the code does not give `k`, the corpus does:
+a width is right only when each of the 680 bodies decodes to its exact end.
 
 ### Phase 11: P-code statement recovery
 
