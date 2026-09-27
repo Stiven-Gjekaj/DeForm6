@@ -60,6 +60,7 @@ use deform6::vb::controlinfo::{
 use deform6::vb::header::{VbHeader, header_region};
 use deform6::vb::object::{Object, ObjectTable};
 use deform6::vb::opcodes::OpcodeTable;
+use deform6::vb::procdesc::{MethodEntry, read_method_table};
 use deform6::vb::project::{ObjectTableHead, ProjectInfo};
 use object::LittleEndian as LE;
 use object::pe::ImageNtHeaders32;
@@ -604,4 +605,159 @@ fn each_pcode_stub_loads_the_word_at_four_of_its_control_into_eax() {
         failures.join("\n")
     );
     assert_eq!(stubs, EXPECTED_BOUND_SLOTS);
+}
+
+/// The method table entries of the P-code corpus, in all 99 objects of the 42
+/// programs.
+const EXPECTED_METHOD_ENTRIES: usize = 871;
+
+/// The entries that name a procedure descriptor.
+const EXPECTED_DESCRIPTORS: usize = 680;
+
+/// The entries that map into no section.
+const EXPECTED_NOT_ADDRESSES: usize = 191;
+
+/// DeForm6 reads the method table of each object of a P-code program.
+/// Checked against the test's own reading of the table, and against the
+/// layout of the file:
+///
+/// - Each entry that the test finds to be an address is a descriptor, in the
+///   same order. Each other entry comes before the first descriptor.
+/// - `ProcTable` of each descriptor is the address of the `ObjectInfo` of its
+///   object.
+/// - Each body is the `ProcSize` bytes that end at its descriptor, with
+///   `ProcSize` read here from the file. It starts on a four-byte boundary,
+///   and no two bodies of one program share a byte.
+/// - Each handler address that `inspect` reports is a descriptor of the
+///   method table of its form.
+#[test]
+fn each_method_table_of_a_pcode_program_names_the_descriptors_of_its_procedures() {
+    let table = OpcodeTable::builtin();
+    let (mut entries, mut descriptors, mut not_addresses) = (0, 0, 0);
+    let mut failures = Vec::new();
+    for (key, exe) in pcode_programs() {
+        let bytes = read(&exe);
+        let pe = PeImage::parse(&bytes).unwrap_or_else(|err| panic!("{key}: {err}"));
+        let objects = objects_by_name(&pe);
+        let mut bodies = Vec::new();
+        let mut by_object = BTreeMap::new();
+        for object in objects.values() {
+            let methods = read_method_table(&pe, object.lp_object_info)
+                .unwrap_or_else(|err| panic!("{key}: {}: {err}", object.name));
+            if !methods.defects().is_empty() {
+                failures.push(format!("{key}: {}: {:?}", object.name, methods.defects()));
+            }
+            entries += methods.entries.len();
+            not_addresses += methods
+                .entries
+                .iter()
+                .filter(|entry| matches!(entry, MethodEntry::NotAnAddress { .. }))
+                .count();
+            let found: Vec<u32> = methods.descriptors().map(|d| d.va.get()).collect();
+            descriptors += found.len();
+            let addresses: Vec<u32> = method_table(&pe, object)
+                .into_iter()
+                .filter(|value| pe.region_at_va(Va::new(*value)).is_some())
+                .collect();
+            if found != addresses {
+                failures.push(format!(
+                    "{key}: {} gives {found:x?}, and the test reads {addresses:x?}",
+                    object.name
+                ));
+            }
+            let first = methods
+                .entries
+                .iter()
+                .position(|entry| matches!(entry, MethodEntry::Descriptor { .. }))
+                .unwrap_or(methods.entries.len());
+            if methods.entries[first..]
+                .iter()
+                .any(|entry| !matches!(entry, MethodEntry::Descriptor { .. }))
+            {
+                failures.push(format!(
+                    "{key}: {}: an entry after a descriptor is not one",
+                    object.name
+                ));
+            }
+            for descriptor in methods.descriptors() {
+                if descriptor.proc_table != object.lp_object_info {
+                    failures.push(format!(
+                        "{key}: {}: the descriptor at {:#x} names {:#x}",
+                        object.name,
+                        descriptor.va.get(),
+                        descriptor.proc_table.get()
+                    ));
+                }
+                let body = descriptor.body(&pe).unwrap();
+                let start = body.file_offset(Off::new(0)).unwrap().get();
+                let at = pe
+                    .region_at_va(descriptor.va)
+                    .unwrap()
+                    .file_offset(Off::new(0))
+                    .unwrap()
+                    .get();
+                let proc_size = u32::from(u16::from_le_bytes([
+                    bytes[usize::try_from(at).unwrap() + 8],
+                    bytes[usize::try_from(at).unwrap() + 9],
+                ]));
+                if (body.len(), start + body.len()) != (proc_size, at) {
+                    failures.push(format!(
+                        "{key}: the body at {start:#x} has {} bytes, and the descriptor at \
+                         {at:#x} gives {proc_size}",
+                        body.len()
+                    ));
+                }
+                if start % 4 != 0 {
+                    failures.push(format!("{key}: a body starts at {start:#x}"));
+                }
+                bodies.push((start, body.len()));
+            }
+            by_object.insert(object.name.clone(), found);
+        }
+        bodies.sort_unstable();
+        for pair in bodies.windows(2) {
+            if pair[0].0 + pair[0].1 > pair[1].0 {
+                failures.push(format!("{key}: the bodies {pair:x?} share bytes"));
+            }
+        }
+        let report = deform6::inspect(&bytes, &table, Mode::Strict)
+            .unwrap_or_else(|err| panic!("{key}: {err}"));
+        for form in &report.forms {
+            for control in &form.controls {
+                for event in &control.events {
+                    if let EventReport::Named {
+                        handler_address: Some(address),
+                        ..
+                    }
+                    | EventReport::BoundUnnamed {
+                        handler_address: Some(address),
+                        ..
+                    } = event
+                        && !by_object[&form.name].contains(address)
+                    {
+                        failures.push(format!(
+                            "{key}: {}.{} gives {address:#x}, which is no descriptor",
+                            form.name, control.name
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} method table facts do not hold:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+    assert_eq!(
+        (entries, descriptors, not_addresses),
+        (
+            EXPECTED_METHOD_ENTRIES,
+            EXPECTED_DESCRIPTORS,
+            EXPECTED_NOT_ADDRESSES
+        ),
+        "the P-code corpus now gives {entries} entries, {descriptors} descriptors and \
+         {not_addresses} values that are not addresses"
+    );
 }

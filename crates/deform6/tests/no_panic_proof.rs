@@ -44,7 +44,12 @@ use std::path::{Path, PathBuf};
 
 use deform6::inspect;
 use deform6::journal::Mode;
+use deform6::read::pe::PeImage;
+use deform6::vb::header::{VbHeader, header_region};
+use deform6::vb::object::ObjectTable;
 use deform6::vb::opcodes::OpcodeTable;
+use deform6::vb::procdesc::read_method_table;
+use deform6::vb::project::{ObjectTableHead, ProjectInfo};
 
 /// The count `crates/deform6/tests/corpus_sweep.rs`,
 /// `crates/deform6/tests/differential.rs` and
@@ -481,6 +486,43 @@ fn drive_one(source: &str, path: &Path, opcode_table: &OpcodeTable) {
     // held to the same claim as everything above it.
     println!("no_panic_proof: {source} {} fidelity::walk", path.display());
     let _ = deform6::fidelity::walk::walk(&data);
+
+    // The method table reader is public, and it follows each entry to a
+    // descriptor and a body. It runs here on each object of every input,
+    // native or P-code, so it meets bytes that are not a method table too.
+    println!("no_panic_proof: {source} {} procdesc", path.display());
+    drive_method_tables(&data);
+}
+
+/// Reads the method table of each object that the public walk reaches, and
+/// the body of each descriptor. A step that refuses ends the walk for this
+/// input; nothing is asserted about the results.
+fn drive_method_tables(data: &[u8]) {
+    let Ok(pe) = PeImage::parse(data) else {
+        return;
+    };
+    let Some(header) = header_region(&pe)
+        .ok()
+        .and_then(|hdr| VbHeader::read(&hdr).ok())
+    else {
+        return;
+    };
+    let Ok(info) = ProjectInfo::read(&pe, header.lp_project_data) else {
+        return;
+    };
+    let Ok(head) = ObjectTableHead::read(&pe, info.lp_object_table) else {
+        return;
+    };
+    let Ok(table) = ObjectTable::walk(&pe, info.lp_object_table, &head) else {
+        return;
+    };
+    for object in &table.objects {
+        if let Ok(methods) = read_method_table(&pe, object.lp_object_info) {
+            for descriptor in methods.descriptors() {
+                let _ = descriptor.body(&pe);
+            }
+        }
+    }
 }
 
 /// Roadmap success criterion 5, and SAF-01: one run reads every file in
