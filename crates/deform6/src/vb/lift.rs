@@ -111,7 +111,9 @@
 //! gives the profile of that class, an object of the project, a call on the
 //! object finds a control accessor, a method, or the get or the let of a
 //! public variable there. The lift names a variable by its field, such as
-//! `global_7.field_34`, as it names a field of `Me`.
+//! `global_7.field_34`, as it names a field of `Me`. When the class is a
+//! class of the runtime, such as its global object, [`Callees`] can give
+//! its interface, and a call finds its function in [`VbTypes`].
 //!
 //! # What the lift checks
 //!
@@ -257,6 +259,7 @@ pub struct Callees {
     strings: Vec<(u16, String)>,
     variables: Vec<(u16, u32, bool)>,
     classes: Vec<(u16, Callees)>,
+    class_interfaces: Vec<(u16, String)>,
 }
 
 /// A method that [`Callees`] gives.
@@ -312,6 +315,23 @@ impl Callees {
     pub fn with_class(mut self, index: u16, profile: Self) -> Self {
         self.classes.push((index, profile));
         self
+    }
+
+    /// Adds the class at `index` of the constant table that is a class of
+    /// the runtime, with the interface `interface`.
+    #[must_use]
+    pub fn with_class_interface(mut self, index: u16, interface: &str) -> Self {
+        self.class_interfaces.push((index, interface.to_owned()));
+        self
+    }
+
+    /// Gives the interface of the class of the runtime at `index` of the
+    /// constant table.
+    fn class_interface(&self, index: u16) -> Option<&str> {
+        self.class_interfaces
+            .iter()
+            .find(|(at, _)| *at == index)
+            .map(|(_, interface)| interface.as_str())
     }
 
     /// Gives the profile of the class at `index` of the constant table.
@@ -1367,6 +1387,8 @@ pub fn lift(
                 let index = word16(0)?;
                 let class = if callees.class(index).is_some() {
                     Some(format!("{PROJECT_CLASS}{index}"))
+                } else if let Some(interface) = callees.class_interface(index) {
+                    Some(interface.to_owned())
                 } else {
                     reference.class
                 };
@@ -2113,6 +2135,21 @@ result = false
             ]
         );
         assert_eq!(class_indexes(&listing, &table), [9]);
+        // The same class as a class of the runtime with the interface _Box:
+        // the get of 0x00A8 of _Box gives Text.
+        let types = VbTypes::parse(TYPES.as_bytes()).unwrap();
+        let runtime = Callees::default().with_class_interface(9, "_Box");
+        let mut get = vec![0x15, 0x9C, 0xFF];
+        get.extend_from_slice(&object);
+        get.extend_from_slice(&[
+            0x1C, 0xA8, 0x00, 0x00, 0x00, 0x03, 0x9C, 0xFF, 0x05, 0x78, 0xFF,
+        ]);
+        get.push(0x0C);
+        let listing_get = disassemble(&Region::new(&get, Off::new(0)), &table);
+        assert_eq!(
+            render(&lift(&listing_get, &table, &runtime, Some(&types)).unwrap())[0],
+            "       local_88 = global_3.Text"
+        );
         let unknown = Callees::default();
         assert_eq!(
             lift(&listing, &table, &unknown, None),

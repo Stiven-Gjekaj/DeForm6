@@ -4,10 +4,11 @@
 //! methods and the accessors of its link table, the control accessors of a
 //! form when the user derived the control types, the strings of its
 //! constant table that its P-code names, and the profile of each object of
-//! the project that its P-code names with `NewIfNullPr`.
+//! the project that its P-code names with `NewIfNullPr`, or the interface
+//! of a class of the runtime that it names so.
 
 use crate::read::pe::PeImage;
-use crate::vb::constants::{constant, constant_string};
+use crate::vb::constants::{class_reference_iid, constant, constant_string};
 use crate::vb::lift::{Callees, class_indexes, string_indexes};
 use crate::vb::links::read_method_links;
 use crate::vb::object::Object;
@@ -75,6 +76,10 @@ pub fn callees_of_project(
                     .find(|(other, _)| other.lp_object_info == target)
                 {
                     callees = callees.with_class(index, profile.clone());
+                } else if let Some(interface) = types.and_then(|types| {
+                    types.interface_of_iid(&class_reference_iid(pe, object.lp_object_info, index)?)
+                }) {
+                    callees = callees.with_class_interface(index, interface);
                 }
             }
         }
