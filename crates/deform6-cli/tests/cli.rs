@@ -1625,3 +1625,49 @@ fn disasm_lift_names_the_reason_and_prints_the_listing() {
                     0000  F4 00                     OpA\n";
     assert!(stdout.contains(expected), "{stdout}");
 }
+
+/// `disasm --vb-types` names the types file that it reads, and refuses one
+/// that it cannot read or parse.
+#[test]
+fn disasm_names_the_types_file_and_refuses_a_bad_one() {
+    let table = write_pcode_table("types");
+    let types = std::env::temp_dir().join(format!("deform6-vb-types-{}.toml", std::process::id()));
+    fs::write(&types, "[interfaces._Box]\nvtable_size = 64\n").unwrap();
+    let (code, stdout, stderr) = run(&[
+        OsStr::new("disasm"),
+        fast_flames_pcode_path().as_os_str(),
+        OsStr::new("--pcode-table"),
+        table.as_os_str(),
+        OsStr::new("--vb-types"),
+        types.as_os_str(),
+    ]);
+    assert_eq!(code, 0, "{stderr}");
+    assert!(
+        stdout.contains(&format!("VB types     {}", types.display())),
+        "{stdout}"
+    );
+
+    fs::write(&types, "[interfaces._Box]\nvtable_size = \"big\"\n").unwrap();
+    let (code, _, stderr) = run(&[
+        OsStr::new("disasm"),
+        fast_flames_pcode_path().as_os_str(),
+        OsStr::new("--pcode-table"),
+        table.as_os_str(),
+        OsStr::new("--vb-types"),
+        types.as_os_str(),
+    ]);
+    fs::remove_file(&types).unwrap();
+    assert_eq!(code, 5, "{stderr}");
+
+    let (code, _, stderr) = run(&[
+        OsStr::new("disasm"),
+        fast_flames_pcode_path().as_os_str(),
+        OsStr::new("--pcode-table"),
+        table.as_os_str(),
+        OsStr::new("--vb-types"),
+        OsStr::new("/nonexistent/deform6-vb-types.toml"),
+    ]);
+    fs::remove_file(&table).unwrap();
+    assert_eq!(code, 5, "{stderr}");
+    assert!(stderr.contains("could not read"), "{stderr}");
+}

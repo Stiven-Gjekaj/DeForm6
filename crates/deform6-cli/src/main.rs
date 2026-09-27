@@ -50,6 +50,7 @@ use deform6::vb::procdesc::{MethodEntry, read_method_table};
 use deform6::vb::project::{Declaration, ExportName};
 use deform6::vb::project::{ObjectTableHead, ProjectInfo};
 use deform6::vb::propstream::PropertyValue;
+use deform6::vb::types::VbTypes;
 use deform6::vb::{ControlReport, FormReport, ObjectProcedures, ProcedureEntry};
 
 /// `deform6`: reads a compiled Visual Basic 6 executable and reports what it
@@ -112,6 +113,12 @@ enum Command {
         /// name slots by their offsets, and they are not the source.
         #[arg(long)]
         lift: bool,
+
+        /// The interfaces of the controls, which `cargo run -p xtask --
+        /// derive-vb-types` writes from `VB6.OLB`. With them, `--lift` can
+        /// follow a call of a control. This repository does not ship them.
+        #[arg(long)]
+        vb_types: Option<PathBuf>,
     },
 
     Extract {
@@ -228,7 +235,8 @@ fn run(cli: &Cli) -> Exit {
             input,
             pcode_table,
             lift,
-        } => run_disasm(input, pcode_table, *lift),
+            vb_types,
+        } => run_disasm(input, pcode_table, *lift, vb_types.as_deref()),
         Command::Extract {
             input,
             output,
@@ -306,7 +314,7 @@ fn load_opcode_table(opcode_table_path: Option<&Path>) -> Result<(OpcodeTable, S
 /// refuses gets the same exit code as from `inspect`. A native program holds
 /// no P-code: the command says so and exits with 0. A table that cannot be
 /// read is [`Exit::Internal`], as a bad `--opcode-table` is.
-fn run_disasm(path: &Path, table_path: &Path, lift: bool) -> Exit {
+fn run_disasm(path: &Path, table_path: &Path, lift: bool, types_path: Option<&Path>) -> Exit {
     let table = match std::fs::read(table_path) {
         Ok(bytes) => match PcodeTable::parse(&bytes) {
             Ok(table) => table,
@@ -317,6 +325,20 @@ fn run_disasm(path: &Path, table_path: &Path, lift: bool) -> Exit {
         },
         Err(err) => {
             eprintln!("could not read {}: {err}", table_path.display());
+            return Exit::Internal;
+        }
+    };
+    let types = match types_path.map(|types_path| (types_path, std::fs::read(types_path))) {
+        None => None,
+        Some((types_path, Ok(bytes))) => match VbTypes::parse(&bytes) {
+            Ok(types) => Some(types),
+            Err(err) => {
+                eprintln!("{}: {err}", types_path.display());
+                return Exit::Internal;
+            }
+        },
+        Some((types_path, Err(err))) => {
+            eprintln!("could not read {}: {err}", types_path.display());
             return Exit::Internal;
         }
     };
@@ -344,11 +366,14 @@ fn run_disasm(path: &Path, table_path: &Path, lift: bool) -> Exit {
         table_path.display(),
         table.len()
     );
+    if let Some(types_path) = types_path {
+        println!("VB types     {}", types_path.display());
+    }
     if report.native {
         println!("This program is native code, and it holds no P-code.");
         return Exit::Ok;
     }
-    match print_pcode(&data, &table, lift) {
+    match print_pcode(&data, &table, types.as_ref(), lift) {
         Ok(()) => Exit::Ok,
         Err(refusal) => {
             eprintln!("{refusal}");
@@ -359,7 +384,12 @@ fn run_disasm(path: &Path, table_path: &Path, lift: bool) -> Exit {
 
 /// Prints the P-code of each procedure of each object, in the order of the
 /// object table and of each method table.
-fn print_pcode(data: &[u8], table: &PcodeTable, lift: bool) -> Result<(), deform6::Refusal> {
+fn print_pcode(
+    data: &[u8],
+    table: &PcodeTable,
+    types: Option<&VbTypes>,
+    lift: bool,
+) -> Result<(), deform6::Refusal> {
     let pe = PeImage::parse(data)?;
     let header = VbHeader::read(&header_region(&pe)?)?;
     let info = ProjectInfo::read(&pe, header.lp_project_data)?;
@@ -375,9 +405,12 @@ fn print_pcode(data: &[u8], table: &PcodeTable, lift: bool) -> Result<(), deform
                 continue;
             }
         };
-        let callees = read_method_links(&pe, object)
+        let mut callees = read_method_links(&pe, object)
             .map(|links| links.callees(&methods))
             .unwrap_or_default();
+        if let Some(types) = types {
+            callees = types.with_controls(callees, &pe, object);
+        }
         for entry in &methods.entries {
             let MethodEntry::Descriptor { index, descriptor } = entry else {
                 continue;
@@ -393,7 +426,7 @@ fn print_pcode(data: &[u8], table: &PcodeTable, lift: bool) -> Result<(), deform
             };
             let listing = disassemble(&body, table);
             if lift {
-                match deform6::vb::lift::lift(&listing, table, &callees, None) {
+                match deform6::vb::lift::lift(&listing, table, &callees, types) {
                     Ok(stmts) => {
                         for line in deform6::vb::lift::render(&stmts) {
                             println!("    {line}");

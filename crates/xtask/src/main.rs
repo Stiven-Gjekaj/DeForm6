@@ -156,7 +156,7 @@ fn run(args: Vec<String>) -> i32 {
     }
 }
 
-const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | update-fidelity | export-builds [--probe] <dir> | import-builds [--capture <file>] <dir> | export-pcode [--probe] <dir> | import-pcode [--capture <file>] <dir> | derive-opcode-table | fetch-pcode-symbols <dll> [--out <dir>] | derive-pcode-table <dll> <pdb> [--out <path>] | check-pcode-table [<table>] | derive-vb-types <olb> [--out <path>] | fetch-corpus | pin-corpus <name> <url> | fuzz-pr | fuzz-cron | licences";
+const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | update-fidelity | export-builds [--probe] <dir> | import-builds [--capture <file>] <dir> | export-pcode [--probe] <dir> | import-pcode [--capture <file>] <dir> | derive-opcode-table | fetch-pcode-symbols <dll> [--out <dir>] | derive-pcode-table <dll> <pdb> [--out <path>] | check-pcode-table [<table>] [--vb-types <types>] | derive-vb-types <olb> [--out <path>] | fetch-corpus | pin-corpus <name> <url> | fuzz-pr | fuzz-cron | licences";
 
 /// The number of corpus programs `update-ratios` refuses to write fewer
 /// than. Matches `EXPECTED_PROGRAM_COUNT` in `crates/deform6/tests/ratios.rs`
