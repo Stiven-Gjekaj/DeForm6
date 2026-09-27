@@ -58,6 +58,13 @@
 //! | `PopFPR4`, `PopFPR8` | Move the value of the floating point unit to the stack, as 4 or 8 bytes |
 //! | `CStr2Ansi`, `CStr2Uni` | Pop the address of a frame slot and a string, and write a copy of the string into the slot |
 //! | `ForI4`, `ForStepI4`, `NextI4` | A `For` loop over a `Long` counter |
+//! | `LateIdLdVar` | Get a property of the object register by its `DISPID`, late bound, into a `Variant` in the frame slot, and push its address |
+//! | `PopAd` | Pop a value that nothing uses; a call gives a statement |
+//! | `Ary1Ld` + a type, `Ary1St` + a type | Pop a one-dimensional array and an index, and push the element or pop a value into it |
+//! | `AryLdPr` | Pop an array and its indexes, and set the object register to the element |
+//! | `FnInStr4`, `FnUBound` | `InStr` of four values, `UBound` of two, in the order of the push |
+//! | `FStVarCopyObj` | Pop into the `Variant` in the frame slot |
+//! | `ForI2`, `NextI2`, `NextStepI4` | The `For` loops of an `Integer` counter, and the end of a loop with a step |
 //! | `OnErrorGoto` | `On Error GoTo` a label, `On Error Resume Next` for `0xFFFF`, or `On Error GoTo 0` for `0xFFFE` |
 //!
 //! All the names of one slot must give one family. A conversion whose names
@@ -232,6 +239,10 @@ pub enum Expr {
     Constant(u16),
     /// A new object of the class at an index of the constant table.
     New(u16),
+    /// A member of an object, late bound, by its `DISPID`.
+    Late(Box<Expr>, u32),
+    /// An element of an array.
+    Index(Box<Expr>, Vec<Expr>),
 }
 
 /// The procedure that a call names.
@@ -268,6 +279,7 @@ pub struct Callees {
     class_interfaces: Vec<(u16, String)>,
     arguments: Vec<(u16, i16, String)>,
     base: Option<String>,
+    owner: Option<u16>,
 }
 
 /// A method that [`Callees`] gives.
@@ -322,6 +334,14 @@ impl Callees {
     #[must_use]
     pub fn with_class(mut self, index: u16, profile: Self) -> Self {
         self.classes.push((index, profile));
+        self
+    }
+
+    /// Sets the owner of the profile: the index of its object in the
+    /// project. A call of a method records it.
+    #[must_use]
+    pub const fn with_owner(mut self, owner: u16) -> Self {
+        self.owner = Some(owner);
         self
     }
 
@@ -449,6 +469,8 @@ impl Expr {
             Self::Str(text) => format!("\"{}\"", text.replace('"', "\"\"")),
             Self::Constant(index) => format!("const_{index:X}"),
             Self::New(index) => format!("New class_{index:X}"),
+            Self::Late(object, dispid) => format!("{}.[DISPID {dispid:#X}]", object.text()),
+            Self::Index(array, indexes) => format!("{}({})", array.text(), arguments_text(indexes)),
         }
     }
 }
@@ -637,6 +659,12 @@ enum Family {
     NewIfNull,
     Nop,
     Function(&'static str),
+    FunctionOf(&'static str, u8),
+    LateGet,
+    Discard,
+    ArrayLoad,
+    ArrayStore,
+    ArrayObjectRegister,
     Sized(u8),
     StringCopy,
     For { step: bool },
@@ -777,6 +805,16 @@ fn family_of(name: &str) -> Option<Family> {
             Family::Nop
         }
         "ConcatStr" => Family::Binary(BinaryOp::Concat),
+        "LateIdLdVar" => Family::LateGet,
+        "PopAd" => Family::Discard,
+        "AryLdPr" => Family::ArrayObjectRegister,
+        "FnInStr4" => Family::FunctionOf("InStr", 4),
+        "FnUBound" => Family::FunctionOf("UBound", 2),
+        "FStVarCopyObj" => Family::FrameStore,
+        "ForI2" => Family::For { step: false },
+        "NextI2" | "NextStepI4" => Family::Next,
+        _ if typed("Ary1Ld") => Family::ArrayLoad,
+        _ if typed("Ary1St") => Family::ArrayStore,
         "FnLenStr" => Family::Function("Len"),
         "FnLenBStr" => Family::Function("LenB"),
         "NotI2" | "NotI4" => Family::Function("Not"),
@@ -1061,6 +1099,10 @@ fn interface_call(
 /// `Me`, or an object of a class of the constant table. An offset in the
 /// base interface of the object, such as `_Form`, is a call of that
 /// interface.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the state of the lift, the profile, the call and the record of it"
+)]
 fn project_call(
     state: &mut State,
     profile: &Callees,
@@ -1069,6 +1111,7 @@ fn project_call(
     vtable_offset: u16,
     pushes: bool,
     at: u32,
+    calls: &mut Vec<MethodCall>,
 ) -> Result<Option<Stmt>, LiftFault> {
     if pushes {
         let (name, interface) = profile
@@ -1095,6 +1138,13 @@ fn project_call(
             .checked_sub(4)
             .ok_or(LiftFault::CallArguments(at))?;
         let args = call_arguments(&mut state.stack, bytes, at)?;
+        calls.push((
+            profile.owner,
+            method.index,
+            args.iter()
+                .map(|value| (value.bytes, value.class.clone()))
+                .collect(),
+        ));
         let callee = Callee::Member(Box::new(object), format!("method_{}", method.index));
         return Ok(Some(Stmt::Call(callee, expressions(args))));
     }
@@ -1126,6 +1176,7 @@ fn object_call(
     vtable_offset: u16,
     pushes: bool,
     at: u32,
+    calls: &mut Vec<MethodCall>,
 ) -> Result<Option<Stmt>, LiftFault> {
     let (object, class) = state.object.clone().ok_or(LiftFault::NoObject(at))?;
     let profile = match class.as_deref() {
@@ -1137,7 +1188,16 @@ fn object_call(
         None => None,
     };
     if let Some(profile) = profile {
-        return project_call(state, profile, types, object, vtable_offset, pushes, at);
+        return project_call(
+            state,
+            profile,
+            types,
+            object,
+            vtable_offset,
+            pushes,
+            at,
+            calls,
+        );
     }
     let interface = class.ok_or(LiftFault::NoFunction(at))?;
     if pushes {
@@ -1146,10 +1206,11 @@ fn object_call(
     interface_call(state, types, &interface, object, vtable_offset, at)
 }
 
-/// The classes of the arguments of one call of a method of `Me`: the index
-/// of the method, and for each argument, first argument first, its bytes on
-/// the stack and its interface when the lift knows it.
-pub type MethodCall = (u16, Vec<(u8, Option<String>)>);
+/// The classes of the arguments of one call of a method of an object of the
+/// project: the owner of the profile of the object, the index of the
+/// method, and for each argument, first argument first, its bytes on the
+/// stack and its interface when the lift knows it.
+pub type MethodCall = (Option<u16>, u16, Vec<(u8, Option<String>)>);
 
 /// Lifts a listing to statements. `callees` gives the methods that a
 /// `ThisVCallHresult` can call and the control accessors of the form.
@@ -1339,6 +1400,7 @@ fn run(
                     .ok_or(LiftFault::CallArguments(at))?;
                 let args = call_arguments(&mut state.stack, bytes, at)?;
                 calls.push((
+                    callees.owner,
                     method.index,
                     args.iter()
                         .map(|value| (value.bytes, value.class.clone()))
@@ -1375,7 +1437,7 @@ fn run(
                 None
             }
             Family::ObjectCall { pushes } => {
-                object_call(&mut state, callees, types, word16(0)?, pushes, at)?
+                object_call(&mut state, callees, types, word16(0)?, pushes, at, calls)?
             }
             Family::GlobalLoad => {
                 state
@@ -1516,6 +1578,74 @@ fn run(
                 None
             }
             Family::Nop => None,
+            Family::FunctionOf(function, count) => {
+                let mut args = Vec::new();
+                for _ in 0..count {
+                    args.push(pop(&mut state)?);
+                }
+                args.reverse();
+                state.stack.push(Value::plain(
+                    Expr::Call(
+                        Callee::Member(Box::new(Expr::Word("VBA")), function.to_owned()),
+                        args,
+                    ),
+                    true,
+                ));
+                None
+            }
+            Family::LateGet => {
+                let (object, _) = state.object.clone().ok_or(LiftFault::NoObject(at))?;
+                let slot = offset16()?;
+                let dispid = arguments
+                    .get(2..6)
+                    .and_then(|bytes| bytes.try_into().ok())
+                    .map(u32::from_le_bytes)
+                    .ok_or_else(short)?;
+                let expr = Expr::Late(Box::new(object), dispid);
+                state.bindings.insert(slot, (expr.clone(), None));
+                state.stack.push(Value {
+                    expr,
+                    bytes: 4,
+                    slot: Some(slot),
+                    class: None,
+                });
+                None
+            }
+            Family::Discard => {
+                let value = pop(&mut state)?;
+                match value {
+                    Expr::Call(callee, args) => Some(Stmt::Call(callee, args)),
+                    _ => None,
+                }
+            }
+            Family::ArrayLoad => {
+                let array = pop(&mut state)?;
+                let index = pop(&mut state)?;
+                state.stack.push(Value::plain(
+                    Expr::Index(Box::new(array), vec![index]),
+                    is_word(names),
+                ));
+                None
+            }
+            Family::ArrayStore => {
+                let array = pop(&mut state)?;
+                let index = pop(&mut state)?;
+                let value = pop(&mut state)?;
+                Some(Stmt::Assign {
+                    target: Expr::Index(Box::new(array), vec![index]),
+                    value,
+                })
+            }
+            Family::ArrayObjectRegister => {
+                let array = pop(&mut state)?;
+                let mut indexes = Vec::new();
+                for _ in 0..word16(0)? {
+                    indexes.push(pop(&mut state)?);
+                }
+                indexes.reverse();
+                state.object = Some((Expr::Index(Box::new(array), indexes), None));
+                None
+            }
             Family::Function(function) => {
                 let value = pop(&mut state)?;
                 state
@@ -1840,6 +1970,21 @@ names = ["NextI4"]
 [primary.32]
 width = 2
 names = ["OnErrorGoto"]
+[primary.33]
+width = 6
+names = ["LateIdLdVar"]
+[primary.34]
+width = 0
+names = ["PopAd"]
+[primary.35]
+width = 0
+names = ["Ary1LdAd", "Ary1LdI4", "Ary1LdR4", "Ary1LdStr"]
+[primary.36]
+width = 0
+names = ["Ary1StI4", "Ary1StR4"]
+[primary.37]
+width = 0
+names = ["FnInStr4"]
 [lead1.C8]
 width = 0
 names = ["End"]
@@ -1996,7 +2141,7 @@ result = false
             .with_method(0x6F8, 5, 12);
         assert_eq!(
             method_calls(&listing, &table, &callees, Some(&types), 0),
-            [(5, vec![(4, Some("_Box".to_owned())), (4, None)])]
+            [(None, 5, vec![(4, Some("_Box".to_owned())), (4, None)])]
         );
     }
 
@@ -2339,6 +2484,18 @@ result = false
             ]
         );
         assert_eq!(class_indexes(&listing, &table), [9]);
+        let owned = Callees::default().with_class(
+            9,
+            Callees::default()
+                .with_owner(4)
+                .with_method(0x6F8, 2, 8)
+                .with_variable(0x700, 0x34, true)
+                .with_variable(0x704, 0x34, false),
+        );
+        assert_eq!(
+            method_calls(&listing, &table, &owned, None, 0),
+            [(Some(4), 2, vec![(4, None)])]
+        );
         // The same class as a class of the runtime with the interface _Box:
         // the get of 0x00A8 of _Box gives Text.
         let types = VbTypes::parse(TYPES.as_bytes()).unwrap();
@@ -2359,6 +2516,24 @@ result = false
             lift(&listing, &table, &unknown, None),
             Err(LiftFault::NoFunction(8))
         );
+    }
+
+    #[test]
+    fn a_late_get_an_array_and_a_function_give_their_expressions() {
+        // local_88 = InStr(1, Me.[DISPID 0], arg_C(2), 0): the late get
+        // writes local_4C and pushes its address, which PopAd drops.
+        let body = [
+            0x16, 0x33, 0xB4, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x34, 0x01, 1, 0, 0, 0, 0x03, 0xB4,
+            0xFF, 0x02, 0x02, 0x15, 0x0C, 0x00, 0x35, 0x01, 0, 0, 0, 0, 0x37, 0x05, 0x78, 0xFF,
+            0x0C,
+        ];
+        assert_eq!(
+            lines(&body).unwrap()[0],
+            "       local_88 = VBA.InStr(1, Me.[DISPID 0x0], arg_C(2), 0)"
+        );
+        // arg_C(1) = 7
+        let store = [0x02, 0x07, 0x02, 0x01, 0x15, 0x0C, 0x00, 0x36, 0x0C];
+        assert_eq!(lines(&store).unwrap()[0], "       arg_C(1) = 7");
     }
 
     #[test]
