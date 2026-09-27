@@ -44,6 +44,11 @@ heading its version and its date.
   handler addresses and no `UnknownStubShape` defect.
 - The fidelity walk records a P-code stub as an absent `EventStub` record,
   because its emitter writes the native stub only.
+- `vb::procdesc` reads the method table of an object and each P-code
+  procedure descriptor that it names. The body of a procedure is the
+  `ProcSize` bytes before its descriptor. The 42 P-code programs give 680
+  descriptors, and a test holds each body to its descriptor. `inspect` does
+  not report the bodies yet.
 
 ### What stays open
 
@@ -53,7 +58,8 @@ heading its version and its date.
 ### What this does not do
 
 - It does not change the version in `Cargo.toml`, and it has no tag.
-- It adds `StubShape` and the field `StubHandler::shape` to the library. It
+- It adds `StubShape`, the field `StubHandler::shape` and the module
+  `vb::procdesc` to the library. It
   removes no public item, and it changes the type of none. For a P-code
   program, a report now gives a handler address where it gave none, and the
   text of an `UnknownStubShape` defect names both shapes.
