@@ -13,7 +13,15 @@
 
 use std::collections::BTreeMap;
 
+use crate::read::pe::PeImage;
+use crate::read::region::Off;
+use crate::vb::controlinfo::{ControlInfo, ControlInfoTable};
+use crate::vb::lift::Callees;
+use crate::vb::object::Object;
 use crate::vb::opcodes::{TableError, line_at};
+
+/// The `wIndex` of the `ControlInfo` record of a form itself.
+const FORM_RECORD_INDEX: u16 = 0xFFFF;
 
 /// The functions at one vtable offset of an interface.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -155,6 +163,56 @@ impl VbTypes {
     #[must_use]
     pub fn control_interface(&self, guid: &[u8; 16]) -> Option<&str> {
         self.controls.get(&guid_text(guid)).map(String::as_str)
+    }
+
+    /// Gives the 16 bytes of the GUID that `control` names, when the image
+    /// holds them.
+    fn guid(pe: &PeImage<'_>, control: &ControlInfo) -> Option<[u8; 16]> {
+        pe.region_at_va(control.lp_guid)?
+            .take(Off::new(0), 16)?
+            .try_into()
+            .ok()
+    }
+
+    /// Adds to `callees` the control accessors of `object`, when it is a
+    /// form.
+    ///
+    /// The record of the form itself holds `wIndex` `0xFFFF`, and its GUID
+    /// names the interface of the form. The accessor of a control is at the
+    /// vtable size of that interface, plus 4 times the `wIndex` of the
+    /// control. A control whose GUID names no interface of the file is left
+    /// out, and so is each control of an object that is not a form.
+    #[must_use]
+    pub fn with_controls(&self, callees: Callees, pe: &PeImage<'_>, object: &Object) -> Callees {
+        let Ok(controls) = ControlInfoTable::read(pe, object) else {
+            return callees;
+        };
+        let base = controls
+            .entries
+            .iter()
+            .find(|control| control.w_index == FORM_RECORD_INDEX)
+            .and_then(|form| self.control_interface(&Self::guid(pe, form)?))
+            .and_then(|interface| self.interface(interface))
+            .map(|interface| u32::from(interface.vtable_size));
+        let Some(base) = base else {
+            return callees;
+        };
+        let mut callees = callees;
+        for control in &controls.entries {
+            if control.w_index == FORM_RECORD_INDEX {
+                continue;
+            }
+            let offset = u32::from(control.w_index)
+                .checked_mul(4)
+                .and_then(|bytes| bytes.checked_add(base))
+                .and_then(|offset| u16::try_from(offset).ok());
+            let interface = Self::guid(pe, control)
+                .and_then(|guid| self.control_interface(&guid).map(str::to_owned));
+            if let (Some(offset), Some(interface)) = (offset, interface) {
+                callees = callees.with_control(offset, &control.name, &interface);
+            }
+        }
+        callees
     }
 
     /// Gives the interface of the name `name`.

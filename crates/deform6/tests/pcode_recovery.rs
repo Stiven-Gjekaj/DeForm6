@@ -58,11 +58,13 @@ use deform6::vb::controlinfo::{
     ControlInfoTable, EventReport, EventSlot, StubShape, read_event_table,
 };
 use deform6::vb::header::{VbHeader, header_region};
+use deform6::vb::lift::Callees;
 use deform6::vb::links::{LinkSlot, read_method_links};
 use deform6::vb::object::{Object, ObjectTable};
 use deform6::vb::opcodes::OpcodeTable;
 use deform6::vb::procdesc::{MethodEntry, read_method_table};
 use deform6::vb::project::{ObjectTableHead, ProjectInfo};
+use deform6::vb::types::{VbTypes, guid_text};
 use object::LittleEndian as LE;
 use object::pe::ImageNtHeaders32;
 use object::read::pe::{ImageNtHeaders, ImageOptionalHeader, Import, PeFile32};
@@ -991,4 +993,110 @@ fn each_control_index_of_a_pcode_form_is_the_position_of_its_source_block() {
         failures.join("\n")
     );
     assert_eq!(checked, EXPECTED_INDEXED_CONTROLS);
+}
+
+/// The control accessors that `VbTypes::with_controls` gives across the
+/// forms of the P-code corpus.
+const EXPECTED_ACCESSORS: usize = 562;
+
+/// The vtable size that the types file of the test below gives the form.
+const FORM_VTABLE_SIZE: u16 = 760;
+
+/// `VbTypes::with_controls` gives each control of a form of a P-code program
+/// an accessor at the vtable size of the form plus 4 times the position of
+/// the control in the source. The types file is built here from the GUIDs
+/// that the binary itself names, with placeholder interfaces: the GUID of
+/// the record of the form gets `_Form0` of 760 bytes, and each other GUID an
+/// interface of its own.
+#[test]
+fn each_control_of_a_pcode_form_gets_the_accessor_of_its_source_position() {
+    let root = build_record::corpus_root();
+    let projects = vbp::project_files();
+    let mut accessors = 0;
+    let mut failures = Vec::new();
+    for (key, exe) in pcode_programs() {
+        let bytes = read(&exe);
+        let pe = PeImage::parse(&bytes).unwrap_or_else(|err| panic!("{key}: {err}"));
+        let project = vbp::select_project_file(&root.join(&key), &projects)
+            .unwrap_or_else(|err| panic!("{key}: {err}"));
+        let sources: BTreeMap<String, PathBuf> = vbp::Project::read(&project)
+            .declared_objects()
+            .into_iter()
+            .filter_map(|object| Some((object.name?, object.source_file)))
+            .collect();
+        for object in objects_by_name(&pe).values() {
+            let controls =
+                ControlInfoTable::read(&pe, object).unwrap_or_else(|err| panic!("{key}: {err}"));
+            let path = &sources[&object.name];
+            if controls.entries.is_empty()
+                || !path
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("frm"))
+            {
+                continue;
+            }
+            let mut by_guid: BTreeMap<String, (String, u16)> = BTreeMap::new();
+            for (n, control) in controls.entries.iter().enumerate() {
+                let guid: [u8; 16] = pe
+                    .region_at_va(control.lp_guid)
+                    .and_then(|region| region.take(Off::new(0), 16))
+                    .unwrap()
+                    .try_into()
+                    .unwrap();
+                let entry = if control.name == "Form" {
+                    ("_Form0".to_owned(), FORM_VTABLE_SIZE)
+                } else {
+                    (format!("_Control{n}"), 4)
+                };
+                by_guid.entry(guid_text(&guid)).or_insert(entry);
+            }
+            let mut text = String::from("[controls]\n");
+            for (guid, (interface, _)) in &by_guid {
+                text.push_str(&format!("\"{guid}\" = \"{interface}\"\n"));
+            }
+            for (interface, size) in by_guid.values() {
+                text.push_str(&format!("[interfaces.{interface}]\nvtable_size = {size}\n"));
+            }
+            let types = VbTypes::parse(text.as_bytes()).unwrap();
+            let callees = types.with_controls(Callees::default(), &pe, object);
+
+            let mut blocks = Vec::new();
+            begin_blocks(&frm::Form::read(path).blocks(), &mut blocks);
+            let (_, controls_of_source) = blocks.split_first().unwrap();
+            let intrinsic = |class: &String| class.starts_with("VB.");
+            let order: Vec<&String> = controls_of_source
+                .iter()
+                .filter(|(class, _)| intrinsic(class))
+                .chain(
+                    controls_of_source
+                        .iter()
+                        .filter(|(class, _)| !intrinsic(class)),
+                )
+                .map(|(_, name)| name)
+                .collect();
+            for control in controls.entries.iter().filter(|c| c.name != "Form") {
+                accessors += 1;
+                let position = order
+                    .iter()
+                    .position(|name| **name == control.name)
+                    .unwrap();
+                let offset = u16::try_from(4 * (position + 1)).unwrap() + FORM_VTABLE_SIZE;
+                if callees.control(offset).map(|(name, _)| name) != Some(control.name.as_str()) {
+                    failures.push(format!(
+                        "{key}: {}.{} is not at {offset:#x}: {:?}",
+                        object.name,
+                        control.name,
+                        callees.control(offset)
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} controls are not at the accessor of their source position:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+    assert_eq!(accessors, EXPECTED_ACCESSORS);
 }
