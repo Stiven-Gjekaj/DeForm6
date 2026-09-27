@@ -1267,12 +1267,25 @@ fn freed_slots(names: &[String], arguments: &[u8]) -> Option<Vec<i16>> {
 }
 
 impl State {
+    /// The number of values on the stack. A result of an import call on the
+    /// floating point unit is not on the stack.
+    fn depth(&self) -> usize {
+        self.stack
+            .iter()
+            .filter(|value| !value.is_float_call())
+            .count()
+    }
+
     /// Binds `slot` to `value`, and keeps `stmt` until an `FFree` of the slot
-    /// drops it. A statement that is still pending for the slot stays.
+    /// drops it. A statement that is still pending for the slot stays. The
+    /// statement goes after the import calls on the floating point unit
+    /// that the end of the statement gives as statements of their own.
     fn bind_pending(&mut self, slot: i16, value: Value, index: usize, stmt: LiftedStmt) {
         if let Some(old) = self.pending.remove(&slot) {
             self.kept.push(old);
         }
+        let floats = self.stack.len().saturating_sub(self.depth());
+        let index = index.saturating_add(floats);
         let store = self.stores;
         self.stores = store.saturating_add(1);
         self.pending.insert(slot, (store, index, stmt));
@@ -1646,7 +1659,7 @@ fn run(
                 });
                 None
             }
-            Family::FrameStore if state.stack.len() > 1 => {
+            Family::FrameStore if state.depth() > 1 => {
                 let value = state.stack.pop().ok_or(LiftFault::StackShort(at))?;
                 let slot = offset16()?;
                 let assign = LiftedStmt {
@@ -1830,7 +1843,7 @@ fn run(
             Family::ObjectStore => {
                 let value = state.stack.pop().ok_or(LiftFault::StackShort(at))?;
                 let slot = offset16()?;
-                if state.stack.is_empty() {
+                if state.depth() == 0 {
                     let set = LiftedStmt {
                         offset: first,
                         stmt: Stmt::Set {
@@ -3264,6 +3277,30 @@ result = false
             [
                 "       Call import_2()",
                 "       Call import_3(local_64)",
+                "       Exit"
+            ]
+        );
+        // A store after such a call comes after it.
+        let store = [
+            0x12, 0x02, 0x00, 0x00, 0x00, 0x0F, 0x9C, 0xFF, 0x05, 0x78, 0xFF, 0x0C,
+        ];
+        assert_eq!(
+            lines(&store).unwrap(),
+            [
+                "       Call import_2()",
+                "       local_88 = local_64",
+                "       Exit"
+            ]
+        );
+        // A Set after such a call comes after it too.
+        let set = [
+            0x12, 0x02, 0x00, 0x00, 0x00, 0x27, 0x09, 0x00, 0x1B, 0xE4, 0xFF, 0x0C,
+        ];
+        assert_eq!(
+            lines(&set).unwrap(),
+            [
+                "       Call import_2()",
+                "       Set local_1C = New class_9",
                 "       Exit"
             ]
         );
