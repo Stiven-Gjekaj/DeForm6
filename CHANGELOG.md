@@ -49,6 +49,11 @@ heading its version and its date.
   `ProcSize` bytes before its descriptor. The 42 P-code programs give 680
   descriptors, and a test holds each body to its descriptor. `inspect` does
   not report the bodies yet.
+- `cargo run -p xtask -- fetch-pcode-symbols <dll>` fetches the symbol file
+  of a copy of `MSVBVM60.DLL` from the symbol server of Microsoft, and
+  `cargo run -p xtask -- derive-pcode-table <dll> <pdb>` writes the P-code
+  dispatch table with the name of each handler. Neither file enters the
+  repository.
 
 ### What stays open
 
