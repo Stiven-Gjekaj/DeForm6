@@ -1141,6 +1141,22 @@ fn takes_a_float(name: &str) -> bool {
         && !GIVE_A_FLOAT.iter().any(|prefix| name.starts_with(prefix))
 }
 
+/// The bytes on the stack of the value that a load of the names `names`
+/// pushes: 4 for a word, 8 for a `Double` or a `Currency` that the load
+/// pushes as two words, such as `FLdR8`, and else 0.
+fn load_bytes(names: &[String]) -> u8 {
+    if is_word(names) {
+        4
+    } else if names
+        .iter()
+        .all(|name| (name.ends_with("R8") || name.ends_with("Cy")) && !name.contains("FPR"))
+    {
+        8
+    } else {
+        0
+    }
+}
+
 /// Reads an unsigned 16-bit argument.
 fn u16_at(arguments: &[u8], at: usize) -> Option<u16> {
     let bytes = arguments.get(at..at.checked_add(2)?)?;
@@ -1192,6 +1208,16 @@ impl Value {
     /// statement, the call is a statement of its own.
     fn is_float_call(&self) -> bool {
         self.bytes == 0 && matches!(self.expr, Expr::Call(Callee::Import(_), _))
+    }
+
+    /// A value of `bytes` bytes, with no slot and no class.
+    const fn sized(expr: Expr, bytes: u8) -> Self {
+        Self {
+            expr,
+            bytes,
+            slot: None,
+            class: None,
+        }
     }
 
     /// A value with no slot and no class.
@@ -1653,7 +1679,10 @@ fn run(
             }
             Family::FrameLoad | Family::ArgRef => {
                 let value = state.load(offset16()?, is_word(names));
-                state.stack.push(value);
+                state.stack.push(Value {
+                    bytes: load_bytes(names),
+                    ..value
+                });
                 None
             }
             Family::ObjectRegister => {
@@ -1889,7 +1918,7 @@ fn run(
             Family::GlobalLoad => {
                 state
                     .stack
-                    .push(Value::plain(Expr::Global(word16(0)?), is_word(names)));
+                    .push(Value::sized(Expr::Global(word16(0)?), load_bytes(names)));
                 None
             }
             Family::GlobalObjectRegister => {
@@ -1900,7 +1929,7 @@ fn run(
                 let (base, _) = state.object.clone().ok_or(LiftFault::NoObject(at))?;
                 let field = Expr::Field(Box::new(base), word16(0)?);
                 if family == Family::FieldLoad {
-                    state.stack.push(Value::plain(field, is_word(names)));
+                    state.stack.push(Value::sized(field, load_bytes(names)));
                 } else {
                     state.object = Some((field, None));
                 }
@@ -1910,7 +1939,7 @@ fn run(
                 let base = state.load(offset16()?, true).expr;
                 let field = Expr::Field(Box::new(base), word16(2)?);
                 if family == Family::FrameFieldLoad {
-                    state.stack.push(Value::plain(field, is_word(names)));
+                    state.stack.push(Value::sized(field, load_bytes(names)));
                 } else {
                     state.object = Some((field, None));
                 }
@@ -2609,6 +2638,9 @@ names = ["FnLenVar"]
 [primary.48]
 width = 0
 names = ["CI4R4"]
+[primary.49]
+width = 2
+names = ["FLdCy", "FLdR8"]
 [primary.44]
 width = 4
 names = ["LateMemCall"]
@@ -3408,6 +3440,9 @@ result = false
             lines(&text).unwrap()[0],
             "       Call import_2(CStr(local_64), Len(local_60))"
         );
+        // import_2(local_64): FLdR8 pushes the 8 bytes of a Double.
+        let double = [0x49, 0x9C, 0xFF, 0x12, 0x02, 0x00, 0x08, 0x00, 0x0C];
+        assert_eq!(lines(&double).unwrap()[0], "       Call import_2(local_64)");
         // For local_64 = 1 To 9 Step 2
         let step = [
             0x02, 0x01, 0x15, 0x9C, 0xFF, 0x02, 0x09, 0x02, 0x02, 0x41, 0x9C, 0xFF, 0x0E, 0x00,
