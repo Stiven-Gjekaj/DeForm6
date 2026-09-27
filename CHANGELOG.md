@@ -71,9 +71,16 @@ heading its version and its date.
   and `deform6 disasm --lift` prints them. It lifts a procedure only when it
   knows the stack effect of each opcode. It lifts a call of a method of `Me`
   and a call through the constant table of the object, and no other call.
-  `check-pcode-table` counts the bodies that lift: 104 of 680. The
+  `check-pcode-table` counts the bodies that lift: 115 of 680. The
   statements name each variable and each called procedure by its offset or
   its index, and `extract` writes none of them.
+- `cargo run -p xtask -- derive-vb-types <VB6.OLB>` writes the interfaces of
+  the controls from a copy of `VB6.OLB` that the user owns, and
+  `vb::types` reads them. `ControlInfo::w_index` gives the position of a
+  control in the source, in 613 of 613 records of the corpus. With
+  `--vb-types`, `deform6 disasm --lift` and `check-pcode-table` lift the
+  calls of the controls of a form: 143 of 680 bodies lift. Neither file
+  enters the repository.
 
 ### What stays open
 
@@ -84,7 +91,8 @@ heading its version and its date.
 
 - It does not change the version in `Cargo.toml`, and it has no tag.
 - It adds `StubShape`, the field `StubHandler::shape`, and the modules
-  `vb::procdesc`, `vb::pcode`, `vb::lift` and `vb::links` to the library. It
+  `vb::procdesc`, `vb::pcode`, `vb::lift`, `vb::links` and `vb::types` to the
+  library, and the field `ControlInfo::w_index`. It
   removes no public item, and it changes the type of none. For a P-code
   program, a report now gives a handler address where it gave none, and the
   text of an `UnknownStubShape` defect names both shapes.
