@@ -1238,6 +1238,30 @@ impl State {
 /// interface of its controls.
 pub(crate) const CONTROL_ARRAY: &str = "[]";
 
+/// Gives the function at `vtable_offset` of the object of a control array
+/// whose controls have the interface `element`.
+///
+/// The runtime calls this object `tagCARR`. Its vtable for `IVBControl` in
+/// `MSVBVM60.DLL` 6.0.98.2 holds `Item(Integer, CTL**)` at `0x40`, then
+/// `LBound`, `UBound` and `Count` at `0x44`, `0x48` and `0x4C`. Each of the
+/// last three writes an `Integer`. No type library gives them.
+fn control_array_function(element: &str, vtable_offset: u16) -> Option<TypeFunction> {
+    let (name, arg_bytes, result_interface) = match vtable_offset {
+        0x40 => ("Item", 8, Some(element.to_owned())),
+        0x44 => ("LBound", 4, None),
+        0x48 => ("UBound", 4, None),
+        0x4C => ("Count", 4, None),
+        _ => return None,
+    };
+    Some(TypeFunction {
+        names: vec![name.to_owned()],
+        kinds: vec!["get".to_owned()],
+        arg_bytes: Some(arg_bytes),
+        result: true,
+        result_interface,
+    })
+}
+
 /// The prefix of the class of an object of the project, before the index of
 /// its class in the constant table.
 const PROJECT_CLASS: char = '@';
@@ -1252,9 +1276,14 @@ fn interface_call(
     vtable_offset: u16,
     at: u32,
 ) -> Result<Option<Stmt>, LiftFault> {
-    let function = types
-        .and_then(|types| types.interface(interface)?.function(vtable_offset))
-        .ok_or(LiftFault::NoFunction(at))?;
+    let function = match interface.strip_prefix(CONTROL_ARRAY) {
+        Some(element) => control_array_function(element, vtable_offset),
+        None => types
+            .and_then(|types| types.interface(interface)?.function(vtable_offset))
+            .cloned(),
+    }
+    .ok_or(LiftFault::NoFunction(at))?;
+    let function = &function;
     let bytes = function.arg_bytes.ok_or(LiftFault::CallArguments(at))?;
     let mut args = call_arguments(&mut state.stack, bytes, at)?;
     let name = member_name(function);
@@ -2407,6 +2436,27 @@ result = false
                 "       Call Me.box1.Cls()",
                 "       Exit"
             ]
+        );
+    }
+
+    #[test]
+    fn a_control_array_gives_its_control_by_item() {
+        // local_88 = Me.box1.Item(0).Text: the accessor gives the object of
+        // the array into local_68, whose Item writes the control into
+        // local_64, whose Text writes local_60.
+        let body = [
+            0x15, 0xA0, 0xFF, 0x15, 0x9C, 0xFF, 0x02, 0x00, 0x16, 0x1A, 0x2C, 0x03, 0x1B, 0x98,
+            0xFF, 0x06, 0x98, 0xFF, 0x1C, 0x40, 0x00, 0x00, 0x00, 0x06, 0x9C, 0xFF, 0x1C, 0xA8,
+            0x00, 0x00, 0x00, 0x03, 0xA0, 0xFF, 0x05, 0x78, 0xFF, 0x18, 0x98, 0xFF, 0x18, 0x9C,
+            0xFF, 0x0C,
+        ];
+        let table = PcodeTable::parse(TABLE.as_bytes()).unwrap();
+        let types = VbTypes::parse(TYPES.as_bytes()).unwrap();
+        let callees = Callees::default().with_control(0x32C, "box1", "[]_Box");
+        let listing = disassemble(&Region::new(&body, Off::new(0)), &table);
+        assert_eq!(
+            render(&lift(&listing, &table, &callees, Some(&types)).unwrap()),
+            ["       local_88 = Me.box1.Item(0).Text", "       Exit"]
         );
     }
 
