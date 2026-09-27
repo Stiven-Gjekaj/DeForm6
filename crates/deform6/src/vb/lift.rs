@@ -80,6 +80,8 @@
 //! | `Open` | Pop the record length, the file number and the file name, and open the file in the mode of a 16-bit argument |
 //! | `CRec2Ansi`, `CRec2Uni` | As `CStr2Ansi`, for a record |
 //! | `GetRec4`, `GetRec3`, `PutRec4`, `PutRec3` | Pop the byte size, the variable, the record number for the `4` form, and the file number, and `Get` or `Put` the variable |
+//! | `GetRecOwn3`, `PutRecOwn3` | As `GetRec3` and `PutRec3`, with a descriptor of the type in place of the byte size |
+//! | `DestructAnsiOFrame` | Nothing: it frees the ANSI copy of a record |
 //! | `PrintFile` | Pop the file number and one item, whose bytes with the 4 bytes of a descriptor are a 16-bit argument, and `Print` the item. The corpus holds no `Print` of more items |
 //! | `IStDarg` | As `IStStrCopy` |
 //! | `AryLdRf`, `Ary1LdRf` | Pop an array and its indexes, and push the address of the element |
@@ -794,10 +796,14 @@ enum Family {
     End,
     Exit,
     ThisCall,
-    ImportCall { result: bool },
+    ImportCall {
+        result: bool,
+    },
     Free,
     ObjectStore,
-    ObjectCall { pushes: bool },
+    ObjectCall {
+        pushes: bool,
+    },
     GlobalLoad,
     GlobalObjectRegister,
     FieldLoad,
@@ -805,7 +811,9 @@ enum Family {
     FrameFieldLoad,
     FrameFieldObjectRegister,
     FrameFieldStore,
-    StoreKeep { object: bool },
+    StoreKeep {
+        object: bool,
+    },
     PopTemp,
     LitString,
     LitVariant(VariantKind),
@@ -819,15 +827,26 @@ enum Family {
     ArrayErase,
     GlobalObjectStore,
     FrameLoadVariant,
-    LateCall { result: bool, arguments: bool },
+    LateCall {
+        result: bool,
+        arguments: bool,
+    },
     VariantObjectRegister,
     VariantBinary(BinaryOp),
     VariantCopy,
-    Redim { preserve: bool },
+    Redim {
+        preserve: bool,
+    },
     Open,
-    FileRecord { name: &'static str, record: bool },
+    FileRecord {
+        name: &'static str,
+        record: bool,
+        sized: bool,
+    },
     PrintFile,
-    ArrayReference { dimensions_argument: bool },
+    ArrayReference {
+        dimensions_argument: bool,
+    },
     LitSingle,
     CopyBytes,
     ArrayElementRegister,
@@ -839,7 +858,9 @@ enum Family {
     ArrayObjectRegister,
     Sized(u8),
     StringCopy,
-    For { step: bool },
+    For {
+        step: bool,
+    },
     Next,
     OnError,
 }
@@ -985,19 +1006,34 @@ fn family_of(name: &str) -> Option<Family> {
         "GetRec4" => Family::FileRecord {
             name: "Get",
             record: true,
+            sized: true,
         },
         "GetRec3" => Family::FileRecord {
             name: "Get",
             record: false,
+            sized: true,
         },
         "PutRec4" => Family::FileRecord {
             name: "Put",
             record: true,
+            sized: true,
         },
         "PutRec3" => Family::FileRecord {
             name: "Put",
             record: false,
+            sized: true,
         },
+        "GetRecOwn3" => Family::FileRecord {
+            name: "Get",
+            record: false,
+            sized: false,
+        },
+        "PutRecOwn3" => Family::FileRecord {
+            name: "Put",
+            record: false,
+            sized: false,
+        },
+        "DestructAnsiOFrame" => Family::Nop,
         "PrintFile" => Family::PrintFile,
         "IStDarg" => Family::IndirectStore,
         "AryLdRf" => Family::ArrayReference {
@@ -2121,8 +2157,14 @@ fn run(
                 ));
                 None
             }
-            Family::FileRecord { name, record } => {
-                pop(&mut state)?;
+            Family::FileRecord {
+                name,
+                record,
+                sized,
+            } => {
+                if sized {
+                    pop(&mut state)?;
+                }
                 let variable = pop(&mut state)?;
                 let number = if record {
                     pop(&mut state)?
@@ -2752,6 +2794,12 @@ names = ["GetRec3"]
 [primary.50]
 width = 4
 names = ["PrintFile"]
+[primary.51]
+width = 2
+names = ["GetRecOwn3"]
+[primary.52]
+width = 4
+names = ["DestructAnsiOFrame"]
 [primary.44]
 width = 4
 names = ["LateMemCall"]
@@ -3618,6 +3666,14 @@ result = false
                 "       Exit"
             ]
         );
+        // Get #1, , local_64 of a record or an array.
+        let own = [0x02, 0x01, 0x15, 0x9C, 0xFF, 0x51, 0x0D, 0x00, 0x0C];
+        assert_eq!(
+            lines(&own).unwrap()[0],
+            "       Call VBA.Get(1, , local_64)"
+        );
+        let destruct = [0x52, 0x88, 0xFE, 0x03, 0x00, 0x0C];
+        assert_eq!(lines(&destruct).unwrap(), ["       Exit"]);
         let two = [
             0x0F, 0xA4, 0xFF, 0x0F, 0xA4, 0xFF, 0x02, 0x01, 0x50, 0x29, 0x00, 0x10, 0x00, 0x0C,
         ];
