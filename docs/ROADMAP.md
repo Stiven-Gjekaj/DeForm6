@@ -720,10 +720,30 @@ each higher byte. 1346 slots have a name, and 775 different handlers serve
 them. The public count of 1531 slots counts the 185 refused bytes of `0xFF`
 too.
 
-**Part 3 is next: the argument widths.** A handler ends with
-`xor eax,eax / mov al,[esi+k] / add esi,k+1 / jmp [table]`, and `k` is the
-width of its arguments. Where the code does not give `k`, the corpus does:
-a width is right only when each of the 680 bodies decodes to its exact end.
+#### Part 3, done on 2026-09-27
+
+**The widths.** `derive-pcode-table` now reads the machine code of each
+handler with the `iced-x86` decoder, and writes the width of its arguments.
+On entry `esi` points after the opcode. The tracer follows the fall-through
+path, adds each constant change to `esi`, and stops at the dispatch jump
+`mov al,[esi+k] / jmp [4*eax+table]`, at another write to `esi`, at a
+return, or at a jump through a register. A handler whose paths reach the
+next opcode at 4, 6, 8 and more reads a 16-bit byte count: `FFreeStr`,
+`FFreeVar` and `FFreeAd`.
+
+Each of the 1351 slots gets a width. `cargo run -p xtask -- check-pcode-table`
+decodes each P-code body of the corpus with the table: 680 of 680 decode to
+their end, or to an exit and fewer than four bytes of padding. With one
+width changed, `FLdRfVar` from 2 to 3, only 430 decode.
+
+A search that fitted the widths to the corpus came first, and it failed: it
+found widths such as 11 that fit and are wrong, because a decode that goes
+wrong can come back into step. So the widths come from the code, and the
+corpus only checks them.
+
+**The exit is met, with one limit.** The corpus uses 284 of the 1351 slots.
+The widths of the other slots come from the code alone, and no body checks
+them.
 
 ### Phase 11: P-code statement recovery
 
@@ -771,7 +791,7 @@ Phase 8  (exit met on the author's XP host; --verify-build waits)
    |
    +-- Phase 9  (exit met: 42 P-code binaries with their source)
           |
-          +-- Phase 10 (needs the Phase 9 corpus to verify widths)
+          +-- Phase 10 (exit met: names and widths, 680 of 680 bodies decode)
                  |
                  +-- Phase 11 (needs the Phase 10 table)
 
