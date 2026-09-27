@@ -59,6 +59,12 @@ heading its version and its date.
 - `vb::pcode` decodes a P-code body with that table, and `deform6 disasm
   <exe> --pcode-table <table>` prints the P-code of each procedure. The
   listing gives opcodes, not Basic.
+- `vb::lift` follows the stack of a decoded body and gives its statements,
+  and `deform6 disasm --lift` prints them. It lifts a procedure only when it
+  knows the stack effect of each opcode, so a procedure with a call does not
+  lift. `check-pcode-table` counts the bodies that lift: 69 of 680. The
+  statements name each variable by its offset, and `extract` writes none of
+  them.
 
 ### What stays open
 
@@ -69,7 +75,7 @@ heading its version and its date.
 
 - It does not change the version in `Cargo.toml`, and it has no tag.
 - It adds `StubShape`, the field `StubHandler::shape`, and the modules
-  `vb::procdesc` and `vb::pcode` to the library. It
+  `vb::procdesc`, `vb::pcode` and `vb::lift` to the library. It
   removes no public item, and it changes the type of none. For a P-code
   program, a report now gives a handler address where it gave none, and the
   text of an `UnknownStubShape` defect names both shapes.
