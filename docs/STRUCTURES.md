@@ -2457,9 +2457,63 @@ true. The comparison with `ProcCount`, the zero bytes and the gap after a
 descriptor were measured one time, and no test keeps them true. Unit tests in
 `vb/procdesc.rs` read `frmFire` byte for byte.
 
-**What the measurement did not settle.** The word at `+0x04` and the bytes
-after `+0x0A`. The descriptor is longer than 10 bytes: the gap to the next
-body is 48 bytes or more, and it is not the same in each descriptor.
+**The word at `+0x04` is the argument size.** It is the bytes of the
+arguments that a caller pushes:
+
+- 4 for `Me`;
+- 4 for each argument by reference, and for each array;
+- for each argument by value, the size of the value: 8 for a `Double`, a
+  `Currency` or a `Date`, 16 for a `Variant`, and 4 for each other type;
+- 4 for the address of the result of a `Function` or a `Property Get`.
+
+Each of the 680 descriptors agrees with the declaration of its procedure in
+the source. A procedure of a standard module has no `Me`, and its word still
+counts those 4 bytes. The corpus holds six arguments of `ByVal ... As
+Double` and one of `ByVal ... As Variant`.
+`each_pcode_descriptor_gives_the_argument_size_of_its_source_procedure` in
+`tests/pcode_recovery.rs` keeps this true.
+
+**What the measurement did not settle.** The bytes after `+0x0A`. The
+descriptor is longer than 10 bytes: the gap to the next body is 48 bytes or
+more, and it is not the same in each descriptor.
+
+---
+
+## 23a. The method link table, measured on the P-code corpus, 2026-09-27
+
+A P-code call to a method of `Me`, such as `ThisVCallHresult`, names the
+method by its byte offset in the vtable of the object. Three fields of
+`OptionalObjectInfo` (§5.3) give the vtable:
+
+| Offset | Size | §5.3 name | What the P-code corpus shows |
+|---|---|---|---|
+| `0x28` | 2 | `wMethodLinkCount` | The number of slots of the link table |
+| `0x2A` | 2 | `wPCodeCount` | The number of methods of the base interface: 439 in each form, 0 in each class |
+| `0x30` | 4 | `lpMethodLinkTable` | The address of the link table: one address for each slot |
+
+The vtable holds the 7 methods of `IDispatch`, then the methods of the base
+interface, then the slots of the link table. So the slot of a vtable offset
+is `offset / 4 - 7 - wPCodeCount`. In a form the first slot is at `0x6F8`.
+
+A slot of a method holds an address 7 bytes into the P-code stub of the
+method (§22). At that address the stub reads `33 C0 BA <descriptor> 68
+<engine> C3`, so the slot names the descriptor of the method. Another slot
+holds an address of other code: in `Organism.cls`, `81 44 24 04 <offset> B9
+<address> FF E1`.
+
+| Check | Count |
+|---|---|
+| Objects of the corpus with source and a link table | 86 |
+| Of them, whose method slots are the public procedures of the source, then the private ones, each group in the order of the file | 86 |
+| Of them, whose other slots number two for each public variable of the source | 86 |
+| Method slots | 663: the 680 descriptors, less the 17 of the 8 standard modules |
+| `ThisVCallHresult` offsets that name a method slot of their own object | 465 of 465 |
+
+The other slots come before the method slots. A standard module has no
+`OptionalObjectInfo`, and no link table. `vb::links` reads the table, and
+`each_link_table_of_a_pcode_program_gives_the_procedures_of_its_source` in
+`tests/pcode_recovery.rs` keeps the first three rows true. The count of
+`ThisVCallHresult` offsets needs the P-code table, and no test keeps it true.
 
 ---
 
