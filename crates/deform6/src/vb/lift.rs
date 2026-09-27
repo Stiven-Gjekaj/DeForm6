@@ -107,6 +107,12 @@
 //! its result through its last argument, the address of a frame slot, and
 //! the lift binds that slot to the call in the same way.
 //!
+//! `NewIfNullPr` names a class of the constant table. When [`Callees`]
+//! gives the profile of that class, an object of the project, a call on the
+//! object finds a control accessor, a method, or the get or the let of a
+//! public variable there. The lift names a variable by its field, such as
+//! `global_7.field_34`, as it names a field of `Me`.
+//!
 //! # What the lift checks
 //!
 //! The stack must hold the values that each opcode pops, and it must be
@@ -250,6 +256,7 @@ pub struct Callees {
     controls: Vec<(u16, String, String)>,
     strings: Vec<(u16, String)>,
     variables: Vec<(u16, u32, bool)>,
+    classes: Vec<(u16, Callees)>,
 }
 
 /// A method that [`Callees`] gives.
@@ -297,6 +304,23 @@ impl Callees {
             .iter()
             .find(|(offset, _, _)| *offset == vtable_offset)
             .map(|(_, field, get)| (*field, *get))
+    }
+
+    /// Adds the class at `index` of the constant table: an object of the
+    /// project whose vtable `profile` gives.
+    #[must_use]
+    pub fn with_class(mut self, index: u16, profile: Self) -> Self {
+        self.classes.push((index, profile));
+        self
+    }
+
+    /// Gives the profile of the class at `index` of the constant table.
+    #[must_use]
+    pub fn class(&self, index: u16) -> Option<&Self> {
+        self.classes
+            .iter()
+            .find(|(at, _)| *at == index)
+            .map(|(_, profile)| profile)
     }
 
     /// Adds the string `text` at `index` of the constant table.
@@ -922,6 +946,60 @@ impl State {
     }
 }
 
+/// The prefix of the class of an object of the project, before the index of
+/// its class in the constant table.
+const PROJECT_CLASS: char = '@';
+
+/// Lifts a call on an object of the project whose vtable `profile` gives.
+fn project_call(
+    state: &mut State,
+    profile: &Callees,
+    object: Expr,
+    vtable_offset: u16,
+    pushes: bool,
+    at: u32,
+) -> Result<Option<Stmt>, LiftFault> {
+    if pushes {
+        let (name, interface) = profile
+            .control(vtable_offset)
+            .ok_or(LiftFault::NoFunction(at))?;
+        state.stack.push(Value {
+            expr: Expr::Member(Box::new(object), name.to_owned()),
+            bytes: 4,
+            slot: None,
+            class: Some(interface.to_owned()),
+        });
+        return Ok(None);
+    }
+    if let Some(method) = profile.method(vtable_offset) {
+        let bytes = method
+            .arg_size
+            .checked_sub(4)
+            .ok_or(LiftFault::CallArguments(at))?;
+        let args = call_arguments(&mut state.stack, bytes, at)?;
+        let callee = Callee::Member(Box::new(object), format!("method_{}", method.index));
+        return Ok(Some(Stmt::Call(callee, expressions(args))));
+    }
+    let (field, get) = profile
+        .variable(vtable_offset)
+        .ok_or(LiftFault::NoFunction(at))?;
+    let field = u16::try_from(field).map_err(|_| LiftFault::NoFunction(at))?;
+    let target = Expr::Field(Box::new(object), field);
+    let value = state.stack.pop().ok_or(LiftFault::StackShort(at))?;
+    if get {
+        let slot = value.slot.ok_or(LiftFault::NoResultSlot(at))?;
+        state.bindings.insert(slot, (target, None));
+        return Ok(None);
+    }
+    if value.bytes == 0 {
+        return Err(LiftFault::CallArguments(at));
+    }
+    Ok(Some(Stmt::Assign {
+        target,
+        value: value.expr,
+    }))
+}
+
 /// Lifts a call through the object register at `vtable_offset`.
 fn object_call(
     state: &mut State,
@@ -945,6 +1023,14 @@ fn object_call(
             class: Some(interface.to_owned()),
         });
         return Ok(None);
+    }
+    if let Some(profile) = class
+        .as_deref()
+        .and_then(|class| class.strip_prefix(PROJECT_CLASS))
+        .and_then(|index| index.parse::<u16>().ok())
+        .and_then(|index| callees.class(index))
+    {
+        return project_call(state, profile, object, vtable_offset, pushes, at);
     }
     if pushes {
         return Err(LiftFault::NoFunction(at));
@@ -1278,7 +1364,13 @@ pub fn lift(
             }
             Family::NewIfNull => {
                 let reference = state.stack.pop().ok_or(LiftFault::StackShort(at))?;
-                state.object = Some((reference.expr, reference.class));
+                let index = word16(0)?;
+                let class = if callees.class(index).is_some() {
+                    Some(format!("{PROJECT_CLASS}{index}"))
+                } else {
+                    reference.class
+                };
+                state.object = Some((reference.expr, class));
                 None
             }
             Family::Nop => None,
@@ -1345,6 +1437,27 @@ pub fn lift(
         out.insert(index.min(out.len()), set);
     }
     Ok(out)
+}
+
+/// Gives the index of each class of the constant table that `listing`
+/// names with `NewIfNullPr`. A caller gives [`Callees`] the profile of each
+/// one that is an object of the project.
+#[must_use]
+pub fn class_indexes(listing: &PcodeListing, table: &PcodeTable) -> Vec<u16> {
+    let mut out = Vec::new();
+    for instruction in &listing.instructions {
+        let names = table
+            .slot(instruction.lead, instruction.opcode)
+            .map(|slot| slot.names.as_slice())
+            .unwrap_or_default();
+        if family(names) == Some(Family::NewIfNull)
+            && let Some(index) = u16_at(&instruction.arguments, 0)
+            && !out.contains(&index)
+        {
+            out.push(index);
+        }
+    }
+    out
 }
 
 /// Gives the index of each string of the constant table that `listing`
@@ -1423,7 +1536,7 @@ pub fn render(stmts: &[LiftedStmt]) -> Vec<String> {
     reason = "a test builds the state it needs and must fail loudly when that state is wrong"
 )]
 mod tests {
-    use super::{Callees, LiftFault, lift, render, string_indexes};
+    use super::{Callees, LiftFault, class_indexes, lift, render, string_indexes};
     use crate::read::region::{Off, Region};
     use crate::vb::pcode::{PcodeTable, disassemble};
     use crate::vb::types::VbTypes;
@@ -1966,6 +2079,45 @@ result = false
         let body = [0x21, 0x05, 0x00, 0x21, 0x02, 0x00, 0x21, 0x05, 0x00, 0x0C];
         let listing = disassemble(&Region::new(&body, Off::new(0)), &table);
         assert_eq!(string_indexes(&listing, &table), [5, 2]);
+    }
+
+    #[test]
+    fn a_call_on_an_object_of_the_project_uses_the_profile_of_its_class() {
+        // NewIfNullPr of global_3, whose class at index 9 of the constant
+        // table has the control box1 at 0x32C, the method 2 at 0x6F8 with
+        // one argument, and the get and the let of field 0x34 at 0x700 and
+        // 0x704.
+        let profile = Callees::default()
+            .with_control(0x32C, "box1", "_Box")
+            .with_method(0x6F8, 2, 8)
+            .with_variable(0x700, 0x34, true)
+            .with_variable(0x704, 0x34, false);
+        let callees = Callees::default().with_class(9, profile);
+        let object = [0x1D, 0x03, 0x00, 0x28, 0x09, 0x00];
+        let mut body = vec![0x02, 0x05];
+        body.extend_from_slice(&object);
+        body.extend_from_slice(&[0x1C, 0x04, 0x07, 0x00, 0x00]);
+        body.extend_from_slice(&[0x15, 0x9C, 0xFF]);
+        body.extend_from_slice(&object);
+        body.extend_from_slice(&[0x1C, 0x00, 0x07, 0x00, 0x00, 0x03, 0x9C, 0xFF]);
+        body.extend_from_slice(&object);
+        body.extend_from_slice(&[0x1C, 0xF8, 0x06, 0x00, 0x00, 0x0C]);
+        let table = PcodeTable::parse(TABLE.as_bytes()).unwrap();
+        let listing = disassemble(&Region::new(&body, Off::new(0)), &table);
+        assert_eq!(
+            render(&lift(&listing, &table, &callees, None).unwrap()),
+            [
+                "       global_3.field_34 = 5",
+                "       Call global_3.method_2(global_3.field_34)",
+                "       Exit"
+            ]
+        );
+        assert_eq!(class_indexes(&listing, &table), [9]);
+        let unknown = Callees::default();
+        assert_eq!(
+            lift(&listing, &table, &unknown, None),
+            Err(LiftFault::NoFunction(8))
+        );
     }
 
     #[test]
