@@ -202,6 +202,21 @@ open:
 deform6 extract <path-to-exe> -o <output-directory>
 ```
 
+Print the P-code of each procedure of a P-code program. The opcode table is
+not in this repository. Fetch the symbols of a copy of `MSVBVM60.DLL` that you
+own, derive the table from the two files, and check it against the P-code
+corpus:
+
+```
+cargo run -p xtask -- fetch-pcode-symbols <path-to-MSVBVM60.DLL>
+cargo run -p xtask -- derive-pcode-table <path-to-MSVBVM60.DLL> derived/symbols/MSVBVM60.pdb
+cargo run -p xtask -- check-pcode-table
+deform6 disasm <path-to-exe> --pcode-table derived/pcode-table.toml
+```
+
+The listing gives each opcode, its bytes and the name of its handler. It is
+not Basic.
+
 Run everything the gate runs, in one command:
 
 ```
