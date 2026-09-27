@@ -78,7 +78,9 @@
 //! | `Redim` | Pop an array, then a lower and an upper bound for each dimension, and `ReDim` it |
 //! | `RedimPreserve` | As `Redim`, and keep the elements |
 //! | `Open` | Pop the record length, the file number and the file name, and open the file in the mode of a 16-bit argument |
-//! | `CRec2Ansi` | As `CStr2Ansi`, for a record |
+//! | `CRec2Ansi`, `CRec2Uni` | As `CStr2Ansi`, for a record |
+//! | `GetRec4`, `GetRec3`, `PutRec4`, `PutRec3` | Pop the byte size, the variable, the record number for the `4` form, and the file number, and `Get` or `Put` the variable |
+//! | `PrintFile` | Pop the file number and one item, whose bytes with the 4 bytes of a descriptor are a 16-bit argument, and `Print` the item. The corpus holds no `Print` of more items |
 //! | `IStDarg` | As `IStStrCopy` |
 //! | `AryLdRf`, `Ary1LdRf` | Pop an array and its indexes, and push the address of the element |
 //! | an operator and `VarBool`, such as `EqVarBool` | Pop two `Variant` values, push the Boolean of the comparison |
@@ -823,6 +825,8 @@ enum Family {
     VariantCopy,
     Redim { preserve: bool },
     Open,
+    FileRecord { name: &'static str, record: bool },
+    PrintFile,
     ArrayReference { dimensions_argument: bool },
     LitSingle,
     CopyBytes,
@@ -977,7 +981,24 @@ fn family_of(name: &str) -> Option<Family> {
         "Redim" => Family::Redim { preserve: false },
         "RedimPreserve" => Family::Redim { preserve: true },
         "Open" => Family::Open,
-        "CRec2Ansi" => Family::StringCopy,
+        "CRec2Ansi" | "CRec2Uni" => Family::StringCopy,
+        "GetRec4" => Family::FileRecord {
+            name: "Get",
+            record: true,
+        },
+        "GetRec3" => Family::FileRecord {
+            name: "Get",
+            record: false,
+        },
+        "PutRec4" => Family::FileRecord {
+            name: "Put",
+            record: true,
+        },
+        "PutRec3" => Family::FileRecord {
+            name: "Put",
+            record: false,
+        },
+        "PrintFile" => Family::PrintFile,
         "IStDarg" => Family::IndirectStore,
         "AryLdRf" => Family::ArrayReference {
             dimensions_argument: true,
@@ -2100,6 +2121,33 @@ fn run(
                 ));
                 None
             }
+            Family::FileRecord { name, record } => {
+                pop(&mut state)?;
+                let variable = pop(&mut state)?;
+                let number = if record {
+                    pop(&mut state)?
+                } else {
+                    Expr::Word("")
+                };
+                let file = pop(&mut state)?;
+                Some(Stmt::Call(
+                    Callee::Member(Box::new(Expr::Word("VBA")), name.to_owned()),
+                    vec![file, number, variable],
+                ))
+            }
+            Family::PrintFile => {
+                let bytes = word16(2)?
+                    .checked_sub(4)
+                    .ok_or(LiftFault::CallArguments(at))?;
+                let args = expressions(call_arguments(&mut state.stack, bytes, at)?);
+                if args.len() != 2 {
+                    return Err(LiftFault::CallArguments(at));
+                }
+                Some(Stmt::Call(
+                    Callee::Member(Box::new(Expr::Word("VBA")), "Print".to_owned()),
+                    args,
+                ))
+            }
             Family::Open => {
                 let length = pop(&mut state)?;
                 let number = pop(&mut state)?;
@@ -2695,6 +2743,15 @@ names = ["IStDarg"]
 [primary.4D]
 width = 2
 names = ["CRec2Ansi"]
+[primary.4E]
+width = 0
+names = ["GetRec4"]
+[primary.4F]
+width = 0
+names = ["GetRec3"]
+[primary.50]
+width = 4
+names = ["PrintFile"]
 [primary.44]
 width = 4
 names = ["LateMemCall"]
@@ -3546,6 +3603,25 @@ result = false
                 "       Exit"
             ]
         );
+        // Get #1, 1, local_64; Get #1, , local_60; Print #1, local_5C
+        let file = [
+            0x02, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x15, 0x9C, 0xFF, 0x01, 0x02, 0x00, 0x00,
+            0x00, 0x4E, 0x02, 0x01, 0x15, 0xA0, 0xFF, 0x01, 0x02, 0x00, 0x00, 0x00, 0x4F, 0x0F,
+            0xA4, 0xFF, 0x02, 0x01, 0x50, 0x29, 0x00, 0x0C, 0x00, 0x0C,
+        ];
+        assert_eq!(
+            lines(&file).unwrap(),
+            [
+                "       Call VBA.Get(1, 1, local_64)",
+                "       Call VBA.Get(1, , local_60)",
+                "       Call VBA.Print(1, local_5C)",
+                "       Exit"
+            ]
+        );
+        let two = [
+            0x0F, 0xA4, 0xFF, 0x0F, 0xA4, 0xFF, 0x02, 0x01, 0x50, 0x29, 0x00, 0x10, 0x00, 0x0C,
+        ];
+        assert_eq!(lines(&two), Err(LiftFault::CallArguments(8)));
         // For local_64 = 1 To 9 Step 2
         let step = [
             0x02, 0x01, 0x15, 0x9C, 0xFF, 0x02, 0x09, 0x02, 0x02, 0x41, 0x9C, 0xFF, 0x0E, 0x00,
