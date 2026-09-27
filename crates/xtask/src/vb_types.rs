@@ -25,6 +25,10 @@
 //! - `[iids]` maps the GUID of each interface to its name. A class
 //!   reference of a constant table, such as the one of the global object of
 //!   the runtime, names an interface by its GUID.
+//! - `[imports]` maps the ordinal of a DLL export to the function of a
+//!   module that has it as its entry, such as `685` to `Err` of the VBA
+//!   library, with the interface of its result when the library gives it.
+//!   An executable imports the functions of the runtime by these ordinals.
 //! - `[interfaces.<name>]` gives `vtable_size`, and for each vtable offset
 //!   the names of the functions there, the kinds, `arg_bytes` and `result`.
 //!   `arg_bytes` is the sum of the sizes of the parameters on the stack: 4
@@ -96,11 +100,20 @@ pub(crate) struct Interface {
     functions: BTreeMap<String, Slot>,
 }
 
+/// One function of a module, by the ordinal of its DLL export.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct Import {
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result_interface: Option<String>,
+}
+
 /// The whole file.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub(crate) struct Types {
     controls: BTreeMap<String, String>,
     iids: BTreeMap<String, String>,
+    imports: BTreeMap<String, Import>,
     interfaces: BTreeMap<String, Interface>,
 }
 
@@ -206,6 +219,22 @@ pub(crate) fn derive(infos: &[TypeInfo]) -> Result<Types, String> {
             },
         );
     }
+    for info in infos.iter().filter(|info| info.kind == Kind::Module) {
+        for function in &info.functions {
+            let (Some(ordinal), Some(name)) = (function.ordinal, &function.name) else {
+                continue;
+            };
+            types.imports.insert(
+                ordinal.to_string(),
+                Import {
+                    name: name.clone(),
+                    result_interface: function
+                        .result_type
+                        .and_then(|index| interface_name(infos, index)),
+                },
+            );
+        }
+    }
     for info in infos {
         let (Some(name), Some(guid)) = (&info.name, &info.guid) else {
             continue;
@@ -230,6 +259,9 @@ impl Types {
         }
         for (key, value) in other.iids {
             self.iids.entry(key).or_insert(value);
+        }
+        for (key, value) in other.imports {
+            self.imports.entry(key).or_insert(value);
         }
         for (key, value) in other.interfaces {
             self.interfaces.entry(key).or_insert(value);
@@ -413,6 +445,32 @@ mod tests {
         assert_eq!(merged.interfaces["_Box"].vtable_size, 0x30);
         assert_eq!(merged.interfaces["_Other"].vtable_size, 0x99);
         assert_eq!(merged.interfaces.len(), first.interfaces.len() + 1);
+    }
+
+    #[test]
+    fn a_function_of_a_module_is_an_import_by_its_ordinal() {
+        let mut module = interface(vec![function("Err", 2, 9)]);
+        module.kind = Kind::Module;
+        module.name = Some("Information".to_owned());
+        module.functions[0].ordinal = Some(685);
+        module.functions[0].result_type = Some(1);
+        let mut class = interface(Vec::new());
+        class.kind = Kind::Coclass;
+        class.name = Some("ErrObject".to_owned());
+        let mut errors = interface(Vec::new());
+        errors.name = Some("_ErrObject".to_owned());
+        let mut plain = function("Beep", 1, 3);
+        plain.ordinal = None;
+        module.functions.push(plain);
+        let types = derive(&[module, class, errors]).unwrap();
+        assert_eq!(types.imports.len(), 1);
+        assert_eq!(types.imports["685"].name, "Err");
+        assert_eq!(
+            types.imports["685"].result_interface.as_deref(),
+            Some("_ErrObject")
+        );
+        let text = render(&types).unwrap();
+        assert!(text.contains("[imports.685]"), "{text}");
     }
 
     #[test]
