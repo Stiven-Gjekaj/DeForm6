@@ -7,8 +7,8 @@
 //! - `[controls]` maps the GUID that a `ControlInfo` record names, in the
 //!   registry form, to the name of the interface of the control.
 //! - `[interfaces.<name>]` gives `vtable_size`, and under `functions` a
-//!   table for each vtable offset in hexadecimal, with `names`, `arg_bytes`
-//!   and `result`. `arg_bytes` leaves out the 4 bytes of the object. It is
+//!   table for each vtable offset in hexadecimal, with `names`, `kinds`,
+//!   `arg_bytes` and `result`. `arg_bytes` leaves out the 4 bytes of the object. It is
 //!   absent when the tool cannot size a parameter.
 
 use std::collections::BTreeMap;
@@ -21,6 +21,8 @@ use crate::vb::opcodes::{TableError, line_at};
 pub struct TypeFunction {
     /// The names of the functions at the offset.
     pub names: Vec<String>,
+    /// The kind of each function: `method`, `get`, `let` or `set`.
+    pub kinds: Vec<String>,
     /// The bytes of the arguments on the stack, without the object, or
     /// `None` when the file gives none.
     pub arg_bytes: Option<u16>,
@@ -75,6 +77,8 @@ struct RawFunction {
     #[serde(default)]
     names: Vec<String>,
     #[serde(default)]
+    kinds: Vec<String>,
+    #[serde(default)]
     arg_bytes: Option<u16>,
     #[serde(default)]
     result: bool,
@@ -126,6 +130,7 @@ impl VbTypes {
                     offset,
                     TypeFunction {
                         names: function.names,
+                        kinds: function.kinds,
                         arg_bytes: function.arg_bytes,
                         result: function.result,
                     },
@@ -203,6 +208,7 @@ result = false
         assert_eq!(interface.vtable_size, 48);
         let text = interface.function(0x24).unwrap();
         assert_eq!(text.names, ["Text"]);
+        assert_eq!(text.kinds, ["get"]);
         assert_eq!(text.arg_bytes, Some(4));
         assert!(text.result);
         assert_eq!(interface.function(0x28).unwrap().arg_bytes, None);
