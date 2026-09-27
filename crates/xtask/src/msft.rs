@@ -79,6 +79,9 @@ pub(crate) struct Parameter {
     pub vt: u16,
     /// The `PARAMFLAG` bits.
     pub flags: u32,
+    /// The index of the type info that the parameter names, through
+    /// pointers, when it is a type of this library.
+    pub user_type: Option<usize>,
 }
 
 /// The `PARAMFLAG_FRETVAL` bit: the parameter receives the result.
@@ -171,6 +174,40 @@ fn parameter_vt(bytes: &[u8], descs: usize, data_type: i32) -> Result<u16, Strin
     u16_at(bytes, at).ok_or_else(|| format!("the file ends in the type description at {at:#x}"))
 }
 
+/// The `VT_PTR` variant type.
+const VT_PTR: u16 = 26;
+
+/// The `VT_USERDEFINED` variant type.
+const VT_USERDEFINED: u16 = 29;
+
+/// The largest number of pointers that this reader follows to the type of
+/// a parameter.
+const MAX_POINTERS: usize = 4;
+
+/// Gives the index of the type info that a parameter of the type
+/// `data_type` names, through pointers: a `VT_USERDEFINED` whose reference
+/// is a type info of this library, at a multiple of the length of a type
+/// info record.
+fn parameter_user_type(bytes: &[u8], descs: usize, data_type: i32) -> Option<usize> {
+    let mut data_type = data_type;
+    for _ in 0..MAX_POINTERS {
+        let at = descs.checked_add(usize::try_from(data_type).ok()?)?;
+        let vt = u16_at(bytes, at)?;
+        let next = i32_at(bytes, at.checked_add(4)?)?;
+        match vt {
+            VT_PTR => data_type = next,
+            VT_USERDEFINED => {
+                let reference = usize::try_from(next).ok()?;
+                return (reference.checked_rem(TYPE_INFO_LEN)? == 0)
+                    .then(|| reference.checked_div(TYPE_INFO_LEN))
+                    .flatten();
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
 /// Reads the function records of one type info.
 fn functions(
     bytes: &[u8],
@@ -240,6 +277,7 @@ fn functions(
             parameters.push(Parameter {
                 vt: parameter_vt(bytes, descs, data_type)?,
                 flags,
+                user_type: parameter_user_type(bytes, descs, data_type),
             });
         }
         let name_at = add(
@@ -429,8 +467,13 @@ pub(crate) mod tests {
             out[at + 8] = u8::try_from(text.len()).unwrap();
             out[at + 12..at + 12 + text.len()].copy_from_slice(text.as_bytes());
         }
-        // A type description of VT_PTR.
+        // A pointer to a pointer to the type info 1, BoxEvents.
         put_u16(&mut out, 0x500, 26);
+        put_u32(&mut out, 0x504, 8);
+        put_u16(&mut out, 0x508, 26);
+        put_u32(&mut out, 0x50C, 0x10);
+        put_u16(&mut out, 0x510, 29);
+        put_u32(&mut out, 0x514, 0x64);
         // Text: 0x18 + 12 bytes.
         let text = 0x604;
         put_u16(&mut out, text, 0x24);
@@ -472,15 +515,27 @@ pub(crate) mod tests {
                     name: Some("Text".to_owned()),
                     vtable_offset: 0x24,
                     invoke_kind: 2,
-                    parameters: vec![Parameter { vt: 26, flags: 0xA }],
+                    parameters: vec![Parameter {
+                        vt: 26,
+                        flags: 0xA,
+                        user_type: Some(1)
+                    }],
                 },
                 Function {
                     name: Some("Move".to_owned()),
                     vtable_offset: 0x28,
                     invoke_kind: 1,
                     parameters: vec![
-                        Parameter { vt: 4, flags: 1 },
-                        Parameter { vt: 12, flags: 1 }
+                        Parameter {
+                            vt: 4,
+                            flags: 1,
+                            user_type: None
+                        },
+                        Parameter {
+                            vt: 12,
+                            flags: 1,
+                            user_type: None
+                        }
                     ],
                 },
             ]

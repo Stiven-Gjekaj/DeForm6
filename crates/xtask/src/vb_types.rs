@@ -263,7 +263,11 @@ mod tests {
             name: Some(name.to_owned()),
             vtable_offset: 0x40,
             invoke_kind,
-            parameters: vec![Parameter { vt, flags: 1 }],
+            parameters: vec![Parameter {
+                vt,
+                flags: 1,
+                user_type: None,
+            }],
         }
     }
 
