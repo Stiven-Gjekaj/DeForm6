@@ -1525,9 +1525,11 @@ fn map_editor_writes_a_form_file_for_its_refused_form_and_the_report_marks_it_un
     fs::remove_dir_all(&out_dir).ok();
 }
 
-/// A P-code table of four slots, built here, with the widths and the names
-/// that the runtime of the XP host gives them. Written to a file of its own
-/// for each test that uses it.
+/// A P-code table of four slots, built here. The names are placeholders,
+/// because a table that a runtime gives must not enter this repository; the
+/// last one follows the rule of an exit. The widths are those under which
+/// the body of `cmdStop_Click` decodes. Written to a file of its own for each
+/// test that uses it.
 fn write_pcode_table(tag: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!(
         "deform6-pcode-table-{tag}-{}.toml",
@@ -1535,10 +1537,10 @@ fn write_pcode_table(tag: &str) -> PathBuf {
     ));
     fs::write(
         &path,
-        "[primary.F4]\nhandler = \"0x1\"\nwidth = 1\nnames = [\"LitI2_Byte\"]\n\
-         [primary.08]\nhandler = \"0x2\"\nwidth = 2\nnames = [\"FLdPr\"]\n\
-         [primary.8E]\nhandler = \"0x3\"\nwidth = 2\nnames = [\"MemStI2\"]\n\
-         [primary.13]\nhandler = \"0x4\"\nwidth = 0\nnames = [\"ExitProcHresult\"]\n",
+        "[primary.F4]\nhandler = \"0x1\"\nwidth = 1\nnames = [\"OpA\"]\n\
+         [primary.08]\nhandler = \"0x2\"\nwidth = 2\nnames = [\"OpB\"]\n\
+         [primary.8E]\nhandler = \"0x3\"\nwidth = 2\nnames = [\"OpC\"]\n\
+         [primary.13]\nhandler = \"0x4\"\nwidth = 0\nnames = [\"ExitProcTest\"]\n",
     )
     .unwrap();
     path
@@ -1564,10 +1566,10 @@ fn disasm_prints_the_p_code_of_each_procedure() {
     fs::remove_file(&table).unwrap();
     assert_eq!(code, 0, "{stderr}");
     let expected = "  method 6  descriptor 0x00403438  12 bytes\n\
-                    \x20   0000  F4 00                     LitI2_Byte\n\
-                    \x20   0002  08 08 00                  FLdPr\n\
-                    \x20   0005  8E 4C 00                  MemStI2\n\
-                    \x20   0008  13                        ExitProcHresult\n\
+                    \x20   0000  F4 00                     OpA\n\
+                    \x20   0002  08 08 00                  OpB\n\
+                    \x20   0005  8E 4C 00                  OpC\n\
+                    \x20   0008  13                        ExitProcTest\n\
                     \x20   end of the body, after 3 bytes of padding\n";
     assert!(stdout.contains(expected), "{stdout}");
     assert!(

@@ -291,36 +291,39 @@ mod tests {
     use super::{PcodeEnd, PcodeInstruction, PcodeTable, PcodeWidth, disassemble};
     use crate::read::region::{Off, Region};
 
-    /// A table of five slots, built here. The widths and the names of `F4`,
-    /// `08`, `8E` and `13` are those that the runtime of the XP host gives.
+    /// A table of seven slots, built here. The names are placeholders: a
+    /// table that a runtime gives must not enter this repository. Only the
+    /// rule of the exit is real: `ExitProc` at the start of a name, or `End`.
+    /// The widths of `F4`, `08`, `8E` and `13` are the widths under which the
+    /// measured body below decodes.
     const TABLE: &str = r#"
 [primary.F4]
 handler = "0x000fd21f"
 width = 1
-names = ["LitI2_Byte"]
+names = ["OpA"]
 [primary.08]
 handler = "0x1"
 width = 2
-names = ["FLdPr"]
+names = ["OpB"]
 [primary.8E]
 handler = "0x2"
 width = 2
-names = ["MemStI2"]
+names = ["OpC"]
 [primary.13]
 handler = "0x3"
 width = 0
-names = ["ExitProcHresult"]
+names = ["ExitProcTest"]
 [primary.32]
 handler = "0x4"
 width = "counted"
-names = ["FFreeStr"]
+names = ["OpCounted"]
 [lead1.C8]
 handler = "0x5"
 width = 0
 names = ["End"]
 [primary.05]
 handler = "0x6"
-names = ["ImpAdLdRf"]
+names = ["OpNoWidth"]
 "#;
 
     /// One decoded opcode as a tuple: offset, lead, opcode and arguments.
@@ -373,8 +376,8 @@ names = ["ImpAdLdRf"]
     }
 
     /// The body of `cmdStop_Click` in the P-code `Fast_Flames.exe`, byte for
-    /// byte: `LitI2_Byte 0`, `FLdPr`, `MemStI2`, `ExitProcHresult`, and three
-    /// bytes of padding.
+    /// byte: four opcodes with 1, 2, 2 and 0 argument bytes, the last an exit,
+    /// and three bytes of padding.
     #[test]
     fn the_measured_body_of_cmd_stop_click_decodes_to_its_end() {
         let body = [
