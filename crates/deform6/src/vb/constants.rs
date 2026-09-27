@@ -30,6 +30,17 @@ pub fn constant(pe: &PeImage<'_>, lp_object_info: Va, index: u16) -> Option<Va> 
         .va_le(Off::new(u32::from(index).checked_mul(4)?))
 }
 
+/// Gives the 16 bytes of the GUID at the address of the entry at `index` of
+/// the constant table. The second argument of `VCallHresult` names such an
+/// entry: the GUID of the interface of the call.
+#[must_use]
+pub fn constant_guid(pe: &PeImage<'_>, lp_object_info: Va, index: u16) -> Option<[u8; 16]> {
+    pe.region_at_va(constant(pe, lp_object_info, index)?)?
+        .take(Off::new(0), 16)?
+        .try_into()
+        .ok()
+}
+
 /// The first word of a class reference: the number of GUIDs that follow.
 const CLASS_REFERENCE_GUIDS: u32 = 2;
 
@@ -105,7 +116,7 @@ pub fn constant_string(pe: &PeImage<'_>, lp_object_info: Va, index: u16) -> Opti
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{class_reference_iid, constant, constant_name, constant_string};
+    use super::{class_reference_iid, constant, constant_guid, constant_name, constant_string};
     use crate::read::pe::PeImage;
     use crate::read::region::Va;
 
@@ -240,6 +251,22 @@ mod tests {
         let bytes = synthetic_image(&extra);
         let pe = PeImage::parse(&bytes).unwrap();
         assert_eq!(constant_name(&pe, info, 0).as_deref(), Some("Run"));
+    }
+
+    /// `frmDiffuse` in the P-code `Diffuse.exe`: `VCallHresult` at `0x0014`
+    /// of its first body names entry 4, the GUID
+    /// `{33AD4F79-6699-11CF-B70C-00AA0060D393}` of the interface of `App`.
+    #[test]
+    fn diffuse_gives_the_interface_of_a_call() {
+        let pe = PeImage::parse(DIFFUSE_P_CODE).unwrap();
+        assert_eq!(
+            constant_guid(&pe, Va::new(0x0040_1B48), 4),
+            Some([
+                0x79, 0x4F, 0xAD, 0x33, 0x99, 0x66, 0xCF, 0x11, 0xB7, 0x0C, 0x00, 0xAA, 0x00, 0x60,
+                0xD3, 0x93
+            ])
+        );
+        assert_eq!(constant_guid(&pe, Va::new(0x0090_0000), 4), None);
     }
 
     #[test]
