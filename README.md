@@ -214,14 +214,24 @@ cargo run -p xtask -- check-pcode-table
 deform6 disasm <path-to-exe> --pcode-table derived/pcode-table.toml
 ```
 
+The interfaces of the controls are not in this repository either. Derive
+them from a copy of `VB6.OLB` that you own:
+
+```
+cargo run -p xtask -- derive-vb-types <path-to-VB6.OLB>
+cargo run -p xtask -- check-pcode-table --vb-types derived/vb-types.toml
+deform6 disasm <path-to-exe> --pcode-table derived/pcode-table.toml --vb-types derived/vb-types.toml --lift
+```
+
 The listing gives each opcode, its bytes and the name of its handler. It is
 not Basic.
 
 With `--lift`, `disasm` prints a procedure as statements when it can follow
-the stack of every opcode: 104 of the 680 procedures of the P-code corpus. The
-statements name each variable by its offset, such as `local_88` or
-`Me.field_54`, and each called procedure by its index, such as
-`Me.method_16`. They are not the source, and `extract` writes none of them.
+the stack of every opcode: 115 of the 680 procedures of the P-code corpus, and
+143 with `--vb-types`. The statements name each variable by its offset, such
+as `local_88` or `Me.field_54`, and each called procedure by its index, such
+as `Me.method_16`. With `--vb-types` they name the controls and their
+properties, such as `Me.chkAutomatic.Value`. They are not the source, and `extract` writes none of them.
 
 Run everything the gate runs, in one command:
 
@@ -488,7 +498,7 @@ collected.
 cargo test --workspace
 ```
 
-1521 tests run. The suite includes:
+1539 tests run. The suite includes:
 
 - **The corpus sweep.** All 44 programs are read and report what they hold.
 - **The structural check.** Every extracted project is checked against the
