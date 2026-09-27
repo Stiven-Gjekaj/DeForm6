@@ -734,7 +734,7 @@ next opcode at 4, 6, 8 and more reads a 16-bit byte count: `FFreeStr`,
 Each of the 1351 slots gets a width. `cargo run -p xtask -- check-pcode-table`
 decodes each P-code body of the corpus with the table: 680 of 680 decode to
 their end, or to an exit and fewer than four bytes of padding. With one
-width changed, `FLdRfVar` from 2 to 3, only 430 decode.
+width changed by one byte, only 430 decode.
 
 A search that fitted the widths to the corpus came first, and it failed: it
 found widths such as 11 that fit and are wrong, because a decode that goes
@@ -765,9 +765,30 @@ method table: each opcode, its bytes and the name of its handler, and how the
 decode ended. `check-pcode-table` now uses the same decoder. The listing is
 not Basic, and the README says so.
 
-**Part 2 is next: the lift.** P-code is a stack machine. The lift follows
-the stack through a body and builds an expression for each statement,
-starting with the procedures of the corpus whose source is shortest.
+#### Part 2, started on 2026-09-27
+
+**The lift, for procedures with no calls.** `vb::lift` follows the stack of
+a decoded body and gives a statement at each store, branch and exit. The
+kind of each opcode comes from the names of its handler: loads and stores of
+frame slots, of fields and of globals, constants, operators, conversions,
+branches and exits. All the names of one handler must give one kind. The
+stack must hold what each opcode pops, and it must be empty after each
+statement. `deform6 disasm --lift` prints the statements, and
+`check-pcode-table` counts them: 69 of the 680 bodies lift.
+
+A read of the source of the non-trivial ones found each one to be the
+statements of its source, such as `ExtractB = (currentColor \ 65536) And 255`
+and the key codes 37 to 40 of `vbKeyLeft` to `vbKeyDown`. The lift names each
+variable by its offset. It is not the source, and `extract` writes none of it.
+
+A committed test cannot hold the lift of the corpus, because that needs the
+derived table. The tests of `vb::lift` use tables with placeholder opcode
+numbers.
+
+**Next: the calls.** The stack effect of a call, such as `VCallHresult`,
+depends on the method that it calls, and 611 bodies hold one. The operand of
+a call probably names the method in a table of the object. That table is the
+next structure to measure.
 
 **The gate.** The recovered code compiles, which Phase 8 already measures, and
 the rebuilt program behaves the same as the original.
