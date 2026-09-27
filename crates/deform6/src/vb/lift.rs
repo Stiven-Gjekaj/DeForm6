@@ -1771,7 +1771,14 @@ fn run(
                 None
             }
             Family::NewObject => {
-                state.stack.push(Value::plain(Expr::New(word16(0)?), true));
+                let index = word16(0)?;
+                let mut value = Value::plain(Expr::New(index), true);
+                value.class = if callees.class(index).is_some() {
+                    Some(format!("{PROJECT_CLASS}{index}"))
+                } else {
+                    callees.class_interface(index).map(str::to_owned)
+                };
+                state.stack.push(value);
                 None
             }
             Family::NewIfNull => {
@@ -2850,6 +2857,21 @@ result = false
         assert_eq!(
             render(&lift(&listing_get, &table, &runtime, Some(&types)).unwrap())[0],
             "       local_88 = global_3.Text"
+        );
+        // Set local_1C = New class 9, then the get of 0x00A8 of _Box on
+        // local_1C: New gives the class of its index.
+        let new = [
+            0x27, 0x09, 0x00, 0x1B, 0xE4, 0xFF, 0x15, 0x9C, 0xFF, 0x06, 0xE4, 0xFF, 0x1C, 0xA8,
+            0x00, 0x00, 0x00, 0x03, 0x9C, 0xFF, 0x05, 0x78, 0xFF, 0x0C,
+        ];
+        let listing_new = disassemble(&Region::new(&new, Off::new(0)), &table);
+        assert_eq!(
+            render(&lift(&listing_new, &table, &runtime, Some(&types)).unwrap()),
+            [
+                "       Set local_1C = New class_9",
+                "       local_88 = local_1C.Text",
+                "       Exit"
+            ]
         );
         let unknown = Callees::default();
         assert_eq!(
