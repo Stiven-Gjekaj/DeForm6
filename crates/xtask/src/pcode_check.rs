@@ -12,10 +12,9 @@
 //! the interfaces of the controls that `derive-vb-types` wrote.
 
 use deform6::read::pe::PeImage;
-use deform6::vb::constants::constant_string;
+use deform6::vb::context::callees_of_project;
 use deform6::vb::header::{VbHeader, header_region};
-use deform6::vb::lift::{lift, string_indexes};
-use deform6::vb::links::read_method_links;
+use deform6::vb::lift::lift;
 use deform6::vb::object::ObjectTable;
 use deform6::vb::pcode::{PcodeTable, disassemble};
 use deform6::vb::procdesc::read_method_table;
@@ -86,32 +85,17 @@ fn check(path: &str, types_path: Option<&str>) -> Result<(usize, Vec<String>, us
             .map_err(|err| format!("{key}: {err}"))?;
         let objects = ObjectTable::walk(&pe, info.lp_object_table, &head)
             .map_err(|err| format!("{key}: {err}"))?;
-        for object in &objects.objects {
+        let all_callees = callees_of_project(&pe, &objects.objects, &table, types.as_ref());
+        for (object, callees) in objects.objects.iter().zip(&all_callees) {
             let methods = read_method_table(&pe, object.lp_object_info)
                 .map_err(|err| format!("{key}: {}: {err}", object.name))?;
-            let mut callees = read_method_links(&pe, object)
-                .map_err(|err| format!("{key}: {}: {err}", object.name))?
-                .callees(&methods);
-            if let Some(types) = &types {
-                callees = types.with_controls(callees, &pe, object);
-            }
-            for descriptor in methods.descriptors() {
-                let Some(body) = descriptor.body(&pe) else {
-                    continue;
-                };
-                for index in string_indexes(&disassemble(&body, &table), &table) {
-                    if let Some(text) = constant_string(&pe, object.lp_object_info, index) {
-                        callees = callees.with_string(index, &text);
-                    }
-                }
-            }
             for descriptor in methods.descriptors() {
                 bodies = bodies.saturating_add(1);
                 let body = descriptor
                     .body(&pe)
                     .ok_or_else(|| format!("{key}: a body cannot be read"))?;
                 let listing = disassemble(&body, &table);
-                if lift(&listing, &table, &callees, types.as_ref()).is_ok() {
+                if lift(&listing, &table, callees, types.as_ref()).is_ok() {
                     lifted = lifted.saturating_add(1);
                 }
                 if !listing.end.is_complete() {

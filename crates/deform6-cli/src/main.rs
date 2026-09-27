@@ -36,13 +36,11 @@ use clap::Parser as _;
 use deform6::Report;
 use deform6::read::pe::PeImage;
 use deform6::vb::classify::ObjectKind;
-use deform6::vb::constants::constant_string;
+use deform6::vb::context::callees_of_project;
 use deform6::vb::controlinfo::EventReport;
 use deform6::vb::controltree::ControlKind;
 use deform6::vb::functyp::{Argument, DefaultValue, Prototype, TypeEntry, VbType};
 use deform6::vb::header::{VbHeader, header_region};
-use deform6::vb::lift::string_indexes;
-use deform6::vb::links::read_method_links;
 use deform6::vb::object::ObjectTable;
 use deform6::vb::ocx::{Clsid, ExternalControl, OcxHeader};
 use deform6::vb::opcodes::OpcodeTable;
@@ -397,7 +395,8 @@ fn print_pcode(
     let info = ProjectInfo::read(&pe, header.lp_project_data)?;
     let head = ObjectTableHead::read(&pe, info.lp_object_table)?;
     let objects = ObjectTable::walk(&pe, info.lp_object_table, &head)?;
-    for object in &objects.objects {
+    let all_callees = callees_of_project(&pe, &objects.objects, table, types);
+    for (object, callees) in objects.objects.iter().zip(&all_callees) {
         println!();
         println!("{}", object.name);
         let methods = match read_method_table(&pe, object.lp_object_info) {
@@ -407,22 +406,6 @@ fn print_pcode(
                 continue;
             }
         };
-        let mut callees = read_method_links(&pe, object)
-            .map(|links| links.callees(&methods))
-            .unwrap_or_default();
-        if let Some(types) = types {
-            callees = types.with_controls(callees, &pe, object);
-        }
-        for descriptor in methods.descriptors() {
-            let Some(body) = descriptor.body(&pe) else {
-                continue;
-            };
-            for index in string_indexes(&disassemble(&body, table), table) {
-                if let Some(text) = constant_string(&pe, object.lp_object_info, index) {
-                    callees = callees.with_string(index, &text);
-                }
-            }
-        }
         for entry in &methods.entries {
             let MethodEntry::Descriptor { index, descriptor } = entry else {
                 continue;
@@ -438,7 +421,7 @@ fn print_pcode(
             };
             let listing = disassemble(&body, table);
             if lift {
-                match deform6::vb::lift::lift(&listing, table, &callees, types) {
+                match deform6::vb::lift::lift(&listing, table, callees, types) {
                     Ok(stmts) => {
                         for line in deform6::vb::lift::render(&stmts) {
                             println!("    {line}");

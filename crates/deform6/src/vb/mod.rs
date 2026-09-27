@@ -18,6 +18,7 @@
 
 pub mod classify;
 pub mod constants;
+pub mod context;
 pub mod controlinfo;
 pub mod controltree;
 pub mod frx;
