@@ -22,11 +22,11 @@
 
 use crate::read::pe::PeImage;
 use crate::read::region::{Off, Va};
-use crate::vb::constants::{class_reference_iid, constant, constant_string};
+use crate::vb::constants::{class_reference_iid, constant, constant_name, constant_string};
 use crate::vb::functyp::{FuncTypeWalk, ProcedureSignature, PrototypeList, TypeEntry, VbType};
 use std::collections::BTreeMap;
 
-use crate::vb::lift::{Callees, class_indexes, method_calls, string_indexes};
+use crate::vb::lift::{Callees, class_indexes, method_calls, name_indexes, string_indexes};
 use crate::vb::links::read_method_links;
 use crate::vb::object::Object;
 use crate::vb::pcode::{PcodeListing, PcodeTable, disassemble};
@@ -164,6 +164,11 @@ pub fn callees_of_project(
             for index in string_indexes(listing, table) {
                 if let Some(text) = constant_string(pe, object.lp_object_info, index) {
                     callees = callees.with_string(index, &text);
+                }
+            }
+            for index in name_indexes(listing, table) {
+                if let Some(name) = constant_name(pe, object.lp_object_info, index) {
+                    callees = callees.with_name(index, &name);
                 }
             }
             for index in class_indexes(listing, table) {

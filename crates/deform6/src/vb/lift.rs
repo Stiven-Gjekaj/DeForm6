@@ -85,6 +85,8 @@
 //! | `LitR4FP` | Push a 4-byte floating point constant on the floating point unit |
 //! | `PopTmpLdAdFPR4`, `CVarBoolI2` | Pop a value into a temporary slot, and push its address |
 //! | `FLdVar` | Push the 16 bytes of the `Variant` of a frame slot |
+//! | `LateMemCall` | Pop a count of `Variant` values, and call the member of the object register whose name is at an index of the constant table |
+//! | `LateMemCallLdVar`, `LateMemLdVar` | As `LateMemCall`, or with no arguments, into a frame slot, and push the address of the slot |
 //! | `ImpAdStAdFunc` | Pop an object, and `Set` a global at a 16-bit index to it |
 //! | `LdPrVar` | Pop the address of a `Variant`, and load its object into the object register |
 //! | `CStrVarVal`, `CBoolVarNull` | Convert the `Variant` at the popped address |
@@ -327,6 +329,7 @@ pub struct Callees {
     methods: Vec<(u16, CalledMethod)>,
     controls: Vec<(u16, String, String)>,
     strings: Vec<(u16, String)>,
+    names: Vec<(u16, String)>,
     variables: Vec<(u16, u32, bool)>,
     classes: Vec<(u16, Callees)>,
     class_interfaces: Vec<(u16, String)>,
@@ -462,6 +465,21 @@ impl Callees {
     pub fn with_string(mut self, index: u16, text: &str) -> Self {
         self.strings.push((index, text.to_owned()));
         self
+    }
+
+    /// Adds the member name `name` at `index` of the constant table.
+    #[must_use]
+    pub fn with_name(mut self, index: u16, name: &str) -> Self {
+        self.names.push((index, name.to_owned()));
+        self
+    }
+
+    /// Gives the member name at `index` of the constant table.
+    fn name(&self, index: u16) -> Option<&str> {
+        self.names
+            .iter()
+            .find(|(at, _)| *at == index)
+            .map(|(_, name)| name.as_str())
     }
 
     /// Gives the expression of the string at `index` of the constant table.
@@ -792,6 +810,7 @@ enum Family {
     ArrayErase,
     GlobalObjectStore,
     FrameLoadVariant,
+    LateCall { result: bool, arguments: bool },
     VariantObjectRegister,
     VariantBinary(BinaryOp),
     VariantCopy,
@@ -969,6 +988,18 @@ fn family_of(name: &str) -> Option<Family> {
         "PopTmpLdAdFPR4" | "CVarBoolI2" => Family::PopTemp,
         "ImpAdStAdFunc" => Family::GlobalObjectStore,
         "FLdVar" => Family::FrameLoadVariant,
+        "LateMemCall" => Family::LateCall {
+            result: false,
+            arguments: true,
+        },
+        "LateMemCallLdVar" => Family::LateCall {
+            result: true,
+            arguments: true,
+        },
+        "LateMemLdVar" => Family::LateCall {
+            result: true,
+            arguments: false,
+        },
         "LdPrVar" => Family::VariantObjectRegister,
         "CStrVarVal" => Family::Function("CStr"),
         "CBoolVarNull" => Family::Function("CBool"),
@@ -1638,6 +1669,47 @@ fn run(
                     value,
                 })
             }
+            Family::LateCall {
+                result,
+                arguments: with_arguments,
+            } => {
+                let (object, _) = state.object.clone().ok_or(LiftFault::NoObject(at))?;
+                let skip = if result { 2 } else { 0 };
+                let name = callees
+                    .name(u16_at(arguments, skip).ok_or_else(short)?)
+                    .ok_or(LiftFault::NoCallee(at))?
+                    .to_owned();
+                let count = if with_arguments {
+                    u16_at(arguments, skip.saturating_add(2)).ok_or_else(short)?
+                } else {
+                    0
+                };
+                let bytes = count.checked_mul(16).ok_or(LiftFault::CallArguments(at))?;
+                let mut args = expressions(call_arguments(&mut state.stack, bytes, at)?);
+                args.reverse();
+                let callee = Callee::Member(Box::new(object), name);
+                if result {
+                    let slot = offset16()?;
+                    let expr = if with_arguments {
+                        Expr::Call(callee, args)
+                    } else {
+                        let Callee::Member(object, name) = callee else {
+                            return Err(LiftFault::NoCallee(at));
+                        };
+                        Expr::Member(object, name)
+                    };
+                    state.bindings.insert(slot, (expr.clone(), None));
+                    state.stack.push(Value {
+                        expr,
+                        bytes: 4,
+                        slot: Some(slot),
+                        class: None,
+                    });
+                    None
+                } else {
+                    Some(Stmt::Call(callee, args))
+                }
+            }
             Family::GlobalObjectStore => {
                 let value = pop(&mut state)?;
                 Some(Stmt::Set {
@@ -2194,6 +2266,28 @@ pub fn string_indexes(listing: &PcodeListing, table: &PcodeTable) -> Vec<u16> {
     out
 }
 
+/// Gives the index of each member name of the constant table that a
+/// late-bound call of `listing` names. A caller gives [`Callees`] each one.
+#[must_use]
+pub fn name_indexes(listing: &PcodeListing, table: &PcodeTable) -> Vec<u16> {
+    let mut out = Vec::new();
+    for instruction in &listing.instructions {
+        let names = table
+            .slot(instruction.lead, instruction.opcode)
+            .map(|slot| slot.names.as_slice())
+            .unwrap_or_default();
+        let Some(Family::LateCall { result, .. }) = family(names) else {
+            continue;
+        };
+        if let Some(index) = u16_at(&instruction.arguments, if result { 2 } else { 0 })
+            && !out.contains(&index)
+        {
+            out.push(index);
+        }
+    }
+    out
+}
+
 /// Renders statements as lines, with a label before each statement that a
 /// branch names. A label whose offset starts no statement is given on a
 /// line of its own at the end.
@@ -2245,7 +2339,8 @@ pub fn render(stmts: &[LiftedStmt]) -> Vec<String> {
 )]
 mod tests {
     use super::{
-        Callees, LiftFault, class_indexes, lift, lift_method, method_calls, render, string_indexes,
+        Callees, LiftFault, class_indexes, lift, lift_method, method_calls, name_indexes, render,
+        string_indexes,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::pcode::{PcodeTable, disassemble};
@@ -2457,6 +2552,12 @@ names = ["CVarStr"]
 [primary.43]
 width = 2
 names = ["FLdVar"]
+[primary.44]
+width = 4
+names = ["LateMemCall"]
+[primary.45]
+width = 6
+names = ["LateMemCallLdVar"]
 [lead1.C8]
 width = 0
 names = ["End"]
@@ -3190,6 +3291,34 @@ result = false
         assert_eq!(
             lines(&step).unwrap()[0],
             "       For local_64 = 1 To 9 Step 2  ' past the end: GoTo L000E"
+        );
+    }
+
+    #[test]
+    fn a_late_call_takes_its_variants_in_the_order_of_the_source() {
+        let table = PcodeTable::parse(TABLE.as_bytes()).unwrap();
+        let callees = Callees::default()
+            .with_name(7, "Run")
+            .with_name(8, "RegRead");
+        // local_1C.Run local_64, local_60; local_88 = local_1C.RegRead(local_64)
+        let body = [
+            0x06, 0xE4, 0xFF, 0x43, 0x9C, 0xFF, 0x43, 0xA0, 0xFF, 0x44, 0x07, 0x00, 0x02, 0x00,
+            0x43, 0x9C, 0xFF, 0x06, 0xE4, 0xFF, 0x45, 0x90, 0xFF, 0x08, 0x00, 0x01, 0x00, 0x05,
+            0x78, 0xFF, 0x0C,
+        ];
+        let listing = disassemble(&Region::new(&body, Off::new(0)), &table);
+        assert_eq!(
+            render(&lift(&listing, &table, &callees, None).unwrap()),
+            [
+                "       Call local_1C.Run(local_64, local_60)",
+                "       local_88 = local_1C.RegRead(local_64)",
+                "       Exit"
+            ]
+        );
+        assert_eq!(name_indexes(&listing, &table), [7, 8]);
+        assert_eq!(
+            lift(&listing, &table, &Callees::default(), None),
+            Err(LiftFault::NoCallee(9))
         );
     }
 
