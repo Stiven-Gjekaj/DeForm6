@@ -1599,6 +1599,16 @@ fn project_call(
     }))
 }
 
+/// Gives the class that the entry at `index` of the constant table names:
+/// an object of the project, or an interface of the runtime.
+fn class_at(callees: &Callees, index: u16) -> Option<String> {
+    if callees.class(index).is_some() {
+        Some(format!("{PROJECT_CLASS}{index}"))
+    } else {
+        callees.class_interface(index).map(str::to_owned)
+    }
+}
+
 /// Lifts a call through the object register at `vtable_offset`.
 fn object_call(
     state: &mut State,
@@ -2009,6 +2019,12 @@ fn run(
                 None
             }
             Family::ObjectCall { pushes } => {
+                if !pushes
+                    && let Some((object, class @ None)) = state.object.as_mut()
+                    && *object != Expr::Arg(8)
+                {
+                    *class = class_at(callees, word16(2)?);
+                }
                 object_call(&mut state, callees, types, word16(0)?, pushes, at, calls)?
             }
             Family::GlobalLoad => {
@@ -2129,11 +2145,7 @@ fn run(
             Family::NewObject => {
                 let index = word16(0)?;
                 let mut value = Value::plain(Expr::New(index), true);
-                value.class = if callees.class(index).is_some() {
-                    Some(format!("{PROJECT_CLASS}{index}"))
-                } else {
-                    callees.class_interface(index).map(str::to_owned)
-                };
+                value.class = class_at(callees, index);
                 state.stack.push(value);
                 None
             }
@@ -2510,6 +2522,28 @@ pub fn string_indexes(listing: &PcodeListing, table: &PcodeTable) -> Vec<u16> {
     out
 }
 
+/// Gives the index of the entry of the constant table that each
+/// `VCallHresult` of `listing` names: the GUID of the interface of the
+/// call. A caller gives [`Callees`] the class of each one, and the lift
+/// uses it for an object whose class it does not know.
+#[must_use]
+pub fn interface_indexes(listing: &PcodeListing, table: &PcodeTable) -> Vec<u16> {
+    let mut out = Vec::new();
+    for instruction in &listing.instructions {
+        let names = table
+            .slot(instruction.lead, instruction.opcode)
+            .map(|slot| slot.names.as_slice())
+            .unwrap_or_default();
+        if family(names) == Some(Family::ObjectCall { pushes: false })
+            && let Some(index) = u16_at(&instruction.arguments, 2)
+            && !out.contains(&index)
+        {
+            out.push(index);
+        }
+    }
+    out
+}
+
 /// Gives the index of each member name of the constant table that a
 /// late-bound call of `listing` names. A caller gives [`Callees`] each one.
 #[must_use]
@@ -2583,8 +2617,8 @@ pub fn render(stmts: &[LiftedStmt]) -> Vec<String> {
 )]
 mod tests {
     use super::{
-        Callees, LiftFault, class_indexes, lift, lift_method, method_calls, name_indexes, render,
-        string_indexes,
+        Callees, LiftFault, class_indexes, interface_indexes, lift, lift_method, method_calls,
+        name_indexes, render, string_indexes,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::pcode::{PcodeTable, disassemble};
@@ -3432,6 +3466,19 @@ result = false
                 "       local_88 = local_1C.Text",
                 "       Exit"
             ]
+        );
+        // local_78 has no known class, and the call names entry 5, the
+        // interface _Box.
+        let named = [
+            0x15, 0x9C, 0xFF, 0x06, 0x88, 0xFF, 0x1C, 0xA8, 0x00, 0x05, 0x00, 0x03, 0x9C, 0xFF,
+            0x05, 0x78, 0xFF, 0x0C,
+        ];
+        let listing_named = disassemble(&Region::new(&named, Off::new(0)), &table);
+        assert_eq!(interface_indexes(&listing_named, &table), [5]);
+        let by_call = Callees::default().with_class_interface(5, "_Box");
+        assert_eq!(
+            render(&lift(&listing_named, &table, &by_call, Some(&types)).unwrap())[0],
+            "       local_88 = local_78.Text"
         );
         let unknown = Callees::default();
         assert_eq!(
