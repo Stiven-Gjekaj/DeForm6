@@ -96,6 +96,7 @@ mod builds;
 mod fetch_corpus;
 mod fuzz;
 mod licences;
+mod msft;
 mod opcode_table;
 mod pcode;
 mod pcode_check;
@@ -103,6 +104,7 @@ mod pcode_symbols;
 mod pcode_table;
 mod pcode_widths;
 mod pdb2;
+mod vb_types;
 
 use std::path::Path;
 
@@ -133,6 +135,7 @@ fn run(args: Vec<String>) -> i32 {
         Some("fetch-pcode-symbols") => pcode_symbols::run(args.get(1..).unwrap_or(&[])),
         Some("check-pcode-table") => pcode_check::run(args.get(1..).unwrap_or(&[])),
         Some("derive-pcode-table") => pcode_table::run(args.get(1..).unwrap_or(&[])),
+        Some("derive-vb-types") => vb_types::run(args.get(1..).unwrap_or(&[])),
         Some("fetch-corpus") => fetch_corpus::run(args.get(1..).unwrap_or(&[])),
         Some("pin-corpus") => fetch_corpus::run_pin(args.get(1..).unwrap_or(&[])),
         Some("fuzz-pr") => fuzz::run_pr(args.get(1..).unwrap_or(&[])),
@@ -153,7 +156,7 @@ fn run(args: Vec<String>) -> i32 {
     }
 }
 
-const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | update-fidelity | export-builds [--probe] <dir> | import-builds [--capture <file>] <dir> | export-pcode [--probe] <dir> | import-pcode [--capture <file>] <dir> | derive-opcode-table | fetch-pcode-symbols <dll> [--out <dir>] | derive-pcode-table <dll> <pdb> [--out <path>] | check-pcode-table [<table>] | fetch-corpus | pin-corpus <name> <url> | fuzz-pr | fuzz-cron | licences";
+const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | update-fidelity | export-builds [--probe] <dir> | import-builds [--capture <file>] <dir> | export-pcode [--probe] <dir> | import-pcode [--capture <file>] <dir> | derive-opcode-table | fetch-pcode-symbols <dll> [--out <dir>] | derive-pcode-table <dll> <pdb> [--out <path>] | check-pcode-table [<table>] | derive-vb-types <olb> [--out <path>] | fetch-corpus | pin-corpus <name> <url> | fuzz-pr | fuzz-cron | licences";
 
 /// The number of corpus programs `update-ratios` refuses to write fewer
 /// than. Matches `EXPECTED_PROGRAM_COUNT` in `crates/deform6/tests/ratios.rs`
