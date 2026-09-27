@@ -818,6 +818,10 @@ fn each_pcode_descriptor_gives_the_argument_size_of_its_source_procedure() {
 /// table.
 const EXPECTED_METHOD_SLOTS: usize = 663;
 
+/// The objects of the P-code corpus with a link table: the 99 objects, less
+/// the 8 standard modules.
+const EXPECTED_LINK_TABLES: usize = 91;
+
 /// The link table of each object of a P-code program holds a method slot
 /// for each procedure of its source. The public procedures come first, then
 /// the private ones, each group in the order of the file. Before them come
@@ -827,6 +831,7 @@ fn each_link_table_of_a_pcode_program_gives_the_procedures_of_its_source() {
     let root = build_record::corpus_root();
     let projects = vbp::project_files();
     let mut methods_found = 0;
+    let mut tables = 0;
     let mut failures = Vec::new();
     for (key, exe) in pcode_programs() {
         let bytes = read(&exe);
@@ -844,6 +849,7 @@ fn each_link_table_of_a_pcode_program_gives_the_procedures_of_its_source() {
             if links.slots.is_empty() {
                 continue;
             }
+            tables += 1;
             let descriptors: Vec<u32> = read_method_table(&pe, object.lp_object_info)
                 .unwrap_or_else(|err| panic!("{key}: {}: {err}", object.name))
                 .descriptors()
@@ -887,5 +893,8 @@ fn each_link_table_of_a_pcode_program_gives_the_procedures_of_its_source() {
         failures.len(),
         failures.join("\n")
     );
-    assert_eq!(methods_found, EXPECTED_METHOD_SLOTS);
+    assert_eq!(
+        (tables, methods_found),
+        (EXPECTED_LINK_TABLES, EXPECTED_METHOD_SLOTS)
+    );
 }

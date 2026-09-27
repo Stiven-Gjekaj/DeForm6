@@ -16,9 +16,9 @@
 //! - An entry of the link table is an address. For a method, the address is
 //!   7 bytes into the P-code stub of the method, where the stub reads
 //!   `33 C0 BA <descriptor> 68 <engine> C3` (`STRUCTURES.md` section 22).
-//! - In each of the 86 objects of the corpus whose source the repository
-//!   holds, the other slots number two for each public variable of the
-//!   source, and they come first. The method slots follow: the public
+//! - In each of the 91 objects of the corpus that are not standard modules,
+//!   the other slots number two for each public variable of the source, and
+//!   they come first. The method slots follow: the public
 //!   procedures of the source, then the private ones, each group in the
 //!   order of the file.
 //! - Each of the 465 `ThisVCallHresult` offsets of the corpus names a
