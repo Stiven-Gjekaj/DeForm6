@@ -1524,3 +1524,82 @@ fn map_editor_writes_a_form_file_for_its_refused_form_and_the_report_marks_it_un
 
     fs::remove_dir_all(&out_dir).ok();
 }
+
+/// A P-code table of four slots, built here, with the widths and the names
+/// that the runtime of the XP host gives them. Written to a file of its own
+/// for each test that uses it.
+fn write_pcode_table(tag: &str) -> PathBuf {
+    let path = std::env::temp_dir().join(format!(
+        "deform6-pcode-table-{tag}-{}.toml",
+        std::process::id()
+    ));
+    fs::write(
+        &path,
+        "[primary.F4]\nhandler = \"0x1\"\nwidth = 1\nnames = [\"LitI2_Byte\"]\n\
+         [primary.08]\nhandler = \"0x2\"\nwidth = 2\nnames = [\"FLdPr\"]\n\
+         [primary.8E]\nhandler = \"0x3\"\nwidth = 2\nnames = [\"MemStI2\"]\n\
+         [primary.13]\nhandler = \"0x4\"\nwidth = 0\nnames = [\"ExitProcHresult\"]\n",
+    )
+    .unwrap();
+    path
+}
+
+fn fast_flames_pcode_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../corpus-pcode/vb6-code/Fire-effect/Fast_Flames.exe")
+}
+
+/// `disasm` prints the P-code of `cmdStop_Click` in the P-code
+/// `Fast_Flames.exe`, and the decode of a body that the small table does
+/// not cover stops at the first opcode that it does not hold.
+#[test]
+fn disasm_prints_the_p_code_of_each_procedure() {
+    let table = write_pcode_table("listing");
+    let (code, stdout, stderr) = run(&[
+        OsStr::new("disasm"),
+        fast_flames_pcode_path().as_os_str(),
+        OsStr::new("--pcode-table"),
+        table.as_os_str(),
+    ]);
+    fs::remove_file(&table).unwrap();
+    assert_eq!(code, 0, "{stderr}");
+    let expected = "  method 6  descriptor 0x00403438  12 bytes\n\
+                    \x20   0000  F4 00                     LitI2_Byte\n\
+                    \x20   0002  08 08 00                  FLdPr\n\
+                    \x20   0005  8E 4C 00                  MemStI2\n\
+                    \x20   0008  13                        ExitProcHresult\n\
+                    \x20   end of the body, after 3 bytes of padding\n";
+    assert!(stdout.contains(expected), "{stdout}");
+    assert!(
+        stdout.contains("  method 5  descriptor 0x00403b90  400 bytes\n    stops at 0000: the table holds no such opcode\n"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("P-code table"), "{stdout}");
+}
+
+/// `disasm` on a native program says that it holds no P-code, and exits
+/// with 0. A table that cannot be read exits with 5.
+#[test]
+fn disasm_names_a_native_program_and_refuses_a_missing_table() {
+    let table = write_pcode_table("native");
+    let (code, stdout, _) = run(&[
+        OsStr::new("disasm"),
+        gradient_sample_path().as_os_str(),
+        OsStr::new("--pcode-table"),
+        table.as_os_str(),
+    ]);
+    fs::remove_file(&table).unwrap();
+    assert_eq!(code, 0);
+    assert!(
+        stdout.contains("This program is native code, and it holds no P-code."),
+        "{stdout}"
+    );
+
+    let (code, _, stderr) = run(&[
+        OsStr::new("disasm"),
+        fast_flames_pcode_path().as_os_str(),
+        OsStr::new("--pcode-table"),
+        OsStr::new("/nonexistent/deform6-pcode-table.toml"),
+    ]);
+    assert_eq!(code, 5, "{stderr}");
+}

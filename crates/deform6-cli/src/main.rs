@@ -34,14 +34,20 @@ use std::process::ExitCode;
 use clap::Parser as _;
 
 use deform6::Report;
+use deform6::read::pe::PeImage;
 use deform6::vb::classify::ObjectKind;
 use deform6::vb::controlinfo::EventReport;
 use deform6::vb::controltree::ControlKind;
 use deform6::vb::functyp::{Argument, DefaultValue, Prototype, TypeEntry, VbType};
+use deform6::vb::header::{VbHeader, header_region};
+use deform6::vb::object::ObjectTable;
 use deform6::vb::ocx::{Clsid, ExternalControl, OcxHeader};
 use deform6::vb::opcodes::OpcodeTable;
+use deform6::vb::pcode::{PcodeEnd, PcodeInstruction, PcodeTable, disassemble};
 use deform6::vb::privateobj::Gap;
+use deform6::vb::procdesc::{MethodEntry, read_method_table};
 use deform6::vb::project::{Declaration, ExportName};
+use deform6::vb::project::{ObjectTableHead, ProjectInfo};
 use deform6::vb::propstream::PropertyValue;
 use deform6::vb::{ControlReport, FormReport, ObjectProcedures, ProcedureEntry};
 
@@ -89,6 +95,18 @@ enum Command {
 
     /// Reads one executable and writes a Visual Basic 6 project directory
     /// that VB6 can open.
+    /// Reads one P-code executable and prints the P-code of each procedure,
+    /// decoded with a table that `cargo run -p xtask --
+    /// derive-pcode-table` wrote from a runtime that you own.
+    Disasm {
+        /// The executable to read.
+        input: PathBuf,
+
+        /// The P-code table. This repository does not ship one.
+        #[arg(long)]
+        pcode_table: PathBuf,
+    },
+
     Extract {
         /// The executable to read.
         ///
@@ -199,6 +217,7 @@ fn run(cli: &Cli) -> Exit {
             opcode_table,
             salvage,
         } => run_inspect(input, opcode_table.as_deref(), mode_for(*salvage)),
+        Command::Disasm { input, pcode_table } => run_disasm(input, pcode_table),
         Command::Extract {
             input,
             output,
@@ -265,6 +284,148 @@ fn load_opcode_table(opcode_table_path: Option<&Path>) -> Result<(OpcodeTable, S
         Err(err) => {
             eprintln!("{err}");
             Err(Exit::Internal)
+        }
+    }
+}
+
+/// Reads `path` and the P-code table, and prints the P-code of each
+/// procedure.
+///
+/// The file goes through [`deform6::inspect`] first, so a file that it
+/// refuses gets the same exit code as from `inspect`. A native program holds
+/// no P-code: the command says so and exits with 0. A table that cannot be
+/// read is [`Exit::Internal`], as a bad `--opcode-table` is.
+fn run_disasm(path: &Path, table_path: &Path) -> Exit {
+    let table = match std::fs::read(table_path) {
+        Ok(bytes) => match PcodeTable::parse(&bytes) {
+            Ok(table) => table,
+            Err(err) => {
+                eprintln!("{}: {err}", table_path.display());
+                return Exit::Internal;
+            }
+        },
+        Err(err) => {
+            eprintln!("could not read {}: {err}", table_path.display());
+            return Exit::Internal;
+        }
+    };
+    let data = match std::fs::read(path) {
+        Ok(data) => data,
+        Err(err) => {
+            eprintln!("could not read {}: {err}", path.display());
+            return Exit::Internal;
+        }
+    };
+    let report = match deform6::inspect(
+        &data,
+        &OpcodeTable::builtin(),
+        deform6::journal::Mode::Strict,
+    ) {
+        Ok(report) => report,
+        Err(refusal) => {
+            eprintln!("{refusal}");
+            return exit_for(refusal);
+        }
+    };
+    println!("File         {}", path.display());
+    println!(
+        "P-code table {}, {} slots",
+        table_path.display(),
+        table.len()
+    );
+    if report.native {
+        println!("This program is native code, and it holds no P-code.");
+        return Exit::Ok;
+    }
+    match print_pcode(&data, &table) {
+        Ok(()) => Exit::Ok,
+        Err(refusal) => {
+            eprintln!("{refusal}");
+            exit_for(refusal)
+        }
+    }
+}
+
+/// Prints the P-code of each procedure of each object, in the order of the
+/// object table and of each method table.
+fn print_pcode(data: &[u8], table: &PcodeTable) -> Result<(), deform6::Refusal> {
+    let pe = PeImage::parse(data)?;
+    let header = VbHeader::read(&header_region(&pe)?)?;
+    let info = ProjectInfo::read(&pe, header.lp_project_data)?;
+    let head = ObjectTableHead::read(&pe, info.lp_object_table)?;
+    let objects = ObjectTable::walk(&pe, info.lp_object_table, &head)?;
+    for object in &objects.objects {
+        println!();
+        println!("{}", object.name);
+        let methods = match read_method_table(&pe, object.lp_object_info) {
+            Ok(methods) => methods,
+            Err(refusal) => {
+                println!("  the method table cannot be read: {refusal}");
+                continue;
+            }
+        };
+        for entry in &methods.entries {
+            let MethodEntry::Descriptor { index, descriptor } = entry else {
+                continue;
+            };
+            println!(
+                "  method {index}  descriptor {:#010x}  {} bytes",
+                descriptor.va.get(),
+                descriptor.proc_size
+            );
+            let Some(body) = descriptor.body(&pe) else {
+                println!("    the body cannot be read");
+                continue;
+            };
+            let listing = disassemble(&body, table);
+            for instruction in &listing.instructions {
+                println!("    {}", format_instruction(instruction, table));
+            }
+            println!("    {}", format_end(listing.end));
+        }
+    }
+    Ok(())
+}
+
+/// Formats one decoded opcode: its offset, its bytes, the first name of its
+/// handler, and the number of other names that the handler has.
+fn format_instruction(instruction: &PcodeInstruction, table: &PcodeTable) -> String {
+    let mut bytes = Vec::new();
+    if let Some(lead) = instruction.lead {
+        bytes.push(format!("{:02X}", lead.saturating_add(0xFB)));
+    }
+    bytes.push(format!("{:02X}", instruction.opcode));
+    bytes.extend(
+        instruction
+            .arguments
+            .iter()
+            .map(|byte| format!("{byte:02X}")),
+    );
+    let names = table
+        .slot(instruction.lead, instruction.opcode)
+        .map(|slot| slot.names.as_slice())
+        .unwrap_or_default();
+    let name = match names {
+        [] => "(no name)".to_owned(),
+        [one] => one.clone(),
+        [first, rest @ ..] => format!("{first} (or {} other names)", rest.len()),
+    };
+    format!(
+        "{:04X}  {:<24}  {name}",
+        instruction.offset,
+        bytes.join(" ")
+    )
+}
+
+/// Formats how a decode ended.
+fn format_end(end: PcodeEnd) -> String {
+    match end {
+        PcodeEnd::Complete => "end of the body".to_owned(),
+        PcodeEnd::Padding(bytes) => format!("end of the body, after {bytes} bytes of padding"),
+        PcodeEnd::NoSlot(at) => format!("stops at {at:04X}: the table holds no such opcode"),
+        PcodeEnd::NoWidth(at) => format!("stops at {at:04X}: the table gives the opcode no width"),
+        PcodeEnd::PastEnd(at) => {
+            format!("stops at {at:04X}: the opcode runs past the end of the body")
         }
     }
 }
