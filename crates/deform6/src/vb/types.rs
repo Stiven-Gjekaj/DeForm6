@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use crate::read::pe::PeImage;
 use crate::read::region::Off;
 use crate::vb::controlinfo::{ControlInfo, ControlInfoTable};
-use crate::vb::lift::Callees;
+use crate::vb::lift::{CONTROL_ARRAY, Callees};
 use crate::vb::object::Object;
 use crate::vb::opcodes::{TableError, line_at};
 
@@ -175,6 +175,24 @@ impl VbTypes {
         self.controls.get(&guid_text(guid)).map(String::as_str)
     }
 
+    /// Gives the class of the object of a control array whose `ControlInfo`
+    /// record names `guid`.
+    ///
+    /// The record of a control array names the GUID of the events of its
+    /// control plus 1 in its first 32 bits, such as `{33AD4F03-...}` for an
+    /// array of `OptionButton`, whose events have `{33AD4F02-...}`. This
+    /// holds for each control array of the P-code corpus.
+    #[must_use]
+    pub fn control_array_interface(&self, guid: &[u8; 16]) -> Option<String> {
+        let (first, _) = guid.split_first_chunk::<4>()?;
+        let events = u32::from_le_bytes(*first).checked_sub(1)?;
+        let mut single = *guid;
+        let (head, _) = single.split_first_chunk_mut::<4>()?;
+        *head = events.to_le_bytes();
+        self.control_interface(&single)
+            .map(|interface| format!("{CONTROL_ARRAY}{interface}"))
+    }
+
     /// Gives the 16 bytes of the GUID that `control` names, when the image
     /// holds them.
     fn guid(pe: &PeImage<'_>, control: &ControlInfo) -> Option<[u8; 16]> {
@@ -190,8 +208,10 @@ impl VbTypes {
     /// The record of the form itself holds `wIndex` `0xFFFF`, and its GUID
     /// names the interface of the form. The accessor of a control is at the
     /// vtable size of that interface, plus 4 times the `wIndex` of the
-    /// control. A control whose GUID names no interface of the file is left
-    /// out, and so is each control of an object that is not a form. The
+    /// control. A control array gets the class that
+    /// [`VbTypes::control_array_interface`] gives. A control whose GUID names
+    /// no interface of the file is left out, and so is each control of an
+    /// object that is not a form. The
     /// interface of the form becomes the base interface of `callees`.
     #[must_use]
     pub fn with_controls(&self, callees: Callees, pe: &PeImage<'_>, object: &Object) -> Callees {
@@ -218,8 +238,11 @@ impl VbTypes {
                 .checked_mul(4)
                 .and_then(|bytes| bytes.checked_add(base))
                 .and_then(|offset| u16::try_from(offset).ok());
-            let interface = Self::guid(pe, control)
-                .and_then(|guid| self.control_interface(&guid).map(str::to_owned));
+            let interface = Self::guid(pe, control).and_then(|guid| {
+                self.control_interface(&guid)
+                    .map(str::to_owned)
+                    .or_else(|| self.control_array_interface(&guid))
+            });
             if let (Some(offset), Some(interface)) = (offset, interface) {
                 callees = callees.with_control(offset, &control.name, &interface);
             }
@@ -284,6 +307,13 @@ result = false
         let types = VbTypes::parse(TYPES.as_bytes()).unwrap();
         assert_eq!(types.control_interface(&GUID), Some("_Box"));
         assert_eq!(types.control_interface(&[0; 16]), None);
+        let mut array = GUID;
+        array[0] = 0xD3;
+        assert_eq!(
+            types.control_array_interface(&array).as_deref(),
+            Some("[]_Box")
+        );
+        assert_eq!(types.control_array_interface(&GUID), None);
         let mut iid = GUID;
         iid[0] = 0xD1;
         assert_eq!(types.interface_of_iid(&iid), Some("_Box"));

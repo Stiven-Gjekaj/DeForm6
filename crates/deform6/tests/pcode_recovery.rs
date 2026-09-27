@@ -1020,6 +1020,104 @@ fn each_control_index_of_a_pcode_form_is_the_position_of_its_source_block() {
     assert_eq!(checked, EXPECTED_INDEXED_CONTROLS);
 }
 
+/// Adds the class and the name of each `Begin` block of `blocks` that has an
+/// `Index` property: an element of a control array.
+fn array_blocks(blocks: &[frm::Block], out: &mut Vec<(String, String)>) {
+    for block in blocks {
+        if block
+            .properties
+            .iter()
+            .any(|property| property.name == "Index")
+            && !out.iter().any(|(_, name)| *name == block.name)
+        {
+            out.push((block.class.clone(), block.name.clone()));
+        }
+        array_blocks(&block.children, out);
+    }
+}
+
+/// The control arrays of a class of `VB.` in the forms of the P-code
+/// corpus.
+const EXPECTED_CONTROL_ARRAYS: usize = 5;
+
+/// The `ControlInfo` record of a control array of a class of `VB.` names
+/// the GUID that a single control of the same class names, plus 1 in its
+/// first 32 bits. No single control names the GUID of an array.
+#[test]
+fn a_control_array_names_the_guid_of_its_class_plus_one() {
+    let root = build_record::corpus_root();
+    let projects = vbp::project_files();
+    let mut singles: BTreeMap<String, Vec<[u8; 16]>> = BTreeMap::new();
+    let mut arrays = Vec::new();
+    for (key, exe) in pcode_programs() {
+        let bytes = read(&exe);
+        let pe = PeImage::parse(&bytes).unwrap_or_else(|err| panic!("{key}: {err}"));
+        let project = vbp::select_project_file(&root.join(&key), &projects)
+            .unwrap_or_else(|err| panic!("{key}: {err}"));
+        let sources: BTreeMap<String, PathBuf> = vbp::Project::read(&project)
+            .declared_objects()
+            .into_iter()
+            .filter_map(|object| Some((object.name?, object.source_file)))
+            .collect();
+        for object in objects_by_name(&pe).values() {
+            let path = &sources[&object.name];
+            if !path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("frm"))
+            {
+                continue;
+            }
+            let controls =
+                ControlInfoTable::read(&pe, object).unwrap_or_else(|err| panic!("{key}: {err}"));
+            let form = frm::Form::read(path).blocks();
+            let mut blocks = Vec::new();
+            begin_blocks(&form, &mut blocks);
+            let mut array_names = Vec::new();
+            array_blocks(&form, &mut array_names);
+            for control in &controls.entries {
+                let Some((class, _)) = blocks.iter().find(|(_, name)| *name == control.name) else {
+                    continue;
+                };
+                if !class.starts_with("VB.") {
+                    continue;
+                }
+                let guid: [u8; 16] = pe
+                    .region_at_va(control.lp_guid)
+                    .and_then(|region| region.take(Off::new(0), 16))
+                    .unwrap()
+                    .try_into()
+                    .unwrap();
+                if array_names.iter().any(|(_, name)| *name == control.name) {
+                    arrays.push((format!("{key}: {}", control.name), class.clone(), guid));
+                } else {
+                    singles.entry(class.clone()).or_default().push(guid);
+                }
+            }
+        }
+    }
+    let mut failures = Vec::new();
+    for (control, class, guid) in &arrays {
+        let mut single = *guid;
+        let first = u32::from_le_bytes(single[..4].try_into().unwrap());
+        single[..4].copy_from_slice(&(first - 1).to_le_bytes());
+        let of_class = singles.get(class).cloned().unwrap_or_default();
+        if !of_class.contains(&single) || singles.values().flatten().any(|one| one == guid) {
+            failures.push(format!(
+                "{control} ({class}) names {}, and the single controls of its class name {:?}",
+                guid_text(guid),
+                of_class.iter().map(guid_text).collect::<Vec<_>>()
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} control arrays do not name the GUID of their class plus one:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+    assert_eq!(arrays.len(), EXPECTED_CONTROL_ARRAYS);
+}
+
 /// The control accessors that `VbTypes::with_controls` gives across the
 /// forms of the P-code corpus.
 const EXPECTED_ACCESSORS: usize = 562;

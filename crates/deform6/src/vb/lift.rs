@@ -1234,6 +1234,10 @@ impl State {
     }
 }
 
+/// The prefix of the class of the object of a control array, before the
+/// interface of its controls.
+pub(crate) const CONTROL_ARRAY: &str = "[]";
+
 /// The prefix of the class of an object of the project, before the index of
 /// its class in the constant table.
 const PROJECT_CLASS: char = '@';
