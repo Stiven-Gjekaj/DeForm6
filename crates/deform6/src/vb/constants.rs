@@ -30,6 +30,23 @@ pub fn constant(pe: &PeImage<'_>, lp_object_info: Va, index: u16) -> Option<Va> 
         .va_le(Off::new(u32::from(index).checked_mul(4)?))
 }
 
+/// The first word of a class reference: the number of GUIDs that follow.
+const CLASS_REFERENCE_GUIDS: u32 = 2;
+
+/// Gives the GUID of the interface of the class reference at `index` of the
+/// constant table. A class reference holds 2, the address of the GUID of
+/// the class, and the address of the GUID of its interface. `NewIfNullPr`
+/// names one for a class of the runtime, such as its global object.
+#[must_use]
+pub fn class_reference_iid(pe: &PeImage<'_>, lp_object_info: Va, index: u16) -> Option<[u8; 16]> {
+    let reference = pe.region_at_va(constant(pe, lp_object_info, index)?)?;
+    if reference.u32_le(Off::new(0))? != CLASS_REFERENCE_GUIDS {
+        return None;
+    }
+    let iid = reference.va_le(Off::new(8))?;
+    pe.region_at_va(iid)?.take(Off::new(0), 16)?.try_into().ok()
+}
+
 /// Gives the string at `index` of the constant table: the UTF-16 characters
 /// at the address of the entry, with their length in bytes in the 4 bytes
 /// before them.
@@ -63,7 +80,7 @@ pub fn constant_string(pe: &PeImage<'_>, lp_object_info: Va, index: u16) -> Opti
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{constant, constant_string};
+    use super::{class_reference_iid, constant, constant_string};
     use crate::read::pe::PeImage;
     use crate::read::region::Va;
 
@@ -147,6 +164,23 @@ mod tests {
             constant_string(&pe, Va::new(0x0040_1B48), 0xE).as_deref(),
             Some(" px")
         );
+    }
+
+    /// `frmDiffuse` in the P-code `Diffuse.exe`: entry 2 of its constant
+    /// table is the class reference of the global object of the runtime,
+    /// whose interface `VBGlobal` has the GUID
+    /// `{FCFB3D22-A0FA-1068-A738-08002B3371B5}`.
+    #[test]
+    fn diffuse_gives_the_interface_of_the_global_object() {
+        let pe = PeImage::parse(DIFFUSE_P_CODE).unwrap();
+        assert_eq!(
+            class_reference_iid(&pe, Va::new(0x0040_1B48), 2),
+            Some([
+                0x22, 0x3D, 0xFB, 0xFC, 0xFA, 0xA0, 0x68, 0x10, 0xA7, 0x38, 0x08, 0x00, 0x2B, 0x33,
+                0x71, 0xB5
+            ])
+        );
+        assert_eq!(class_reference_iid(&pe, Va::new(0x0040_1B48), 0xE), None);
     }
 
     #[test]
