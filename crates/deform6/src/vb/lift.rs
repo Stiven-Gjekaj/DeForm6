@@ -75,6 +75,15 @@
 //! | `Ary1LdPr` | Pop a one-dimensional array and an index, and set the object register to the element |
 //! | `NewIfNullAd` | As `NewIfNullPr`, and push the object in the place of setting the object register |
 //! | `MemStStrCopy` | Pop a string into a field of the object register |
+//! | `Redim` | Pop an array, then a lower and an upper bound for each dimension, and `ReDim` it |
+//! | `AryLdRf`, `Ary1LdRf` | Pop an array and its indexes, and push the address of the element |
+//! | an operator and `VarBool`, such as `EqVarBool` | Pop two `Variant` values, push the Boolean of the comparison |
+//! | `UMiI2`, `UMiI4`, `UMiR4`, `UMiR8` | The negative of the top value |
+//! | `CastAd` | Give the top object the class at an index of the constant table |
+//! | `ImpAdCallNonVirt` | As `ImpAdCallHresult` |
+//! | `IStStrCopy` | Pop a string into what the frame slot points to |
+//! | `LitR4FP` | Push a 4-byte floating point constant on the floating point unit |
+//! | `PopTmpLdAdFPR4`, `CVarBoolI2` | Pop a value into a temporary slot, and push its address |
 //! | `OnErrorGoto` | `On Error GoTo` a label, `On Error Resume Next` for `0xFFFF`, or `On Error GoTo 0` for `0xFFFE` |
 //!
 //! All the names of one slot must give one family. A conversion whose names
@@ -199,6 +208,8 @@ pub enum BinaryOp {
     Concat,
     /// `^`
     Pow,
+    /// `To`, between the bounds of a dimension of `ReDim`.
+    To,
 }
 
 impl BinaryOp {
@@ -222,6 +233,7 @@ impl BinaryOp {
             Self::Mod => "Mod",
             Self::Concat => "&",
             Self::Pow => "^",
+            Self::To => "To",
         }
     }
 }
@@ -681,6 +693,9 @@ enum Family {
     FunctionOf(&'static str, u8),
     FloatFunction(&'static str),
     ArrayErase,
+    Redim,
+    ArrayReference { dimensions_argument: bool },
+    LitSingle,
     CopyBytes,
     ArrayElementRegister,
     NewIfNullPush,
@@ -830,6 +845,26 @@ fn family_of(name: &str) -> Option<Family> {
         }
         "ConcatStr" => Family::Binary(BinaryOp::Concat),
         "LateIdLdVar" => Family::LateGet,
+        "Redim" => Family::Redim,
+        "AryLdRf" => Family::ArrayReference {
+            dimensions_argument: true,
+        },
+        "Ary1LdRf" => Family::ArrayReference {
+            dimensions_argument: false,
+        },
+        "EqVarBool" => Family::Binary(BinaryOp::Eq),
+        "NeVarBool" => Family::Binary(BinaryOp::Ne),
+        "LtVarBool" => Family::Binary(BinaryOp::Lt),
+        "GtVarBool" => Family::Binary(BinaryOp::Gt),
+        "LeVarBool" => Family::Binary(BinaryOp::Le),
+        "GeVarBool" => Family::Binary(BinaryOp::Ge),
+        "UMiI2" | "UMiI4" => Family::Function("-"),
+        "UMiR4" | "UMiR8" => Family::FloatFunction("-"),
+        "CastAd" => Family::NewIfNullPush,
+        "ImpAdCallNonVirt" => Family::ImportCall { result: false },
+        "IStStrCopy" => Family::IndirectStore,
+        "LitR4FP" => Family::LitSingle,
+        "PopTmpLdAdFPR4" | "CVarBoolI2" => Family::PopTemp,
         "FnAbsI2" | "FnAbsI4" => Family::Function("Abs"),
         "FnAbsR4" | "FnAbsR8" => Family::FloatFunction("Abs"),
         "FnIntR4" | "FnIntR8" => Family::FloatFunction("Int"),
@@ -919,7 +954,7 @@ fn family(names: &[String]) -> Option<Family> {
 }
 
 /// The types of a value that is 4 bytes on the stack.
-const WORD_TYPES: &[&str] = &["UI1", "I2", "I4", "Ad", "Str"];
+const WORD_TYPES: &[&str] = &["UI1", "I2", "I4", "Ad", "Str", "Bool"];
 
 /// The types of a value that is not 4 bytes on the stack, or that is on
 /// the floating point unit.
@@ -939,6 +974,15 @@ fn is_word(names: &[String]) -> bool {
         && !names
             .iter()
             .any(|name| !reference(name) && WIDE_TYPES.iter().any(|kind| name.ends_with(kind)))
+}
+
+/// Tells whether an opcode of the name `name` takes a value of the floating
+/// point unit: a name that ends in a floating point type, or `CVarR4`,
+/// `CVarR8` and the conversions from them.
+fn takes_a_float(name: &str) -> bool {
+    ["R4", "R8", "FPR4", "FPR8"]
+        .iter()
+        .any(|kind| name.ends_with(kind))
 }
 
 /// Reads an unsigned 16-bit argument.
@@ -1322,7 +1366,12 @@ fn run(
     }
     let mut out = Vec::new();
     let mut start: Option<u32> = None;
-    for instruction in &listing.instructions {
+    for (position, instruction) in listing.instructions.iter().enumerate() {
+        let next_takes_a_float = listing
+            .instructions
+            .get(position.saturating_add(1))
+            .and_then(|next| table.slot(next.lead, next.opcode))
+            .is_some_and(|slot| slot.names.iter().any(|name| takes_a_float(name)));
         let PcodeInstruction {
             offset,
             lead,
@@ -1462,10 +1511,18 @@ fn run(
             Family::ImportCall { result } => {
                 let callee = Callee::Import(word16(0)?);
                 let args = expressions(call_arguments(&mut state.stack, word16(2)?, at)?);
+                let float = names
+                    .iter()
+                    .any(|name| name.ends_with("FPR4") || name.ends_with("FPR8"));
                 if result {
                     state
                         .stack
                         .push(Value::plain(Expr::Call(callee, args), true));
+                    None
+                } else if float && next_takes_a_float {
+                    state
+                        .stack
+                        .push(Value::plain(Expr::Call(callee, args), false));
                     None
                 } else {
                     Some(Stmt::Call(callee, args))
@@ -1648,6 +1705,55 @@ fn run(
                 let value = pop(&mut state)?;
                 state.stack.push(Value::plain(
                     Expr::Convert(function, Box::new(value)),
+                    false,
+                ));
+                None
+            }
+            Family::Redim => {
+                let array = pop(&mut state)?;
+                let mut bounds = Vec::new();
+                for _ in 0..word16(0)?.saturating_mul(2) {
+                    bounds.push(pop(&mut state)?);
+                }
+                bounds.reverse();
+                let ranges = bounds
+                    .chunks(2)
+                    .map(|pair| match pair {
+                        [lower, upper] => Expr::Binary(
+                            BinaryOp::To,
+                            Box::new(lower.clone()),
+                            Box::new(upper.clone()),
+                        ),
+                        _ => Expr::Word("?"),
+                    })
+                    .collect();
+                Some(Stmt::Call(
+                    Callee::Member(Box::new(Expr::Word("VBA")), "ReDim".to_owned()),
+                    vec![Expr::Index(Box::new(array), ranges)],
+                ))
+            }
+            Family::ArrayReference {
+                dimensions_argument,
+            } => {
+                let array = pop(&mut state)?;
+                let count = if dimensions_argument { word16(0)? } else { 1 };
+                let mut indexes = Vec::new();
+                for _ in 0..count {
+                    indexes.push(pop(&mut state)?);
+                }
+                indexes.reverse();
+                state
+                    .stack
+                    .push(Value::plain(Expr::Index(Box::new(array), indexes), true));
+                None
+            }
+            Family::LitSingle => {
+                let bytes: [u8; 4] = arguments
+                    .get(..4)
+                    .and_then(|bytes| bytes.try_into().ok())
+                    .ok_or_else(short)?;
+                state.stack.push(Value::plain(
+                    Expr::Real(f64::from(f32::from_le_bytes(bytes)).to_bits()),
                     false,
                 ));
                 None
@@ -2086,6 +2192,12 @@ names = ["CopyBytes"]
 [primary.3A]
 width = 0
 names = ["FnAbsI2", "FnAbsI4"]
+[primary.3B]
+width = 8
+names = ["Redim"]
+[primary.3C]
+width = 0
+names = ["MulR4", "MulR8"]
 [lead1.C8]
 width = 0
 names = ["End"]
@@ -2680,6 +2792,29 @@ result = false
                 "       local_90 = Abs(arg_14)",
                 "       Exit"
             ]
+        );
+    }
+
+    #[test]
+    fn redim_gives_its_bounds_and_a_float_call_gives_a_float_result() {
+        // ReDim arg_C(0 To 7, 1 To 3)
+        let redim = [
+            0x02, 0x00, 0x02, 0x07, 0x02, 0x01, 0x02, 0x03, 0x15, 0x0C, 0x00, 0x3B, 0x02, 0x00,
+            0x11, 0x00, 0x01, 0x00, 0x80, 0x00, 0x0C,
+        ];
+        assert_eq!(
+            lines(&redim).unwrap()[0],
+            "       Call VBA.ReDim(arg_C((0 To 7), (1 To 3)))"
+        );
+        // import_2() * import_3(), both on the floating point unit, into
+        // local_A0 as a Double.
+        let float = [
+            0x12, 0x02, 0x00, 0x00, 0x00, 0x12, 0x03, 0x00, 0x00, 0x00, 0x3C, 0x2B, 0x60, 0xFF,
+            0x0C,
+        ];
+        assert_eq!(
+            lines(&float).unwrap()[0],
+            "       local_A0 = (import_2() * import_3())"
         );
     }
 
