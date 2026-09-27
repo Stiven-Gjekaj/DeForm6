@@ -73,9 +73,11 @@
 //!   ([`VbTypes`]) gives the argument bytes of the function there. The
 //!   handler pushes the object itself.
 //!
-//! The lift pops one value for each 4 bytes. It refuses the call when a
-//! popped value is not known to be 4 bytes on the stack: a value of the
-//! floating point unit, a `Double`, a `Currency` or a `Variant`. An
+//! The lift pops values until their sizes add up to the bytes of the call.
+//! It refuses the call when a popped value has no known size on the stack,
+//! such as a value of the floating point unit, or when the sizes do not add
+//! up to the bytes. A value of 4 bytes is a value of a type of 4 bytes or
+//! less, or an address; `PopAdLdVar` gives a `Variant` of 16 bytes. An
 //! `ImpAdCall` handler that serves `ImpAdCallFPR4` and `ImpAdCallFPR8` too
 //! can leave a result on the floating point unit, which is not the stack.
 //! The lift gives it no result, so an opcode that uses the result finds an
@@ -710,8 +712,9 @@ const DEFAULT_MEMBER: &str = "_Default";
 struct Value {
     /// The expression.
     expr: Expr,
-    /// Whether the value is known to be 4 bytes on the stack.
-    word: bool,
+    /// The bytes of the value on the stack, or 0 when the lift does not know
+    /// them: a value on the floating point unit has 0 bytes on the stack.
+    bytes: u8,
     /// The frame slot that the opcode addressed, for a load of a slot.
     slot: Option<i16>,
     /// The interface of the object, when the value is an object whose class
@@ -724,7 +727,7 @@ impl Value {
     const fn plain(expr: Expr, word: bool) -> Self {
         Self {
             expr,
-            word,
+            bytes: if word { 4 } else { 0 },
             slot: None,
             class: None,
         }
@@ -734,19 +737,21 @@ impl Value {
 /// An object and its interface, when the lift knows it.
 type Object = (Expr, Option<String>);
 
-/// Pops the arguments of a call of `bytes` bytes: one value of 4 bytes for
-/// each 4 bytes, first argument first.
+/// Pops the arguments of a call of `bytes` bytes, first argument first.
+/// Each popped value must have a known size, and the sizes must add up to
+/// `bytes`.
 fn call_arguments(stack: &mut Vec<Value>, bytes: u16, at: u32) -> Result<Vec<Value>, LiftFault> {
     if bytes.checked_rem(4) != Some(0) {
         return Err(LiftFault::CallArguments(at));
     }
-    let count = bytes.checked_div(4).ok_or(LiftFault::CallArguments(at))?;
+    let mut left = bytes;
     let mut args = Vec::new();
-    for _ in 0..count {
+    while left > 0 {
         let value = stack.pop().ok_or(LiftFault::StackShort(at))?;
-        if !value.word {
-            return Err(LiftFault::CallArguments(at));
-        }
+        left = left
+            .checked_sub(u16::from(value.bytes))
+            .filter(|_| value.bytes > 0)
+            .ok_or(LiftFault::CallArguments(at))?;
         args.push(value);
     }
     Ok(args)
@@ -807,7 +812,7 @@ impl State {
             .unwrap_or_else(|| (Expr::frame(offset), None));
         Value {
             expr,
-            word,
+            bytes: if word { 4 } else { 0 },
             slot: Some(offset),
             class,
         }
@@ -832,7 +837,7 @@ fn object_call(
         }
         state.stack.push(Value {
             expr: Expr::Member(Box::new(object), name.to_owned()),
-            word: true,
+            bytes: 4,
             slot: None,
             class: Some(interface.to_owned()),
         });
@@ -1116,7 +1121,7 @@ pub fn lift(
             Family::PopTemp => {
                 let value = state.stack.pop().ok_or(LiftFault::StackShort(at))?;
                 state.stack.push(Value {
-                    word: true,
+                    bytes: 4,
                     slot: Some(offset16()?),
                     ..value
                 });
@@ -1148,7 +1153,7 @@ pub fn lift(
                 };
                 state.stack.push(Value {
                     expr,
-                    word: true,
+                    bytes: 4,
                     slot: Some(slot),
                     class: None,
                 });
