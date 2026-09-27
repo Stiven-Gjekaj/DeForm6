@@ -21,7 +21,8 @@
 //! ends at the end of the body, or after an exit (a name that starts with
 //! `ExitProc`, or `End`) that leaves fewer than four bytes: bodies start on a
 //! four-byte boundary (`STRUCTURES.md` section 23), and those bytes fill the
-//! space. It stops at the first opcode that the table does not hold, that
+//! space. When a branch (a name that starts with `Branch`) goes to those
+//! bytes, they are code, and the decode goes on. It stops at the first opcode that the table does not hold, that
 //! has no width, or whose arguments run past the end of the body.
 //!
 //! With the table of the runtime of the XP host, each of the 680 bodies of
@@ -58,6 +59,14 @@ pub struct PcodeSlot {
 }
 
 impl PcodeSlot {
+    /// Tells whether a name of the slot marks a branch: a name that starts
+    /// with `Branch`. Its first two argument bytes are the offset of the
+    /// target in the body.
+    #[must_use]
+    pub fn is_branch(&self) -> bool {
+        self.names.iter().any(|name| name.starts_with("Branch"))
+    }
+
     /// Tells whether a name of the slot marks an exit.
     #[must_use]
     pub fn is_exit(&self) -> bool {
@@ -227,12 +236,14 @@ pub fn disassemble(body: &Region<'_>, table: &PcodeTable) -> PcodeListing {
     let mut instructions = Vec::new();
     let mut at = 0_usize;
     let mut after_exit = false;
+    let mut last_target = None::<usize>;
     let end = loop {
         let left = bytes.len().saturating_sub(at);
         if left == 0 {
             break PcodeEnd::Complete;
         }
-        if after_exit && left < PADDING {
+        let reached = last_target.is_some_and(|target| target >= at);
+        if after_exit && left < PADDING && !reached {
             break PcodeEnd::Padding(offset(left));
         }
         let start = at;
@@ -277,6 +288,14 @@ pub fn disassemble(body: &Region<'_>, table: &PcodeTable) -> PcodeListing {
             arguments: arguments.to_vec(),
         });
         after_exit = slot.is_exit();
+        if slot.is_branch()
+            && let Some(target) = arguments
+                .get(..2)
+                .and_then(|bytes| <[u8; 2]>::try_from(bytes).ok())
+                .map(|bytes| usize::from(u16::from_le_bytes(bytes)))
+        {
+            last_target = Some(last_target.map_or(target, |last| last.max(target)));
+        }
     };
     PcodeListing { instructions, end }
 }
@@ -321,6 +340,10 @@ names = ["OpCounted"]
 handler = "0x5"
 width = 0
 names = ["End"]
+[primary.FA]
+handler = "0x7"
+width = 2
+names = ["BranchTest"]
 [primary.05]
 handler = "0x6"
 names = ["OpNoWidth"]
@@ -350,7 +373,7 @@ names = ["OpNoWidth"]
     #[test]
     fn the_table_gives_each_slot_by_its_lead_and_its_opcode() {
         let table = PcodeTable::parse(TABLE.as_bytes()).unwrap();
-        assert_eq!(table.len(), 7);
+        assert_eq!(table.len(), 8);
         assert_eq!(
             table.slot(None, 0x32).unwrap().width,
             Some(PcodeWidth::Counted)
@@ -462,6 +485,10 @@ names = ["OpNoWidth"]
         assert_eq!(run(&[0xF4]).1, PcodeEnd::PastEnd(0));
         assert_eq!(run(&[0x32, 0x09, 0x00, 1]).1, PcodeEnd::PastEnd(0));
         assert_eq!(run(&[0xFC]).1, PcodeEnd::PastEnd(0));
+        // A branch that goes past an exit makes the bytes after it code.
+        let (list, end) = run(&[0xFA, 0x04, 0x00, 0x13, 0x13]);
+        assert_eq!(list.len(), 3, "{list:?}");
+        assert_eq!(end, PcodeEnd::Complete);
         // Four bytes after an exit are not padding.
         assert_eq!(run(&[0x13, 0x00, 0x00, 0x00, 0x00]).1, PcodeEnd::NoSlot(1));
         assert!(!PcodeEnd::NoSlot(1).is_complete());
