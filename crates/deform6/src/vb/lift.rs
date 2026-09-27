@@ -49,7 +49,16 @@
 //! | `LitDate`, `LitR8FP` | Push an 8-byte constant on the floating point unit |
 //! | `New` | Push a new object of a class at an index of the constant table |
 //! | `NewIfNullPr` | Pop the address of an object variable, create the object when the variable is empty, and set the object register to it |
-//! | `Bos`, `LargeBos`, `ZeroRetVal`, `ZeroRetValVar`, `SetLastSystemError` | Change no stack and give no statement |
+//! | `Bos`, `LargeBos`, `ZeroRetVal`, `ZeroRetValVar`, `SetLastSystemError`, `HardType` | Change no stack and give no statement |
+//! | `ConcatStr` | Pop two strings, push the `&` of them |
+//! | `FnLenStr`, `FnLenBStr`, `NotI2`, `NotI4`, `CBoolI2`, `CBoolUI1`, `CBoolI4` | Replace the top value with `Len`, `LenB`, `Not` or `CBool` of it |
+//! | `FMemStStrCopy` | Pop a string into a field of the object in a frame slot |
+//! | `FStAdFuncNoPop` | Store the top object into the frame slot, and keep it on the stack |
+//! | `PopAdLdVar` | Pop the address of a `Variant`, and push the 16 bytes of the `Variant` |
+//! | `PopFPR4`, `PopFPR8` | Move the value of the floating point unit to the stack, as 4 or 8 bytes |
+//! | `CStr2Ansi`, `CStr2Uni` | Pop the address of a frame slot and a string, and write a copy of the string into the slot |
+//! | `ForI4`, `ForStepI4`, `NextI4` | A `For` loop over a `Long` counter |
+//! | `OnErrorGoto` | `On Error GoTo` a label, `On Error Resume Next` for `0xFFFF`, or `On Error GoTo 0` for `0xFFFE` |
 //!
 //! All the names of one slot must give one family. A conversion whose names
 //! give both `CSng` and `CDbl` gives no conversion: one handler serves both,
@@ -149,6 +158,8 @@ pub enum BinaryOp {
     IntDiv,
     /// `Mod`
     Mod,
+    /// `&`
+    Concat,
 }
 
 impl BinaryOp {
@@ -170,6 +181,7 @@ impl BinaryOp {
             Self::Div => "/",
             Self::IntDiv => "\\",
             Self::Mod => "Mod",
+            Self::Concat => "&",
         }
     }
 }
@@ -367,6 +379,31 @@ pub enum Stmt {
     Exit,
     /// A call whose result is not used.
     Call(Callee, Vec<Expr>),
+    /// The start of a `For` loop. When the counter is past the end, the
+    /// loop goes to `exit`.
+    For {
+        /// The counter.
+        counter: Expr,
+        /// The first value.
+        start: Expr,
+        /// The last value.
+        end: Expr,
+        /// The step, when it is not 1.
+        step: Option<Expr>,
+        /// The offset after the loop.
+        exit: u16,
+    },
+    /// The end of a `For` loop: the next value of the counter, and a branch
+    /// back to `body` while the counter is not past the end.
+    Next {
+        /// The counter.
+        counter: Expr,
+        /// The offset of the first statement of the loop.
+        body: u16,
+    },
+    /// `On Error`: `Some` target offset, or `None` for `Resume Next`, or
+    /// `Some(0)` for `GoTo 0`.
+    OnError(Option<u16>),
     /// A store of an object.
     Set {
         /// Where the object goes.
@@ -390,6 +427,30 @@ impl Stmt {
             Self::Exit => "Exit".to_owned(),
             Self::Call(callee, args) => format!("Call {}({})", callee.text(), arguments_text(args)),
             Self::Set { target, value } => format!("Set {} = {}", target.text(), value.text()),
+            Self::For {
+                counter,
+                start,
+                end,
+                step,
+                exit,
+            } => {
+                let step = step
+                    .as_ref()
+                    .map(|step| format!(" Step {}", step.text()))
+                    .unwrap_or_default();
+                format!(
+                    "For {} = {} To {}{step}  ' past the end: GoTo L{exit:04X}",
+                    counter.text(),
+                    start.text(),
+                    end.text()
+                )
+            }
+            Self::Next { counter, body } => {
+                format!("Next {}  ' loop: GoTo L{body:04X}", counter.text())
+            }
+            Self::OnError(None) => "On Error Resume Next".to_owned(),
+            Self::OnError(Some(0)) => "On Error GoTo 0".to_owned(),
+            Self::OnError(Some(target)) => format!("On Error GoTo L{target:04X}"),
         }
     }
 }
@@ -471,6 +532,12 @@ enum Family {
     NewObject,
     NewIfNull,
     Nop,
+    Function(&'static str),
+    Sized(u8),
+    StringCopy,
+    For { step: bool },
+    Next,
+    OnError,
 }
 
 /// The constant of a `Variant` literal.
@@ -602,7 +669,24 @@ fn family_of(name: &str) -> Option<Family> {
         "LitDate" | "LitR8FP" => Family::LitReal,
         "New" => Family::NewObject,
         "NewIfNullPr" => Family::NewIfNull,
-        "Bos" | "LargeBos" | "ZeroRetVal" | "ZeroRetValVar" | "SetLastSystemError" => Family::Nop,
+        "Bos" | "LargeBos" | "ZeroRetVal" | "ZeroRetValVar" | "SetLastSystemError" | "HardType" => {
+            Family::Nop
+        }
+        "ConcatStr" => Family::Binary(BinaryOp::Concat),
+        "FnLenStr" => Family::Function("Len"),
+        "FnLenBStr" => Family::Function("LenB"),
+        "NotI2" | "NotI4" => Family::Function("Not"),
+        "CBoolI2" | "CBoolUI1" | "CBoolI4" => Family::Function("CBool"),
+        "FMemStStrCopy" => Family::FrameFieldStore,
+        "FStAdFuncNoPop" => Family::StoreKeep { object: true },
+        "PopAdLdVar" => Family::Sized(16),
+        "PopFPR4" => Family::Sized(4),
+        "PopFPR8" => Family::Sized(8),
+        "CStr2Ansi" | "CStr2Uni" => Family::StringCopy,
+        "ForI4" => Family::For { step: false },
+        "ForStepI4" => Family::For { step: true },
+        "NextI4" => Family::Next,
+        "OnErrorGoto" => Family::OnError,
         _ if typed("ImpAdLd") => Family::GlobalLoad,
         _ if typed("MemLd") => Family::FieldLoad,
         _ if typed("FMemLd") => Family::FrameFieldLoad,
@@ -1179,6 +1263,51 @@ pub fn lift(
                 None
             }
             Family::Nop => None,
+            Family::Function(function) => {
+                let value = pop(&mut state)?;
+                state
+                    .stack
+                    .push(Value::plain(Expr::Convert(function, Box::new(value)), true));
+                None
+            }
+            Family::Sized(bytes) => {
+                let value = state.stack.pop().ok_or(LiftFault::StackShort(at))?;
+                state.stack.push(Value {
+                    bytes,
+                    slot: None,
+                    ..value
+                });
+                None
+            }
+            Family::StringCopy => {
+                let target = state.stack.pop().ok_or(LiftFault::StackShort(at))?;
+                let value = state.stack.pop().ok_or(LiftFault::StackShort(at))?;
+                let slot = target.slot.ok_or(LiftFault::NoResultSlot(at))?;
+                state.bindings.insert(slot, (value.expr, None));
+                None
+            }
+            Family::For { step } => {
+                let step = if step { Some(pop(&mut state)?) } else { None };
+                let end = pop(&mut state)?;
+                let counter = pop(&mut state)?;
+                let start = pop(&mut state)?;
+                Some(Stmt::For {
+                    counter,
+                    start,
+                    end,
+                    step,
+                    exit: word16(2)?,
+                })
+            }
+            Family::Next => Some(Stmt::Next {
+                counter: pop(&mut state)?,
+                body: word16(2)?,
+            }),
+            Family::OnError => Some(Stmt::OnError(match word16(0)? {
+                0xFFFF => None,
+                0xFFFE => Some(0),
+                target => Some(target),
+            })),
         };
         if let Some(stmt) = stmt {
             if !state.stack.is_empty() {
@@ -1207,7 +1336,11 @@ pub fn render(stmts: &[LiftedStmt]) -> Vec<String> {
     let mut targets: Vec<u16> = stmts
         .iter()
         .filter_map(|lifted| match lifted.stmt {
-            Stmt::IfNotGoTo { target, .. } | Stmt::GoTo(target) => Some(target),
+            Stmt::IfNotGoTo { target, .. }
+            | Stmt::GoTo(target)
+            | Stmt::For { exit: target, .. }
+            | Stmt::Next { body: target, .. } => Some(target),
+            Stmt::OnError(target) => target.filter(|target| *target != 0),
             Stmt::Assign { .. } | Stmt::Set { .. } | Stmt::End | Stmt::Exit | Stmt::Call(..) => {
                 None
             }
@@ -1384,6 +1517,27 @@ names = ["FStStrCopy"]
 [primary.2B]
 width = 2
 names = ["FStR8"]
+[primary.2C]
+width = 0
+names = ["ConcatStr"]
+[primary.2D]
+width = 0
+names = ["NotI2", "NotI4"]
+[primary.2E]
+width = 0
+names = ["PopAdLdVar"]
+[primary.2F]
+width = 0
+names = ["CStr2Ansi"]
+[primary.30]
+width = 4
+names = ["ForI4"]
+[primary.31]
+width = 4
+names = ["NextI4"]
+[primary.32]
+width = 2
+names = ["OnErrorGoto"]
 [lead1.C8]
 width = 0
 names = ["End"]
@@ -1705,6 +1859,59 @@ result = false
         assert_eq!(
             lines(&body).unwrap(),
             ["       global_3.field_40 = 1", "       Exit"]
+        );
+    }
+
+    #[test]
+    fn a_concatenation_and_a_function_give_their_expressions() {
+        // local_88 = Not (arg_C & arg_10)
+        let body = [
+            0x03, 0x0C, 0x00, 0x03, 0x10, 0x00, 0x2C, 0x2D, 0x05, 0x78, 0xFF, 0x0C,
+        ];
+        assert_eq!(
+            lines(&body).unwrap()[0],
+            "       local_88 = Not((arg_C & arg_10))"
+        );
+    }
+
+    #[test]
+    fn a_variant_by_value_is_16_bytes_and_an_ansi_copy_binds_its_slot() {
+        // Call import_1 with the Variant at local_70, which is 16 bytes.
+        let variant = [0x15, 0x90, 0xFF, 0x2E, 0x12, 0x01, 0x00, 0x10, 0x00, 0x0C];
+        assert_eq!(
+            lines(&variant).unwrap()[0],
+            "       Call import_1(local_70)"
+        );
+        let short = [0x15, 0x90, 0xFF, 0x2E, 0x12, 0x01, 0x00, 0x04, 0x00, 0x0C];
+        assert_eq!(lines(&short), Err(LiftFault::CallArguments(4)));
+        // Copy arg_C into local_64 as ANSI, then pass local_64.
+        let ansi = [
+            0x03, 0x0C, 0x00, 0x15, 0x9C, 0xFF, 0x2F, 0x03, 0x9C, 0xFF, 0x12, 0x02, 0x00, 0x04,
+            0x00, 0x0C,
+        ];
+        assert_eq!(lines(&ansi).unwrap()[0], "       Call import_2(arg_C)");
+    }
+
+    #[test]
+    fn a_for_loop_and_on_error_give_statements_and_labels() {
+        // On Error Resume Next; For local_88 = 1 To 3: local_90 = 0: Next;
+        // On Error GoTo 0; On Error GoTo the exit.
+        let body = [
+            0x32, 0xFF, 0xFF, 0x02, 0x01, 0x15, 0x78, 0xFF, 0x02, 0x03, 0x30, 0x60, 0xFF, 0x1C,
+            0x00, 0x02, 0x00, 0x05, 0x70, 0xFF, 0x15, 0x78, 0xFF, 0x31, 0x60, 0xFF, 0x0F, 0x00,
+            0x32, 0xFE, 0xFF, 0x32, 0x22, 0x00, 0x0C,
+        ];
+        assert_eq!(
+            lines(&body).unwrap(),
+            [
+                "       On Error Resume Next",
+                "       For local_88 = 1 To 3  ' past the end: GoTo L001C",
+                "L000F: local_90 = 0",
+                "       Next local_88  ' loop: GoTo L000F",
+                "L001C: On Error GoTo 0",
+                "       On Error GoTo L0022",
+                "L0022: Exit",
+            ]
         );
     }
 
