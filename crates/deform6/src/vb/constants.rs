@@ -47,6 +47,31 @@ pub fn class_reference_iid(pe: &PeImage<'_>, lp_object_info: Va, index: u16) -> 
     pe.region_at_va(iid)?.take(Off::new(0), 16)?.try_into().ok()
 }
 
+/// The longest member name that this module reads, in UTF-16 units.
+const MAX_NAME_UNITS: u32 = 0x100;
+
+/// Gives the member name at `index` of the constant table: UTF-16
+/// characters up to a zero unit, with no length before them. `LateMemCall`
+/// names one.
+///
+/// Gives `None` when no zero unit comes in the first 256 units, when the
+/// name is empty, and when a character is not a letter, a digit or `_`.
+#[must_use]
+pub fn constant_name(pe: &PeImage<'_>, lp_object_info: Va, index: u16) -> Option<String> {
+    let region = pe.region_at_va(constant(pe, lp_object_info, index)?)?;
+    let mut name = String::new();
+    for unit in 0..MAX_NAME_UNITS {
+        let code = region.u16_le(Off::new(unit.checked_mul(2)?))?;
+        if code == 0 {
+            return (!name.is_empty()).then_some(name);
+        }
+        let character = char::from_u32(u32::from(code))
+            .filter(|character| character.is_ascii_alphanumeric() || *character == '_')?;
+        name.push(character);
+    }
+    None
+}
+
 /// Gives the string at `index` of the constant table: the UTF-16 characters
 /// at the address of the entry, with their length in bytes in the 4 bytes
 /// before them.
@@ -80,7 +105,7 @@ pub fn constant_string(pe: &PeImage<'_>, lp_object_info: Va, index: u16) -> Opti
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{class_reference_iid, constant, constant_string};
+    use super::{class_reference_iid, constant, constant_name, constant_string};
     use crate::read::pe::PeImage;
     use crate::read::region::Va;
 
@@ -181,6 +206,40 @@ mod tests {
             ])
         );
         assert_eq!(class_reference_iid(&pe, Va::new(0x0040_1B48), 0xE), None);
+    }
+
+    const PASSGEN_P_CODE: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus-pcode/public-domain/PassGen/PassGen.exe"
+    ));
+
+    /// `frmPassGen` in the P-code `PassGen.exe`: its `ObjectInfo` is at
+    /// `0x40599c`, and entry `0x43` of its constant table is the name of
+    /// `qS.RegWrite ...` in `frmPassGen.frm`. Entry `0x42` is the string
+    /// "REG_DWORD", whose length comes before it and is not a name.
+    #[test]
+    fn passgen_gives_the_name_of_a_late_member() {
+        let pe = PeImage::parse(PASSGEN_P_CODE).unwrap();
+        let info = Va::new(0x0040_599C);
+        assert_eq!(constant_name(&pe, info, 0x43).as_deref(), Some("RegWrite"));
+        assert_eq!(
+            constant_string(&pe, info, 0x42).as_deref(),
+            Some("REG_DWORD")
+        );
+    }
+
+    #[test]
+    fn a_name_needs_a_zero_unit_and_only_the_characters_of_a_name() {
+        let bytes = synthetic_image(&table());
+        let pe = PeImage::parse(&bytes).unwrap();
+        let info = Va::new(0x0040_1000);
+        assert_eq!(constant_name(&pe, info, 0), None);
+        assert_eq!(constant_name(&pe, info, 2), None);
+        let mut extra = table();
+        extra[0x84..0x8A].copy_from_slice(&[b'R', 0, b'u', 0, b'n', 0]);
+        let bytes = synthetic_image(&extra);
+        let pe = PeImage::parse(&bytes).unwrap();
+        assert_eq!(constant_name(&pe, info, 0).as_deref(), Some("Run"));
     }
 
     #[test]
