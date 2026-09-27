@@ -17,7 +17,8 @@
 //! | `ILdRfDarg` | Push the argument at a 16-bit offset |
 //! | `FSt` + a type, `FStVarCopy` | Pop into the frame slot |
 //! | `ISt` + a type | Pop into what the frame slot points to |
-//! | `FLdPr` | Set the object register to the frame slot |
+//! | `FLdPr`, `ILdPr` | Set the object register to the frame slot, or to what it points to |
+//! | `FLdPrThis` | Set the object register to `Me` |
 //! | `MemSt` + a type | Pop into a field of the object register |
 //! | `ImpAdSt` + a type | Pop into a global at a 16-bit index |
 //! | an operator and two types, such as `LtI4` | Pop two values, push one |
@@ -323,6 +324,7 @@ enum Family {
     FrameStore,
     IndirectStore,
     ObjectRegister,
+    ObjectRegisterThis,
     FieldStore,
     GlobalStore,
     Binary(BinaryOp),
@@ -416,7 +418,8 @@ fn family_of(name: &str) -> Option<Family> {
         "ILdRfDarg" => Family::ArgRef,
         "FLdRf" | "FLdRfVar" | "ILdRf" => Family::FrameLoad,
         "FStVarCopy" => Family::FrameStore,
-        "FLdPr" => Family::ObjectRegister,
+        "FLdPr" | "ILdPr" => Family::ObjectRegister,
+        "FLdPrThis" => Family::ObjectRegisterThis,
         "BranchF" => Family::BranchFalse,
         "Branch" => Family::Branch,
         "End" => Family::End,
@@ -594,6 +597,10 @@ pub fn lift(
             }
             Family::ObjectRegister => {
                 object = Some(Expr::frame(offset16()?));
+                None
+            }
+            Family::ObjectRegisterThis => {
+                object = Some(Expr::Arg(8));
                 None
             }
             Family::Binary(op) => {
@@ -797,6 +804,12 @@ names = ["FLdFPR8"]
 [primary.15]
 width = 2
 names = ["FLdRf", "FLdRfVar"]
+[primary.16]
+width = 0
+names = ["FLdPrThis"]
+[primary.17]
+width = 2
+names = ["ILdPr"]
 [lead1.C8]
 width = 0
 names = ["End"]
@@ -887,6 +900,24 @@ names = ["End"]
             [
                 "       Me.field_54 = 0",
                 "       Me.field_40 = -1",
+                "       Exit"
+            ]
+        );
+    }
+
+    #[test]
+    fn the_object_register_is_me_or_a_frame_slot() {
+        // `FLdPrThis`, then a store to field 0x54; `ILdPr` of arg_C, then a
+        // store to field 0x40.
+        let body = [
+            0x16, 0x02, 0x00, 0x07, 0x54, 0x00, 0x17, 0x0C, 0x00, 0x02, 0x01, 0x07, 0x40, 0x00,
+            0x0C,
+        ];
+        assert_eq!(
+            lines(&body).unwrap(),
+            [
+                "       Me.field_54 = 0",
+                "       arg_C.field_40 = 1",
                 "       Exit"
             ]
         );
