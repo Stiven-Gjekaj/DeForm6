@@ -85,6 +85,7 @@
 //! | `ForVar` | As `ForI4`, for a `Variant` counter |
 //! | `NextVar`, `NextStepVar` | As `NextI4`, for a `Variant` counter |
 //! | `AddVar`, `SubVar`, `MulVar` | As `ConcatVar`, for `+`, `-` and `*` |
+//! | `LitNothing` | Push the 4 bytes of `Nothing` |
 //! | `DestructAnsiOFrame` | Nothing: it frees the ANSI copy of a record |
 //! | `PrintFile` | Pop the file number and one item, whose bytes with the 4 bytes of a descriptor are a 16-bit argument, and `Print` the item. The corpus holds no `Print` of more items |
 //! | `IStDarg` | As `IStStrCopy` |
@@ -820,6 +821,7 @@ enum Family {
     },
     PopTemp,
     LitString,
+    LitNothing,
     LitVariant(VariantKind),
     LitReal,
     NewObject,
@@ -986,6 +988,7 @@ fn family_of(name: &str) -> Option<Family> {
         "FStAdNoPop" => Family::StoreKeep { object: true },
         "PopTmpLdAd1" | "PopTmpLdAd2" | "PopTmpLdAd4" | "PopTmpLdAdStr" => Family::PopTemp,
         "LitStr" => Family::LitString,
+        "LitNothing" => Family::LitNothing,
         "LitVar_Missing" => Family::LitVariant(VariantKind::Word("Missing")),
         "LitVar_Empty" => Family::LitVariant(VariantKind::Word("Empty")),
         "LitVar_Null" => Family::LitVariant(VariantKind::Word("Null")),
@@ -2102,6 +2105,10 @@ fn run(
                 });
                 None
             }
+            Family::LitNothing => {
+                state.stack.push(Value::plain(Expr::Word("Nothing"), true));
+                None
+            }
             Family::LitString => {
                 state
                     .stack
@@ -2869,6 +2876,9 @@ names = ["Close"]
 [primary.56]
 width = 2
 names = ["AddVar"]
+[primary.57]
+width = 0
+names = ["LitNothing"]
 [primary.44]
 width = 4
 names = ["LateMemCall"]
@@ -3788,6 +3798,9 @@ result = false
                 "       Exit"
             ]
         );
+        // import_2(Nothing)
+        let nothing = [0x57, 0x12, 0x02, 0x00, 0x04, 0x00, 0x0C];
+        assert_eq!(lines(&nothing).unwrap()[0], "       Call import_2(Nothing)");
         let destruct = [0x52, 0x88, 0xFE, 0x03, 0x00, 0x0C];
         assert_eq!(lines(&destruct).unwrap(), ["       Exit"]);
         let two = [
