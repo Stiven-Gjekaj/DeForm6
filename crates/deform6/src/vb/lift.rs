@@ -1850,7 +1850,7 @@ fn run(
                     .arg_size
                     .checked_sub(4)
                     .ok_or(LiftFault::CallArguments(at))?;
-                let args = call_arguments(&mut state.stack, bytes, at)?;
+                let mut args = call_arguments(&mut state.stack, bytes, at)?;
                 calls.push((
                     callees.owner,
                     method.index,
@@ -1858,7 +1858,20 @@ fn run(
                         .map(|value| (value.bytes, value.class.clone()))
                         .collect(),
                 ));
-                Some(Stmt::Call(Callee::Method(method.index), expressions(args)))
+                let callee = Callee::Method(method.index);
+                if state.depth() > 0
+                    && let Some(slot) = args
+                        .last()
+                        .and_then(|value| value.slot)
+                        .filter(|slot| *slot < 0)
+                {
+                    args.pop();
+                    let value = Expr::Call(callee, expressions(args));
+                    state.bindings.insert(slot, (value, None));
+                    None
+                } else {
+                    Some(Stmt::Call(callee, expressions(args)))
+                }
             }
             Family::ImportCall { result } => {
                 let callee = Callee::Import(word16(0)?);
@@ -3443,6 +3456,21 @@ result = false
         // import_2(local_64): FLdR8 pushes the 8 bytes of a Double.
         let double = [0x49, 0x9C, 0xFF, 0x12, 0x02, 0x00, 0x08, 0x00, 0x0C];
         assert_eq!(lines(&double).unwrap()[0], "       Call import_2(local_64)");
+        // ReDim arg_10(0 To Me.method_2(arg_C)): a call with a value under
+        // its arguments is a Function, whose last argument is the local that
+        // takes the result.
+        let function = [
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x15, 0xB4, 0xFF, 0x0F, 0x0C, 0x00, 0x11, 0x24, 0x00,
+            0x06, 0x00, 0x0F, 0xB4, 0xFF, 0x15, 0x10, 0x00, 0x3B, 0x01, 0x00, 0x11, 0x00, 0x01,
+            0x00, 0x80, 0x00, 0x0C,
+        ];
+        let table = PcodeTable::parse(TABLE.as_bytes()).unwrap();
+        let listing = disassemble(&Region::new(&function, Off::new(0)), &table);
+        let callees = Callees::default().with_method(0x24, 2, 12);
+        assert_eq!(
+            render(&lift(&listing, &table, &callees, None).unwrap())[0],
+            "       Call VBA.ReDim(arg_10((0 To Me.method_2(arg_C))))"
+        );
         // For local_64 = 1 To 9 Step 2
         let step = [
             0x02, 0x01, 0x15, 0x9C, 0xFF, 0x02, 0x09, 0x02, 0x02, 0x41, 0x9C, 0xFF, 0x0E, 0x00,
