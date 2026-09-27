@@ -1678,6 +1678,20 @@ result = false
     }
 
     #[test]
+    fn a_value_passed_through_a_temporary_slot_is_an_argument_of_4_bytes() {
+        // A float conversion gives a value that the lift does not size;
+        // PopTmpLdAd2 passes it by the address of a temporary slot.
+        let body = [
+            0x03, 0x0C, 0x00, 0x0D, 0x26, 0x70, 0xFF, 0x12, 0x02, 0x00, 0x04, 0x00, 0x0C,
+        ];
+        assert_eq!(lines(&body).unwrap()[0], "       Call import_2(arg_C)");
+        assert_eq!(
+            lines(&[0x03, 0x0C, 0x00, 0x0D, 0x12, 0x02, 0x00, 0x04, 0x00, 0x0C]),
+            Err(LiftFault::CallArguments(4))
+        );
+    }
+
+    #[test]
     fn new_if_null_sets_the_object_register_to_the_variable() {
         // NewIfNullPr of global_3, then a field store through the register.
         let body = [
