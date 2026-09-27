@@ -65,6 +65,16 @@
 //! | `FnInStr4`, `FnUBound` | `InStr` of four values, `UBound` of two, in the order of the push |
 //! | `FStVarCopyObj` | Pop into the `Variant` in the frame slot |
 //! | `ForI2`, `NextI2`, `NextStepI4` | The `For` loops of an `Integer` counter, and the end of a loop with a step |
+//! | `FnAbsI2`, `FnAbsI4`, `FnAbsR4`, `FnAbsR8`, `FnIntR4`, `FnIntR8`, `CBoolR4`, `CBoolR8` | `Abs`, `Int` or `CBool` of the top value |
+//! | `PwrR8R8` | Pop two values, push the `^` of them |
+//! | `AryLock`, `AryUnlock` | Lock or unlock an array in a frame slot; the stack does not change |
+//! | `Erase` | Pop an array, and `Erase` it |
+//! | `CVarRef`, `CVarR4` | Put the top value into a `Variant` in the frame slot, and push its address |
+//! | `CDargRef` | Pop an address, and push a `Variant` of 16 bytes that refers to it |
+//! | `CopyBytes` | Pop an address and a source, and copy the source there: an assignment of a `Type` |
+//! | `Ary1LdPr` | Pop a one-dimensional array and an index, and set the object register to the element |
+//! | `NewIfNullAd` | As `NewIfNullPr`, and push the object in the place of setting the object register |
+//! | `MemStStrCopy` | Pop a string into a field of the object register |
 //! | `OnErrorGoto` | `On Error GoTo` a label, `On Error Resume Next` for `0xFFFF`, or `On Error GoTo 0` for `0xFFFE` |
 //!
 //! All the names of one slot must give one family. A conversion whose names
@@ -187,6 +197,8 @@ pub enum BinaryOp {
     Mod,
     /// `&`
     Concat,
+    /// `^`
+    Pow,
 }
 
 impl BinaryOp {
@@ -209,6 +221,7 @@ impl BinaryOp {
             Self::IntDiv => "\\",
             Self::Mod => "Mod",
             Self::Concat => "&",
+            Self::Pow => "^",
         }
     }
 }
@@ -666,6 +679,11 @@ enum Family {
     Nop,
     Function(&'static str),
     FunctionOf(&'static str, u8),
+    FloatFunction(&'static str),
+    ArrayErase,
+    CopyBytes,
+    ArrayElementRegister,
+    NewIfNullPush,
     LateGet,
     Discard,
     ArrayLoad,
@@ -812,6 +830,19 @@ fn family_of(name: &str) -> Option<Family> {
         }
         "ConcatStr" => Family::Binary(BinaryOp::Concat),
         "LateIdLdVar" => Family::LateGet,
+        "FnAbsI2" | "FnAbsI4" => Family::Function("Abs"),
+        "FnAbsR4" | "FnAbsR8" => Family::FloatFunction("Abs"),
+        "FnIntR4" | "FnIntR8" => Family::FloatFunction("Int"),
+        "CBoolR4" | "CBoolR8" => Family::Function("CBool"),
+        "PwrR8R8" => Family::Binary(BinaryOp::Pow),
+        "AryLock" | "AryUnlock" => Family::Nop,
+        "Erase" => Family::ArrayErase,
+        "CVarRef" | "CVarR4" => Family::PopTemp,
+        "CDargRef" => Family::Sized(16),
+        "CopyBytes" => Family::CopyBytes,
+        "Ary1LdPr" => Family::ArrayElementRegister,
+        "NewIfNullAd" => Family::NewIfNullPush,
+        "MemStStrCopy" => Family::FieldStore,
         "PopAd" => Family::Discard,
         "AryLdPr" => Family::ArrayObjectRegister,
         "FnInStr4" => Family::FunctionOf("InStr", 4),
@@ -1613,6 +1644,47 @@ fn run(
                 ));
                 None
             }
+            Family::FloatFunction(function) => {
+                let value = pop(&mut state)?;
+                state.stack.push(Value::plain(
+                    Expr::Convert(function, Box::new(value)),
+                    false,
+                ));
+                None
+            }
+            Family::ArrayErase => Some(Stmt::Call(
+                Callee::Member(Box::new(Expr::Word("VBA")), "Erase".to_owned()),
+                vec![pop(&mut state)?],
+            )),
+            Family::CopyBytes => {
+                let target = pop(&mut state)?;
+                let value = pop(&mut state)?;
+                Some(Stmt::Assign { target, value })
+            }
+            Family::ArrayElementRegister => {
+                let array = pop(&mut state)?;
+                let index = pop(&mut state)?;
+                state.object = Some((Expr::Index(Box::new(array), vec![index]), None));
+                None
+            }
+            Family::NewIfNullPush => {
+                let reference = state.stack.pop().ok_or(LiftFault::StackShort(at))?;
+                let index = word16(0)?;
+                let class = if callees.class(index).is_some() {
+                    Some(format!("{PROJECT_CLASS}{index}"))
+                } else if let Some(interface) = callees.class_interface(index) {
+                    Some(interface.to_owned())
+                } else {
+                    reference.class
+                };
+                state.stack.push(Value {
+                    expr: reference.expr,
+                    bytes: 4,
+                    slot: None,
+                    class,
+                });
+                None
+            }
             Family::LateGet => {
                 let (object, _) = state.object.clone().ok_or(LiftFault::NoObject(at))?;
                 let slot = offset16()?;
@@ -2005,6 +2077,15 @@ names = ["Ary1StI4", "Ary1StR4"]
 [primary.37]
 width = 0
 names = ["FnInStr4"]
+[primary.38]
+width = 0
+names = ["Erase"]
+[primary.39]
+width = 2
+names = ["CopyBytes"]
+[primary.3A]
+width = 0
+names = ["FnAbsI2", "FnAbsI4"]
 [lead1.C8]
 width = 0
 names = ["End"]
@@ -2579,6 +2660,24 @@ result = false
             [
                 "       local_88 = arg_C",
                 "       Call import_2(arg_C, 1)",
+                "       Exit"
+            ]
+        );
+    }
+
+    #[test]
+    fn erase_a_copy_of_bytes_and_abs_give_statements() {
+        // Erase arg_C; local_88 = arg_10 by 8 bytes; local_90 = Abs(arg_14)
+        let body = [
+            0x15, 0x0C, 0x00, 0x38, 0x15, 0x10, 0x00, 0x15, 0x78, 0xFF, 0x39, 0x08, 0x00, 0x03,
+            0x14, 0x00, 0x3A, 0x05, 0x70, 0xFF, 0x0C,
+        ];
+        assert_eq!(
+            lines(&body).unwrap(),
+            [
+                "       Call VBA.Erase(arg_C)",
+                "       local_88 = arg_10",
+                "       local_90 = Abs(arg_14)",
                 "       Exit"
             ]
         );
