@@ -441,7 +441,15 @@ mod tests {
         other.vtable_size = 0x99;
         second.interfaces.insert("_Box".to_owned(), other.clone());
         second.interfaces.insert("_Other".to_owned(), other);
+        second.imports.insert(
+            "685".to_owned(),
+            super::Import {
+                name: "Err".to_owned(),
+                result_interface: None,
+            },
+        );
         merged.merge(second);
+        assert_eq!(merged.imports["685"].name, "Err");
         assert_eq!(merged.interfaces["_Box"].vtable_size, 0x30);
         assert_eq!(merged.interfaces["_Other"].vtable_size, 0x99);
         assert_eq!(merged.interfaces.len(), first.interfaces.len() + 1);
