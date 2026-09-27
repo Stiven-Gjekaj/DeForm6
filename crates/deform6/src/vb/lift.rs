@@ -84,6 +84,7 @@
 //! | `IStStrCopy` | Pop a string into what the frame slot points to |
 //! | `LitR4FP` | Push a 4-byte floating point constant on the floating point unit |
 //! | `PopTmpLdAdFPR4`, `CVarBoolI2` | Pop a value into a temporary slot, and push its address |
+//! | `FLdVar` | Push the 16 bytes of the `Variant` of a frame slot |
 //! | `ImpAdStAdFunc` | Pop an object, and `Set` a global at a 16-bit index to it |
 //! | `LdPrVar` | Pop the address of a `Variant`, and load its object into the object register |
 //! | `CStrVarVal`, `CBoolVarNull` | Convert the `Variant` at the popped address |
@@ -790,6 +791,7 @@ enum Family {
     FloatFunction(&'static str),
     ArrayErase,
     GlobalObjectStore,
+    FrameLoadVariant,
     VariantObjectRegister,
     VariantBinary(BinaryOp),
     VariantCopy,
@@ -966,6 +968,7 @@ fn family_of(name: &str) -> Option<Family> {
         "LitR4FP" => Family::LitSingle,
         "PopTmpLdAdFPR4" | "CVarBoolI2" => Family::PopTemp,
         "ImpAdStAdFunc" => Family::GlobalObjectStore,
+        "FLdVar" => Family::FrameLoadVariant,
         "LdPrVar" => Family::VariantObjectRegister,
         "CStrVarVal" => Family::Function("CStr"),
         "CBoolVarNull" => Family::Function("CBool"),
@@ -1564,6 +1567,11 @@ fn run(
             Family::Lit(len) => {
                 let value = constant(arguments, len).ok_or_else(short)?;
                 state.stack.push(Value::plain(Expr::Const(value), true));
+                None
+            }
+            Family::FrameLoadVariant => {
+                let value = state.load(offset16()?, false);
+                state.stack.push(Value { bytes: 16, ..value });
                 None
             }
             Family::FrameLoad | Family::ArgRef => {
@@ -2446,6 +2454,9 @@ names = ["ForStepI2"]
 [primary.42]
 width = 2
 names = ["CVarStr"]
+[primary.43]
+width = 2
+names = ["FLdVar"]
 [lead1.C8]
 width = 0
 names = ["End"]
@@ -3168,6 +3179,9 @@ result = false
             lines(&variant).unwrap()[0],
             "       Call import_2(CVar(local_64))"
         );
+        // import_2(local_64): FLdVar pushes the 16 bytes of the Variant.
+        let copy = [0x43, 0x9C, 0xFF, 0x12, 0x02, 0x00, 0x10, 0x00, 0x0C];
+        assert_eq!(lines(&copy).unwrap()[0], "       Call import_2(local_64)");
         // For local_64 = 1 To 9 Step 2
         let step = [
             0x02, 0x01, 0x15, 0x9C, 0xFF, 0x02, 0x09, 0x02, 0x02, 0x41, 0x9C, 0xFF, 0x0E, 0x00,
