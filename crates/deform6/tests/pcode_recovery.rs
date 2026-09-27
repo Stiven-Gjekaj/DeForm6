@@ -66,7 +66,7 @@ use deform6::vb::project::{ObjectTableHead, ProjectInfo};
 use object::LittleEndian as LE;
 use object::pe::ImageNtHeaders32;
 use object::read::pe::{ImageNtHeaders, ImageOptionalHeader, Import, PeFile32};
-use support::{source, vbp};
+use support::{frm, source, vbp};
 
 /// The directory of the committed P-code corpus.
 fn pcode_root() -> PathBuf {
@@ -897,4 +897,98 @@ fn each_link_table_of_a_pcode_program_gives_the_procedures_of_its_source() {
         (tables, methods_found),
         (EXPECTED_LINK_TABLES, EXPECTED_METHOD_SLOTS)
     );
+}
+
+/// The class and the name of each `Begin` block of a form, depth first,
+/// each name one time: the form first, then its controls. The elements of a
+/// control array share one name.
+fn begin_blocks(blocks: &[frm::Block], out: &mut Vec<(String, String)>) {
+    for block in blocks {
+        if !out.iter().any(|(_, name)| *name == block.name) {
+            out.push((block.class.clone(), block.name.clone()));
+        }
+        begin_blocks(&block.children, out);
+    }
+}
+
+/// The `ControlInfo` records of the P-code corpus that the test below
+/// compares with their source.
+const EXPECTED_INDEXED_CONTROLS: usize = 613;
+
+/// The `wIndex` of each `ControlInfo` record of a form of a P-code program is
+/// the position of the name of its control in the source: the form at 0,
+/// then the `Begin` blocks of a class of `VB.` in the order of the file,
+/// then the other `Begin` blocks, such as a Winsock control, in the order of
+/// the file. The record of the form itself, named `Form`, holds `0xFFFF`.
+#[test]
+fn each_control_index_of_a_pcode_form_is_the_position_of_its_source_block() {
+    let root = build_record::corpus_root();
+    let projects = vbp::project_files();
+    let mut checked = 0;
+    let mut failures = Vec::new();
+    for (key, exe) in pcode_programs() {
+        let bytes = read(&exe);
+        let pe = PeImage::parse(&bytes).unwrap_or_else(|err| panic!("{key}: {err}"));
+        let project = vbp::select_project_file(&root.join(&key), &projects)
+            .unwrap_or_else(|err| panic!("{key}: {err}"));
+        let sources: BTreeMap<String, PathBuf> = vbp::Project::read(&project)
+            .declared_objects()
+            .into_iter()
+            .filter_map(|object| Some((object.name?, object.source_file)))
+            .collect();
+        for object in objects_by_name(&pe).values() {
+            let controls =
+                ControlInfoTable::read(&pe, object).unwrap_or_else(|err| panic!("{key}: {err}"));
+            let path = &sources[&object.name];
+            if controls.entries.is_empty()
+                || !path
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("frm"))
+            {
+                continue;
+            }
+            let mut blocks = Vec::new();
+            begin_blocks(&frm::Form::read(path).blocks(), &mut blocks);
+            let (form, controls_of_source) = blocks.split_first().unwrap();
+            let intrinsic = |class: &String| class.starts_with("VB.");
+            let names: Vec<&String> = std::iter::once(&form.1)
+                .chain(
+                    controls_of_source
+                        .iter()
+                        .filter(|(class, _)| intrinsic(class))
+                        .map(|(_, name)| name),
+                )
+                .chain(
+                    controls_of_source
+                        .iter()
+                        .filter(|(class, _)| !intrinsic(class))
+                        .map(|(_, name)| name),
+                )
+                .collect();
+            for control in &controls.entries {
+                checked += 1;
+                let expected = if control.name == "Form" {
+                    Some(0xFFFF)
+                } else {
+                    names
+                        .iter()
+                        .position(|name| **name == control.name)
+                        .and_then(|at| u16::try_from(at).ok())
+                };
+                if Some(control.w_index) != expected {
+                    failures.push(format!(
+                        "{key}: {}.{} holds wIndex {}, and the source gives {expected:?}",
+                        object.name, control.name, control.w_index
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} control indexes do not agree with the source:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+    assert_eq!(checked, EXPECTED_INDEXED_CONTROLS);
 }

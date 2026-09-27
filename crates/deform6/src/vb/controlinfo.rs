@@ -124,6 +124,11 @@ pub struct ControlInfo {
     /// The number of event slots [`read_event_table`] reads after the
     /// header.
     pub w_event_count: u16,
+    /// `wIndex` at `0x0C`. In each form of the P-code corpus, it is the
+    /// position of the control in the source: the form at 0, then the
+    /// intrinsic controls, then the other controls, each group in the order
+    /// of the file. The record of the form itself holds `0xFFFF`.
+    pub w_index: u16,
     /// The address of this control's 16-byte CLSID.
     pub lp_guid: Va,
     /// The address of the event handler table [`read_event_table`] reads.
@@ -322,6 +327,7 @@ impl ControlInfoTable {
                 rva: element.rva(Off::new(0)),
                 f_control_type: raw.f_control_type,
                 w_event_count: raw.w_event_count,
+                w_index: raw.w_index,
                 lp_guid: raw.lp_guid,
                 lp_event_table: raw.lp_event_table,
                 lpsz_name: raw.lpsz_name,
@@ -339,6 +345,7 @@ impl ControlInfoTable {
 struct RawControlInfo {
     f_control_type: u16,
     w_event_count: u16,
+    w_index: u16,
     lp_guid: Va,
     lp_event_table: Va,
     lpsz_name: Va,
@@ -358,6 +365,9 @@ fn read_raw_control_info(element: &Region<'_>) -> Result<RawControlInfo, Refusal
         w_event_count: element
             .u16_le(Off::new(0x02))
             .ok_or(Refusal::Damaged("a ControlInfo holds no wEventCount"))?,
+        w_index: element
+            .u16_le(Off::new(0x0C))
+            .ok_or(Refusal::Damaged("a ControlInfo holds no wIndex"))?,
         lp_guid: element.va_le(Off::new(0x08)).ok_or(Refusal::Damaged(
             "a ControlInfo holds no address for its GUID",
         ))?,
@@ -1803,6 +1813,7 @@ mod tests {
                 rva: None,
                 f_control_type: 0x40,
                 w_event_count: 0,
+                w_index: 0,
                 lp_guid: Va::new(0),
                 lp_event_table: Va::new(0),
                 lpsz_name: Va::new(0),
@@ -1828,6 +1839,7 @@ mod tests {
             rva: Some(Rva::new(0x0000_1200)),
             f_control_type,
             w_event_count,
+            w_index: 0,
             lp_guid: Va::new(0),
             lp_event_table: Va::new(lp_event_table),
             lpsz_name: Va::new(0),

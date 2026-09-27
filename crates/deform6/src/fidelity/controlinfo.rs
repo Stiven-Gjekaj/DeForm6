@@ -76,6 +76,7 @@ mod tests {
             rva: None,
             f_control_type: 0x0040,
             w_event_count: 0x0017,
+            w_index: 0,
             lp_guid: Va::new(0x0040_B008),
             lp_event_table: Va::new(0x0040_B018),
             lpsz_name: Va::new(0x0040_B020),
