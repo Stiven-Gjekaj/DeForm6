@@ -12,8 +12,7 @@
 //! | Names | What the opcode does |
 //! |---|---|
 //! | `LitI4`, `LitR4`, `LitI2`, `LitI2_Byte` | Push a constant |
-//! | `FLd` + a type | Push the frame slot at a signed 16-bit offset |
-//! | `ILd` + a type | Push the value that the frame slot points to |
+//! | `FLd` or `ILd` + a type, `FLdRf`, `ILdRf` | Push the frame slot at a signed 16-bit offset; the lift does not yet tell a slot from what it points to, and one handler serves names of both kinds |
 //! | `ILdRfDarg` | Push the argument at a 16-bit offset |
 //! | `FSt` + a type, `FStVarCopy` | Pop into the frame slot |
 //! | `ISt` + a type | Pop into what the frame slot points to |
@@ -21,7 +20,7 @@
 //! | `MemSt` + a type | Pop into a field of the object register |
 //! | `ImpAdSt` + a type | Pop into a global at a 16-bit index |
 //! | an operator and two types, such as `LtI4` | Pop two values, push one |
-//! | `C` and two types, such as `CI4I2` | Convert the top value |
+//! | `C` and two types, such as `CI4I2`, or `FnC`, a Basic word and a type, such as `FnCSngI2` | Convert the top value |
 //! | `BranchF` | Pop a condition, and branch when it is false |
 //! | `Branch` | Branch |
 //! | `End`, and a name that starts with `ExitProc` | End the program, or exit |
@@ -223,7 +222,6 @@ pub enum LiftFault {
 enum Family {
     Lit(u8),
     FrameLoad,
-    IndirectLoad,
     ArgRef,
     FrameStore,
     IndirectStore,
@@ -278,9 +276,29 @@ fn is_type(text: &str) -> bool {
     TYPES.iter().any(|(suffix, _)| *suffix == text)
 }
 
-/// Gives the conversion of a name such as `CI4I2`: the Basic function of
-/// the first type, when the rest is a type too.
+/// The Basic words of the `FnC` names, such as `FnCSngI2`, and their
+/// functions.
+const FUNCTIONS: &[(&str, &str)] = &[
+    ("Byte", "CByte"),
+    ("Int", "CInt"),
+    ("Lng", "CLng"),
+    ("Sng", "CSng"),
+    ("Dbl", "CDbl"),
+    ("Cur", "CCur"),
+    ("Str", "CStr"),
+    ("Var", "CVar"),
+];
+
+/// Gives the conversion of a name such as `CI4I2` or `FnCSngI2`: the Basic
+/// function of the first type, when the rest is a type too.
 fn conversion(name: &str) -> Option<&'static str> {
+    if let Some(rest) = name.strip_prefix("FnC") {
+        return FUNCTIONS.iter().find_map(|(word, function)| {
+            rest.strip_prefix(word)
+                .filter(|from| is_type(from))
+                .map(|_| *function)
+        });
+    }
     let rest = name.strip_prefix('C')?;
     TYPES.iter().find_map(|(suffix, function)| {
         rest.strip_prefix(suffix)
@@ -297,6 +315,7 @@ fn family_of(name: &str) -> Option<Family> {
         "LitI2" => Family::Lit(2),
         "LitI2_Byte" => Family::Lit(1),
         "ILdRfDarg" => Family::ArgRef,
+        "FLdRf" | "ILdRf" => Family::FrameLoad,
         "FStVarCopy" => Family::FrameStore,
         "FLdPr" => Family::ObjectRegister,
         "BranchF" => Family::BranchFalse,
@@ -304,7 +323,7 @@ fn family_of(name: &str) -> Option<Family> {
         "End" => Family::End,
         _ if name.starts_with("ExitProc") => Family::Exit,
         _ if typed("FLd") => Family::FrameLoad,
-        _ if typed("ILd") => Family::IndirectLoad,
+        _ if typed("ILd") => Family::FrameLoad,
         _ if typed("FSt") => Family::FrameStore,
         _ if typed("ISt") => Family::IndirectStore,
         _ if typed("MemSt") => Family::FieldStore,
@@ -403,7 +422,7 @@ pub fn lift(listing: &PcodeListing, table: &PcodeTable) -> Result<Vec<LiftedStmt
                 stack.push(slot);
                 None
             }
-            Family::IndirectLoad | Family::ArgRef => {
+            Family::ArgRef => {
                 let slot = Expr::frame(offset16()?);
                 stack.push(slot);
                 None
@@ -579,6 +598,12 @@ names = ["CR4I2", "CR8I2"]
 [primary.0E]
 width = 0
 names = ["LtI4", "FLdI2"]
+[primary.0F]
+width = 2
+names = ["FLdI4", "FLdStr", "ILdRf"]
+[primary.10]
+width = 0
+names = ["CR4I2", "FnCSngI2"]
 [lead1.C8]
 width = 0
 names = ["End"]
@@ -642,6 +667,12 @@ names = ["End"]
                 "L0015: Exit",
             ]
         );
+    }
+
+    #[test]
+    fn the_aliases_of_one_handler_give_one_family() {
+        let body = [0x0F, 0x0C, 0x00, 0x10, 0x05, 0x78, 0xFF, 0x0C];
+        assert_eq!(lines(&body).unwrap()[0], "       local_88 = CSng(arg_C)");
     }
 
     #[test]
