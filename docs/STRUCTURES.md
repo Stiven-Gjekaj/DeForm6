@@ -1687,14 +1687,15 @@ prior-art survey both confirm the form layer is mode-independent.
 `lpNativeCode` branch matters only for reporting and for the later code-recovery
 milestone.
 
-### 10.3 `ProcDscInfo` (P-code only) **[L]**
+### 10.3 `ProcDscInfo` (P-code only) **[C]** (§23)
 
 SEK is the only source that documents it, at
-`ObjectInfo.lpMethods[i]`:
+`ObjectInfo.lpMethods[i]`. The P-code corpus confirms the layout and the body
+rule (§23):
 
 | Offset | Size | Name |
 |---|---|---|
-| 0x00 | 4 | `ProcTable`, VA of a 56-byte table whose last dword is a data constant |
+| 0x00 | 4 | `ProcTable`, VA of a 56-byte table whose last dword is a data constant. In the corpus it is the `ObjectInfo` of the object (§5.2), which is 56 bytes |
 | 0x04 | 2 | unknown |
 | 0x06 | 2 | `FrameSize` |
 | 0x08 | 2 | `ProcSize` |
@@ -1705,7 +1706,8 @@ milestone but recorded here because it is not documented anywhere else found.
 
 Each P-code event stub loads `edx` with an entry of `lpMethods` (§22). So the
 handler address that DeForm6 gives for a P-code event is the address of the
-descriptor of the handler procedure. The layout above stays **[L]**.
+descriptor of the handler procedure. `vb::procdesc` reads the method table,
+each descriptor and each body.
 
 ---
 
@@ -2422,7 +2424,46 @@ measured.
 
 ---
 
-## 23. Practical parse order for DeForm6
+## 23. The method table and `ProcDscInfo`, measured on the P-code corpus, 2026-09-27
+
+Section 10.3 gave `ProcDscInfo` from one source, at **[L]**. The 42 programs
+in `corpus-pcode/` hold 99 objects. `vb::procdesc::read_method_table` reads
+`wMethodCount` and `lpMethods` of each (§5.2), and follows each entry.
+
+| Check | Count |
+|---|---|
+| Method table entries | 871 |
+| Entries that map into no section | 191 |
+| Entries that name a descriptor whose body fits before it | 680 |
+| Entries that map into a section and cannot be read | 0 |
+| Descriptors whose `ProcTable` is the `ObjectInfo` of their object | 680 of 680 |
+| Bodies that are the `ProcSize` bytes that end at their descriptor | 680 of 680 |
+| Bodies that start on a four-byte boundary | 680 of 680 |
+| Handler addresses of events (§22) that are a descriptor | 388 of 388 |
+
+No two bodies of one program share a byte. Each entry that maps into no
+section comes before the first descriptor of its table. They hold small
+values and text, and this document does not know what they are. The number
+of descriptors equals `Object.ProcCount` (§5.1) in only 49 of the 99
+objects, so the reader takes the entries that are addresses.
+
+The body of `cmdStart_Click` in `Fast_Flames.exe` is 400 bytes at file offset
+`0x3A00`, and it ends with `13 00`. Many bodies end with zero bytes after
+their last opcode. This document does not know if that is padding or code.
+
+`each_method_table_of_a_pcode_program_names_the_descriptors_of_its_procedures`
+in `tests/pcode_recovery.rs` keeps the table and the order of the entries
+true. The comparison with `ProcCount`, the zero bytes and the gap after a
+descriptor were measured one time, and no test keeps them true. Unit tests in
+`vb/procdesc.rs` read `frmFire` byte for byte.
+
+**What the measurement did not settle.** The word at `+0x04` and the bytes
+after `+0x0A`. The descriptor is longer than 10 bytes: the gap to the next
+body is 48 bytes or more, and it is not the same in each descriptor.
+
+---
+
+## 24. Practical parse order for DeForm6
 
 1. Parse the PE. Reject anything that is not 32-bit x86. Record `ImageBase` and
    build the RVA-to-file-offset map from the section table.
