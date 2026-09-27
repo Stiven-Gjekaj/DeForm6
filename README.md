@@ -217,6 +217,11 @@ deform6 disasm <path-to-exe> --pcode-table derived/pcode-table.toml
 The listing gives each opcode, its bytes and the name of its handler. It is
 not Basic.
 
+With `--lift`, `disasm` prints a procedure as statements when it can follow
+the stack of every opcode: 69 of the 680 procedures of the P-code corpus. The
+statements name each variable by its offset, such as `local_88` or
+`Me.field_54`. They are not the source, and `extract` writes none of them.
+
 Run everything the gate runs, in one command:
 
 ```
