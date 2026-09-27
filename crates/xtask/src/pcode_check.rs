@@ -6,10 +6,13 @@
 //! is the check that the user runs on the table that they derive. It decodes
 //! with [`deform6::vb::pcode::disassemble`], whose doc comment gives the
 //! rules, and it names each body that does not decode to its end. It exits
-//! with 1 when one body does not.
+//! with 1 when one body does not. It also counts the bodies that
+//! [`deform6::vb::lift::lift`] lifts to statements; that count only reports,
+//! and it does not fail the command.
 
 use deform6::read::pe::PeImage;
 use deform6::vb::header::{VbHeader, header_region};
+use deform6::vb::lift::lift;
 use deform6::vb::object::ObjectTable;
 use deform6::vb::pcode::{PcodeTable, disassemble};
 use deform6::vb::procdesc::read_method_table;
@@ -30,12 +33,13 @@ pub(crate) fn run(args: &[String]) -> i32 {
         }
     };
     match check(path) {
-        Ok((bodies, failures)) => {
+        Ok((bodies, failures, lifted)) => {
             for failure in &failures {
                 println!("{failure}");
             }
             let decoded = bodies.saturating_sub(failures.len());
             println!("{decoded} of {bodies} P-code bodies decode to their end");
+            println!("{lifted} of {bodies} P-code bodies lift to statements");
             i32::from(!failures.is_empty())
         }
         Err(err) => {
@@ -47,11 +51,12 @@ pub(crate) fn run(args: &[String]) -> i32 {
 
 /// Decodes each body of each program in `corpus-pcode/`, and gives the
 /// number of bodies and a line for each body that does not decode.
-fn check(path: &str) -> Result<(usize, Vec<String>), String> {
+fn check(path: &str) -> Result<(usize, Vec<String>, usize), String> {
     let bytes = std::fs::read(path).map_err(|err| format!("reading {path}: {err}"))?;
     let table = PcodeTable::parse(&bytes).map_err(|err| format!("{path}: {err}"))?;
     let root = pcode_record::pcode_root();
     let mut bodies = 0_usize;
+    let mut lifted = 0_usize;
     let mut failures = Vec::new();
     for exe in build_record::executables(&root)? {
         let key = build_record::program_key(&exe, &root)?;
@@ -74,6 +79,9 @@ fn check(path: &str) -> Result<(usize, Vec<String>), String> {
                     .body(&pe)
                     .ok_or_else(|| format!("{key}: a body cannot be read"))?;
                 let listing = disassemble(&body, &table);
+                if lift(&listing, &table).is_ok() {
+                    lifted = lifted.saturating_add(1);
+                }
                 if !listing.end.is_complete() {
                     failures.push(format!(
                         "{key}: {} descriptor {:#x}: {:?}",
@@ -85,5 +93,5 @@ fn check(path: &str) -> Result<(usize, Vec<String>), String> {
             }
         }
     }
-    Ok((bodies, failures))
+    Ok((bodies, failures, lifted))
 }
