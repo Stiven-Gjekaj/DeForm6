@@ -2,6 +2,11 @@
 //! with the vtable offset and the argument bytes of each function, from a
 //! copy of `VB6.OLB` that the user owns.
 //!
+//! It takes more type libraries after the first one: a file that is a type
+//! library, or a PE file whose `TYPELIB` resources hold them, such as
+//! `MSVBVM60.DLL` for the `VBA` library or an OCX for its controls. When
+//! two libraries give one name or one GUID, the first library wins.
+//!
 //! A P-code call of a method of another object, such as `VCallHresult`,
 //! names the method by its vtable offset, and the called method removes its
 //! own arguments. So the lift must know the interface of the object and the
@@ -199,6 +204,82 @@ pub(crate) fn derive(infos: &[TypeInfo]) -> Result<Types, String> {
     Ok(types)
 }
 
+impl Types {
+    /// Adds each control, GUID and interface of `other` whose key `self`
+    /// does not hold yet.
+    fn merge(&mut self, other: Self) {
+        for (key, value) in other.controls {
+            self.controls.entry(key).or_insert(value);
+        }
+        for (key, value) in other.iids {
+            self.iids.entry(key).or_insert(value);
+        }
+        for (key, value) in other.interfaces {
+            self.interfaces.entry(key).or_insert(value);
+        }
+    }
+}
+
+/// The name of the resource type of a type library in a PE file.
+const TYPELIB_RESOURCE: &str = "TYPELIB";
+
+/// Gives the type libraries of a file: the file itself when it starts with
+/// `MSFT`, else each `TYPELIB` resource of a PE file.
+///
+/// # Errors
+///
+/// Gives an error when the file is neither, or when its resource directory
+/// cannot be read.
+fn libraries(bytes: &[u8]) -> Result<Vec<&[u8]>, String> {
+    use object::LittleEndian as LE;
+    use object::read::pe::{PeFile32, ResourceNameOrId};
+
+    if bytes.starts_with(b"MSFT") {
+        return Ok(vec![bytes]);
+    }
+    let file = PeFile32::parse(bytes)
+        .map_err(|err| format!("the file is not a type library and not a PE file: {err}"))?;
+    let sections = file.section_table();
+    let bad = |err: object::read::Error| format!("the resources cannot be read: {err}");
+    let Some(directory) = file
+        .data_directories()
+        .resource_directory(bytes, &sections)
+        .map_err(bad)?
+    else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    for kind in directory.root().map_err(bad)?.entries {
+        let ResourceNameOrId::Name(name) = kind.name_or_id() else {
+            continue;
+        };
+        if name.to_string_lossy(directory).map_err(bad)? != TYPELIB_RESOURCE {
+            continue;
+        }
+        let Some(ids) = kind.data(directory).map_err(bad)?.table() else {
+            continue;
+        };
+        for id in ids.entries {
+            let Some(languages) = id.data(directory).map_err(bad)?.table() else {
+                continue;
+            };
+            for language in languages.entries {
+                let Some(entry) = language.data(directory).map_err(bad)?.data() else {
+                    continue;
+                };
+                let size = usize::try_from(entry.size.get(LE))
+                    .map_err(|_| "a resource size does not fit".to_owned())?;
+                let library = sections
+                    .pe_data_at(bytes, entry.offset_to_data.get(LE))
+                    .and_then(|data| data.get(..size))
+                    .ok_or("a TYPELIB resource is outside the file")?;
+                out.push(library);
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Renders the file as TOML.
 pub(crate) fn render(types: &Types) -> Result<String, String> {
     let body =
@@ -212,17 +293,19 @@ pub(crate) fn render(types: &Types) -> Result<String, String> {
     ))
 }
 
-/// Runs `derive-vb-types <olb> [--out <path>]`.
+/// Runs `derive-vb-types <olb> [<library>...] [--out <path>]`.
 pub(crate) fn run(args: &[String]) -> i32 {
-    let (olb, out) = match args {
-        [olb] => (olb, DEFAULT_OUTPUT_PATH),
-        [olb, flag, out] if flag == "--out" => (olb, out.as_str()),
-        _ => {
-            eprintln!("usage: cargo run -p xtask -- derive-vb-types <olb> [--out <path>]");
-            return 1;
-        }
+    let (inputs, out) = match args {
+        [inputs @ .., flag, out] if flag == "--out" => (inputs, out.as_str()),
+        inputs => (inputs, DEFAULT_OUTPUT_PATH),
     };
-    match derive_file(olb, out) {
+    if inputs.is_empty() {
+        eprintln!(
+            "usage: cargo run -p xtask -- derive-vb-types <olb> [<library>...] [--out <path>]"
+        );
+        return 1;
+    }
+    match derive_file(inputs, out) {
         Ok(summary) => {
             println!("{summary}");
             0
@@ -234,10 +317,17 @@ pub(crate) fn run(args: &[String]) -> i32 {
     }
 }
 
-/// Reads the library, derives the types and writes them to `out`.
-fn derive_file(olb: &str, out: &str) -> Result<String, String> {
-    let bytes = std::fs::read(olb).map_err(|err| format!("reading {olb}: {err}"))?;
-    let types = derive(&parse(&bytes)?)?;
+/// Reads the libraries, derives the types and writes them to `out`.
+fn derive_file(inputs: &[String], out: &str) -> Result<String, String> {
+    let mut types = Types::default();
+    for input in inputs {
+        let bytes = std::fs::read(input).map_err(|err| format!("reading {input}: {err}"))?;
+        for library in libraries(&bytes).map_err(|err| format!("{input}: {err}"))? {
+            types.merge(derive(
+                &parse(library).map_err(|err| format!("{input}: {err}"))?,
+            )?);
+        }
+    }
     if let Some(parent) = std::path::Path::new(out).parent() {
         std::fs::create_dir_all(parent)
             .map_err(|err| format!("creating {}: {err}", parent.display()))?;
@@ -262,7 +352,7 @@ fn derive_file(olb: &str, out: &str) -> Result<String, String> {
     reason = "a test builds the state it needs and must fail loudly when that state is wrong"
 )]
 mod tests {
-    use super::{derive, render};
+    use super::{derive, libraries, render};
     use crate::msft::tests::library;
     use crate::msft::{Function, Kind, Parameter, TypeInfo, parse};
 
@@ -291,6 +381,28 @@ mod tests {
             Some("BoxEvents")
         );
         assert_eq!(interface.functions["0028"].result_interface, None);
+    }
+
+    #[test]
+    fn a_second_library_adds_only_what_the_first_does_not_hold() {
+        let first = derive(&parse(&library()).unwrap()).unwrap();
+        let mut merged = first.clone();
+        let mut second = first.clone();
+        let mut other = first.interfaces["_Box"].clone();
+        other.vtable_size = 0x99;
+        second.interfaces.insert("_Box".to_owned(), other.clone());
+        second.interfaces.insert("_Other".to_owned(), other);
+        merged.merge(second);
+        assert_eq!(merged.interfaces["_Box"].vtable_size, 0x30);
+        assert_eq!(merged.interfaces["_Other"].vtable_size, 0x99);
+        assert_eq!(merged.interfaces.len(), first.interfaces.len() + 1);
+    }
+
+    #[test]
+    fn a_type_library_is_its_own_library_and_other_bytes_are_refused() {
+        let bytes = library();
+        assert_eq!(libraries(&bytes).unwrap(), [bytes.as_slice()]);
+        assert!(libraries(b"not a library").is_err());
     }
 
     fn function(name: &str, invoke_kind: u8, vt: u16) -> Function {
