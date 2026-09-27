@@ -1319,7 +1319,7 @@ agrees with the three as well (§17).
 | 0x04 | 2 | unknown | IDC: `wFlagIndexRef`. On the corpus, one more than the `imm32` of each stub of the control (§19). | **[G]** |
 | 0x06 | 2 | `bWEventsOffset` | Offset into the memory struct to copy events | **[C]** |
 | 0x08 | 4 | `lpGuid` | **VA of this control's 16-byte CLSID.** | **[C]** |
-| 0x0C | 2 | `wIndex` | Control index. AI reads a dword at 0x0C. | **[D]** |
+| 0x0C | 2 | `wIndex` | Control index. AI reads a dword at 0x0C. The P-code corpus settles it as a word, see §23b. | **[C]** |
 | 0x0E | 2 | unknown | | **[G]** |
 | 0x10 | 2 | unknown | PVB: `wUnnamedEvents` | **[G]** |
 | 0x12 | 2 | unknown | PVB: `wFlags`, `0x4` if unnamed events exist | **[G]** |
@@ -2514,6 +2514,55 @@ The other slots come before the method slots. A standard module has no
 `each_link_table_of_a_pcode_program_gives_the_procedures_of_its_source` in
 `tests/pcode_recovery.rs` keeps the first four rows true. The count of
 `ThisVCallHresult` offsets needs the P-code table, and no test keeps it true.
+
+---
+
+## 23b. The controls of a form and their interfaces, measured on the P-code corpus, 2026-09-27
+
+A P-code expression such as `cmbLength.Text` gets the control from the form,
+then calls a function of the control:
+
+1. `FLdPrThis` and `VCallAd <offset>` call a control accessor of `Me`, which
+   gives the control.
+2. `FStAdFunc` stores the control in a temporary frame slot, and `FLdPr`
+   of that slot puts it in the object register.
+3. `VCallHresult <offset>` calls the function at that vtable offset of the
+   interface of the control. The called function removes its own
+   arguments.
+
+**`wIndex`.** In each of the 613 `ControlInfo` records of the forms of the
+corpus, `wIndex` at `+0x0C` is the position of the control in the source:
+the form at 0, then the controls of a class of `VB.`, then the other
+controls, such as a Winsock control, each group in the order of the file.
+The record of the form itself, named `Form`, holds `0xFFFF`.
+
+**The accessor.** The accessor of a control is at the vtable size of the
+interface of the form, 760 bytes for `_Form`, plus 4 times its `wIndex`.
+1281 of the 1350 calls that follow an accessor of `Me` in the corpus name a
+function of the interface of the control at that rule. Each of the other
+69 is a call on a control whose class `VB6.OLB` does not hold: a Winsock
+control, a rich text box, or an element of a control array.
+
+**The interface.** `lpGuid` of a `ControlInfo` record names the GUID of the
+events interface of the control, such as `PictureBoxEvents`. The interface
+of the control has the name of the class with `_` before it, such as
+`_PictureBox`. `VB6.OLB` holds both, and its function records give the
+vtable offset of each function, with the low bit set as a flag, and the
+type of each parameter. Each function of its 31 interfaces returns an
+`HRESULT`. Each parameter is 4 bytes on the stack, 16 for a `Variant`, or a
+pointer. A property get gives its result through its last parameter, the
+address of a frame slot.
+
+`each_control_index_of_a_pcode_form_is_the_position_of_its_source_block`
+and `each_control_of_a_pcode_form_gets_the_accessor_of_its_source_position`
+in `tests/pcode_recovery.rs` keep the rules of `wIndex` and of the accessor
+true. The count of 1281 calls needs `VB6.OLB` and the P-code table, and no
+test keeps it true.
+
+**What the measurement did not settle.** The class of an object argument
+of a procedure. `ILdPr` loads it, and 91 bodies stop at a call on one. The
+binary does not seem to give the class of an argument of a private
+procedure.
 
 ---
 
