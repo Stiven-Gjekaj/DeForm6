@@ -1571,7 +1571,7 @@ fn project_call(
                 .collect(),
         ));
         let callee = Callee::Member(Box::new(object), format!("method_{}", method.index));
-        return Ok(Some(Stmt::Call(callee, expressions(args))));
+        return Ok(call_or_function(state, callee, args));
     }
     let (field, get) = profile
         .variable(vtable_offset)
@@ -1600,6 +1600,27 @@ fn class_at(callees: &Callees, index: u16) -> Option<String> {
         Some(format!("{PROJECT_CLASS}{index}"))
     } else {
         callees.class_interface(index).map(str::to_owned)
+    }
+}
+
+/// Gives the call of a method of the project with `args`, first argument
+/// first. A call with values under its arguments is part of an expression,
+/// so it calls a Function: its last argument is the local that takes the
+/// result, and the lift binds that local to the call. Else the call is a
+/// statement.
+fn call_or_function(state: &mut State, callee: Callee, mut args: Vec<Value>) -> Option<Stmt> {
+    if state.depth() > 0
+        && let Some(slot) = args
+            .last()
+            .and_then(|value| value.slot)
+            .filter(|slot| *slot < 0)
+    {
+        args.pop();
+        let value = Expr::Call(callee, expressions(args));
+        state.bindings.insert(slot, (value, None));
+        None
+    } else {
+        Some(Stmt::Call(callee, expressions(args)))
     }
 }
 
@@ -1937,7 +1958,7 @@ fn run(
                     .arg_size
                     .checked_sub(4)
                     .ok_or(LiftFault::CallArguments(at))?;
-                let mut args = call_arguments(&mut state.stack, bytes, at)?;
+                let args = call_arguments(&mut state.stack, bytes, at)?;
                 calls.push((
                     callees.owner,
                     method.index,
@@ -1945,20 +1966,7 @@ fn run(
                         .map(|value| (value.bytes, value.class.clone()))
                         .collect(),
                 ));
-                let callee = Callee::Method(method.index);
-                if state.depth() > 0
-                    && let Some(slot) = args
-                        .last()
-                        .and_then(|value| value.slot)
-                        .filter(|slot| *slot < 0)
-                {
-                    args.pop();
-                    let value = Expr::Call(callee, expressions(args));
-                    state.bindings.insert(slot, (value, None));
-                    None
-                } else {
-                    Some(Stmt::Call(callee, expressions(args)))
-                }
+                call_or_function(&mut state, Callee::Method(method.index), args)
             }
             Family::ImportCall { result } => {
                 let callee = Callee::Import(word16(0)?);
@@ -3415,6 +3423,23 @@ result = false
         assert_eq!(
             method_calls(&listing, &table, &owned, None, 0),
             [(Some(4), 2, vec![(4, None)])]
+        );
+        // If Not (0 = New class_9.method_2()): a method of the project with
+        // a value under its arguments is a Function, whose last argument
+        // takes the result.
+        let function = [
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x15, 0xB4, 0xFF, 0x27, 0x09, 0x00, 0x1B, 0xE4, 0xFF,
+            0x06, 0xE4, 0xFF, 0x1C, 0xF8, 0x06, 0x00, 0x00, 0x03, 0xB4, 0xFF, 0x09, 0x0A, 0x1E,
+            0x00, 0x0C,
+        ];
+        let listing_function = disassemble(&Region::new(&function, Off::new(0)), &table);
+        assert_eq!(
+            render(&lift(&listing_function, &table, &owned, None).unwrap()),
+            [
+                "       If Not (0 = New class_9.method_2()) Then GoTo L001E",
+                "       Exit",
+                "L001E:"
+            ]
         );
         // The same class as a class of the runtime with the interface _Box:
         // the get of 0x00A8 of _Box gives Text.
