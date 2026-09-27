@@ -39,8 +39,8 @@ const LP_METHODS_AT: u32 = 0x24;
 /// The width of one method table entry: a four-byte value.
 const METHOD_ENTRY_SIZE: u32 = 4;
 
-/// The bytes of a `ProcDscInfo` that this reader reads: `ProcTable`, one
-/// unknown word, `FrameSize` and `ProcSize` (`STRUCTURES.md` section 10.3).
+/// The bytes of a `ProcDscInfo` that this reader reads: `ProcTable`, the
+/// argument size, `FrameSize` and `ProcSize` (`STRUCTURES.md` section 10.3).
 pub const PROC_DESC_READ_LEN: u32 = 0x0A;
 
 /// A `ProcDscInfo`, the descriptor of one P-code procedure.
@@ -54,8 +54,13 @@ pub struct ProcDescriptor {
     /// method table names the descriptor. `STRUCTURES.md` section 10.3 gives
     /// it as a 56-byte table, and `ObjectInfo` is 56 bytes.
     pub proc_table: Va,
-    /// The word at `+0x04`. This reader does not know what it is.
-    pub unknown_04: u16,
+    /// The word at `+0x04`: the bytes of the arguments that a caller pushes.
+    /// That is 4 for `Me`, 4 for each argument by reference, the size of the
+    /// value for each argument by value (8 for a `Double`, 16 for a
+    /// `Variant`), and 4 for the address of the result of a `Function` or a
+    /// `Property Get`. Each of the 680 descriptors of the P-code corpus
+    /// agrees with the declaration of its procedure in the source.
+    pub arg_size: u16,
     /// `FrameSize` at `+0x06`.
     pub frame_size: u16,
     /// `ProcSize` at `+0x08`: the length of the P-code body, which is the
@@ -89,7 +94,7 @@ impl ProcDescriptor {
             proc_table: window
                 .va_le(Off::new(0x00))
                 .ok_or(Refusal::Damaged("a procedure descriptor field is cut"))?,
-            unknown_04: field(0x04)?,
+            arg_size: field(0x04)?,
             frame_size: field(0x06)?,
             proc_size: field(0x08)?,
         })
@@ -371,7 +376,7 @@ mod tests {
                     descriptor: ProcDescriptor {
                         va: Va::new(0x0040_1080),
                         proc_table: Va::new(0x0040_10C0),
-                        unknown_04: 4,
+                        arg_size: 4,
                         frame_size: 0x80,
                         proc_size: 0x10,
                     },
@@ -501,7 +506,7 @@ mod tests {
             ProcDescriptor {
                 va: Va::new(0x0040_3B90),
                 proc_table: Va::new(0x0040_2788),
-                unknown_04: 4,
+                arg_size: 4,
                 frame_size: 128,
                 proc_size: 400,
             }

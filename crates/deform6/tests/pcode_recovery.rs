@@ -761,3 +761,53 @@ fn each_method_table_of_a_pcode_program_names_the_descriptors_of_its_procedures(
          {not_addresses} values that are not addresses"
     );
 }
+
+/// The word at `+0x04` of each descriptor is the argument size of its
+/// procedure in the source: 4 for `Me`, 4 for each argument by reference,
+/// the size of each argument by value, and 4 for the result of a `Function`
+/// or a `Property Get`. `support::source` reads the size from the
+/// declaration. The descriptors of an object are the procedures of its
+/// source file, in the order of that file.
+#[test]
+fn each_pcode_descriptor_gives_the_argument_size_of_its_source_procedure() {
+    let root = build_record::corpus_root();
+    let projects = vbp::project_files();
+    let mut checked = 0;
+    let mut failures = Vec::new();
+    for (key, exe) in pcode_programs() {
+        let bytes = read(&exe);
+        let pe = PeImage::parse(&bytes).unwrap_or_else(|err| panic!("{key}: {err}"));
+        let project = vbp::select_project_file(&root.join(&key), &projects)
+            .unwrap_or_else(|err| panic!("{key}: {err}"));
+        let sources: BTreeMap<String, PathBuf> = vbp::Project::read(&project)
+            .declared_objects()
+            .into_iter()
+            .filter_map(|object| Some((object.name?, object.source_file)))
+            .collect();
+        for object in objects_by_name(&pe).values() {
+            let methods = read_method_table(&pe, object.lp_object_info)
+                .unwrap_or_else(|err| panic!("{key}: {}: {err}", object.name));
+            let found: Vec<u32> = methods
+                .descriptors()
+                .map(|descriptor| u32::from(descriptor.arg_size))
+                .collect();
+            let declared: Vec<(String, u32)> =
+                source::declared_argument_sizes(&sources[&object.name]);
+            let expected: Vec<u32> = declared.iter().map(|(_, size)| *size).collect();
+            checked += found.len();
+            if found != expected {
+                failures.push(format!(
+                    "{key}: {} gives {found:?}, and the source declares {declared:?}",
+                    object.name
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} objects do not give the argument sizes of their source:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+    assert_eq!(checked, EXPECTED_DESCRIPTORS);
+}

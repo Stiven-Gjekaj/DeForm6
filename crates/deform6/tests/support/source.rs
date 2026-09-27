@@ -170,3 +170,120 @@ pub fn declared_public_procedures(path: &Path) -> Vec<String> {
 pub fn declared_procedures(path: &Path) -> Vec<String> {
     procedures(path, |_is_public| true)
 }
+
+/// Gives the bytes that a caller pushes for one argument, from its text in
+/// a declaration, such as `ByVal X As Double` or `Optional Name As String`:
+/// 4 for an argument by reference or an array, and the size of the value
+/// for an argument by value. A `Double`, a `Currency` and a `Date` are 8
+/// bytes, a `Variant` is 16, and each other type is 4. An argument with no
+/// `As` is a `Variant`.
+fn argument_size(argument: &str) -> u32 {
+    let text = argument.trim().to_ascii_lowercase();
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let by_value = words.contains(&"byval");
+    let array = text.contains("()");
+    let kind = words
+        .iter()
+        .position(|word| *word == "as")
+        .and_then(|at| words.get(at + 1))
+        .copied()
+        .unwrap_or("variant");
+    if !by_value || array {
+        return 4;
+    }
+    match kind {
+        "double" | "currency" | "date" => 8,
+        "variant" => 16,
+        _ => 4,
+    }
+}
+
+/// Splits an argument list at each comma that no parenthesis holds.
+fn arguments(list: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth = 0_i32;
+    let mut start = 0;
+    for (at, byte) in list.bytes().enumerate() {
+        match byte {
+            b'(' => depth += 1,
+            b')' => depth -= 1,
+            b',' if depth == 0 => {
+                out.push(&list[start..at]);
+                start = at + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&list[start..]);
+    out.into_iter()
+        .filter(|argument| !argument.trim().is_empty())
+        .collect()
+}
+
+/// Gives the argument list of a declaration: the text between the first
+/// `(` and the `)` that closes it.
+fn argument_list(declaration: &str) -> &str {
+    let Some(open) = declaration.find('(') else {
+        return "";
+    };
+    let mut depth = 0_i32;
+    for (at, byte) in declaration.bytes().enumerate().skip(open) {
+        match byte {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return &declaration[open + 1..at];
+                }
+            }
+            _ => {}
+        }
+    }
+    &declaration[open + 1..]
+}
+
+/// Gives each procedure that `path` declares, by the rules of
+/// [`declared_procedures`], with the bytes that a caller pushes for it: 4
+/// for `Me`, the size of each argument, and 4 for the address of the result
+/// of a `Function` or a `Property Get`.
+///
+/// A declaration that continues onto the next lines is read with those
+/// lines. Gives an empty list when the file cannot be read.
+#[must_use]
+pub fn declared_argument_sizes(path: &Path) -> Vec<(String, u32)> {
+    let Ok(bytes) = std::fs::read(path) else {
+        return Vec::new();
+    };
+    let text: String = bytes.iter().copied().map(char::from).collect();
+
+    let mut logical = Vec::new();
+    let mut current = String::new();
+    for line in text.lines() {
+        if continues_to_next_line(line) {
+            current.push_str(line.trim_end().trim_end_matches('_'));
+            current.push(' ');
+        } else {
+            current.push_str(line);
+            logical.push(std::mem::take(&mut current));
+        }
+    }
+
+    let mut out = Vec::new();
+    for line in logical {
+        let line = line.trim();
+        let Some((_, name)) = declaration(line) else {
+            continue;
+        };
+        let words: Vec<&str> = line.split_whitespace().collect();
+        let returns =
+            words.contains(&"Function") || words.windows(2).any(|pair| pair == ["Property", "Get"]);
+        let size = 4
+            + arguments(argument_list(line))
+                .into_iter()
+                .map(argument_size)
+                .sum::<u32>()
+            + if returns { 4 } else { 0 };
+        out.push((name, size));
+    }
+    out
+}
