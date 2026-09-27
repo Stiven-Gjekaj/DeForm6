@@ -46,6 +46,7 @@ use deform6::inspect;
 use deform6::journal::Mode;
 use deform6::read::pe::PeImage;
 use deform6::vb::header::{VbHeader, header_region};
+use deform6::vb::links::read_method_links;
 use deform6::vb::object::ObjectTable;
 use deform6::vb::opcodes::OpcodeTable;
 use deform6::vb::procdesc::read_method_table;
@@ -494,8 +495,8 @@ fn drive_one(source: &str, path: &Path, opcode_table: &OpcodeTable) {
     drive_method_tables(&data);
 }
 
-/// Reads the method table of each object that the public walk reaches, and
-/// the body of each descriptor. A step that refuses ends the walk for this
+/// Reads the method table of each object that the public walk reaches, the
+/// body of each descriptor, and the method link table. A step that refuses ends the walk for this
 /// input; nothing is asserted about the results.
 fn drive_method_tables(data: &[u8]) {
     let Ok(pe) = PeImage::parse(data) else {
@@ -520,6 +521,11 @@ fn drive_method_tables(data: &[u8]) {
         if let Ok(methods) = read_method_table(&pe, object.lp_object_info) {
             for descriptor in methods.descriptors() {
                 let _ = descriptor.body(&pe);
+            }
+        }
+        if let Ok(links) = read_method_links(&pe, object) {
+            for offset in [0, 0x1C, 0x6F8, u16::MAX] {
+                let _ = links.method_at(offset);
             }
         }
     }

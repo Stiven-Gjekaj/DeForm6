@@ -58,6 +58,7 @@ use deform6::vb::controlinfo::{
     ControlInfoTable, EventReport, EventSlot, StubShape, read_event_table,
 };
 use deform6::vb::header::{VbHeader, header_region};
+use deform6::vb::links::{LinkSlot, read_method_links};
 use deform6::vb::object::{Object, ObjectTable};
 use deform6::vb::opcodes::OpcodeTable;
 use deform6::vb::procdesc::{MethodEntry, read_method_table};
@@ -810,4 +811,81 @@ fn each_pcode_descriptor_gives_the_argument_size_of_its_source_procedure() {
         failures.join("\n")
     );
     assert_eq!(checked, EXPECTED_DESCRIPTORS);
+}
+
+/// The method slots of the link tables of the P-code corpus: the 680
+/// descriptors, less the 17 of the 8 standard modules, which have no link
+/// table.
+const EXPECTED_METHOD_SLOTS: usize = 663;
+
+/// The link table of each object of a P-code program holds a method slot
+/// for each procedure of its source. The public procedures come first, then
+/// the private ones, each group in the order of the file. Before them come
+/// two other slots for each public variable of the source.
+#[test]
+fn each_link_table_of_a_pcode_program_gives_the_procedures_of_its_source() {
+    let root = build_record::corpus_root();
+    let projects = vbp::project_files();
+    let mut methods_found = 0;
+    let mut failures = Vec::new();
+    for (key, exe) in pcode_programs() {
+        let bytes = read(&exe);
+        let pe = PeImage::parse(&bytes).unwrap_or_else(|err| panic!("{key}: {err}"));
+        let project = vbp::select_project_file(&root.join(&key), &projects)
+            .unwrap_or_else(|err| panic!("{key}: {err}"));
+        let sources: BTreeMap<String, PathBuf> = vbp::Project::read(&project)
+            .declared_objects()
+            .into_iter()
+            .filter_map(|object| Some((object.name?, object.source_file)))
+            .collect();
+        for object in objects_by_name(&pe).values() {
+            let links = read_method_links(&pe, object)
+                .unwrap_or_else(|err| panic!("{key}: {}: {err}", object.name));
+            if links.slots.is_empty() {
+                continue;
+            }
+            let descriptors: Vec<u32> = read_method_table(&pe, object.lp_object_info)
+                .unwrap_or_else(|err| panic!("{key}: {}: {err}", object.name))
+                .descriptors()
+                .map(|descriptor| descriptor.va.get())
+                .collect();
+            let path = &sources[&object.name];
+            let scopes = source::declared_procedure_scopes(path);
+            let expected: Vec<u32> = [true, false]
+                .into_iter()
+                .flat_map(|public| {
+                    scopes
+                        .iter()
+                        .zip(&descriptors)
+                        .filter(move |((is_public, _), _)| *is_public == public)
+                        .map(|(_, va)| *va)
+                })
+                .collect();
+            let found: Vec<u32> = links
+                .slots
+                .iter()
+                .filter_map(|slot| match slot {
+                    LinkSlot::Method(va) => Some(va.get()),
+                    LinkSlot::Other => None,
+                })
+                .collect();
+            let others = links.slots.len() - found.len();
+            let variables = source::declared_public_variables(path);
+            methods_found += found.len();
+            if found != expected || others != 2 * variables {
+                failures.push(format!(
+                    "{key}: {} gives the methods {found:x?} and {others} other slots; the source \
+                     gives {expected:x?} and {variables} public variables",
+                    object.name
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} link tables do not give the procedures of their source:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+    assert_eq!(methods_found, EXPECTED_METHOD_SLOTS);
 }

@@ -114,6 +114,16 @@ fn declaration(line: &str) -> Option<(bool, String)> {
 /// accepts, in the order of the file. `keep` is given whether the
 /// declaration is public.
 fn procedures(path: &Path, keep: fn(bool) -> bool) -> Vec<String> {
+    scoped_procedures(path)
+        .into_iter()
+        .filter(|(is_public, _)| keep(*is_public))
+        .map(|(_, name)| name)
+        .collect()
+}
+
+/// Gives each procedure that `path` declares, with whether it is public, in
+/// the order of the file.
+fn scoped_procedures(path: &Path) -> Vec<(bool, String)> {
     let Ok(bytes) = std::fs::read(path) else {
         return Vec::new();
     };
@@ -132,10 +142,8 @@ fn procedures(path: &Path, keep: fn(bool) -> bool) -> Vec<String> {
         if is_continuation {
             continue;
         }
-        if let Some((is_public, name)) = declaration(line.trim())
-            && keep(is_public)
-        {
-            out.push(name);
+        if let Some(found) = declaration(line.trim()) {
+            out.push(found);
         }
     }
     out
@@ -286,4 +294,41 @@ pub fn declared_argument_sizes(path: &Path) -> Vec<(String, u32)> {
         out.push((name, size));
     }
     out
+}
+
+/// Gives each procedure that `path` declares, with whether it is public, by
+/// the rules of [`declared_procedures`].
+#[must_use]
+pub fn declared_procedure_scopes(path: &Path) -> Vec<(bool, String)> {
+    scoped_procedures(path)
+}
+
+/// Gives the number of public variables that `path` declares: each name of
+/// a `Public` line before the first procedure, such as the two of
+/// `Public X As Long, Y As Long`. A `Public` constant, declaration, type,
+/// enumeration or event is not a variable.
+///
+/// Gives 0 when the file cannot be read.
+#[must_use]
+pub fn declared_public_variables(path: &Path) -> usize {
+    let Ok(bytes) = std::fs::read(path) else {
+        return 0;
+    };
+    let text: String = bytes.iter().copied().map(char::from).collect();
+    let mut count = 0;
+    for line in text.lines() {
+        let line = line.trim();
+        if declaration(line).is_some() {
+            break;
+        }
+        let Some(rest) = line.strip_prefix("Public ") else {
+            continue;
+        };
+        let first = rest.split_whitespace().next().unwrap_or_default();
+        if matches!(first, "Const" | "Declare" | "Type" | "Enum" | "Event") {
+            continue;
+        }
+        count += arguments(rest).len();
+    }
+    count
 }
