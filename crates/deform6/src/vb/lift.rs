@@ -166,7 +166,7 @@
 //! `GoTo` to a label at the offset of a statement. This is not the Basic of
 //! the source, and no claim is made that it compiles.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::vb::pcode::{PcodeEnd, PcodeInstruction, PcodeListing, PcodeTable};
 use crate::vb::types::{TypeFunction, VbTypes};
@@ -274,6 +274,11 @@ pub enum Expr {
     Late(Box<Expr>, u32),
     /// An element of an array.
     Index(Box<Expr>, Vec<Expr>),
+    /// The value that a store put into a frame slot, with the number of
+    /// the store and the slot. The end of the lift replaces it: with the
+    /// slot when the statement of the store stays, and with the value when
+    /// an `FFree` drops that statement.
+    Bound(u32, i16, Box<Expr>),
 }
 
 /// The procedure that a call names.
@@ -294,6 +299,14 @@ impl Callee {
             Self::Method(index) => format!("Me.method_{index}"),
             Self::Import(index) => format!("import_{index:X}"),
             Self::Member(object, name) => format!("{}.{name}", object.text()),
+        }
+    }
+
+    /// Replaces each [`Expr::Bound`] of the callee, as [`Expr::resolve`].
+    fn resolve(self, kept: &BTreeSet<u32>) -> Self {
+        match self {
+            Self::Member(object, name) => Self::Member(Box::new(object.resolve(kept)), name),
+            other => other,
         }
     }
 }
@@ -502,6 +515,41 @@ impl Expr {
             Self::New(index) => format!("New class_{index:X}"),
             Self::Late(object, dispid) => format!("{}.[DISPID {dispid:#X}]", object.text()),
             Self::Index(array, indexes) => format!("{}({})", array.text(), arguments_text(indexes)),
+            Self::Bound(_, _, value) => value.text(),
+        }
+    }
+
+    /// Replaces each [`Expr::Bound`]: with its slot when `kept` holds the
+    /// number of its store, and else with its value.
+    fn resolve(self, kept: &BTreeSet<u32>) -> Self {
+        let each = |exprs: Vec<Self>| exprs.into_iter().map(|expr| expr.resolve(kept)).collect();
+        match self {
+            Self::Bound(store, slot, _) if kept.contains(&store) => Self::frame(slot),
+            Self::Bound(_, _, value) => value.resolve(kept),
+            Self::Field(object, offset) => Self::Field(Box::new(object.resolve(kept)), offset),
+            Self::Binary(op, left, right) => Self::Binary(
+                op,
+                Box::new(left.resolve(kept)),
+                Box::new(right.resolve(kept)),
+            ),
+            Self::Convert(function, value) => {
+                Self::Convert(function, Box::new(value.resolve(kept)))
+            }
+            Self::Call(callee, args) => Self::Call(callee.resolve(kept), each(args)),
+            Self::Member(object, name) => Self::Member(Box::new(object.resolve(kept)), name),
+            Self::Late(object, dispid) => Self::Late(Box::new(object.resolve(kept)), dispid),
+            Self::Index(array, indexes) => {
+                Self::Index(Box::new(array.resolve(kept)), each(indexes))
+            }
+            other => other,
+        }
+    }
+
+    /// The expression without the [`Expr::Bound`] around it.
+    fn unbound(self) -> Self {
+        match self {
+            Self::Bound(_, _, value) => value.unbound(),
+            other => other,
         }
     }
 }
@@ -571,6 +619,46 @@ pub enum Stmt {
 }
 
 impl Stmt {
+    /// Replaces each [`Expr::Bound`] of the statement, as [`Expr::resolve`].
+    fn resolve(self, kept: &BTreeSet<u32>) -> Self {
+        match self {
+            Self::Assign { target, value } => Self::Assign {
+                target: target.resolve(kept),
+                value: value.resolve(kept),
+            },
+            Self::Set { target, value } => Self::Set {
+                target: target.resolve(kept),
+                value: value.resolve(kept),
+            },
+            Self::IfNotGoTo { condition, target } => Self::IfNotGoTo {
+                condition: condition.resolve(kept),
+                target,
+            },
+            Self::Call(callee, args) => Self::Call(
+                callee.resolve(kept),
+                args.into_iter().map(|arg| arg.resolve(kept)).collect(),
+            ),
+            Self::For {
+                counter,
+                start,
+                end,
+                step,
+                exit,
+            } => Self::For {
+                counter: counter.resolve(kept),
+                start: start.resolve(kept),
+                end: end.resolve(kept),
+                step: step.map(|step| step.resolve(kept)),
+                exit,
+            },
+            Self::Next { counter, body } => Self::Next {
+                counter: counter.resolve(kept),
+                body,
+            },
+            other => other,
+        }
+    }
+
     /// The text of the statement.
     #[must_use]
     pub fn text(&self) -> String {
@@ -1082,8 +1170,9 @@ fn member_name(function: &TypeFunction) -> String {
 }
 
 /// A `Set` that the lift gives only when no `FFree` frees its slot: the
-/// index of the statement that it goes before, and the statement.
-type PendingSet = (usize, LiftedStmt);
+/// number of its store, the index of the statement that it goes before, and
+/// the statement.
+type PendingSet = (u32, usize, LiftedStmt);
 
 /// The things that the lift keeps between opcodes.
 #[derive(Default)]
@@ -1092,6 +1181,10 @@ struct State {
     object: Option<Object>,
     bindings: BTreeMap<i16, Object>,
     pending: BTreeMap<i16, PendingSet>,
+    /// The pending statements that a later store to the same slot replaced
+    /// before an `FFree`: they stay.
+    kept: Vec<PendingSet>,
+    stores: u32,
 }
 
 /// Reads the frame slots that an `FFree` opcode frees: one slot, or a 16-bit
@@ -1109,6 +1202,21 @@ fn freed_slots(names: &[String], arguments: &[u8]) -> Option<Vec<i16>> {
 }
 
 impl State {
+    /// Binds `slot` to `value`, and keeps `stmt` until an `FFree` of the slot
+    /// drops it. A statement that is still pending for the slot stays.
+    fn bind_pending(&mut self, slot: i16, value: Value, index: usize, stmt: LiftedStmt) {
+        if let Some(old) = self.pending.remove(&slot) {
+            self.kept.push(old);
+        }
+        let store = self.stores;
+        self.stores = store.saturating_add(1);
+        self.pending.insert(slot, (store, index, stmt));
+        self.bindings.insert(
+            slot,
+            (Expr::Bound(store, slot, Box::new(value.expr)), value.class),
+        );
+    }
+
     /// The value of a load of the frame slot at `offset`: the object that a
     /// temporary slot is bound to, or the slot.
     fn load(&self, offset: i16, word: bool) -> Value {
@@ -1446,8 +1554,7 @@ fn run(
                         value: value.expr.clone(),
                     },
                 };
-                state.pending.insert(slot, (out.len(), assign));
-                state.bindings.insert(slot, (value.expr, value.class));
+                state.bind_pending(slot, value, out.len(), assign);
                 None
             }
             Family::FrameStore | Family::IndirectStore => {
@@ -1539,9 +1646,10 @@ fn run(
                             value: value.expr.clone(),
                         },
                     };
-                    state.pending.insert(slot, (out.len(), set));
+                    state.bind_pending(slot, value, out.len(), set);
+                } else {
+                    state.bindings.insert(slot, (value.expr, value.class));
                 }
-                state.bindings.insert(slot, (value.expr, value.class));
                 None
             }
             Family::ObjectCall { pushes } => {
@@ -1604,17 +1712,11 @@ fn run(
                         value: value.expr.clone(),
                     }
                 };
-                state.pending.insert(
-                    slot,
-                    (
-                        out.len(),
-                        LiftedStmt {
-                            offset: first,
-                            stmt,
-                        },
-                    ),
-                );
-                state.bindings.insert(slot, (value.expr, value.class));
+                let stmt = LiftedStmt {
+                    offset: first,
+                    stmt,
+                };
+                state.bind_pending(slot, value, out.len(), stmt);
                 None
             }
             Family::PopTemp => {
@@ -1811,7 +1913,7 @@ fn run(
             }
             Family::Discard => {
                 let value = pop(&mut state)?;
-                match value {
+                match value.unbound() {
                     Expr::Call(callee, args) => Some(Stmt::Call(callee, args)),
                     _ => None,
                 }
@@ -1902,11 +2004,19 @@ fn run(
         }
     }
     let mut pending: Vec<PendingSet> = state.pending.into_values().collect();
-    pending.sort_by_key(|(index, _)| std::cmp::Reverse(*index));
-    for (index, set) in pending {
+    pending.extend(state.kept);
+    let kept: BTreeSet<u32> = pending.iter().map(|(store, _, _)| *store).collect();
+    pending.sort_by_key(|(store, index, _)| std::cmp::Reverse((*index, *store)));
+    for (_, index, set) in pending {
         out.insert(index.min(out.len()), set);
     }
-    Ok(out)
+    Ok(out
+        .into_iter()
+        .map(|lifted| LiftedStmt {
+            offset: lifted.offset,
+            stmt: lifted.stmt.resolve(&kept),
+        })
+        .collect())
 }
 
 /// Gives the index of each class of the constant table that `listing`
@@ -2290,6 +2400,23 @@ result = false
     }
 
     #[test]
+    fn a_second_store_to_a_slot_keeps_the_first_set() {
+        let mut body = BOX1_IN_LOCAL_68.to_vec();
+        body.push(0xFF);
+        body.extend_from_slice(&BOX1_IN_LOCAL_68);
+        body.extend_from_slice(&[0xFF, 0x1C, 0xB0, 0x00, 0x00, 0x00, 0x0C]);
+        assert_eq!(
+            object_lines(&body).unwrap(),
+            [
+                "       Set local_68 = Me.box1",
+                "       Set local_68 = Me.box1",
+                "       Call local_68.Cls()",
+                "       Exit"
+            ]
+        );
+    }
+
+    #[test]
     fn an_object_slot_that_no_free_frees_gives_a_set() {
         let mut body = BOX1_IN_LOCAL_68.to_vec();
         body.extend_from_slice(&[0xFF, 0x1C, 0xB0, 0x00, 0x00, 0x00, 0x0C]);
@@ -2297,7 +2424,7 @@ result = false
             object_lines(&body).unwrap(),
             [
                 "       Set local_68 = Me.box1",
-                "       Call Me.box1.Cls()",
+                "       Call local_68.Cls()",
                 "       Exit"
             ]
         );
@@ -2761,8 +2888,8 @@ result = false
             lines(&freed).unwrap(),
             ["       Call import_2(arg_C, 1)", "       Exit"]
         );
-        // Without the free, local_88 is a variable, and its assignment
-        // comes before the call.
+        // Without the free, local_88 is a variable: its assignment comes
+        // before the call, and the call names it.
         let kept = [
             0x02, 0x01, 0x03, 0x0C, 0x00, 0x05, 0x78, 0xFF, 0x03, 0x78, 0xFF, 0x12, 0x02, 0x00,
             0x08, 0x00, 0x0C,
@@ -2771,7 +2898,7 @@ result = false
             lines(&kept).unwrap(),
             [
                 "       local_88 = arg_C",
-                "       Call import_2(arg_C, 1)",
+                "       Call import_2(local_88, 1)",
                 "       Exit"
             ]
         );
