@@ -114,6 +114,12 @@
 //! its result through its last argument, the address of a frame slot, and
 //! the lift binds that slot to the call in the same way.
 //!
+//! A store into a frame slot while other values stay on the stack is a
+//! store into a temporary slot of an expression, such as an argument that
+//! the compiler computes before the others. The lift binds the slot and
+//! gives the assignment only when no `FFree` frees the slot, as for an
+//! object.
+//!
 //! `NewIfNullPr` names a class of the constant table. When [`Callees`]
 //! gives the profile of that class, an object of the project, a call on the
 //! object finds a control accessor, a method, or the get or the let of a
@@ -1350,6 +1356,20 @@ fn run(
                 });
                 None
             }
+            Family::FrameStore if state.stack.len() > 1 => {
+                let value = state.stack.pop().ok_or(LiftFault::StackShort(at))?;
+                let slot = offset16()?;
+                let assign = LiftedStmt {
+                    offset: first,
+                    stmt: Stmt::Assign {
+                        target: Expr::frame(slot),
+                        value: value.expr.clone(),
+                    },
+                };
+                state.pending.insert(slot, (out.len(), assign));
+                state.bindings.insert(slot, (value.expr, value.class));
+                None
+            }
             Family::FrameStore | Family::IndirectStore => {
                 let value = pop(&mut state)?;
                 let slot = offset16()?;
@@ -2537,6 +2557,34 @@ result = false
     }
 
     #[test]
+    fn a_store_between_the_arguments_of_a_call_binds_a_temporary_slot() {
+        // import_2(1, arg_C): arg_C goes into local_88 while 1 stays on the
+        // stack, and FFree1Ad frees local_88 after the call.
+        let freed = [
+            0x02, 0x01, 0x03, 0x0C, 0x00, 0x05, 0x78, 0xFF, 0x03, 0x78, 0xFF, 0x12, 0x02, 0x00,
+            0x08, 0x00, 0x18, 0x78, 0xFF, 0x0C,
+        ];
+        assert_eq!(
+            lines(&freed).unwrap(),
+            ["       Call import_2(arg_C, 1)", "       Exit"]
+        );
+        // Without the free, local_88 is a variable, and its assignment
+        // comes before the call.
+        let kept = [
+            0x02, 0x01, 0x03, 0x0C, 0x00, 0x05, 0x78, 0xFF, 0x03, 0x78, 0xFF, 0x12, 0x02, 0x00,
+            0x08, 0x00, 0x0C,
+        ];
+        assert_eq!(
+            lines(&kept).unwrap(),
+            [
+                "       local_88 = arg_C",
+                "       Call import_2(arg_C, 1)",
+                "       Exit"
+            ]
+        );
+    }
+
+    #[test]
     fn a_label_goes_on_the_first_opcode_of_its_statement() {
         // The shape of `If c Then x = a Else x = b`.
         let body = [
@@ -2570,9 +2618,11 @@ result = false
     #[test]
     fn each_broken_rule_gives_its_fault() {
         assert_eq!(lines(&[0x09, 0x0C]), Err(LiftFault::StackShort(0)));
+        // The store of 2 binds a temporary slot, and the 1 is still on the
+        // stack at the exit.
         assert_eq!(
             lines(&[0x02, 0x01, 0x02, 0x02, 0x05, 0x78, 0xFF, 0x0C]),
-            Err(LiftFault::StackLeft(4))
+            Err(LiftFault::StackLeft(7))
         );
         assert_eq!(
             lines(&[0x02, 0x01, 0x07, 0x54, 0x00]),
