@@ -83,7 +83,7 @@
 //! | `GetRecOwn3`, `PutRecOwn3` | As `GetRec3` and `PutRec3`, with a descriptor of the type in place of the byte size |
 //! | `Close` | Pop the file number, and close the file |
 //! | `ForVar` | As `ForI4`, for a `Variant` counter |
-//! | `NextVar`, `NextStepVar` | Pop the counter; the loop goes back to the opcode after the `ForVar` of the same frame slot |
+//! | `NextVar`, `NextStepVar` | As `NextI4`, for a `Variant` counter |
 //! | `AddVar`, `SubVar`, `MulVar` | As `ConcatVar`, for `+`, `-` and `*` |
 //! | `DestructAnsiOFrame` | Nothing: it frees the ANSI copy of a record |
 //! | `PrintFile` | Pop the file number and one item, whose bytes with the 4 bytes of a descriptor are a 16-bit argument, and `Print` the item. The corpus holds no `Print` of more items |
@@ -779,8 +779,6 @@ pub enum LiftFault {
     /// A property get gives its result through an argument that is not the
     /// address of a frame slot.
     NoResultSlot(u32),
-    /// A `NextVar` names a frame slot that no `ForVar` before it names.
-    NoLoop(u32),
 }
 
 /// What an opcode does, from the names of its handler.
@@ -845,7 +843,6 @@ enum Family {
     },
     Open,
     Close,
-    NextVariant,
     FileRecord {
         name: &'static str,
         record: bool,
@@ -1045,7 +1042,7 @@ fn family_of(name: &str) -> Option<Family> {
         "PrintFile" => Family::PrintFile,
         "Close" => Family::Close,
         "ForVar" => Family::For { step: false },
-        "NextVar" | "NextStepVar" => Family::NextVariant,
+        "NextVar" | "NextStepVar" => Family::Next,
         "AddVar" => Family::VariantBinary(BinaryOp::Add),
         "SubVar" => Family::VariantBinary(BinaryOp::Sub),
         "MulVar" => Family::VariantBinary(BinaryOp::Mul),
@@ -1378,9 +1375,6 @@ struct State {
     floats: Vec<u32>,
     /// The offset of the opcode after the last of those calls.
     resume: Option<u32>,
-    /// The offset of the opcode after each `For`, by the frame slot of the
-    /// loop, for a `NextVar` that names only the slot.
-    loops: BTreeMap<i16, u16>,
 }
 
 /// Reads the frame slots that an `FFree` opcode frees: one slot, or a 16-bit
@@ -2223,17 +2217,6 @@ fn run(
                 Callee::Member(Box::new(Expr::Word("VBA")), "Close".to_owned()),
                 vec![pop(&mut state)?],
             )),
-            Family::NextVariant => {
-                let body = state
-                    .loops
-                    .get(&offset16()?)
-                    .copied()
-                    .ok_or(LiftFault::NoLoop(at))?;
-                Some(Stmt::Next {
-                    counter: pop(&mut state)?,
-                    body,
-                })
-            }
             Family::Open => {
                 let length = pop(&mut state)?;
                 let number = pop(&mut state)?;
@@ -2417,9 +2400,6 @@ fn run(
                 let end = pop(&mut state)?;
                 let counter = pop(&mut state)?;
                 let start = pop(&mut state)?;
-                if let Some(body) = next_offset.and_then(|body| u16::try_from(body).ok()) {
-                    state.loops.insert(offset16()?, body);
-                }
                 Some(Stmt::For {
                     counter,
                     start,
@@ -2873,7 +2853,7 @@ names = ["DestructAnsiOFrame"]
 width = 4
 names = ["ForVar"]
 [primary.54]
-width = 2
+width = 4
 names = ["NextVar"]
 [primary.55]
 width = 0
@@ -3769,22 +3749,20 @@ result = false
         // For local_64 = 1 To 3: local_88 = local_60 + local_64: Next;
         // Close #1
         let loop_of_variants = [
-            0x02, 0x01, 0x15, 0x9C, 0xFF, 0x02, 0x03, 0x53, 0xEC, 0xFE, 0x1E, 0x00, 0x15, 0xA0,
+            0x02, 0x01, 0x15, 0x9C, 0xFF, 0x02, 0x03, 0x53, 0xEC, 0xFE, 0x20, 0x00, 0x15, 0xA0,
             0xFF, 0x15, 0x9C, 0xFF, 0x56, 0x90, 0xFF, 0x05, 0x78, 0xFF, 0x15, 0x9C, 0xFF, 0x54,
-            0xEC, 0xFE, 0x02, 0x01, 0x55, 0x0C,
+            0xEC, 0xFE, 0x0C, 0x00, 0x02, 0x01, 0x55, 0x0C,
         ];
         assert_eq!(
             lines(&loop_of_variants).unwrap(),
             [
-                "       For local_64 = 1 To 3  ' past the end: GoTo L001E",
+                "       For local_64 = 1 To 3  ' past the end: GoTo L0020",
                 "L000C: local_88 = (local_60 + local_64)",
                 "       Next local_64  ' loop: GoTo L000C",
-                "L001E: Call VBA.Close(1)",
+                "L0020: Call VBA.Close(1)",
                 "       Exit"
             ]
         );
-        let lost = [0x15, 0x9C, 0xFF, 0x54, 0xEC, 0xFE, 0x0C];
-        assert_eq!(lines(&lost), Err(LiftFault::NoLoop(3)));
         let destruct = [0x52, 0x88, 0xFE, 0x03, 0x00, 0x0C];
         assert_eq!(lines(&destruct).unwrap(), ["       Exit"]);
         let two = [
