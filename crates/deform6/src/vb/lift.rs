@@ -267,6 +267,7 @@ pub struct Callees {
     classes: Vec<(u16, Callees)>,
     class_interfaces: Vec<(u16, String)>,
     arguments: Vec<(u16, i16, String)>,
+    base: Option<String>,
 }
 
 /// A method that [`Callees`] gives.
@@ -322,6 +323,20 @@ impl Callees {
     pub fn with_class(mut self, index: u16, profile: Self) -> Self {
         self.classes.push((index, profile));
         self
+    }
+
+    /// Sets the base interface of the object, such as `_Form`: its vtable
+    /// comes before the control accessors and the link table.
+    #[must_use]
+    pub fn with_base(mut self, interface: &str) -> Self {
+        self.base = Some(interface.to_owned());
+        self
+    }
+
+    /// Gives the base interface of the object.
+    #[must_use]
+    pub fn base(&self) -> Option<&str> {
+        self.base.as_deref()
     }
 
     /// Adds the interface `interface` of the argument at the frame offset
@@ -996,10 +1011,60 @@ impl State {
 /// its class in the constant table.
 const PROJECT_CLASS: char = '@';
 
-/// Lifts a call on an object of the project whose vtable `profile` gives.
+/// Lifts a call of the function at `vtable_offset` of the interface
+/// `interface` on `object`.
+fn interface_call(
+    state: &mut State,
+    types: Option<&VbTypes>,
+    interface: &str,
+    object: Expr,
+    vtable_offset: u16,
+    at: u32,
+) -> Result<Option<Stmt>, LiftFault> {
+    let function = types
+        .and_then(|types| types.interface(interface)?.function(vtable_offset))
+        .ok_or(LiftFault::NoFunction(at))?;
+    let bytes = function.arg_bytes.ok_or(LiftFault::CallArguments(at))?;
+    let mut args = call_arguments(&mut state.stack, bytes, at)?;
+    let name = member_name(function);
+    let has = |kind: &str| function.kinds.iter().any(|one| one == kind);
+    if function.result {
+        let slot = args
+            .pop()
+            .and_then(|value| value.slot)
+            .ok_or(LiftFault::NoResultSlot(at))?;
+        let value = if args.is_empty() && has("get") {
+            Expr::Member(Box::new(object), name)
+        } else {
+            Expr::Call(Callee::Member(Box::new(object), name), expressions(args))
+        };
+        state
+            .bindings
+            .insert(slot, (value, function.result_interface.clone()));
+        return Ok(None);
+    }
+    let target = Expr::Member(Box::new(object.clone()), name.clone());
+    Ok(Some(match (args.as_slice(), has("let"), has("set")) {
+        ([_], true, _) => Stmt::Assign {
+            target,
+            value: expressions(args).remove(0),
+        },
+        ([_], false, true) => Stmt::Set {
+            target,
+            value: expressions(args).remove(0),
+        },
+        _ => Stmt::Call(Callee::Member(Box::new(object), name), expressions(args)),
+    }))
+}
+
+/// Lifts a call on an object of the project whose vtable `profile` gives:
+/// `Me`, or an object of a class of the constant table. An offset in the
+/// base interface of the object, such as `_Form`, is a call of that
+/// interface.
 fn project_call(
     state: &mut State,
     profile: &Callees,
+    types: Option<&VbTypes>,
     object: Expr,
     vtable_offset: u16,
     pushes: bool,
@@ -1016,6 +1081,13 @@ fn project_call(
             class: Some(interface.to_owned()),
         });
         return Ok(None);
+    }
+    if let Some(base) = profile.base()
+        && types
+            .and_then(|types| types.interface(base))
+            .is_some_and(|interface| vtable_offset < interface.vtable_size)
+    {
+        return interface_call(state, types, base, object, vtable_offset, at);
     }
     if let Some(method) = profile.method(vtable_offset) {
         let bytes = method
@@ -1056,66 +1128,22 @@ fn object_call(
     at: u32,
 ) -> Result<Option<Stmt>, LiftFault> {
     let (object, class) = state.object.clone().ok_or(LiftFault::NoObject(at))?;
-    if object == Expr::Arg(8)
-        && let Some((name, interface)) = callees.control(vtable_offset)
-    {
-        if !pushes {
-            return Err(LiftFault::NoFunction(at));
-        }
-        state.stack.push(Value {
-            expr: Expr::Member(Box::new(object), name.to_owned()),
-            bytes: 4,
-            slot: None,
-            class: Some(interface.to_owned()),
-        });
-        return Ok(None);
+    let profile = match class.as_deref() {
+        None if object == Expr::Arg(8) => Some(callees),
+        Some(class) => class
+            .strip_prefix(PROJECT_CLASS)
+            .and_then(|index| index.parse::<u16>().ok())
+            .and_then(|index| callees.class(index)),
+        None => None,
+    };
+    if let Some(profile) = profile {
+        return project_call(state, profile, types, object, vtable_offset, pushes, at);
     }
-    if let Some(profile) = class
-        .as_deref()
-        .and_then(|class| class.strip_prefix(PROJECT_CLASS))
-        .and_then(|index| index.parse::<u16>().ok())
-        .and_then(|index| callees.class(index))
-    {
-        return project_call(state, profile, object, vtable_offset, pushes, at);
-    }
+    let interface = class.ok_or(LiftFault::NoFunction(at))?;
     if pushes {
         return Err(LiftFault::NoFunction(at));
     }
-    let function = class
-        .as_deref()
-        .and_then(|class| types?.interface(class)?.function(vtable_offset))
-        .ok_or(LiftFault::NoFunction(at))?;
-    let bytes = function.arg_bytes.ok_or(LiftFault::CallArguments(at))?;
-    let mut args = call_arguments(&mut state.stack, bytes, at)?;
-    let name = member_name(function);
-    let has = |kind: &str| function.kinds.iter().any(|one| one == kind);
-    if function.result {
-        let slot = args
-            .pop()
-            .and_then(|value| value.slot)
-            .ok_or(LiftFault::NoResultSlot(at))?;
-        let value = if args.is_empty() && has("get") {
-            Expr::Member(Box::new(object), name)
-        } else {
-            Expr::Call(Callee::Member(Box::new(object), name), expressions(args))
-        };
-        state
-            .bindings
-            .insert(slot, (value, function.result_interface.clone()));
-        return Ok(None);
-    }
-    let target = Expr::Member(Box::new(object.clone()), name.clone());
-    Ok(Some(match (args.as_slice(), has("let"), has("set")) {
-        ([_], true, _) => Stmt::Assign {
-            target,
-            value: expressions(args).remove(0),
-        },
-        ([_], false, true) => Stmt::Set {
-            target,
-            value: expressions(args).remove(0),
-        },
-        _ => Stmt::Call(Callee::Member(Box::new(object), name), expressions(args)),
-    }))
+    interface_call(state, types, &interface, object, vtable_offset, at)
 }
 
 /// The classes of the arguments of one call of a method of `Me`: the index
@@ -1831,7 +1859,7 @@ names = ["End"]
     /// interface `_Box` and its offsets are placeholders.
     const TYPES: &str = r#"
 [interfaces._Box]
-vtable_size = 64
+vtable_size = 256
 [interfaces._Box.functions.00A8]
 names = ["_Default", "Text"]
 kinds = ["get", "get"]
@@ -1969,6 +1997,27 @@ result = false
         assert_eq!(
             method_calls(&listing, &table, &callees, Some(&types), 0),
             [(5, vec![(4, Some("_Box".to_owned())), (4, None)])]
+        );
+    }
+
+    #[test]
+    fn a_call_on_me_below_the_accessors_is_a_call_of_the_base_interface() {
+        // FLdPr of the slot of Me, then the let of Text at 0xAC, with the
+        // base interface _Box.
+        let table = PcodeTable::parse(TABLE.as_bytes()).unwrap();
+        let types = VbTypes::parse(TYPES.as_bytes()).unwrap();
+        let body = [
+            0x02, 0x07, 0x06, 0x08, 0x00, 0x1C, 0xAC, 0x00, 0x00, 0x00, 0x0C,
+        ];
+        let listing = disassemble(&Region::new(&body, Off::new(0)), &table);
+        let callees = Callees::default().with_base("_Box");
+        assert_eq!(
+            render(&lift(&listing, &table, &callees, Some(&types)).unwrap())[0],
+            "       Me.Text = 7"
+        );
+        assert_eq!(
+            lift(&listing, &table, &Callees::default(), Some(&types)),
+            Err(LiftFault::NoFunction(5))
         );
     }
 

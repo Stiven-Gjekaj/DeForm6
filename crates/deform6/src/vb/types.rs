@@ -191,23 +191,25 @@ impl VbTypes {
     /// names the interface of the form. The accessor of a control is at the
     /// vtable size of that interface, plus 4 times the `wIndex` of the
     /// control. A control whose GUID names no interface of the file is left
-    /// out, and so is each control of an object that is not a form.
+    /// out, and so is each control of an object that is not a form. The
+    /// interface of the form becomes the base interface of `callees`.
     #[must_use]
     pub fn with_controls(&self, callees: Callees, pe: &PeImage<'_>, object: &Object) -> Callees {
         let Ok(controls) = ControlInfoTable::read(pe, object) else {
             return callees;
         };
-        let base = controls
+        let form = controls
             .entries
             .iter()
             .find(|control| control.w_index == FORM_RECORD_INDEX)
-            .and_then(|form| self.control_interface(&Self::guid(pe, form)?))
-            .and_then(|interface| self.interface(interface))
-            .map(|interface| u32::from(interface.vtable_size));
-        let Some(base) = base else {
+            .and_then(|form| self.control_interface(&Self::guid(pe, form)?));
+        let Some((name, base)) = form.and_then(|name| {
+            self.interface(name)
+                .map(|interface| (name, u32::from(interface.vtable_size)))
+        }) else {
             return callees;
         };
-        let mut callees = callees;
+        let mut callees = callees.with_base(name);
         for control in &controls.entries {
             if control.w_index == FORM_RECORD_INDEX {
                 continue;
