@@ -6,6 +6,7 @@
 //!
 //! - `[controls]` maps the GUID that a `ControlInfo` record names, in the
 //!   registry form, to the name of the interface of the control.
+//! - `[iids]` maps the GUID of an interface to its name.
 //! - `[interfaces.<name>]` gives `vtable_size`, and under `functions` a
 //!   table for each vtable offset in hexadecimal, with `names`, `kinds`,
 //!   `arg_bytes` and `result`. `arg_bytes` leaves out the 4 bytes of the object. It is
@@ -59,6 +60,7 @@ impl InterfaceType {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VbTypes {
     controls: BTreeMap<String, String>,
+    iids: BTreeMap<String, String>,
     interfaces: BTreeMap<String, InterfaceType>,
 }
 
@@ -67,6 +69,8 @@ pub struct VbTypes {
 struct RawTypes {
     #[serde(default)]
     controls: BTreeMap<String, String>,
+    #[serde(default)]
+    iids: BTreeMap<String, String>,
     #[serde(default)]
     interfaces: BTreeMap<String, RawInterface>,
 }
@@ -154,6 +158,7 @@ impl VbTypes {
         }
         Ok(Self {
             controls: raw.controls,
+            iids: raw.iids,
             interfaces,
         })
     }
@@ -215,6 +220,12 @@ impl VbTypes {
         callees
     }
 
+    /// Gives the name of the interface whose GUID is `guid`.
+    #[must_use]
+    pub fn interface_of_iid(&self, guid: &[u8; 16]) -> Option<&str> {
+        self.iids.get(&guid_text(guid)).map(String::as_str)
+    }
+
     /// Gives the interface of the name `name`.
     #[must_use]
     pub fn interface(&self, name: &str) -> Option<&InterfaceType> {
@@ -236,6 +247,9 @@ mod tests {
     const TYPES: &str = r#"
 [controls]
 "{33AD4ED2-6699-11CF-B70C-00AA0060D393}" = "_Box"
+
+[iids]
+"{33AD4ED1-6699-11CF-B70C-00AA0060D393}" = "_Box"
 
 [interfaces._Box]
 vtable_size = 48
@@ -262,6 +276,10 @@ result = false
         let types = VbTypes::parse(TYPES.as_bytes()).unwrap();
         assert_eq!(types.control_interface(&GUID), Some("_Box"));
         assert_eq!(types.control_interface(&[0; 16]), None);
+        let mut iid = GUID;
+        iid[0] = 0xD1;
+        assert_eq!(types.interface_of_iid(&iid), Some("_Box"));
+        assert_eq!(types.interface_of_iid(&GUID), None);
         let interface = types.interface("_Box").unwrap();
         assert_eq!(interface.vtable_size, 48);
         let text = interface.function(0x24).unwrap();
