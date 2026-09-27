@@ -35,6 +35,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use object::{Object, ObjectSection};
 
+use crate::pcode_widths::{Width, width};
 use crate::pdb2::{Dbi, Omap, Pdb2, Public, publics, u32_at};
 
 /// The default output path, relative to the workspace root.
@@ -124,7 +125,7 @@ impl Image {
     }
 
     /// Gives `len` bytes at `rva`, when one section holds all of them.
-    fn bytes(&self, rva: u32, len: usize) -> Option<&[u8]> {
+    pub(crate) fn bytes(&self, rva: u32, len: usize) -> Option<&[u8]> {
         self.sections.iter().find_map(|(start, data)| {
             let at = usize::try_from(rva.checked_sub(*start)?).ok()?;
             data.get(at..at.checked_add(len)?)
@@ -203,6 +204,9 @@ pub(crate) struct Slot {
     /// Each name of the handler, without `_lblEX_`, sorted. Empty when no
     /// public symbol names the address.
     pub(crate) names: Vec<String>,
+    /// The argument width that the code of the handler gives, or `None` when
+    /// its code cannot be followed.
+    pub(crate) width: Option<Width>,
 }
 
 /// Gives the name of the export that a public symbol names: the name
@@ -317,6 +321,7 @@ pub(crate) fn derive(image: &Image, symbols: &Symbols) -> Result<Vec<Slot>, Stri
             .get(&handler)
             .map(|set| set.iter().cloned().collect())
             .unwrap_or_default(),
+        width: None,
     };
     let read_table = |start: u32, count: u16, table: Table| -> Result<Vec<Slot>, String> {
         let mut out = Vec::new();
@@ -334,7 +339,9 @@ pub(crate) fn derive(image: &Image, symbols: &Symbols) -> Result<Vec<Slot>, Stri
         Ok(out)
     };
 
-    let mut slots = read_table(symbol(PRIMARY_TABLE)?, 256, Table::Primary)?;
+    let primary = symbol(PRIMARY_TABLE)?;
+    let mut tables = BTreeSet::from([primary]);
+    let mut slots = read_table(primary, 256, Table::Primary)?;
     let leads: Vec<(u8, u32)> = slots
         .iter()
         .filter(|slot| slot.opcode >= FIRST_LEAD)
@@ -352,15 +359,33 @@ pub(crate) fn derive(image: &Image, symbols: &Symbols) -> Result<Vec<Slot>, Stri
             ));
         }
         let (start, count) = lead_table(image, handler)?;
+        tables.insert(start);
         slots.extend(read_table(start, count, Table::Lead(lead))?);
     }
+    let mut widths = BTreeMap::new();
+    for slot in &mut slots {
+        slot.width = *widths
+            .entry(slot.handler)
+            .or_insert_with(|| width(image, &tables, slot.handler));
+    }
     Ok(slots)
+}
+
+/// The width of one row of the written file: a number of bytes, or the
+/// word `counted`.
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+enum RowWidth {
+    Fixed(u32),
+    Word(&'static str),
 }
 
 /// One row of the written file.
 #[derive(serde::Serialize)]
 struct Row<'a> {
     handler: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    width: Option<RowWidth>,
     names: &'a [String],
 }
 
@@ -373,6 +398,10 @@ pub(crate) fn render(slots: &[Slot]) -> Result<String, String> {
             format!("{:02X}", slot.opcode),
             Row {
                 handler: format!("{:#010x}", slot.handler),
+                width: slot.width.map(|width| match width {
+                    Width::Fixed(bytes) => RowWidth::Fixed(bytes),
+                    Width::Counted => RowWidth::Word("counted"),
+                }),
                 names: &slot.names,
             },
         );
@@ -382,7 +411,7 @@ pub(crate) fn render(slots: &[Slot]) -> Result<String, String> {
     Ok(format!(
         "# The P-code dispatch table of MSVBVM60.DLL, written by\n# `cargo run -p xtask -- \
          derive-pcode-table`. Do not commit this file.\n#\n# `handler` is the address of the \
-         handler relative to the image base.\n# `names` are the public symbols of the handler \
+         handler relative to the image base.\n# `width` is the number of argument bytes after the opcode, or `counted`\n# for a 16-bit byte count and that many bytes. It is absent when the code of\n# the handler cannot be followed.\n# `names` are the public symbols of the handler \
          without `_lblEX_`.\n\n{body}"
     ))
 }
@@ -557,6 +586,9 @@ mod tests {
                 opcode: 0,
                 handler: 0x1800,
                 names: vec!["Bos".to_owned(), "LargeBos".to_owned()],
+                // The fixture holds no handler code; `pcode_widths` tests
+                // the width.
+                width: slots[0].width,
             }
         );
         assert!(slots[1].names.is_empty());
@@ -605,12 +637,14 @@ mod tests {
                 opcode: 0x13,
                 handler: 0x1038F5,
                 names: vec!["ExitProcHresult".to_owned()],
+                width: Some(super::Width::Fixed(0)),
             },
             Slot {
                 table: Table::Lead(4),
                 opcode: 0,
                 handler: 0x1804,
                 names: Vec::new(),
+                width: Some(super::Width::Counted),
             },
         ];
         let text = render(&slots).unwrap();

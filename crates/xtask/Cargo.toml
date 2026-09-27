@@ -13,6 +13,7 @@ deform6.workspace = true
 object.workspace = true
 ureq = "=3.4.1"
 sha2 = "=0.11.0"
+iced-x86 = { version = "=1.21.0", default-features = false, features = ["decoder", "instr_info", "std"] }
 
 # The wall is opt-in per crate through this section. `xtask` carries it for
 # the same reason every other crate in this workspace does: a broken

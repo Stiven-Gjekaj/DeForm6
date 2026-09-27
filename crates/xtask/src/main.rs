@@ -100,6 +100,7 @@ mod opcode_table;
 mod pcode;
 mod pcode_symbols;
 mod pcode_table;
+mod pcode_widths;
 mod pdb2;
 
 use std::path::Path;

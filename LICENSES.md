@@ -4,7 +4,7 @@ This file names the licence `cargo metadata` states for every third party packag
 
     cargo run -p xtask -- licences
 
-reads the current dependency tree and rewrites this file. Built 2026-09-14. A difference between a fresh run and this committed file means the dependency tree changed and this file did not.
+reads the current dependency tree and rewrites this file. Built 2026-09-27. A difference between a fresh run and this committed file means the dependency tree changed and this file did not.
 
 The three workspace members, `deform6`, `deform6-cli` and `xtask`, are excluded, so a version bump never changes this table.
 
@@ -52,12 +52,14 @@ The three workspace members, `deform6`, `deform6-cli` and `xtask`, are excluded,
 | http | 1.5.0 | MIT OR Apache-2.0 | https://github.com/hyperium/http |
 | httparse | 1.10.1 | MIT OR Apache-2.0 | https://github.com/seanmonstar/httparse |
 | hybrid-array | 0.4.15 | MIT OR Apache-2.0 | https://github.com/RustCrypto/hybrid-array |
+| iced-x86 | 1.21.0 | MIT | https://github.com/icedland/iced |
 | indexmap | 2.14.2 | Apache-2.0 OR MIT | https://github.com/indexmap-rs/indexmap |
 | itoa | 1.0.18 | MIT OR Apache-2.0 | https://github.com/dtolnay/itoa |
 | js-sys | 0.3.105 | MIT OR Apache-2.0 | https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys |
 | jsonschema | 0.56.0 | MIT | https://github.com/Stranger6667/jsonschema |
 | jsonschema-regex | 0.56.0 | MIT | https://github.com/Stranger6667/jsonschema |
 | jsonschema-value | 0.56.0 | MIT | https://github.com/Stranger6667/jsonschema |
+| lazy_static | 1.5.0 | MIT OR Apache-2.0 | https://github.com/rust-lang-nursery/lazy-static.rs |
 | libc | 0.2.189 | MIT OR Apache-2.0 | https://github.com/rust-lang/libc |
 | lock_api | 0.4.14 | MIT OR Apache-2.0 | https://github.com/Amanieu/parking_lot |
 | log | 0.4.34 | MIT OR Apache-2.0 | https://github.com/rust-lang/log |
@@ -164,8 +166,8 @@ The three workspace members, `deform6`, `deform6-cli` and `xtask`, are excluded,
 - BSD-3-Clause: 1
 - CDLA-Permissive-2.0: 1
 - ISC: 2
-- MIT: 19
-- MIT OR Apache-2.0: 88
+- MIT: 20
+- MIT OR Apache-2.0: 89
 - MIT OR Apache-2.0 OR LGPL-2.1-or-later: 1
 - MIT OR Zlib OR Apache-2.0: 1
 - MIT-0: 1
