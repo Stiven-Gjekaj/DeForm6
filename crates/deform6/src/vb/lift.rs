@@ -195,7 +195,9 @@
 //! # What the output is
 //!
 //! The statements name a frame slot by its offset, such as `local_94` or
-//! `arg_C`, and a field by its offset, such as `Me.field_54`. A branch is a
+//! `arg_C`, and a field by its offset, such as `local_88.field_C`. A field
+//! of `Me` has no `Me.`, such as `field_54`, because Basic does not reach a
+//! private variable of a module through `Me`. A branch is a
 //! `GoTo` to a label at the offset of a statement. This is not the Basic of
 //! the source, and no claim is made that it compiles.
 
@@ -669,6 +671,7 @@ impl Expr {
             Self::Local(offset) => format!("local_{offset:X}"),
             Self::Arg(8) => "Me".to_owned(),
             Self::Arg(offset) => format!("arg_{offset:X}"),
+            Self::Field(object, offset) if **object == Self::Arg(8) => format!("field_{offset:X}"),
             Self::Field(object, offset) => format!("{}.field_{offset:X}", object.text()),
             Self::Global(index) => format!("global_{index:X}"),
             Self::Binary(op, left, right) => {
@@ -3721,8 +3724,8 @@ dispid = 67
         assert_eq!(
             lines(&body).unwrap(),
             [
-                "       Me.field_54 = 0",
-                "       Me.field_40 = -1",
+                "       field_54 = 0",
+                "       field_40 = -1",
                 "       Exit Sub"
             ]
         );
@@ -3739,7 +3742,7 @@ dispid = 67
         assert_eq!(
             lines(&body).unwrap(),
             [
-                "       Me.field_54 = 0",
+                "       field_54 = 0",
                 "       arg_C.field_40 = 1",
                 "       Exit Sub"
             ]
@@ -3761,7 +3764,7 @@ dispid = 67
 
     #[test]
     fn globals_fields_and_strings_give_their_expressions() {
-        // local_88 = Me.field_54; local_68.field_10 = local_88.field_C;
+        // local_88 = field_54; local_68.field_10 = local_88.field_C;
         // local_88 = "x", with the string at index 2.
         let body = [
             0x16, 0x1E, 0x54, 0x00, 0x05, 0x78, 0xFF, 0x20, 0x78, 0xFF, 0x0C, 0x00, 0x1F, 0x98,
@@ -3774,7 +3777,7 @@ dispid = 67
         assert_eq!(
             lines,
             [
-                "       local_88 = Me.field_54",
+                "       local_88 = field_54",
                 "       local_68.field_10 = local_88.field_C",
                 "       local_88 = \"x\"",
                 "       Exit Sub"
