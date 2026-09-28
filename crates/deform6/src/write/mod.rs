@@ -150,12 +150,14 @@ pub fn project(report: &Report, data: &[u8], mode: Mode) -> Result<WrittenProjec
                 &object_report.procedures,
                 &[],
                 &path_prefix,
+                object_report.lifted.as_ref(),
             ),
             CodeKind::Module => code::write_bas(
                 &code_model.name,
                 &object_report.procedures,
                 &[],
                 &path_prefix,
+                object_report.lifted.as_ref(),
             ),
         };
         let extension = match code_model.kind {

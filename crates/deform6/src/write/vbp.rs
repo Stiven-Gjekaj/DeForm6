@@ -514,6 +514,7 @@ mod tests {
             kind,
             procedures: ObjectProcedures::Slots(Vec::new()),
             gaps: Vec::new(),
+            lifted: None,
         }
     }
 

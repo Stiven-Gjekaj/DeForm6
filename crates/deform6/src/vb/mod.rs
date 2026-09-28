@@ -16,6 +16,7 @@
 //! only the one file it owns, and this file never becomes a merge point for
 //! two plans in one wave.
 
+pub mod bodies;
 pub mod classify;
 pub mod constants;
 pub mod context;
@@ -149,6 +150,9 @@ pub struct ObjectReport {
     /// Empty for a standard module, which carries no `PrivateObj` to raise
     /// one.
     pub gaps: Vec<Gap>,
+    /// The lifted procedures of the object, which
+    /// [`bodies::lift_objects`] gives. `inspect` leaves it `None`.
+    pub lifted: Option<bodies::LiftedObject>,
 }
 
 /// One form this phase recovered: FRM-01 through FRM-06 composed for one
@@ -527,6 +531,7 @@ fn compose_object(pe: &PeImage<'_>, object: &Object, defects: &mut Vec<Defect>) 
         kind,
         procedures,
         gaps,
+        lifted: None,
     }
 }
 

@@ -1674,3 +1674,59 @@ fn a_given_name_replaces_the_name_of_a_procedure() {
     assert_eq!(callees[0].procedure(3), "makeSpecialString");
     assert_eq!(callees[1].procedure(0), "method_0");
 }
+
+/// `lift_objects` gives each procedure of `TFTPClient.exe` the declaration
+/// that `extract` writes: a Winsock handler by its event, with the
+/// parameters of the event. With no P-code table, each body says that the
+/// lift stopped, and `write::project` writes that body into the form.
+#[test]
+fn each_lifted_procedure_takes_the_declaration_that_extract_writes() {
+    let key = "public-domain/SK-TFTP-Sample__VB6/Client/demo/TFTPClient.exe";
+    let bytes = read(&pcode_root().join(key));
+    let types = VbTypes::parse(WINSOCK_EVENTS.as_bytes()).unwrap();
+    let report =
+        deform6::inspect_with_types(&bytes, &OpcodeTable::builtin(), Some(&types), Mode::Strict)
+            .unwrap();
+    let lifted =
+        deform6::vb::bodies::lift_objects(&bytes, &report, &PcodeTable::default(), Some(&types))
+            .unwrap();
+    assert_eq!(lifted.len(), report.objects.len());
+    let form = report
+        .objects
+        .iter()
+        .position(|object| object.name == "Form1")
+        .unwrap();
+    let procedures = &lifted[form].as_ref().unwrap().procedures;
+    let declarations: Vec<&str> = procedures
+        .iter()
+        .map(|procedure| procedure.declaration.as_str())
+        .collect();
+    assert!(
+        declarations.contains(&"Private Sub WskClient_DataArrival(ByVal bytesTotal As Long)"),
+        "{declarations:#?}"
+    );
+    for procedure in procedures {
+        assert!(
+            procedure.lines[0].contains("The lift stopped"),
+            "{:?}",
+            procedure.lines
+        );
+    }
+    let mut report = report;
+    for (object, own) in report.objects.iter_mut().zip(lifted) {
+        object.lifted = own;
+    }
+    let project = deform6::write::project(&report, &bytes, Mode::Strict).unwrap();
+    let form = project
+        .files
+        .iter()
+        .find(|file| file.name == "Form1.frm")
+        .unwrap();
+    let text = String::from_utf8_lossy(&form.bytes);
+    assert!(
+        text.contains(
+            "Private Sub WskClient_DataArrival(ByVal bytesTotal As Long)\r\n    ' The lift stopped"
+        ),
+        "{text}"
+    );
+}

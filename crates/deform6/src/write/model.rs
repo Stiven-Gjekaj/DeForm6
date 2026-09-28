@@ -472,6 +472,9 @@ pub struct FormModel {
     /// Every resource blob this form's own controls carry, in control tree
     /// order: the order the `.frx` writer must pack them in.
     pub blobs: Vec<BlobRef>,
+    /// The lifted procedures of the form and the declarations of its
+    /// variables, for `extract --lift`. `None` writes each procedure empty.
+    pub lifted: Option<crate::vb::bodies::LiftedObject>,
 }
 
 /// One control: its own name, its own type, its own place in the tree, and
@@ -674,6 +677,7 @@ pub fn from_report(report: &Report, _data: &[u8]) -> (ProjectModel, Vec<ReportIt
             controls,
             procedures,
             blobs,
+            lifted: matching_object.and_then(|object| object.lifted.clone()),
         });
     }
 
@@ -1016,6 +1020,7 @@ mod tests {
             kind,
             procedures: ObjectProcedures::Slots(Vec::new()),
             gaps: Vec::new(),
+            lifted: None,
         }
     }
 

@@ -816,8 +816,12 @@ pub fn write_form(
     // them by this form's own path prefix without this file ever naming
     // the comment emitter itself.
     let form_prefix = crate::report::path_for_form(&form.name);
-    let (region_lines, mut code_items) =
-        crate::write::code::write_code_region(&items, &form_prefix, &procedures);
+    let (region_lines, mut code_items) = crate::write::code::write_code_region(
+        &items,
+        &form_prefix,
+        &procedures,
+        form.lifted.as_ref(),
+    );
     for line in &region_lines {
         writer.push_line(line);
     }
@@ -1083,6 +1087,7 @@ mod tests {
             controls: vec![control],
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         };
         let (files, items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         assert!(
@@ -1130,6 +1135,7 @@ mod tests {
             controls: vec![control],
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         };
         let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         assert!(files.frx.is_none());
@@ -1168,6 +1174,7 @@ mod tests {
             controls: vec![control],
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         };
         let mut data = 8_u32.to_le_bytes().to_vec();
         data.extend_from_slice(&[0u8; 8]);
@@ -1232,6 +1239,7 @@ mod tests {
             controls: vec![control],
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         };
         let mut data = 8_u32.to_le_bytes().to_vec();
         data.extend_from_slice(&[0u8; 8]);
@@ -1297,6 +1305,7 @@ mod tests {
             controls: vec![control],
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         };
 
         let (files, _items) = write_form(&form, &[], &data).expect("write_form must succeed");
@@ -1379,6 +1388,7 @@ mod tests {
             controls: vec![control],
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         };
         let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
@@ -1424,6 +1434,7 @@ mod tests {
             controls: vec![control],
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         };
         let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
@@ -1486,6 +1497,7 @@ mod tests {
             controls,
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         };
         let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
@@ -1540,6 +1552,7 @@ mod tests {
             controls,
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         };
         let (files, items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
@@ -1585,6 +1598,7 @@ mod tests {
             controls: vec![control],
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         };
         let (files, items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
@@ -1618,6 +1632,7 @@ mod tests {
             controls: vec![control],
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         };
         let (_files, items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         assert!(
@@ -1662,6 +1677,7 @@ mod tests {
             controls,
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         };
         let (files, items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
@@ -1728,6 +1744,7 @@ mod tests {
             controls,
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         };
         let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
@@ -1774,6 +1791,7 @@ mod tests {
             controls,
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         };
         let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
@@ -1929,6 +1947,7 @@ mod tests {
             controls: Vec::new(),
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         };
         // This file's own tree_refused_item reads Defect::site.offset
         // alone, never DefectKind: any defect kind carrying the right
@@ -1982,6 +2001,7 @@ mod tests {
             controls: vec![control],
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         };
         let (files, items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
@@ -2029,6 +2049,7 @@ mod tests {
             ],
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         }
     }
 
@@ -2160,6 +2181,7 @@ mod ordering {
             controls,
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         };
         let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
@@ -2218,6 +2240,7 @@ mod ordering {
             controls: vec![control],
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         };
         let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
@@ -2269,6 +2292,7 @@ mod ordering {
             controls,
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         };
         let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);
@@ -2325,6 +2349,7 @@ mod ordering {
             controls,
             procedures: Vec::new(),
             blobs: Vec::new(),
+            lifted: None,
         };
         let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         let text = frm_text(&files);

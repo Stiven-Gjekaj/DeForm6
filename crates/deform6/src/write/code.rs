@@ -18,6 +18,7 @@
 
 use super::model::{LineWriter, SafeName};
 use crate::report::{Confidence, ReportItem};
+use crate::vb::bodies::LiftedObject;
 use crate::vb::functyp::{Argument, DefaultValue, PropertyKind, Prototype, TypeEntry, VbType};
 use crate::vb::{ObjectProcedures, ProcedureEntry};
 use crate::write::values::escape_inline_string;
@@ -499,8 +500,17 @@ pub fn write_code_region(
     items: &[ReportItem],
     path_prefix: &str,
     procedures: &ObjectProcedures,
+    lifted: Option<&LiftedObject>,
 ) -> (Vec<String>, Vec<ReportItem>) {
-    let (procedure_lines, procedure_items) = format_procedures(procedures);
+    let (mut procedure_lines, procedure_items) = format_procedures(procedures);
+    if let Some(lifted) = lifted {
+        procedure_lines = lifted.declarations.clone();
+        for procedure in &lifted.procedures {
+            procedure_lines.push(procedure.declaration.clone());
+            procedure_lines.extend(procedure.lines.iter().cloned());
+            procedure_lines.push(procedure.closing.to_owned());
+        }
+    }
     let procedure_items: Vec<ReportItem> = procedure_items
         .into_iter()
         .map(|mut item| {
@@ -531,12 +541,14 @@ pub fn write_cls(
     procedures: &ObjectProcedures,
     items: &[ReportItem],
     path_prefix: &str,
+    lifted: Option<&LiftedObject>,
 ) -> (Vec<u8>, Vec<ReportItem>) {
     let mut writer = LineWriter::new();
     for line in cls_preamble_lines(name) {
         writer.push_line(&line);
     }
-    let (region_lines, mut result_items) = write_code_region(items, path_prefix, procedures);
+    let (region_lines, mut result_items) =
+        write_code_region(items, path_prefix, procedures, lifted);
     for line in &region_lines {
         writer.push_line(line);
     }
@@ -555,10 +567,12 @@ pub fn write_bas(
     procedures: &ObjectProcedures,
     items: &[ReportItem],
     path_prefix: &str,
+    lifted: Option<&LiftedObject>,
 ) -> (Vec<u8>, Vec<ReportItem>) {
     let mut writer = LineWriter::new();
     writer.push_line(&bas_header_line(name));
-    let (region_lines, mut result_items) = write_code_region(items, path_prefix, procedures);
+    let (region_lines, mut result_items) =
+        write_code_region(items, path_prefix, procedures, lifted);
     for line in &region_lines {
         writer.push_line(line);
     }
@@ -622,6 +636,7 @@ mod tests {
             &ObjectProcedures::Slots(vec![]),
             &[],
             "/modules/Logic_Module",
+            None,
         );
         let content = text(&bytes);
         assert!(!content.contains("VERSION"), "{content:?}");
@@ -725,8 +740,10 @@ mod tests {
     #[test]
     fn write_bas_called_twice_on_one_input_gives_byte_identical_output() {
         let procedures = ObjectProcedures::Slots(vec![ProcedureEntry::Private]);
-        let (first, first_items) = write_bas(&name("Mod1"), &procedures, &[], "/modules/Mod1");
-        let (second, second_items) = write_bas(&name("Mod1"), &procedures, &[], "/modules/Mod1");
+        let (first, first_items) =
+            write_bas(&name("Mod1"), &procedures, &[], "/modules/Mod1", None);
+        let (second, second_items) =
+            write_bas(&name("Mod1"), &procedures, &[], "/modules/Mod1", None);
         assert_eq!(first, second);
         assert_eq!(first_items, second_items);
     }
@@ -734,8 +751,10 @@ mod tests {
     #[test]
     fn write_cls_called_twice_on_one_input_gives_byte_identical_output() {
         let procedures = ObjectProcedures::Slots(vec![]);
-        let (first, first_items) = write_cls(&name("Cls1"), &procedures, &[], "/classes/Cls1");
-        let (second, second_items) = write_cls(&name("Cls1"), &procedures, &[], "/classes/Cls1");
+        let (first, first_items) =
+            write_cls(&name("Cls1"), &procedures, &[], "/classes/Cls1", None);
+        let (second, second_items) =
+            write_cls(&name("Cls1"), &procedures, &[], "/classes/Cls1", None);
         assert_eq!(first, second);
         assert_eq!(first_items, second_items);
     }
@@ -748,6 +767,7 @@ mod tests {
             &ObjectProcedures::Slots(vec![]),
             &[],
             "/classes/Cls1",
+            None,
         );
         assert!(bytes.ends_with(b"\r\n"));
         let crlf_pairs = bytes.windows(2).filter(|window| *window == b"\r\n").count();
@@ -762,12 +782,14 @@ mod tests {
             &ObjectProcedures::Slots(vec![]),
             &[],
             "/classes/Cls1",
+            None,
         );
         let (bas_bytes, _items) = write_bas(
             &name("Mod1"),
             &ObjectProcedures::Slots(vec![]),
             &[],
             "/modules/Mod1",
+            None,
         );
         assert!(!cls_bytes.starts_with(&[0xEF, 0xBB, 0xBF]));
         assert!(!bas_bytes.starts_with(&[0xEF, 0xBB, 0xBF]));
@@ -785,6 +807,7 @@ mod tests {
             &ObjectProcedures::Slots(vec![]),
             &items,
             "/classes/Cls1",
+            None,
         );
         let substitution = result_items
             .iter()
@@ -803,15 +826,19 @@ mod tests {
         let expected = crate::write::comment::uncertainty_comments(&items, "/modules/Mod1");
         assert!(!expected.is_empty(), "the fixture must produce a comment");
 
-        let (lines, _items) =
-            write_code_region(&items, "/modules/Mod1", &ObjectProcedures::Slots(vec![]));
+        let (lines, _items) = write_code_region(
+            &items,
+            "/modules/Mod1",
+            &ObjectProcedures::Slots(vec![]),
+            None,
+        );
         assert_eq!(lines, expected);
     }
 
     #[test]
     fn write_code_region_supplies_no_line_of_its_own_when_no_item_matches_the_prefix() {
         let (lines, _items) =
-            write_code_region(&[], "/modules/Mod1", &ObjectProcedures::Slots(vec![]));
+            write_code_region(&[], "/modules/Mod1", &ObjectProcedures::Slots(vec![]), None);
         assert!(lines.is_empty(), "{lines:?}");
     }
 
@@ -829,6 +856,7 @@ mod tests {
             &[],
             "/modules/Mod1",
             &ObjectProcedures::NoNameArray { proc_count: 7 },
+            None,
         );
         assert!(lines.iter().any(|line| line.contains('7')), "{lines:?}");
         assert_eq!(items.len(), 1);
@@ -845,7 +873,7 @@ mod tests {
             name: "Fire".to_owned(),
             prototype: None,
         }]);
-        let (lines, items) = write_code_region(&[], "/modules/Mod1", &procedures);
+        let (lines, items) = write_code_region(&[], "/modules/Mod1", &procedures, None);
         assert!(
             lines
                 .iter()
@@ -869,6 +897,7 @@ mod tests {
             &ObjectProcedures::Slots(vec![]),
             &items,
             "/modules/Mod1",
+            None,
         );
         let content = text(&bytes);
         let lines: Vec<&str> = content.split("\r\n").collect();
@@ -1341,10 +1370,10 @@ mod sweep {
                 let procedures = object_procedures(&code.procedures);
                 let bytes = match code.kind {
                     CodeKind::Class => {
-                        crate::write::code::write_cls(&code.name, &procedures, &[], &prefix).0
+                        crate::write::code::write_cls(&code.name, &procedures, &[], &prefix, None).0
                     }
                     CodeKind::Module => {
-                        crate::write::code::write_bas(&code.name, &procedures, &[], &prefix).0
+                        crate::write::code::write_bas(&code.name, &procedures, &[], &prefix, None).0
                     }
                 };
                 let code_text = text(&bytes);
@@ -1371,6 +1400,45 @@ mod sweep {
         assert!(
             program_naming_one.is_some(),
             "a positive count with no named program is a contradiction in this test's own logic"
+        );
+    }
+
+    #[test]
+    fn a_lifted_object_writes_its_declarations_and_the_body_of_each_procedure() {
+        use crate::vb::bodies::{LiftedObject, LiftedProcedure};
+        use crate::vb::{ObjectProcedures, ProcedureEntry};
+        use crate::write::code::write_code_region;
+        let lifted = LiftedObject {
+            declarations: vec!["Private field_54 As Variant".to_owned()],
+            procedures: vec![LiftedProcedure {
+                index: 0,
+                declaration: "Private Sub Form_Load()".to_owned(),
+                lines: vec!["       field_54 = 1".to_owned()],
+                closing: "End Sub",
+            }],
+        };
+        let procedures = ObjectProcedures::Slots(vec![ProcedureEntry::Private]);
+        let (lines, items) = write_code_region(&[], "/forms/F", &procedures, Some(&lifted));
+        let code: Vec<&str> = lines
+            .iter()
+            .map(String::as_str)
+            .filter(|line| !line.starts_with('\''))
+            .collect();
+        assert_eq!(
+            code,
+            [
+                "Private field_54 As Variant",
+                "Private Sub Form_Load()",
+                "       field_54 = 1",
+                "End Sub"
+            ]
+        );
+        assert_eq!(items.len(), 1, "the item of the private slot stays");
+        let (empty, _) = write_code_region(&[], "/forms/F", &procedures, None);
+        assert!(
+            empty
+                .iter()
+                .any(|line| line == "Private Sub UnnamedProcedure0()")
         );
     }
 }
