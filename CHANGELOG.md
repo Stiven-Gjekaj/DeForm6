@@ -120,6 +120,37 @@ heading its version and its date.
   by the name of the form; a field of `Me` with no `Me.`; the default
   member with no name; and an empty place for an argument that a call
   leaves out.
+- `extract --pcode-table <table> --lift` writes the lift of each procedure
+  of a P-code program into its body, in place of the empty body. The
+  statements name variables by their offsets, and they are not the source.
+  Without `--lift`, `extract` writes what it wrote before. With the lift,
+  `extract` also writes a `Declare` for each called procedure of a DLL, a
+  `Dim` for each local that a body indexes, and a declaration for each
+  field and each global variable. A field that has the accessor of a public
+  variable is `Public`.
+- `cargo run -p xtask -- export-lift-builds <dir>` writes each P-code
+  program as `extract --lift` writes it, next to its source, with a
+  `build.bat` for the Visual Basic 6 IDE. On the Windows XP host, VB6 makes
+  an executable from 41 of the 42 lifted projects, and from 42 of the 42
+  source projects. The one that fails is `Map-Editor`: DeForm6 refuses the
+  control tree of its form, in the native build too, so the lifted code
+  names controls that the form does not hold. The first such run made an
+  executable from 1 of the 42.
+- The fixes that this run found: a call of a `Function` of the project
+  assigns its result; a function of the runtime that returns a `Variant`
+  takes the address of its result first; `New` of a class of the project
+  names the class; a `Let` of a property with an index is an assignment;
+  an object into an array element takes `Set`; `UBound` has no `VBA.`
+  owner; `Line`, `Circle` and `PSet` take the form of Basic for the flags
+  that the corpus shows; an argument by reference of a prototype is a
+  `Variant`; and a private procedure takes the argument sizes that each of
+  its calls gives.
+- A fault of 2.0.0: `extract` wrote an argument by value without `ByVal`.
+  It now writes `ByVal`. The 24 corpus programs whose files changed still
+  build on the Windows host, and `tests/builds.toml` holds the new hashes.
+- A fault of 2.0.0: `deform6 disasm --help` gave the first line of the help
+  of `extract`, and `deform6 extract --help` gave no description. Each now
+  gives its own.
 - An unbound event slot now prints as unbound, with no handler, and gives
   no hint to load a table.
 - The width tracer of `derive-pcode-table` follows a jump table of a
@@ -130,14 +161,22 @@ heading its version and its date.
 
 - Two corpus programs have no P-code build, because their source does not
   build: `Edge_Detection` and `HMM`.
+- A lifted project that VB6 builds is not yet a check of behaviour. No run
+  compares a rebuilt program with the original.
+- Each local and each field of the lift is a `Variant`. A local that a
+  call gives by reference to a `Declare` goes as `Any`.
 
 ### What this does not do
 
 - It does not change the version in `Cargo.toml`, and it has no tag.
 - It adds `StubShape`, the field `StubHandler::shape`, and the modules
   `vb::procdesc`, `vb::pcode`, `vb::lift`, `vb::links` and `vb::types` to the
-  library, and the field `ControlInfo::w_index`. It
-  removes no public item, and it changes the type of none. For a P-code
+  library, and the field `ControlInfo::w_index`. It removes no public
+  item. It changes some: `write::code::write_code_region`, `write_cls` and
+  `write_bas` take a new last parameter, the lifted object, and
+  `ObjectReport`, `FormModel` and `ProcedureModel` have a new public field.
+  A caller that builds one of these structs with a struct literal must add
+  the field. For a P-code
   program, a report now gives a handler address where it gave none, and the
   text of an `UnknownStubShape` defect names both shapes.
 

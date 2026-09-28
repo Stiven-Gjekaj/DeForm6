@@ -841,10 +841,18 @@ name and with the parameters of its event. 361 of 361 handlers of the
 P-code corpus are lines of their source. Without this, VB6 binds no event
 to a rebuilt form.
 
-**Next.** Each body lifts, and the calls have names. The lift gives names of
-offsets, not of variables, and each statement stays in the form of `GoTo`
-and labels. The next step writes the lift as Basic that VB6 can compile,
-and then the Phase 8 build gate runs it.
+**The build of the lift.** `extract --lift` writes the lift into each
+body, and `export-lift-builds` writes the corpus for the Windows host. VB6
+makes an executable from 41 of the 42 lifted projects, and from 42 of 42
+sources. The first run made one. Each run named the first error of each
+project, and each group of errors became one fix with its own test. The
+one project that fails is `Map-Editor`, whose control tree DeForm6 refuses
+in the native build too.
+
+**Next.** The lift gives names of offsets, not of variables, each variable
+is a `Variant`, and each statement stays in the form of `GoTo` and labels.
+The next step runs each rebuilt program against the original, to check
+behaviour and not only the build.
 
 **The gate.** The recovered code compiles, which Phase 8 already measures, and
 the rebuilt program behaves the same as the original.

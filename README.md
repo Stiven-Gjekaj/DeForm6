@@ -260,8 +260,19 @@ They take the forms of Basic where the lift knows them: `ReDim a(0 To 7)`,
 `Open p For Binary As #1`, `Exit Sub` or `Exit Function`, `Screen.Width`,
 `frmAbout.Visible`, and an empty place for an argument that a call leaves
 out.
-The statements are not the source, and `extract` writes none of them.
-`check-pcode-table` holds them against the source: 3106 of the 4093 string
+The statements are not the source. `extract` writes none of them unless
+you give `--lift`:
+
+```
+deform6 extract <path-to-exe> -o <output-directory> --pcode-table derived/pcode-table.toml --vb-types derived/vb-types.toml --lift
+```
+
+With `--lift`, `extract` writes the lift of each procedure into its body,
+with a `Dim` or a declaration for each variable that the lift names.
+`cargo run -p xtask -- export-lift-builds <dir>` writes each P-code program
+of the corpus this way, for a build with the Visual Basic 6 IDE on a
+Windows host.
+`check-pcode-table` holds the statements against the source: 3106 of the 4093 string
 literals and names after a `.` of the source are in the lift. Most of the
 others are the fields of a user-defined type, which the lift names by their
 offsets.
