@@ -36,6 +36,11 @@
 //!
 //! # The variables of an object
 //!
+//! Each procedure of a DLL that a body calls gets a `Declare` statement in
+//! its object, by its export name and its library. The file holds no type
+//! of an argument, so each one is `ByRef As Any`, and the result is a
+//! `Long`.
+//!
 //! A field of `Me` that a body names, such as `field_54`, is a variable of
 //! the object. Each one gets a `Private` declaration of a `Variant`.
 //!
@@ -55,7 +60,7 @@ use crate::vb::lift::{lift_method, render, result_bytes};
 use crate::vb::object::ObjectTable;
 use crate::vb::pcode::{PcodeTable, disassemble};
 use crate::vb::procdesc::{MethodEntry, read_method_table};
-use crate::vb::project::{ObjectTableHead, ProjectInfo};
+use crate::vb::project::{Declaration, DeclareTable, ExportName, ObjectTableHead, ProjectInfo};
 use crate::vb::types::VbTypes;
 use crate::vb::{ObjectProcedures, ProcedureEntry, Report};
 
@@ -342,6 +347,79 @@ fn rename_prototype(
     }
 }
 
+/// Gives the number of arguments of the first call of `name` in `lines`:
+/// the arguments between the parentheses after `name`, apart by the commas
+/// that are outside a string and outside inner parentheses.
+fn call_arity(lines: &[String], name: &str) -> Option<usize> {
+    let open = format!("{name}(");
+    for line in lines {
+        let characters: Vec<char> = line.chars().collect();
+        let mut at = 0_usize;
+        while at < characters.len() {
+            let tail: String = characters.get(at..).unwrap_or_default().iter().collect();
+            let before = at
+                .checked_sub(1)
+                .and_then(|before| characters.get(before))
+                .copied();
+            if tail.starts_with(&open) && !before.is_some_and(|c| is_name(c) || c == '.') {
+                let mut depth = 0_usize;
+                let mut commas = 0_usize;
+                let mut empty = true;
+                let mut quoted = false;
+                for character in tail.chars().skip(open.len()) {
+                    match character {
+                        '"' => quoted = !quoted,
+                        _ if quoted => {}
+                        '(' => depth = depth.saturating_add(1),
+                        ')' if depth == 0 => {
+                            return Some(if empty { 0 } else { commas.saturating_add(1) });
+                        }
+                        ')' => depth = depth.saturating_sub(1),
+                        ',' if depth == 0 => commas = commas.saturating_add(1),
+                        _ => {}
+                    }
+                    if !character.is_whitespace() {
+                        empty = false;
+                    }
+                }
+                return None;
+            }
+            at = at.saturating_add(1);
+        }
+    }
+    None
+}
+
+/// Gives the `Declare` statement of each procedure of `declarations` that
+/// `lines` calls. The file holds no type of an argument, so each one is
+/// `ByRef As Any`, which takes any argument, and the result is a `Long`.
+fn declare_statements(declarations: &[Declaration], lines: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for declaration in declarations {
+        let ExportName::Name(name) = &declaration.export else {
+            continue;
+        };
+        if !crate::vb::privateobj::is_plausible_identifier(name.as_bytes()) {
+            continue;
+        }
+        let Some(arity) = call_arity(lines, name) else {
+            continue;
+        };
+        let parameters: Vec<String> = (1..=arity)
+            .map(|position| format!("ByRef a{position} As Any"))
+            .collect();
+        let statement = format!(
+            "Private Declare Function {name} Lib \"{}\" ({}) As Long",
+            declaration.library,
+            parameters.join(", ")
+        );
+        if !out.contains(&statement) {
+            out.push(statement);
+        }
+    }
+    out
+}
+
 /// Lifts each procedure of each object of the P-code program `data`, whose
 /// report is `report`. Gives one entry for each object of `report.objects`,
 /// in the same order: `None` for an object with no method table.
@@ -394,6 +472,7 @@ pub fn lift_objects(
         })
         .collect();
     let callees = callees_of_project_named(&pe, &objects, table, types, &names);
+    let declarations = DeclareTable::read(&pe, &info).declarations;
     let mut out: Vec<Option<LiftedObject>> = Vec::new();
     let mut variables: Vec<BTreeSet<String>> = Vec::new();
     for own in &report.objects {
@@ -414,6 +493,7 @@ pub fn lift_objects(
         };
         let mut lifted = LiftedObject::default();
         let mut globals = BTreeSet::new();
+        let mut all_lines: Vec<String> = Vec::new();
         let mut fields = BTreeSet::new();
         for entry in &methods.entries {
             let MethodEntry::Descriptor { index, descriptor } = entry else {
@@ -428,6 +508,7 @@ pub fn lift_objects(
                 Err(fault) => vec![format!("    ' The lift stopped: {fault:?}")],
             };
             fields.extend(words_with(&lines, "field_"));
+            all_lines.extend(lines.iter().cloned());
             globals.extend(words_with(&lines, "g_"));
             let result = result_bytes(&listing, table);
             let (declaration, closing) = declare(
@@ -444,10 +525,12 @@ pub fn lift_objects(
                 closing,
             });
         }
-        lifted.declarations = fields
-            .iter()
-            .map(|field| format!("Private {field} As Variant"))
-            .collect();
+        lifted.declarations = declare_statements(&declarations, &all_lines);
+        lifted.declarations.extend(
+            fields
+                .iter()
+                .map(|field| format!("Private {field} As Variant")),
+        );
         out.push(Some(lifted));
         variables.push(globals);
     }
@@ -480,12 +563,56 @@ pub fn lift_objects(
 )]
 mod tests {
     use super::{
-        built_parameters, declare, declared_bytes, procedure_name, replace_word, words_with,
+        built_parameters, call_arity, declare, declare_statements, declared_bytes, procedure_name,
+        replace_word, words_with,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::lift::result_bytes;
     use crate::vb::pcode::{PcodeTable, disassemble};
+    use crate::vb::project::{Declaration, ExportName};
     use crate::vb::{ObjectProcedures, ProcedureEntry};
+
+    #[test]
+    fn a_call_gives_the_number_of_its_arguments() {
+        let lines = vec![
+            "       x = Other(1)".to_owned(),
+            "       Call GetObjectA(CLng(a.Image), 24, \"(,)\")".to_owned(),
+        ];
+        assert_eq!(call_arity(&lines, "GetObjectA"), Some(3));
+        assert_eq!(call_arity(&lines, "Other"), Some(1));
+        assert_eq!(call_arity(&["Call Beep()".to_owned()], "Beep"), Some(0));
+        assert_eq!(
+            call_arity(&["Call F(G(1, 2), \"a,b\")".to_owned()], "F"),
+            Some(2)
+        );
+        assert_eq!(call_arity(&["Call x.Beep(1)".to_owned()], "Beep"), None);
+        assert_eq!(call_arity(&lines, "Missing"), None);
+    }
+
+    #[test]
+    fn a_called_procedure_of_a_dll_gets_a_declare_statement() {
+        let declarations = vec![
+            Declaration {
+                library: "gdi32".to_owned(),
+                export: ExportName::Name("GetObjectA".to_owned()),
+            },
+            Declaration {
+                library: "user32".to_owned(),
+                export: ExportName::Name("Unused".to_owned()),
+            },
+            Declaration {
+                library: "user32".to_owned(),
+                export: ExportName::OrdinalInferred(12),
+            },
+        ];
+        let lines = vec!["       Call GetObjectA(h, 24, local_A0)".to_owned()];
+        assert_eq!(
+            declare_statements(&declarations, &lines),
+            [
+                "Private Declare Function GetObjectA Lib \"gdi32\" (ByRef a1 As Any, ByRef a2 As Any, ByRef a3 As Any) As Long"
+            ]
+        );
+    }
 
     #[test]
     fn a_word_is_replaced_only_where_it_is_whole() {
