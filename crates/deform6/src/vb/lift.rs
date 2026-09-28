@@ -1559,6 +1559,7 @@ fn control_array_function(element: &str, vtable_offset: u16) -> Option<TypeFunct
         arg_bytes: Some(arg_bytes),
         result: true,
         result_interface,
+        dispid: None,
     })
 }
 

@@ -12,7 +12,7 @@
 //!   object.
 //! - `[interfaces.<name>]` gives `vtable_size`, and under `functions` a
 //!   table for each vtable offset in hexadecimal, with `names`, `kinds`,
-//!   `arg_bytes` and `result`. `arg_bytes` leaves out the 4 bytes of the object. It is
+//!   `arg_bytes`, `result` and `dispid`. `arg_bytes` leaves out the 4 bytes of the object. It is
 //!   absent when the tool cannot size a parameter.
 
 use std::collections::BTreeMap;
@@ -42,6 +42,9 @@ pub struct TypeFunction {
     pub result: bool,
     /// The interface of an object result, when the file gives it.
     pub result_interface: Option<String>,
+    /// The `DISPID` of a late-bound call of the function, when the file
+    /// gives it.
+    pub dispid: Option<u32>,
 }
 
 /// A function of the runtime that an executable imports by its ordinal.
@@ -69,6 +72,14 @@ impl InterfaceType {
     #[must_use]
     pub fn function(&self, vtable_offset: u16) -> Option<&TypeFunction> {
         self.functions.get(&vtable_offset)
+    }
+
+    /// Gives the functions whose `DISPID` is `dispid`.
+    #[must_use]
+    pub fn function_of_dispid(&self, dispid: u32) -> Option<&TypeFunction> {
+        self.functions
+            .values()
+            .find(|function| function.dispid == Some(dispid))
     }
 }
 
@@ -115,6 +126,8 @@ struct RawFunction {
     result: bool,
     #[serde(default)]
     result_interface: Option<String>,
+    #[serde(default)]
+    dispid: Option<u32>,
 }
 
 /// Formats a GUID in the registry form, such as
@@ -167,6 +180,7 @@ impl VbTypes {
                         arg_bytes: function.arg_bytes,
                         result: function.result,
                         result_interface: function.result_interface,
+                        dispid: function.dispid,
                     },
                 );
             }
@@ -337,6 +351,7 @@ kinds = ["get"]
 arg_bytes = 4
 result = true
 result_interface = "_Box"
+dispid = 67
 
 [interfaces._Box.functions.0028]
 names = ["Odd"]
@@ -374,6 +389,9 @@ result = false
         assert!(text.result);
         assert_eq!(text.result_interface.as_deref(), Some("_Box"));
         assert_eq!(interface.function(0x28).unwrap().arg_bytes, None);
+        assert_eq!(text.dispid, Some(0x43));
+        assert_eq!(interface.function_of_dispid(0x43).unwrap().names, ["Text"]);
+        assert!(interface.function_of_dispid(0x44).is_none());
         assert!(interface.function(0x2C).is_none());
         assert!(types.interface("_Other").is_none());
         let err = types.import(685).unwrap();
