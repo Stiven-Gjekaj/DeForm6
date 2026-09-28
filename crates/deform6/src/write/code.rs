@@ -240,6 +240,8 @@ fn format_argument(arg: &Argument, index: usize) -> String {
     }
     if arg.entry.by_ref {
         prefix.push_str("ByRef ");
+    } else if !arg.entry.array {
+        prefix.push_str("ByVal ");
     }
 
     let mut piece = format!("{prefix}{name}");
@@ -984,7 +986,7 @@ mod signatures {
         let signature = format_signature("Public", "Foo", Some(&proto));
         assert_eq!(
             signature.declaration,
-            "Public Function Foo(Optional Bar As Long, Baz() As Variant) As Long"
+            "Public Function Foo(Optional ByVal Bar As Long, Baz() As Variant) As Long"
         );
         assert_eq!(signature.closing, "End Function");
     }
@@ -1028,7 +1030,7 @@ mod signatures {
         let signature = format_signature("Public", "Configure", Some(&proto));
         assert_eq!(
             signature.declaration,
-            "Public Sub Configure(Optional Flags As Long = 3)"
+            "Public Sub Configure(Optional ByVal Flags As Long = 3)"
         );
     }
 
@@ -1064,7 +1066,7 @@ mod signatures {
         let signature = format_signature("Public", "Count", Some(&proto));
         assert_eq!(
             signature.declaration,
-            "Public Property Let Count(Value As Long)"
+            "Public Property Let Count(ByVal Value As Long)"
         );
         assert_eq!(signature.closing, "End Property");
     }
@@ -1109,7 +1111,10 @@ mod signatures {
             None,
         );
         let signature = format_signature("Public", "Weird", Some(&unknown_proto));
-        assert_eq!(signature.declaration, "Public Sub Weird(Raw As Variant)");
+        assert_eq!(
+            signature.declaration,
+            "Public Sub Weird(ByVal Raw As Variant)"
+        );
 
         let com_proto = prototype(
             vec![Argument {
@@ -1121,7 +1126,10 @@ mod signatures {
             None,
         );
         let signature = format_signature("Public", "Take", Some(&com_proto));
-        assert_eq!(signature.declaration, "Public Sub Take(Obj As Object)");
+        assert_eq!(
+            signature.declaration,
+            "Public Sub Take(ByVal Obj As Object)"
+        );
     }
 
     #[test]
@@ -1155,7 +1163,10 @@ mod signatures {
             None,
         );
         let signature = format_signature("Public", "Broken", Some(&proto));
-        assert_eq!(signature.declaration, "Public Sub Broken(Arg1 As Long)");
+        assert_eq!(
+            signature.declaration,
+            "Public Sub Broken(ByVal Arg1 As Long)"
+        );
     }
 
     #[test]
@@ -1185,7 +1196,7 @@ mod signatures {
         let signature = format_signature("Public", "Broken", Some(&proto));
         assert_eq!(
             signature.declaration,
-            "Public Sub Broken(Arg1 As Long, Arg2 As Long)"
+            "Public Sub Broken(ByVal Arg1 As Long, ByVal Arg2 As Long)"
         );
     }
 

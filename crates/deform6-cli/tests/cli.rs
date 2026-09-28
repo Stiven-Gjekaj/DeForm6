@@ -178,7 +178,7 @@ fn grayscale_prints_prototypes_with_modifiers_and_defaults_and_marks_private_pro
         "the Array modifier must print as (): {stdout:?}"
     );
     assert!(
-        stdout.contains("Optional fixOrientation As Boolean = false"),
+        stdout.contains("Optional ByVal fixOrientation As Boolean = false"),
         "stdout was: {stdout:?}"
     );
 

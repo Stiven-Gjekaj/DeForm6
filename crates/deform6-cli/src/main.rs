@@ -1087,6 +1087,8 @@ fn format_argument(arg: &Argument) -> String {
     }
     if arg.entry.by_ref {
         prefix.push_str("ByRef ");
+    } else if !arg.entry.array {
+        prefix.push_str("ByVal ");
     }
 
     let mut piece = format!("{prefix}{}", arg.name);
