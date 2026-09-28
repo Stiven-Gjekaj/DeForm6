@@ -97,6 +97,8 @@
 //! | `IStStrCopy` | Pop a string into what the frame slot points to |
 //! | `LitR4FP` | Push a 4-byte floating point constant on the floating point unit |
 //! | `PopTmpLdAdFPR4`, `CVarBoolI2` | Pop a value into a temporary slot, and push its address |
+//! | `LateIdCall`, `LateIdCallLdVar` | As `LateMemCall` and `LateMemCallLdVar`, with a 32-bit `DISPID` in place of the index of a name |
+//! | `LateIdSt` | Pop a `Variant`, and set the member of the object register of a 32-bit `DISPID` to it |
 //! | `FLdVar` | Push the 16 bytes of the `Variant` of a frame slot |
 //! | `ImpAdCall` of a function of the runtime | As `ImpAdCall`, with the name of the function and the class of its result when [`Callees`] gives them |
 //! | `LateMemCall` | Pop a count of `Variant` values, and call the member of the object register whose name is at an index of the constant table |
@@ -866,7 +868,9 @@ enum Family {
     LateCall {
         result: bool,
         arguments: bool,
+        by_id: bool,
     },
+    LateStore,
     VariantObjectRegister,
     VariantBinary(BinaryOp),
     VariantCopy,
@@ -1104,15 +1108,29 @@ fn family_of(name: &str) -> Option<Family> {
         "LateMemCall" => Family::LateCall {
             result: false,
             arguments: true,
+            by_id: false,
         },
         "LateMemCallLdVar" => Family::LateCall {
             result: true,
             arguments: true,
+            by_id: false,
         },
         "LateMemLdVar" => Family::LateCall {
             result: true,
             arguments: false,
+            by_id: false,
         },
+        "LateIdCall" => Family::LateCall {
+            result: false,
+            arguments: true,
+            by_id: true,
+        },
+        "LateIdCallLdVar" => Family::LateCall {
+            result: true,
+            arguments: true,
+            by_id: true,
+        },
+        "LateIdSt" => Family::LateStore,
         "LdPrVar" => Family::VariantObjectRegister,
         "CStrVarVal" | "CStrVarTmp" => Family::Function("CStr"),
         "FnLenVar" => Family::Function("Len"),
@@ -1267,6 +1285,18 @@ fn load_bytes(names: &[String]) -> u8 {
     } else {
         0
     }
+}
+
+/// The name that the lift gives a member of a late-bound call by its
+/// `DISPID`.
+fn dispid_name(dispid: u32) -> String {
+    format!("[DISPID {dispid:#X}]")
+}
+
+/// Reads an unsigned 32-bit argument.
+fn u32_at(arguments: &[u8], at: usize) -> Option<u32> {
+    let bytes = arguments.get(at..at.checked_add(4)?)?;
+    Some(u32::from_le_bytes(bytes.try_into().ok()?))
 }
 
 /// Reads an unsigned 16-bit argument.
@@ -1895,15 +1925,21 @@ fn run(
             Family::LateCall {
                 result,
                 arguments: with_arguments,
+                by_id,
             } => {
                 let (object, _) = state.object.clone().ok_or(LiftFault::NoObject(at))?;
                 let skip = if result { 2 } else { 0 };
-                let name = callees
-                    .name(u16_at(arguments, skip).ok_or_else(short)?)
-                    .ok_or(LiftFault::NoCallee(at))?
-                    .to_owned();
+                let (name, count_at) = if by_id {
+                    (dispid_name(u32_at(arguments, skip).ok_or_else(short)?), 4)
+                } else {
+                    let name = callees
+                        .name(u16_at(arguments, skip).ok_or_else(short)?)
+                        .ok_or(LiftFault::NoCallee(at))?
+                        .to_owned();
+                    (name, 2)
+                };
                 let count = if with_arguments {
-                    u16_at(arguments, skip.saturating_add(2)).ok_or_else(short)?
+                    u16_at(arguments, skip.saturating_add(count_at)).ok_or_else(short)?
                 } else {
                     0
                 };
@@ -1932,6 +1968,18 @@ fn run(
                 } else {
                     Some(Stmt::Call(callee, args))
                 }
+            }
+            Family::LateStore => {
+                let (object, _) = state.object.clone().ok_or(LiftFault::NoObject(at))?;
+                let name = dispid_name(u32_at(arguments, 0).ok_or_else(short)?);
+                let value = expressions(call_arguments(&mut state.stack, 16, at)?);
+                Some(Stmt::Assign {
+                    target: Expr::Member(Box::new(object), name),
+                    value: value
+                        .into_iter()
+                        .next()
+                        .ok_or(LiftFault::CallArguments(at))?,
+                })
             }
             Family::GlobalObjectStore => {
                 let value = pop(&mut state)?;
@@ -2615,7 +2663,12 @@ pub fn name_indexes(listing: &PcodeListing, table: &PcodeTable) -> Vec<u16> {
             .slot(instruction.lead, instruction.opcode)
             .map(|slot| slot.names.as_slice())
             .unwrap_or_default();
-        let Some(Family::LateCall { result, .. }) = family(names) else {
+        let Some(Family::LateCall {
+            result,
+            by_id: false,
+            ..
+        }) = family(names)
+        else {
             continue;
         };
         if let Some(index) = u16_at(&instruction.arguments, if result { 2 } else { 0 })
@@ -2948,6 +3001,12 @@ names = ["LitNothing"]
 [primary.58]
 width = 2
 names = ["VCall"]
+[primary.59]
+width = 6
+names = ["LateIdCall"]
+[primary.5A]
+width = 4
+names = ["LateIdSt"]
 [primary.44]
 width = 4
 names = ["LateMemCall"]
@@ -3975,6 +4034,21 @@ result = false
             ]
         );
         assert_eq!(name_indexes(&listing, &table), [7, 8]);
+        // local_1C.[DISPID 0x43] local_64; local_1C.[DISPID 0x3] = local_60
+        let by_id = [
+            0x06, 0xE4, 0xFF, 0x43, 0x9C, 0xFF, 0x59, 0x43, 0x00, 0x00, 0x00, 0x01, 0x00, 0x43,
+            0xA0, 0xFF, 0x06, 0xE4, 0xFF, 0x5A, 0x03, 0x00, 0x00, 0x00, 0x0C,
+        ];
+        let listing_id = disassemble(&Region::new(&by_id, Off::new(0)), &table);
+        assert!(name_indexes(&listing_id, &table).is_empty());
+        assert_eq!(
+            render(&lift(&listing_id, &table, &Callees::default(), None).unwrap()),
+            [
+                "       Call local_1C.[DISPID 0x43](local_64)",
+                "       local_1C.[DISPID 0x3] = local_60",
+                "       Exit"
+            ]
+        );
         assert_eq!(
             lift(&listing, &table, &Callees::default(), None),
             Err(LiftFault::NoCallee(9))
