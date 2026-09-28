@@ -230,14 +230,15 @@ not Basic.
 
 With `--lift`, `disasm` prints a procedure as statements when it can follow
 the stack of every opcode: 239 of the 680 procedures of the P-code corpus,
-663 with `--vb-types` from `VB6.OLB`, and 666 when the file also holds the
+673 with `--vb-types` from `VB6.OLB`, and 680 when the file also holds the
 VBA library. The statements name each variable by its offset, such as
 `local_88` or `Me.field_54`, and each called procedure of the project by its
 index, such as `Me.method_16`. With `--vb-types` they name the controls and
 their properties, such as `Me.chkAutomatic.Value`, and the functions of the
-runtime, such as `VBA.Err().Clear()`. The other 14 procedures call a Winsock
-control, whose type library is not in the file. The statements are not the
-source, and `extract` writes none of them.
+runtime, such as `VBA.Err().Clear()`. A late-bound call names its member by
+its `DISPID` when the binary gives no name, such as
+`Me.WskClient.[DISPID 0x43]("Msg_Eof_")` for `WskClient.SendData "Msg_Eof_"`.
+The statements are not the source, and `extract` writes none of them.
 
 Run everything the gate runs, in one command:
 
