@@ -54,7 +54,7 @@ const DEFAULT_VB6: &str = r"%ProgramFiles%\Microsoft Visual Studio\VB98\VB6.EXE"
 /// The directory on the host that receives the executables that VB6 builds.
 /// It is on the host's system drive, `%SystemDrive%`, so no executable
 /// reaches the shared directory.
-const HOST_OUT_DIR: &str = r"%SystemDrive%\deform6-out";
+pub(crate) const HOST_OUT_DIR: &str = r"%SystemDrive%\deform6-out";
 
 /// The characters that `cmd` gives a meaning to inside a batch file, even
 /// between quotes, and the characters that end a path or a line. A name

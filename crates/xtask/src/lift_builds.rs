@@ -21,8 +21,8 @@ use deform6::vb::types::VbTypes;
 
 use crate::build_record::{self, corpus_root, executables, program_key};
 use crate::builds::{
-    Exported, check_batch_name, copy_without_executables, prepare, short_name, write_files,
-    write_lists,
+    Exported, HOST_OUT_DIR, check_batch_name, copy_without_executables, crlf_text, prepare,
+    short_name, write_files, write_lists,
 };
 use crate::pcode_record::pcode_root;
 use crate::ratios::differential::support::vbp;
@@ -134,7 +134,72 @@ fn export(options: &Options) -> Result<usize, String> {
         });
     }
     write_lists(dir, &exported)?;
+    let runs = dir.join("runs.bat");
+    std::fs::write(&runs, render_runs(&exported))
+        .map_err(|err| format!("writing {}: {err}", runs.display()))?;
     Ok(exported.len())
+}
+
+/// The seconds that `runs.bat` gives a program to show its first window
+/// before it sends the marker, and after it.
+const RUN_WAIT_SECONDS: u8 = 6;
+
+/// Renders `runs.bat`, with CRLF at the end of each line.
+///
+/// After `build.bat`, the file starts each executable that VB6 built, the
+/// original side and then the extracted side of each program. It waits
+/// [`RUN_WAIT_SECONDS`] seconds, sends `===SHOT <short> <side>===` out
+/// through `COM1`, waits again, and ends the program. The other machine
+/// takes a picture of the screen at each marker, so the first window of each
+/// rebuilt program can be compared with the first window of its original.
+/// A side with no executable sends `===NONE <short> <side>===`. `ping`
+/// waits, because Windows XP has no `timeout`.
+fn render_runs(programs: &[Exported]) -> String {
+    let wait = format!(
+        "ping -n {} 127.0.0.1 >nul",
+        RUN_WAIT_SECONDS.saturating_add(1)
+    );
+    let mut lines: Vec<String> = [
+        "@echo off",
+        "rem Starts each program that build.bat built, and sends a marker through",
+        "rem COM1 while its first window shows, for the other machine to take a",
+        "rem picture of the screen.",
+        "mode COM1: baud=115200 parity=n data=8 stop=1 to=off xon=off odsr=off octs=off dtr=on rts=on idsr=off >nul",
+    ]
+    .iter()
+    .map(|line| (*line).to_owned())
+    .collect();
+    for program in programs {
+        for side in ["original", "extracted"] {
+            lines.push(format!("call :run {} {side}", program.short));
+        }
+    }
+    lines.extend(
+        [
+            ">COM1 echo ===END===",
+            "exit /b 0",
+            "",
+            ":run",
+            "set FOUND=",
+            &format!(
+                r#"for %%e in ("{HOST_OUT_DIR}\%1\%2\*.exe") do call :one %1 %2 "%%~e" "%%~nxe""#
+            ),
+            r#"if "%FOUND%"=="" >COM1 echo ===NONE %1 %2==="#,
+            "goto :eof",
+            "",
+            ":one",
+            "set FOUND=1",
+            r#"start "" %3"#,
+            &wait,
+            ">COM1 echo ===SHOT %1 %2===",
+            &wait,
+            r#"taskkill /f /im %4 >nul 2>&1"#,
+            "goto :eof",
+        ]
+        .iter()
+        .map(|line| (*line).to_owned()),
+    );
+    crlf_text(&lines)
 }
 
 /// Runs `export-lift-builds`.
@@ -168,7 +233,39 @@ pub(crate) fn run(args: &[String]) -> i32 {
     reason = "a test builds the state it needs and must fail loudly when that state is wrong"
 )]
 mod tests {
-    use super::options;
+    use super::{options, render_runs};
+    use crate::builds::Exported;
+
+    #[test]
+    fn the_run_file_starts_each_side_of_each_program_and_sends_a_marker() {
+        let program = |short: &str| Exported {
+            short: short.to_owned(),
+            key: "k".to_owned(),
+            original_vbp: "a.vbp".to_owned(),
+            extracted_vbp: "b.vbp".to_owned(),
+            files: "h".to_owned(),
+        };
+        let text = render_runs(&[program("p01"), program("p02")]);
+        assert!(!text.replace("\r\n", "").contains('\n'));
+        assert!(text.ends_with("\r\n"));
+        let calls: Vec<&str> = text
+            .split("\r\n")
+            .filter(|line| line.starts_with("call :run"))
+            .collect();
+        assert_eq!(
+            calls,
+            [
+                "call :run p01 original",
+                "call :run p01 extracted",
+                "call :run p02 original",
+                "call :run p02 extracted"
+            ]
+        );
+        assert!(text.contains(r#"for %%e in ("%SystemDrive%\deform6-out\%1\%2\*.exe")"#));
+        assert!(text.contains(">COM1 echo ===SHOT %1 %2==="));
+        assert!(text.contains("ping -n 7 127.0.0.1 >nul"));
+        assert!(text.contains("taskkill /f /im %4"));
+    }
 
     #[test]
     fn the_options_take_two_files_and_one_directory() {
