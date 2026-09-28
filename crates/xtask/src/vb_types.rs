@@ -36,6 +36,8 @@
 //!   module that has it as its entry, such as `685` to `Err` of the VBA
 //!   library, with the interface of its result when the library gives it.
 //!   An executable imports the functions of the runtime by these ordinals.
+//!   `variant_result` tells that the function returns a `Variant`: a call
+//!   of it passes the address of the result first.
 //! - `[interfaces.<name>]` gives `vtable_size`, and for each vtable offset
 //!   the names of the functions there, the kinds, `arg_bytes` and `result`.
 //!   `arg_bytes` is the sum of the sizes of the parameters on the stack: 4
@@ -150,7 +152,12 @@ pub(crate) struct Import {
     name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     result_interface: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    variant_result: bool,
 }
+
+/// The variant type `VT_VARIANT`.
+const VT_VARIANT: u16 = 12;
 
 /// One event of an events interface.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
@@ -285,6 +292,7 @@ pub(crate) fn derive(infos: &[TypeInfo]) -> Result<Types, String> {
                     result_interface: function
                         .result_type
                         .and_then(|index| interface_name(infos, index)),
+                    variant_result: function.return_vt == VT_VARIANT,
                 },
             );
         }
@@ -626,6 +634,7 @@ mod tests {
             super::Import {
                 name: "Err".to_owned(),
                 result_interface: None,
+                variant_result: false,
             },
         );
         let event = |name: &str| {
@@ -670,6 +679,17 @@ mod tests {
         );
         let text = render(&types).unwrap();
         assert!(text.contains("[imports.685]"), "{text}");
+        assert!(!types.imports["685"].variant_result);
+        assert!(!text.contains("variant_result"), "{text}");
+        let mut left = interface(vec![Function {
+            ordinal: Some(617),
+            return_vt: 12,
+            ..function("_B_var_Left", 1, 3)
+        }]);
+        left.kind = Kind::Module;
+        let types = derive(&[left]).unwrap();
+        assert!(types.imports["617"].variant_result);
+        assert!(render(&types).unwrap().contains("variant_result = true"));
     }
 
     #[test]
