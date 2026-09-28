@@ -92,6 +92,16 @@ heading its version and its date.
   late-bound by its `DISPID`. When the types file also holds the OCX, the
   external component table gives the control its interface, and the lift
   names the member of each `DISPID`, such as `SendData`.
+- `check-pcode-table` measures the lift against the source: for each
+  procedure, the string literals and the names after a `.` of its source
+  body against those of its lift. `--write-lift-pins` writes the counts, and
+  `--lift-pins tests/lift.toml` fails when a count moves. 3106 of the 4093
+  tokens of the source are in the lift.
+- The lift names a call of a public procedure of the project by its name,
+  such as `Me.makeSpecialString`, a call of a `Declare` by its export name,
+  such as `GetObjectA`, and a call of a procedure of another module by the
+  module and the index, such as `Sub_Module.method_1()`. The measure moved
+  from 2832 to 3106 of 4093.
 - The width tracer of `derive-pcode-table` follows a jump table of a
   handler. `NextVar` and `NextStepVar` get the width 4 in place of 2, and
   680 of 680 bodies still decode.
