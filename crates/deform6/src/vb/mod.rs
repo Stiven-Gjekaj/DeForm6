@@ -99,6 +99,17 @@ pub enum ProcedureEntry {
     /// validate as a name. Per OBJ-06, nothing is invented: no name, no
     /// index number, no placeholder.
     Private,
+    /// A private procedure that a bound event slot names as its handler.
+    /// The file holds no name for it. The name is the control, or `Form`,
+    /// then `_` and the event that the types file gives for the slot.
+    Handler {
+        /// The name, such as `cmdOK_Click`.
+        name: String,
+        /// The declaration of each parameter, such as
+        /// `KeyAscii As Integer`, with `Index As Integer` first for a
+        /// control array.
+        parameters: Vec<String>,
+    },
 }
 
 /// The procedure slots one object carries, or the fact that it carries none
@@ -407,7 +418,7 @@ pub fn inspect_with_types(
     let object_table = ObjectTable::walk(&pe, info.lp_object_table, &table)?;
     defects.extend(object_table.defects().iter().cloned());
 
-    let objects: Vec<ObjectReport> = object_table
+    let mut objects: Vec<ObjectReport> = object_table
         .objects
         .iter()
         .map(|object| compose_object(&pe, object, &mut defects))
@@ -446,6 +457,7 @@ pub fn inspect_with_types(
         .iter()
         .map(|entry| compose_form(&pe, entry, &object_table.objects, &tables, &mut defects))
         .collect();
+    name_handlers(&pe, &object_table.objects, &forms, &mut objects);
 
     // The policy lives in `Journal::record` and nowhere else: this loop
     // hands it every defect this run collected, in the order it collected
@@ -839,6 +851,93 @@ fn compose_form(
         name,
         controls,
         defects: form_defects,
+    }
+}
+
+/// Gives the name that a handler of an event of `control` takes before `_`:
+/// the name of the control, or the name of the kind of the root, such as
+/// `Form`. Gives `None` for a root of another kind.
+fn handler_owner(control: &ControlReport) -> Option<&str> {
+    if control.parent.is_some() {
+        return Some(&control.name);
+    }
+    match control.kind {
+        controltree::ControlKind::Form => Some("Form"),
+        controltree::ControlKind::MdiForm => Some("MDIForm"),
+        controltree::ControlKind::UserControl => Some("UserControl"),
+        _ => None,
+    }
+}
+
+/// Turns each private procedure of a form that a named event slot binds
+/// into a [`ProcedureEntry::Handler`].
+///
+/// A P-code event stub gives the descriptor of its handler, and the method
+/// table of the object gives the index of the procedure of that
+/// descriptor. The slot must give the parameters of its event, so that the
+/// signature matches the event. A native stub gives the address of machine
+/// code, which the method table does not hold, so a native build gets no
+/// handler here.
+fn name_handlers(
+    pe: &PeImage<'_>,
+    raw: &[Object],
+    forms: &[FormReport],
+    objects: &mut [ObjectReport],
+) {
+    for form in forms {
+        let (Some(object), Some(report)) = (
+            raw.iter().find(|object| object.name == form.name),
+            objects.iter_mut().find(|object| object.name == form.name),
+        ) else {
+            continue;
+        };
+        let ObjectProcedures::Slots(slots) = &mut report.procedures else {
+            continue;
+        };
+        let Ok(methods) = procdesc::read_method_table(pe, object.lp_object_info) else {
+            continue;
+        };
+        for control in &form.controls {
+            let Some(owner) = handler_owner(control) else {
+                continue;
+            };
+            for event in &control.events {
+                let EventReport::Named {
+                    event_name,
+                    parameters: Some(parameters),
+                    handler_address: Some(address),
+                    ..
+                } = event
+                else {
+                    continue;
+                };
+                let Some(index) = methods.entries.iter().find_map(|entry| match entry {
+                    procdesc::MethodEntry::Descriptor { index, descriptor }
+                        if descriptor.va.get() == *address =>
+                    {
+                        Some(*index)
+                    }
+                    _ => None,
+                }) else {
+                    continue;
+                };
+                let Some(slot) = slots.get_mut(usize::from(index)) else {
+                    continue;
+                };
+                if *slot != ProcedureEntry::Private {
+                    continue;
+                }
+                let mut declared = Vec::new();
+                if control.array_index.is_some() {
+                    declared.push("Index As Integer".to_owned());
+                }
+                declared.extend(parameters.iter().cloned());
+                *slot = ProcedureEntry::Handler {
+                    name: format!("{owner}_{event_name}"),
+                    parameters: declared,
+                };
+            }
+        }
     }
 }
 
@@ -1390,7 +1489,7 @@ mod tests {
                     );
                     Some(name.as_str())
                 }
-                ProcedureEntry::Private => None,
+                ProcedureEntry::Private | ProcedureEntry::Handler { .. } => None,
             })
             .collect();
         assert_eq!(

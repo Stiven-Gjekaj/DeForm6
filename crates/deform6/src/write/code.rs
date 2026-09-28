@@ -365,6 +365,23 @@ pub fn format_procedure_entry(
                 (signature, Some(item))
             }
         },
+        ProcedureEntry::Handler { name, parameters } => {
+            let signature = Signature {
+                declaration: format!("Private Sub {name}({})", parameters.join(", ")),
+                closing: "End Sub",
+            };
+            let item = ReportItem {
+                path: String::new(),
+                confidence: Confidence::Inferred,
+                basis: format!(
+                    "the file holds a null where this procedure's own name would be; \
+                     {name} is the name of the event that its slot binds, which the \
+                     types file gives"
+                ),
+                evidence: Vec::new(),
+            };
+            (signature, Some(item))
+        }
         ProcedureEntry::Private => {
             let name = generated_procedure_name(index);
             let signature = format_signature("Private", &name, None);

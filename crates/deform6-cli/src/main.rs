@@ -1002,6 +1002,12 @@ fn print_procedures(procedures: &ObjectProcedures) {
             for entry in entries {
                 match entry {
                     ProcedureEntry::Private => println!("    private"),
+                    ProcedureEntry::Handler { name, parameters } => {
+                        println!(
+                            "    private {name}({}), named for its event",
+                            parameters.join(", ")
+                        );
+                    }
                     ProcedureEntry::Public { name, prototype } => {
                         println!("    {}", format_prototype(name, prototype.as_ref()));
                     }
@@ -1201,7 +1207,8 @@ fn prototype_entries(procedures: &ObjectProcedures) -> Vec<&Prototype> {
                 ProcedureEntry::Public {
                     prototype: None, ..
                 }
-                | ProcedureEntry::Private => None,
+                | ProcedureEntry::Private
+                | ProcedureEntry::Handler { .. } => None,
             })
             .collect(),
         ObjectProcedures::NoNameArray { .. } => Vec::new(),

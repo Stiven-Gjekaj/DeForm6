@@ -560,6 +560,10 @@ pub struct ProcedureModel {
     /// array resolved one at the same index. `None` when it did not, or
     /// when `name` is already `None`.
     pub prototype: Option<Prototype>,
+    /// The declaration of each parameter of an event handler, whose `name`
+    /// comes from its event and not from the file. `None` for any other
+    /// procedure.
+    pub handler_parameters: Option<Vec<String>>,
 }
 
 /// Which kind of `.frx` record a [`BlobRef`] names.
@@ -891,10 +895,17 @@ fn procedures_from(procedures: &ObjectProcedures) -> Vec<ProcedureModel> {
                 ProcedureEntry::Public { name, prototype } => ProcedureModel {
                     name: Some(name.clone()),
                     prototype: prototype.clone(),
+                    handler_parameters: None,
                 },
                 ProcedureEntry::Private => ProcedureModel {
                     name: None,
                     prototype: None,
+                    handler_parameters: None,
+                },
+                ProcedureEntry::Handler { name, parameters } => ProcedureModel {
+                    name: Some(name.clone()),
+                    prototype: None,
+                    handler_parameters: Some(parameters.clone()),
                 },
             })
             .collect(),

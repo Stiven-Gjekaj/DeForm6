@@ -689,18 +689,25 @@ fn write_resolved_lines(
 
 /// Turns [`ProcedureModel`]s into the [`ObjectProcedures`] shape
 /// [`crate::write::code::write_code_region`] already consumes: a public
-/// slot with a recovered name becomes [`ProcedureEntry::Public`], and a
-/// slot with none becomes [`ProcedureEntry::Private`].
+/// slot with a recovered name becomes [`ProcedureEntry::Public`], an event
+/// handler becomes [`ProcedureEntry::Handler`], and a slot with no name
+/// becomes [`ProcedureEntry::Private`].
 fn model_procedures_to_object_procedures(procedures: &[ProcedureModel]) -> ObjectProcedures {
     let slots = procedures
         .iter()
-        .map(|procedure| match &procedure.name {
-            Some(name) => ProcedureEntry::Public {
-                name: name.clone(),
-                prototype: procedure.prototype.clone(),
+        .map(
+            |procedure| match (&procedure.name, &procedure.handler_parameters) {
+                (Some(name), Some(parameters)) => ProcedureEntry::Handler {
+                    name: name.clone(),
+                    parameters: parameters.clone(),
+                },
+                (Some(name), None) => ProcedureEntry::Public {
+                    name: name.clone(),
+                    prototype: procedure.prototype.clone(),
+                },
+                (None, _) => ProcedureEntry::Private,
             },
-            None => ProcedureEntry::Private,
-        })
+        )
         .collect();
     ObjectProcedures::Slots(slots)
 }

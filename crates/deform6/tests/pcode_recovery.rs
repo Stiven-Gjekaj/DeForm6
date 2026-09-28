@@ -1476,6 +1476,7 @@ fn each_procedure_stub_of_a_pcode_program_goes_to_an_object_of_its_kind() {
 const WINSOCK_EVENTS: &str = r#"
 [[events."{248DD893-BB45-11CF-9ABC-0080C7E7B78D}"]]
 name = "Error"
+parameters = ["ByVal Number As Integer", "Description As String", "ByVal Scode As Long", "ByVal Source As String", "ByVal HelpFile As String", "ByVal HelpContext As Long", "CancelDisplay As Boolean"]
 [[events."{248DD893-BB45-11CF-9ABC-0080C7E7B78D}"]]
 name = "DataArrival"
 parameters = ["ByVal bytesTotal As Long"]
@@ -1567,4 +1568,53 @@ fn each_bound_slot_of_a_winsock_control_names_the_event_of_its_source_handler() 
             "WskServer_Close",
         ]
     );
+}
+
+/// `extract` writes each handler of a Winsock control of the two P-code
+/// programs that hold one with the declaration line of its source, and
+/// with `Index As Integer` first for the control array of `Server.exe`.
+#[test]
+fn each_handler_of_a_winsock_control_is_written_with_its_source_declaration() {
+    let root = build_record::corpus_root();
+    let projects = vbp::project_files();
+    let types = VbTypes::parse(WINSOCK_EVENTS.as_bytes()).unwrap();
+    let mut written = 0;
+    for key in [
+        "public-domain/SK-TFTP-Sample__VB6/Client/demo/TFTPClient.exe",
+        "public-domain/SK-TFTP-Sample__VB6/Server/demo/Server.exe",
+    ] {
+        let bytes = read(&pcode_root().join(key));
+        let report = deform6::inspect_with_types(
+            &bytes,
+            &OpcodeTable::builtin(),
+            Some(&types),
+            Mode::Strict,
+        )
+        .unwrap();
+        let project = deform6::write::project(&report, &bytes, Mode::Strict).unwrap();
+        let project_file = vbp::select_project_file(&root.join(key), &projects).unwrap();
+        let source: Vec<String> = vbp::Project::read(&project_file)
+            .declared_objects()
+            .iter()
+            .flat_map(|object| {
+                String::from_utf8_lossy(&read(&object.source_file))
+                    .lines()
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        for file in project
+            .files
+            .iter()
+            .filter(|file| file.name.ends_with(".frm"))
+        {
+            for line in String::from_utf8_lossy(&file.bytes).lines() {
+                if line.starts_with("Private Sub Wsk") {
+                    assert!(source.iter().any(|own| own == line), "{key}: {line}");
+                    written += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(written, 10);
 }
