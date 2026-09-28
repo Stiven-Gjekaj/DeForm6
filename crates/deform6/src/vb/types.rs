@@ -7,6 +7,9 @@
 //! - `[controls]` maps the GUID that a `ControlInfo` record names, in the
 //!   registry form, to the name of the interface of the control.
 //! - `[iids]` maps the GUID of an interface to its name.
+//! - `[imports]` maps the ordinal of an export of the runtime to the name
+//!   of its function, with `result_interface` when the result is an
+//!   object.
 //! - `[interfaces.<name>]` gives `vtable_size`, and under `functions` a
 //!   table for each vtable offset in hexadecimal, with `names`, `kinds`,
 //!   `arg_bytes` and `result`. `arg_bytes` leaves out the 4 bytes of the object. It is
@@ -41,6 +44,17 @@ pub struct TypeFunction {
     pub result_interface: Option<String>,
 }
 
+/// A function of the runtime that an executable imports by its ordinal.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[non_exhaustive]
+pub struct ImportType {
+    /// The name of the function in its module, such as `Err`.
+    pub name: String,
+    /// The interface of an object result, when the file gives it.
+    #[serde(default)]
+    pub result_interface: Option<String>,
+}
+
 /// One interface.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -63,6 +77,7 @@ impl InterfaceType {
 pub struct VbTypes {
     controls: BTreeMap<String, String>,
     iids: BTreeMap<String, String>,
+    imports: BTreeMap<u16, ImportType>,
     interfaces: BTreeMap<String, InterfaceType>,
 }
 
@@ -73,6 +88,8 @@ struct RawTypes {
     controls: BTreeMap<String, String>,
     #[serde(default)]
     iids: BTreeMap<String, String>,
+    #[serde(default)]
+    imports: BTreeMap<String, ImportType>,
     #[serde(default)]
     interfaces: BTreeMap<String, RawInterface>,
 }
@@ -161,9 +178,18 @@ impl VbTypes {
                 },
             );
         }
+        let mut imports = BTreeMap::new();
+        for (key, import) in raw.imports {
+            let ordinal = key.parse::<u16>().map_err(|_| TableError {
+                line: 1,
+                message: format!("imports.{key} is not an ordinal"),
+            })?;
+            imports.insert(ordinal, import);
+        }
         Ok(Self {
             controls: raw.controls,
             iids: raw.iids,
+            imports,
             interfaces,
         })
     }
@@ -256,6 +282,13 @@ impl VbTypes {
         self.iids.get(&guid_text(guid)).map(String::as_str)
     }
 
+    /// Gives the function of the runtime whose export has the ordinal
+    /// `ordinal`.
+    #[must_use]
+    pub fn import(&self, ordinal: u16) -> Option<&ImportType> {
+        self.imports.get(&ordinal)
+    }
+
     /// Gives the interface of the name `name`.
     #[must_use]
     pub fn interface(&self, name: &str) -> Option<&InterfaceType> {
@@ -280,6 +313,13 @@ mod tests {
 
 [iids]
 "{33AD4ED1-6699-11CF-B70C-00AA0060D393}" = "_Box"
+
+[imports.685]
+name = "Err"
+result_interface = "_Box"
+
+[imports.595]
+name = "MsgBox"
 
 [interfaces._Box]
 vtable_size = 48
@@ -329,12 +369,19 @@ result = false
         assert_eq!(interface.function(0x28).unwrap().arg_bytes, None);
         assert!(interface.function(0x2C).is_none());
         assert!(types.interface("_Other").is_none());
+        let err = types.import(685).unwrap();
+        assert_eq!(err.name, "Err");
+        assert_eq!(err.result_interface.as_deref(), Some("_Box"));
+        assert_eq!(types.import(595).unwrap().result_interface, None);
+        assert!(types.import(1).is_none());
     }
 
     #[test]
     fn a_damaged_file_gives_an_error_with_its_line() {
         let bad_key = TYPES.replace("functions.0024", "functions.x024");
         assert!(VbTypes::parse(bad_key.as_bytes()).is_err());
+        let bad_ordinal = TYPES.replace("imports.685", "imports.x685");
+        assert!(VbTypes::parse(bad_ordinal.as_bytes()).is_err());
         let error = VbTypes::parse(b"[interfaces._Box]\nvtable_size = \"big\"\n").unwrap_err();
         assert_eq!(error.line, 2);
         assert!(VbTypes::parse(&[0xFF, 0xFE]).is_err());
