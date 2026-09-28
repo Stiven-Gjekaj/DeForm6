@@ -826,10 +826,19 @@ read against the source found such statements as `VBA.Err().Clear()` and
 `Call VBA.ReDim(arg_10((0 To Me.method_6(arg_C))))` in
 `Realtime_Brightness.exe`.
 
-**Next.** Each body now lifts, and a types file that holds `MSWINSCK.OCX`
-names the members of the Winsock controls. The lift gives names of offsets,
-not of variables, and each statement stays in the form of `GoTo` and
-labels.
+**The measure.** `check-pcode-table` holds the lift of each procedure
+against the body of its source procedure. A token is a string literal or a
+name after a `.`. The first measure gave 2832 of the 4093 tokens of the
+source. A call of a public procedure now gives its name, a call of a
+`Declare` gives its export name, and a call of a procedure of another module
+gives the module. The measure is now 3106 of 4093, and `tests/lift.toml`
+pins it for each program. Most of the 987 other tokens are the fields of a
+user-defined type, such as `.lpstrFile`, which the lift names `field_34`.
+
+**Next.** Each body lifts, and the calls have names. The lift gives names of
+offsets, not of variables, and each statement stays in the form of `GoTo`
+and labels. The next step writes the lift as Basic that VB6 can compile,
+and then the Phase 8 build gate runs it.
 
 **The gate.** The recovered code compiles, which Phase 8 already measures, and
 the rebuilt program behaves the same as the original.
