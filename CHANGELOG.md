@@ -102,6 +102,18 @@ heading its version and its date.
   such as `GetObjectA`, and a call of a procedure of another module by the
   module and the index, such as `Sub_Module.method_1()`. The measure moved
   from 2832 to 3106 of 4093.
+- `derive-vb-types` writes the events of each events interface, in the
+  order of their vtable offsets, with the declaration of each parameter in
+  Basic. `inspect` and `extract` take `--vb-types`. With it, each bound
+  event slot gets the name of its event: 375 of 375 intrinsic slots and 13
+  of 13 Winsock slots of the P-code corpus agree with the handler names of
+  the source. `extract` writes each handler of a P-code form under its event
+  name, such as `Private Sub Form_KeyPress(KeyAscii As Integer)`, and
+  `check-pcode-table` holds each one against the source: 361 of 361 are
+  lines of their source. A handler of a native build keeps its generated
+  name.
+- An unbound event slot now prints as unbound, with no handler, and gives
+  no hint to load a table.
 - The width tracer of `derive-pcode-table` follows a jump table of a
   handler. `NextVar` and `NextStepVar` get the width 4 in place of 2, and
   680 of 680 bodies still decode.
