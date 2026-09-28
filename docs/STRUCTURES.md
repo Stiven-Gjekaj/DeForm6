@@ -506,7 +506,7 @@ PVB/SVBD reading is more detailed and mutually consistent, so it is preferred.
 | 0x10 | 4 | `dwObjectDefaultIIDCount` | `dwObjectTypeGuids` | Count of default IIDs. | **[L]** |
 | 0x14 | 4 | `lpObjectEventsIIDTable` | `lpControls2` | VA of an array of pointers to the events IIDs. AI's "usually the same as lpControls" is wrong. | **[D]** prefer PVB/SVBD |
 | 0x18 | 4 | `dwObjectEventsIIDCount` | `dwNull2` | Count of events IIDs. | **[D]** prefer PVB/SVBD |
-| 0x1C | 4 | `lpObjectDefaultIIDTable` | `lpObjectGuid2` | VA of an array of pointers to default IIDs. | **[D]** prefer PVB/SVBD |
+| 0x1C | 4 | `lpObjectDefaultIIDTable` | `lpObjectGuid2` | VA of an array of pointers to default IIDs. The first is the interface that a `VCallHresult` on the object names (§23c). | **[C]** |
 | 0x20 | 4 | `dwControlCount` | `dwControlCount` | **Number of `ControlInfo` records.** | **[C]** |
 | 0x24 | 4 | `lpControls` | `lpControls` | **VA of the `ControlInfo` array (§8.6), `0x28` bytes per entry.** | **[C]** |
 | 0x28 | 2 | `wMethodLinkCount` | `wEventCount` | Number of method-link entries. | **[L]** |
@@ -2563,6 +2563,86 @@ test keeps it true.
 of a procedure. `ILdPr` loads it, and 91 bodies stop at a call on one. The
 binary does not seem to give the class of an argument of a private
 procedure.
+
+Section 23c settles it for the arguments that a call of the project passes.
+
+## 23c. The calls of other objects and of the runtime, measured on the P-code corpus, 2026-09-28
+
+These rules come from the handlers of `MSVBVM60.DLL` 6.0.98.2 and from the
+P-code corpus. With them, 666 of the 680 bodies lift with a types file from
+`VB6.OLB` and `MSVBVM60.DLL`. Each of the other 14 calls a Winsock control.
+
+**The class of an object argument.** A public method has a `FuncTypDesc`
+record (section 6.3). An argument of an external class in it names a side
+structure, whose second word is the address of the GUID of its interface.
+For an argument of a private method, the class comes from the calls of the
+method in the project: when each call passes an object of one class, the
+argument has that class.
+
+**The interface of a `VCallHresult`.** Its second 16-bit argument names an
+entry of the constant table, whose address holds the GUID of the interface
+of the call. When the call fails, the handler gives that entry to the error
+helper with the object. In `Diffuse.exe`, entry 4 of `frmDiffuse` is the
+GUID of `_App`, and entry 9 is the GUID of the default interface of
+`FastDrawing`. `VCall` calls through the object register as `VCallHresult`
+does, with no `HRESULT` check and no such argument.
+
+**The default interface of an object.** `OptionalObjectInfo + 0x10` is the
+count of default interfaces, and `+ 0x1C` is the address of an array of
+addresses of their GUIDs (section 5.3). The first one is the interface that
+a `VCallHresult` on the object names.
+
+**A class of the runtime.** A class reference of the constant table holds 2,
+the address of the GUID of the class, and the address of the GUID of its
+interface. `NewIfNullPr` names one for the global object of the runtime,
+`VBGlobal`. `New` and `NewIfNullPr` name the `ObjectInfo` of an object of
+the project, or such a class reference.
+
+**A control array.** The `ControlInfo` record of a control array names the
+GUID of the events interface of its control plus 1 in the first 32 bits,
+such as `{33AD4F03-...}` for an array of `OptionButton`. This holds for the
+5 control arrays of a class of `VB.` in the corpus, and each of the 521
+controls of the source that the records name agrees. The accessor gives the
+object of the array, `tagCARR` in the runtime. Its vtable for `IVBControl`
+holds `Item(Integer)` at `0x40`, then `LBound`, `UBound` and `Count` at
+`0x44`, `0x48` and `0x4C`.
+
+**A late-bound call.** `LateMemCall`, `LateMemCallLdVar` and `LateMemLdVar`
+name the member by an entry of the constant table: UTF-16 characters up to
+a zero unit, with no length before them. The handler pops the arguments,
+16 bytes of a `Variant` each, in the order of the source, and calls the
+member of the object register. The `LdVar` forms write the result into a
+frame slot and push its address.
+
+**A function of the runtime.** The entry that an `ImpAdCall` names can be
+the address of `jmp dword ptr [slot]`, where the slot is in the import
+address table. Each such import of `MSVBVM60.DLL` in the corpus is by
+ordinal: `PassGen.exe` imports `rtcErrObj` by 685 and `rtcCreateObject2` by
+716. The type library of the VBA library in `MSVBVM60.DLL` gives each
+function of a module the ordinal of its entry, such as `Err` with 685, whose
+result is `ErrObject`. It names 196 ordinals.
+
+**The bytes of a value on the stack.**
+
+| Opcodes | Stack effect |
+|---|---|
+| `CVar` and a type, such as `CVarStr` | Write a `Variant` into the frame slot of the argument, and push its address: 4 bytes |
+| `FLdVar` | Push the 16 bytes of the `Variant` of a frame slot |
+| `FLdR8`, `FLdCy`, `MemLdR8`, `ILdR8` and the other loads of a `Double` or a `Currency` | Push 8 bytes |
+| `ImpAdCall` that also serves `ImpAdCallFPR4` and `ImpAdCallFPR8` | Leave a result on the floating point unit, which no other opcode than one that takes a float can take |
+| `ConcatVar`, `AddVar`, `SubVar`, `MulVar` | Pop the addresses of two `Variant` values, and push the address of the result |
+
+**`NextVar`.** `NextVar` and `NextStepVar` hold the frame slot of the loop
+and the offset of the body: 4 bytes. The handler goes through a jump table
+of the `Variant` types, and each typed path reads the offset after the slot.
+In each of the 3 loops of a `Variant` of the corpus, the exit of `ForVar` is
+the offset of its `NextVar` plus 6.
+
+**What the measurement did not settle.** The Winsock control: its type
+library is in `MSWINSCK.OCX`, which is not in the types file. The array of
+Winsock controls in `Server.exe` names a GUID that is not the GUID of the
+single Winsock control of `TFTPClient.exe` plus 1. `Print #` of more than
+one item: the corpus holds none.
 
 ---
 
