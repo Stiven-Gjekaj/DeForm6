@@ -108,6 +108,7 @@
 //! | `FDupVar` | Copy the `Variant` of the first frame slot into the second |
 //! | `ForStepI2` | As `ForStepI4` |
 //! | `FnFixR4`, `FnFixR8` | `Fix` of a value of the floating point unit |
+//! | `VCall` | As `VCallHresult`, with no argument that names the interface |
 //! | `OnErrorGoto` | `On Error GoTo` a label, `On Error Resume Next` for `0xFFFF`, or `On Error GoTo 0` for `0xFFFE` |
 //!
 //! All the names of one slot must give one family. A conversion whose names
@@ -1133,7 +1134,9 @@ fn family_of(name: &str) -> Option<Family> {
         _ if typed("FMemLd") => Family::FrameFieldLoad,
         _ if typed("FMemSt") => Family::FrameFieldStore,
         "VCallAd" | "VCallI2" | "VCallI4" | "VCallStr" => Family::ObjectCall { pushes: true },
-        "VCallHresult" => Family::ObjectCall { pushes: false },
+        "VCallHresult" | "VCall" | "VCallFPR4" | "VCallFPR8" | "VCallHidden" => {
+            Family::ObjectCall { pushes: false }
+        }
         "FFree1Ad" | "FFree1Str" | "FFree1Var" | "FFreeAd" | "FFreeStr" | "FFreeVar" => {
             Family::Free
         }
@@ -2025,10 +2028,11 @@ fn run(
             }
             Family::ObjectCall { pushes } => {
                 if !pushes
+                    && let Some(index) = u16_at(arguments, 2)
                     && let Some((object, class @ None)) = state.object.as_mut()
                     && *object != Expr::Arg(8)
                 {
-                    *class = class_at(callees, word16(2)?);
+                    *class = class_at(callees, index);
                 }
                 object_call(&mut state, callees, types, word16(0)?, pushes, at, calls)?
             }
@@ -2879,6 +2883,9 @@ names = ["AddVar"]
 [primary.57]
 width = 0
 names = ["LitNothing"]
+[primary.58]
+width = 2
+names = ["VCall"]
 [primary.44]
 width = 4
 names = ["LateMemCall"]
@@ -3011,6 +3018,16 @@ result = false
                 "       Call local_68.Cls()",
                 "       Exit"
             ]
+        );
+    }
+
+    #[test]
+    fn a_vcall_calls_through_the_object_register_with_no_interface_argument() {
+        let mut body = BOX1_IN_LOCAL_68.to_vec();
+        body.extend_from_slice(&[0xFF, 0x58, 0xB0, 0x00, 0x18, 0x98, 0xFF, 0x0C]);
+        assert_eq!(
+            object_lines(&body).unwrap(),
+            ["       Call Me.box1.Cls()", "       Exit"]
         );
     }
 
