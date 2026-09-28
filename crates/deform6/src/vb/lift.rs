@@ -824,7 +824,11 @@ pub enum Stmt {
     /// `End`.
     End,
     /// An exit from the procedure.
-    Exit,
+    Exit {
+        /// Whether the procedure is a `Function`: its exit opcode is one of
+        /// `ExitProcCb`, which returns a value.
+        function: bool,
+    },
     /// A call whose result is not used.
     Call(Callee, Vec<Expr>),
     /// A statement of Basic that is not a call, with its expressions in the
@@ -932,7 +936,8 @@ impl Stmt {
             Self::Resume(Some(target)) => format!("Resume L{target:04X}"),
             Self::GoTo(target) => format!("GoTo L{target:04X}"),
             Self::End => "End".to_owned(),
-            Self::Exit => "Exit".to_owned(),
+            Self::Exit { function: false } => "Exit Sub".to_owned(),
+            Self::Exit { function: true } => "Exit Function".to_owned(),
             Self::Call(callee, args) => format!("Call {}({})", callee.text(), arguments_text(args)),
             Self::Keyword(keyword, args) => keyword.text(args),
             Self::Set { target, value } => format!("Set {} = {}", target.text(), value.text()),
@@ -1022,7 +1027,10 @@ enum Family {
     Resume,
     Branch,
     End,
-    Exit,
+    Exit {
+        /// Whether the opcode returns a value.
+        function: bool,
+    },
     ThisCall,
     ImportCall {
         result: bool,
@@ -1380,7 +1388,9 @@ fn family_of(name: &str) -> Option<Family> {
         "FFree1Ad" | "FFree1Str" | "FFree1Var" | "FFreeAd" | "FFreeStr" | "FFreeVar" => {
             Family::Free
         }
-        _ if name.starts_with("ExitProc") => Family::Exit,
+        _ if name.starts_with("ExitProc") => Family::Exit {
+            function: name.starts_with("ExitProcCb"),
+        },
         _ if typed("FLd") => Family::FrameLoad,
         _ if typed("ILd") => Family::FrameLoad,
         _ if typed("FSt") => Family::FrameStore,
@@ -2250,7 +2260,7 @@ fn run(
             })),
             Family::Branch => Some(Stmt::GoTo(offset16()?.cast_unsigned())),
             Family::End => Some(Stmt::End),
-            Family::Exit => Some(Stmt::Exit),
+            Family::Exit { function } => Some(Stmt::Exit { function }),
             Family::Free => {
                 for slot in freed_slots(names, arguments).ok_or_else(short)? {
                     state.pending.remove(&slot);
@@ -2911,7 +2921,7 @@ pub fn render(stmts: &[LiftedStmt]) -> Vec<String> {
             Stmt::Assign { .. }
             | Stmt::Set { .. }
             | Stmt::End
-            | Stmt::Exit
+            | Stmt::Exit { .. }
             | Stmt::Call(..)
             | Stmt::Keyword(..) => None,
         })
@@ -3232,6 +3242,9 @@ names = ["BranchT"]
 [primary.5C]
 width = 2
 names = ["Resume"]
+[primary.5D]
+width = 4
+names = ["ExitProcCbHresult"]
 [primary.44]
 width = 4
 names = ["LateMemCall"]
@@ -3309,7 +3322,7 @@ dispid = 67
         ]);
         assert_eq!(
             object_lines(&body).unwrap(),
-            ["       local_88 = Me.box1.Text", "       Exit"]
+            ["       local_88 = Me.box1.Text", "       Exit Sub"]
         );
     }
 
@@ -3325,7 +3338,7 @@ dispid = 67
             [
                 "       Me.box1.Text = 5",
                 "       Call Me.box1.Cls()",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
     }
@@ -3347,7 +3360,7 @@ dispid = 67
         let listing = disassemble(&Region::new(&body, Off::new(0)), &table);
         assert_eq!(
             render(&lift(&listing, &table, &callees, Some(&types)).unwrap()),
-            ["       local_88 = Me.box1.Item(0).Text", "       Exit"]
+            ["       local_88 = Me.box1.Item(0).Text", "       Exit Sub"]
         );
         // An array of controls whose interface is not known: Item gives a
         // control with no class, and the call on it names entry 5, the
@@ -3363,7 +3376,7 @@ dispid = 67
             .with_class_interface(5, "_Box");
         assert_eq!(
             render(&lift(&listing_untyped, &table, &array, Some(&types)).unwrap()),
-            ["       Call Me.wsk.Item(0).Cls()", "       Exit"]
+            ["       Call Me.wsk.Item(0).Cls()", "       Exit Sub"]
         );
     }
 
@@ -3385,7 +3398,7 @@ dispid = 67
             [
                 "       Set local_1C = VBA.Err()",
                 "       Call local_1C.Cls()",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
         assert_eq!(
@@ -3403,7 +3416,7 @@ dispid = 67
             [
                 "       Call VBA.Beep()",
                 "       local_88 = local_64",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
         // A call of a procedure of an object needs the object.
@@ -3422,7 +3435,7 @@ dispid = 67
             [
                 "       Call Beep()",
                 "       local_88 = local_64",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
     }
@@ -3439,7 +3452,7 @@ dispid = 67
                 "       Set local_68 = Me.box1",
                 "       Set local_68 = Me.box1",
                 "       Call local_68.Cls()",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
     }
@@ -3455,7 +3468,7 @@ dispid = 67
         assert_eq!(callees.control(0x32C), Some(("wsk1", None)));
         assert_eq!(
             render(&lift(&listing, &table, &callees, None).unwrap()),
-            ["       Set local_68 = Me.wsk1", "       Exit"]
+            ["       Set local_68 = Me.wsk1", "       Exit Sub"]
         );
     }
 
@@ -3465,7 +3478,7 @@ dispid = 67
         body.extend_from_slice(&[0xFF, 0x58, 0xB0, 0x00, 0x18, 0x98, 0xFF, 0x0C]);
         assert_eq!(
             object_lines(&body).unwrap(),
-            ["       Call Me.box1.Cls()", "       Exit"]
+            ["       Call Me.box1.Cls()", "       Exit Sub"]
         );
     }
 
@@ -3478,7 +3491,7 @@ dispid = 67
             [
                 "       Set local_68 = Me.box1",
                 "       Call local_68.Cls()",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
     }
@@ -3584,7 +3597,10 @@ dispid = 67
         let callees = Callees::default().with_method(0x6F8, 5, 12);
         assert_eq!(
             lines_with(&body, &callees).unwrap(),
-            ["       Call Me.method_5(arg_C, local_88)", "       Exit"]
+            [
+                "       Call Me.method_5(arg_C, local_88)",
+                "       Exit Sub"
+            ]
         );
         // A public procedure gives its name.
         let named = Callees::default()
@@ -3593,7 +3609,10 @@ dispid = 67
             .with_procedure(5, "SaveFile");
         assert_eq!(
             lines_with(&body, &named).unwrap(),
-            ["       Call Me.SaveFile(arg_C, local_88)", "       Exit"]
+            [
+                "       Call Me.SaveFile(arg_C, local_88)",
+                "       Exit Sub"
+            ]
         );
         let fewer = Callees::default().with_method(0x6F8, 5, 8);
         assert_eq!(lines_with(&body, &fewer), Err(LiftFault::StackLeft(6)));
@@ -3611,7 +3630,7 @@ dispid = 67
             [
                 "       local_88 = import_3(1)",
                 "       Call import_2()",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
     }
@@ -3641,7 +3660,7 @@ dispid = 67
             [
                 "       If Not (CLng(arg_C) = 27) Then GoTo L000F",
                 "       End",
-                "L000F: Exit",
+                "L000F: Exit Sub",
             ]
         );
     }
@@ -3658,7 +3677,7 @@ dispid = 67
             [
                 "       Me.field_54 = 0",
                 "       Me.field_40 = -1",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
     }
@@ -3676,7 +3695,7 @@ dispid = 67
             [
                 "       Me.field_54 = 0",
                 "       arg_C.field_40 = 1",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
     }
@@ -3690,7 +3709,7 @@ dispid = 67
         ];
         assert_eq!(
             lines(&body).unwrap(),
-            ["       local_88 = 1", "       Exit"]
+            ["       local_88 = 1", "       Exit Sub"]
         );
     }
 
@@ -3712,7 +3731,7 @@ dispid = 67
                 "       local_88 = Me.field_54",
                 "       local_68.field_10 = local_88.field_C",
                 "       local_88 = \"x\"",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
     }
@@ -3768,6 +3787,15 @@ dispid = 67
     }
 
     #[test]
+    fn an_exit_that_returns_a_value_exits_a_function() {
+        assert_eq!(lines(&[0x0C]).unwrap(), ["       Exit Sub"]);
+        assert_eq!(
+            lines(&[0x5D, 0x00, 0x00, 0x00, 0x00]).unwrap(),
+            ["       Exit Function"]
+        );
+    }
+
+    #[test]
     fn a_missing_argument_is_empty_and_is_dropped_at_the_end() {
         let missing = Expr::Word("Missing");
         assert_eq!(
@@ -3798,7 +3826,7 @@ dispid = 67
             [
                 "       local_A0 = 2.5",
                 "       Call import_1(, 7, New class_4)",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
         // The same call of a procedure of a module, and of an object, whose
@@ -3838,7 +3866,7 @@ dispid = 67
             [
                 "       local_88 = arg_C",
                 "       Call import_2(arg_C)",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
         let freed = [
@@ -3847,7 +3875,7 @@ dispid = 67
         ];
         assert_eq!(
             lines(&freed).unwrap(),
-            ["       Call import_2(arg_C)", "       Exit"]
+            ["       Call import_2(arg_C)", "       Exit Sub"]
         );
     }
 
@@ -3873,7 +3901,7 @@ dispid = 67
         ];
         assert_eq!(
             lines(&body).unwrap(),
-            ["       global_3.field_40 = 1", "       Exit"]
+            ["       global_3.field_40 = 1", "       Exit Sub"]
         );
     }
 
@@ -3925,7 +3953,7 @@ dispid = 67
                 "       Next local_88  ' loop: GoTo L000F",
                 "L001C: On Error GoTo 0",
                 "       On Error GoTo L0022",
-                "L0022: Exit",
+                "L0022: Exit Sub",
             ]
         );
     }
@@ -3966,7 +3994,7 @@ dispid = 67
             [
                 "       global_3.field_34 = 5",
                 "       Call global_3.method_2(global_3.field_34)",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
         assert_eq!(class_indexes(&listing, &table), [9]);
@@ -3983,7 +4011,7 @@ dispid = 67
             [
                 "       global_3.field_34 = 5",
                 "       Call global_3.GetImageWidth(global_3.field_34)",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
         let owned = Callees::default().with_class(
@@ -4011,7 +4039,7 @@ dispid = 67
             render(&lift(&listing_function, &table, &owned, None).unwrap()),
             [
                 "       If Not (0 = New class_9.method_2()) Then GoTo L001E",
-                "       Exit",
+                "       Exit Sub",
                 "L001E:"
             ]
         );
@@ -4043,7 +4071,7 @@ dispid = 67
             [
                 "       Set local_1C = New class_9",
                 "       local_88 = local_1C.Text",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
         // local_78 has no known class, and the call names entry 5, the
@@ -4095,7 +4123,7 @@ dispid = 67
         ];
         assert_eq!(
             lines(&freed).unwrap(),
-            ["       Call import_2(arg_C, 1)", "       Exit"]
+            ["       Call import_2(arg_C, 1)", "       Exit Sub"]
         );
         // Without the free, local_88 is a variable: its assignment comes
         // before the call, and the call names it.
@@ -4108,7 +4136,7 @@ dispid = 67
             [
                 "       local_88 = arg_C",
                 "       Call import_2(local_88, 1)",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
     }
@@ -4126,7 +4154,7 @@ dispid = 67
                 "       Erase arg_C",
                 "       local_88 = arg_10",
                 "       local_90 = Abs(arg_14)",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
     }
@@ -4163,7 +4191,7 @@ dispid = 67
                 "       Call import_2()",
                 "L0005: Call import_3()",
                 "       GoTo L0005",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
         // The argument of the second call comes before the first call, and
@@ -4177,7 +4205,7 @@ dispid = 67
             [
                 "       Call import_2()",
                 "       Call import_3(local_64)",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
         // An operator that takes no float steps over such a call:
@@ -4192,7 +4220,7 @@ dispid = 67
             [
                 "       Call import_2(local_64)",
                 "       local_88 = (local_60 & local_64)",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
         // CI4R4 takes a float, so it takes the result of the call.
@@ -4210,7 +4238,7 @@ dispid = 67
             [
                 "       Call import_2()",
                 "       local_88 = local_64",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
         // A Set after such a call comes after it too.
@@ -4222,14 +4250,18 @@ dispid = 67
             [
                 "       Call import_2()",
                 "       Set local_1C = New class_9",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
         // The statement after such a call keeps its own offset.
         let after = [0x12, 0x02, 0x00, 0x00, 0x00, 0x0B, 0x05, 0x00, 0x0C];
         assert_eq!(
             lines(&after).unwrap(),
-            ["       Call import_2()", "L0005: GoTo L0005", "       Exit"]
+            [
+                "       Call import_2()",
+                "L0005: GoTo L0005",
+                "       Exit Sub"
+            ]
         );
     }
 
@@ -4250,7 +4282,7 @@ dispid = 67
                 "       local_68 = local_64",
                 "       local_88 = (local_68 & local_60)",
                 "       local_88 = local_78.field_34",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
         // import_2(CVar(local_64)): CVarStr pushes the address of its slot.
@@ -4322,7 +4354,7 @@ dispid = 67
             [
                 "       arg_C = 5",
                 "       Call import_2(local_54)",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
         // Get #1, 1, local_64; Get #1, , local_60; Print #1, local_5C
@@ -4337,7 +4369,7 @@ dispid = 67
                 "       Get #1, 1, local_64",
                 "       Get #1, , local_60",
                 "       Print #1, local_5C",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
         // Get #1, , local_64 of a record or an array.
@@ -4357,7 +4389,7 @@ dispid = 67
                 "L000C: local_88 = (local_60 + local_64)",
                 "       Next local_64  ' loop: GoTo L000C",
                 "L0020: Close #1",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
         // import_2(Nothing)
@@ -4375,11 +4407,11 @@ dispid = 67
                 "L0006: Resume Next",
                 "       Resume L0006",
                 "L000C: Resume",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
         let destruct = [0x52, 0x88, 0xFE, 0x03, 0x00, 0x0C];
-        assert_eq!(lines(&destruct).unwrap(), ["       Exit"]);
+        assert_eq!(lines(&destruct).unwrap(), ["       Exit Sub"]);
         let two = [
             0x0F, 0xA4, 0xFF, 0x0F, 0xA4, 0xFF, 0x02, 0x01, 0x50, 0x29, 0x00, 0x10, 0x00, 0x0C,
         ];
@@ -4413,7 +4445,7 @@ dispid = 67
             [
                 "       Call local_1C.Run(local_64, local_60)",
                 "       local_88 = local_1C.RegRead(local_64)",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
         assert_eq!(name_indexes(&listing, &table), [7, 8]);
@@ -4439,7 +4471,7 @@ dispid = 67
             [
                 "       Call Me.box1.Cls()",
                 "       Me.box1.Cls = local_60",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
         // local_88 = Me.box1.Cls through LateIdLdVar.
@@ -4458,7 +4490,7 @@ dispid = 67
             [
                 "       Call local_1C.[DISPID 0x43](local_64)",
                 "       local_1C.[DISPID 0x3] = local_60",
-                "       Exit"
+                "       Exit Sub"
             ]
         );
         assert_eq!(
@@ -4481,7 +4513,7 @@ dispid = 67
                 "       local_88 = arg_10",
                 "       GoTo L0015",
                 "L000F: local_88 = arg_14",
-                "L0015: Exit",
+                "L0015: Exit Sub",
             ]
         );
     }
