@@ -699,7 +699,7 @@ impl Expr {
             Self::Name(name) => name.clone(),
             Self::Implicit => String::new(),
             Self::Real(bits) => format!("{:?}", f64::from_bits(*bits)),
-            Self::Str(text) => format!("\"{}\"", text.replace('"', "\"\"")),
+            Self::Str(text) => string_text(text),
             Self::Constant(index) => format!("const_{index:X}"),
             Self::New(index) => format!("New class_{index:X}"),
             Self::Late(object, 0) => object.text(),
@@ -752,6 +752,45 @@ fn global_at(callees: &Callees, index: u16) -> Expr {
         .iter()
         .find(|(at, _)| *at == index)
         .map_or(Expr::Global(index), |(_, address)| Expr::Variable(*address))
+}
+
+/// The text of the string `text` as Basic writes it. A literal of Basic
+/// holds no control character, so each one is a constant, such as
+/// `vbCrLf`, or `Chr$` and its code, joined to the literals with `&`.
+fn string_text(text: &str) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut literal = String::new();
+    let mut characters = text.chars().peekable();
+    while let Some(character) = characters.next() {
+        let constant = match character {
+            '\r' if characters.peek() == Some(&'\n') => {
+                characters.next();
+                "vbCrLf".to_owned()
+            }
+            '\r' => "vbCr".to_owned(),
+            '\n' => "vbLf".to_owned(),
+            '\t' => "vbTab".to_owned(),
+            '\0' => "vbNullChar".to_owned(),
+            control if control.is_control() => format!("Chr$({})", u32::from(control)),
+            '"' => {
+                literal.push_str("\"\"");
+                continue;
+            }
+            other => {
+                literal.push(other);
+                continue;
+            }
+        };
+        if !literal.is_empty() {
+            parts.push(format!("\"{literal}\""));
+            literal.clear();
+        }
+        parts.push(constant);
+    }
+    if !literal.is_empty() || parts.is_empty() {
+        parts.push(format!("\"{literal}\""));
+    }
+    parts.join(" & ")
 }
 
 /// The text of the member `name` of `object`: with no object for a member
@@ -3908,6 +3947,19 @@ dispid = 67
             lines(&[0x5D, 0x00, 0x00, 0x00, 0x00]).unwrap(),
             ["       Exit Function"]
         );
+    }
+
+    #[test]
+    fn a_control_character_of_a_string_is_a_constant() {
+        let text = |value: &str| Expr::Str(value.to_owned()).text();
+        assert_eq!(text("a\r\nb"), "\"a\" & vbCrLf & \"b\"");
+        assert_eq!(text("\r\n"), "vbCrLf");
+        assert_eq!(text("x\ty\n"), "\"x\" & vbTab & \"y\" & vbLf");
+        assert_eq!(text("\r"), "vbCr");
+        assert_eq!(text("\0"), "vbNullChar");
+        assert_eq!(text("\u{1}q"), "Chr$(1) & \"q\"");
+        assert_eq!(text("say \"hi\""), "\"say \"\"hi\"\"\"");
+        assert_eq!(text(""), "\"\"");
     }
 
     #[test]
