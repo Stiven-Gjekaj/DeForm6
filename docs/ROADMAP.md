@@ -835,6 +835,12 @@ gives the module. The measure is now 3106 of 4093, and `tests/lift.toml`
 pins it for each program. Most of the 987 other tokens are the fields of a
 user-defined type, such as `.lpstrFile`, which the lift names `field_34`.
 
+**The handlers.** A types file names the event of each bound slot, and
+`extract --vb-types` writes each handler of a P-code form under its event
+name and with the parameters of its event. 361 of 361 handlers of the
+P-code corpus are lines of their source. Without this, VB6 binds no event
+to a rebuilt form.
+
 **Next.** Each body lifts, and the calls have names. The lift gives names of
 offsets, not of variables, and each statement stays in the form of `GoTo`
 and labels. The next step writes the lift as Basic that VB6 can compile,
