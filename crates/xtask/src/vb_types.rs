@@ -512,6 +512,7 @@ mod tests {
             }],
             ordinal: None,
             result_type: None,
+            member_id: 0x40,
         }
     }
 

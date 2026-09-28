@@ -107,6 +107,8 @@ pub(crate) struct Function {
     /// The index of the type info that the return type names, through
     /// pointers, when it is a type of this library.
     pub result_type: Option<usize>,
+    /// The member id: the `DISPID` of a late-bound call of the function.
+    pub member_id: u32,
 }
 
 /// The bit of the `FKCCIC` field of a function record that tells that the
@@ -329,6 +331,13 @@ fn functions(
         )?;
         let name_offset = i32_at(bytes, name_at)
             .ok_or_else(|| format!("the file ends in the member names at {name_at:#x}"))?;
+        let id_at = add(
+            after,
+            index.checked_mul(4).ok_or("a member index overflows")?,
+            "a member id",
+        )?;
+        let member_id = u32_at(bytes, id_at)
+            .ok_or_else(|| format!("the file ends in the member ids at {id_at:#x}"))?;
         out.push(Function {
             name: name(bytes, names, name_offset)?,
             vtable_offset,
@@ -336,6 +345,7 @@ fn functions(
             parameters,
             ordinal,
             result_type,
+            member_id,
         });
         at = add(at, size, "a record")?;
     }
@@ -543,6 +553,8 @@ pub(crate) mod tests {
         put_u32(&mut out, moving + 0x2C, 1);
         put_u32(&mut out, 0x600, 0x30 + 0x30);
         // The member ids, then the names.
+        put_u32(&mut out, 0x604 + 0x30 + 0x30, 0x43);
+        put_u32(&mut out, 0x604 + 0x30 + 0x30 + 4, 0x6003_0001);
         let names = 0x604 + 0x30 + 0x30 + 8;
         put_u32(&mut out, names, 0x40);
         put_u32(&mut out, names + 4, 0x60);
@@ -571,6 +583,7 @@ pub(crate) mod tests {
                     }],
                     ordinal: Some(685),
                     result_type: Some(1),
+                    member_id: 0x43,
                 },
                 Function {
                     name: Some("Move".to_owned()),
@@ -590,6 +603,7 @@ pub(crate) mod tests {
                     ],
                     ordinal: None,
                     result_type: None,
+                    member_id: 0x6003_0001,
                 },
             ]
         );
