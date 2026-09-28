@@ -119,6 +119,10 @@ pub struct ImportType {
     /// The interface of an object result, when the file gives it.
     #[serde(default)]
     pub result_interface: Option<String>,
+    /// Whether the function returns a `Variant`: a call of it passes the
+    /// address of the result first.
+    #[serde(default)]
+    pub variant_result: bool,
 }
 
 /// One interface.

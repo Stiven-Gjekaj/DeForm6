@@ -373,6 +373,7 @@ pub struct Callees {
     class_interfaces: Vec<(u16, String)>,
     imports: Vec<(u16, String, Option<String>)>,
     declares: Vec<(u16, String)>,
+    variant_results: Vec<u16>,
     stubs: Vec<(u16, ProjectCall)>,
     arguments: Vec<(u16, i16, String)>,
     procedures: Vec<(u16, String)>,
@@ -597,6 +598,15 @@ impl Callees {
             .iter()
             .find(|(at, _, _)| *at == index)
             .map(|(_, name, result)| (name.as_str(), result.as_deref()))
+    }
+
+    /// Marks the function of the runtime at `index` of the constant table as
+    /// one that returns a `Variant`: a call of it passes the address of the
+    /// result first.
+    #[must_use]
+    pub fn with_variant_result(mut self, index: u16) -> Self {
+        self.variant_results.push(index);
+        self
     }
 
     /// Gives the interface of the class of the runtime at `index` of the
@@ -2402,49 +2412,71 @@ fn run(
                         None => (Callee::Import(index), None),
                     },
                 };
-                let mut args = expressions(call_arguments(&mut state.stack, word16(2)?, at)?);
-                let callee = match callees.project_call(index) {
-                    Some(ProjectCall::Module(module, name)) => {
-                        Callee::Module(module.clone(), name.clone())
-                    }
-                    Some(ProjectCall::Object(name)) => {
-                        if args.is_empty() {
-                            return Err(LiftFault::CallArguments(at));
-                        }
-                        Callee::Member(Box::new(args.remove(0)), name.clone())
-                    }
-                    None => callee,
-                };
-                let float = names
-                    .iter()
-                    .any(|name| name.ends_with("FPR4") || name.ends_with("FPR8"));
-                if result {
-                    let mut value = Value::plain(Expr::Call(callee, args), true);
-                    value.class = class;
-                    state.stack.push(value);
-                    None
-                } else if float {
-                    let begin = if !state.stack.is_empty()
-                        && state.stack.iter().all(Value::is_float_call)
-                    {
-                        state.resume.unwrap_or(first)
+                let mut values = call_arguments(&mut state.stack, word16(2)?, at)?;
+                let result_slot = values
+                    .first()
+                    .and_then(|value| value.slot)
+                    .filter(|slot| *slot < 0);
+                if !result
+                    && callees.variant_results.contains(&index)
+                    && let Some(slot) = result_slot
+                {
+                    values.remove(0);
+                    let call = Expr::Call(callee, expressions(values));
+                    if state.depth() > 0 {
+                        state.bindings.insert(slot, (call, None));
+                        None
                     } else {
-                        first
-                    };
-                    let below = state
-                        .stack
-                        .iter()
-                        .filter(|value| value.is_float_call())
-                        .count();
-                    state.floats.truncate(below);
-                    state.floats.push(begin);
-                    state.resume = next_offset;
-                    state
-                        .stack
-                        .push(Value::plain(Expr::Call(callee, args), false));
-                    None
+                        Some(Stmt::Assign {
+                            target: Expr::frame(slot),
+                            value: call,
+                        })
+                    }
                 } else {
-                    Some(Stmt::Call(callee, args))
+                    let mut args = expressions(values);
+                    let callee = match callees.project_call(index) {
+                        Some(ProjectCall::Module(module, name)) => {
+                            Callee::Module(module.clone(), name.clone())
+                        }
+                        Some(ProjectCall::Object(name)) => {
+                            if args.is_empty() {
+                                return Err(LiftFault::CallArguments(at));
+                            }
+                            Callee::Member(Box::new(args.remove(0)), name.clone())
+                        }
+                        None => callee,
+                    };
+                    let float = names
+                        .iter()
+                        .any(|name| name.ends_with("FPR4") || name.ends_with("FPR8"));
+                    if result {
+                        let mut value = Value::plain(Expr::Call(callee, args), true);
+                        value.class = class;
+                        state.stack.push(value);
+                        None
+                    } else if float {
+                        let begin = if !state.stack.is_empty()
+                            && state.stack.iter().all(Value::is_float_call)
+                        {
+                            state.resume.unwrap_or(first)
+                        } else {
+                            first
+                        };
+                        let below = state
+                            .stack
+                            .iter()
+                            .filter(|value| value.is_float_call())
+                            .count();
+                        state.floats.truncate(below);
+                        state.floats.push(begin);
+                        state.resume = next_offset;
+                        state
+                            .stack
+                            .push(Value::plain(Expr::Call(callee, args), false));
+                        None
+                    } else {
+                        Some(Stmt::Call(callee, args))
+                    }
                 }
             }
             Family::ObjectStore => {
@@ -3870,6 +3902,25 @@ dispid = 67
                 "       local_88 = \"x\"",
                 "       Exit Sub"
             ]
+        );
+    }
+
+    #[test]
+    fn a_function_that_returns_a_variant_takes_its_result_first() {
+        // Push 7, then the address of local_88, then call import 1: the
+        // value pushed last is the first argument.
+        let body = [
+            0x02, 0x07, 0x15, 0x78, 0xFF, 0x12, 0x01, 0x00, 0x08, 0x00, 0x0C,
+        ];
+        let plain = Callees::default().with_import(1, "_B_var_Left", None);
+        assert_eq!(
+            lines_with(&body, &plain).unwrap()[0],
+            "       Call VBA._B_var_Left(local_88, 7)"
+        );
+        let variant = plain.with_variant_result(1);
+        assert_eq!(
+            lines_with(&body, &variant).unwrap()[0],
+            "       local_88 = VBA._B_var_Left(7)"
         );
     }
 

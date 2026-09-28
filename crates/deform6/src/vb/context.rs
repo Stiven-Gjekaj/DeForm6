@@ -340,6 +340,9 @@ pub fn callees_of_project_named(
                         &import.name,
                         import.result_interface.as_deref(),
                     );
+                    if import.variant_result {
+                        callees = callees.with_variant_result(index);
+                    }
                 }
             }
             for index in interface_indexes(listing, table) {
