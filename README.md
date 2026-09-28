@@ -246,7 +246,7 @@ With `--lift`, `disasm` prints a procedure as statements when it can follow
 the stack of every opcode: 239 of the 680 procedures of the P-code corpus,
 673 with `--vb-types` from `VB6.OLB`, and 680 when the file also holds the
 VBA library. The statements name each variable by its offset, such as
-`local_88` or `Me.field_54`. They name a called procedure of the project by
+`local_88` or `field_54`. They name a called procedure of the project by
 its name when it is public, such as `Me.makeSpecialString`, and else by its
 index, such as `Me.method_16`. A call of a module gives the module, such as
 `Sub_Module.method_1()`, and a call of a `Declare` gives its export name,
@@ -256,6 +256,10 @@ runtime, such as `VBA.Err().Clear()`. A late-bound call on a control of an
 OCX names its member when the file holds the OCX, such as
 `Me.WskClient.SendData("Msg_Eof_")`, and else it gives its `DISPID`, such as
 `Me.WskClient.[DISPID 0x43]("Msg_Eof_")`.
+They take the forms of Basic where the lift knows them: `ReDim a(0 To 7)`,
+`Open p For Binary As #1`, `Exit Sub` or `Exit Function`, `Screen.Width`,
+`frmAbout.Visible`, and an empty place for an argument that a call leaves
+out.
 The statements are not the source, and `extract` writes none of them.
 `check-pcode-table` holds them against the source: 3106 of the 4093 string
 literals and names after a `.` of the source are in the lift. Most of the
