@@ -816,19 +816,19 @@ in the constant table. A call of a function of the runtime jumps through a
 slot of the import address table, which imports the function by an ordinal,
 and the VBA library in `MSVBVM60.DLL` names the function of each ordinal.
 The width tracer now follows a jump table of a handler, which gives
-`NextVar` its loop target. With these, 239 of the 680 bodies lift with no
-types file, 663 with a types file from `VB6.OLB`, and 666 when the file also
-holds the VBA library. Section 23c of `STRUCTURES.md` gives the rules. A
+`NextVar` its loop target. A Winsock control is called late-bound by
+`DISPID`, and the null GUID names the object of a control array. With these,
+239 of the 680 bodies lift with no types file, 673 with a types file from
+`VB6.OLB`, and 680 of 680 when the file also holds the VBA library. Section 23c of `STRUCTURES.md` gives the rules. A
 read against the source found such statements as `VBA.Err().Clear()` and
 `Call local_A0.RegWrite(...)` in `PassGen.exe`, and
 `ReDim ImageData(0 To GetImageStreamLength(SrcPictureBox))` as
 `Call VBA.ReDim(arg_10((0 To Me.method_6(arg_C))))` in
 `Realtime_Brightness.exe`.
 
-**Next.** Each of the other 14 bodies calls a Winsock control, whose type
-library is in `MSWINSCK.OCX`. A types file that also holds that library can
-lift them. After that, the lift gives names of offsets, not of variables,
-and each statement stays in the form of `GoTo` and labels.
+**Next.** Each body now lifts. The lift gives names of offsets, not of
+variables, and each statement stays in the form of `GoTo` and labels. A
+member of an OCX control has its `DISPID`, not its name.
 
 **The gate.** The recovered code compiles, which Phase 8 already measures, and
 the rebuilt program behaves the same as the original.
