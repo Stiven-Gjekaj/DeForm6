@@ -660,6 +660,7 @@ impl Expr {
             Self::Str(text) => format!("\"{}\"", text.replace('"', "\"\"")),
             Self::Constant(index) => format!("const_{index:X}"),
             Self::New(index) => format!("New class_{index:X}"),
+            Self::Late(object, 0) => object.text(),
             Self::Late(object, dispid) => format!("{}.[DISPID {dispid:#X}]", object.text()),
             Self::Index(array, indexes) => format!("{}({})", array.text(), arguments_text(indexes)),
             Self::Bound(_, _, value) => value.text(),
@@ -3959,7 +3960,8 @@ dispid = 67
     #[test]
     fn a_late_get_an_array_and_a_function_give_their_expressions() {
         // local_88 = InStr(1, Me.[DISPID 0], arg_C(2), 0): the late get
-        // writes local_4C and pushes its address, which PopAd drops.
+        // writes local_4C and pushes its address, which PopAd drops. DISPID 0
+        // is the default member, which Basic does not name.
         let body = [
             0x16, 0x33, 0xB4, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x34, 0x01, 1, 0, 0, 0, 0x03, 0xB4,
             0xFF, 0x02, 0x02, 0x15, 0x0C, 0x00, 0x35, 0x01, 0, 0, 0, 0, 0x37, 0x05, 0x78, 0xFF,
@@ -3967,7 +3969,7 @@ dispid = 67
         ];
         assert_eq!(
             lines(&body).unwrap()[0],
-            "       local_88 = VBA.InStr(1, Me.[DISPID 0x0], arg_C(2), 0)"
+            "       local_88 = VBA.InStr(1, Me, arg_C(2), 0)"
         );
         // arg_C(1) = 7
         let store = [0x02, 0x07, 0x02, 0x01, 0x15, 0x0C, 0x00, 0x36, 0x0C];
