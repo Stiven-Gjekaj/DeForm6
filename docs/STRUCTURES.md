@@ -2661,6 +2661,35 @@ the offset of its `NextVar` plus 6.
 not zero. `Resume` holds `0xFFFF` for `Resume Next`, `0xFFFE` for `Resume`,
 or the offset of a label; the corpus holds `Resume Next` only.
 
+**The name of a called procedure of the project.** `lpProcNamesArray`
+(§5.1) has the same order as the method table of its object. In 179 of 179
+public names of the corpus, the name at index N is the source name of the
+method at index N of the method table. A `Private` or a `Friend` procedure
+has no name there, so the lift names it by its index, such as `method_4`.
+
+**What `ImpAdCall` names.** The constant entry of an `ImpAdCall` is the
+address of a stub. The stub has one of four shapes:
+
+| Stub | Bytes | Goes to | Corpus |
+|------|-------|---------|--------|
+| Runtime import | `FF 25 <slot>` | The function that the import address table slot imports | |
+| `Declare` | `A1 <cache> 0B C0 74 02 FF E0 68 <descriptor>` | The entry of type 7 of the `Declare` table (§7.1) whose `lpImportDescriptor` is `<descriptor>` | 186 of 186 |
+| Procedure of a module | `BA <descriptor> B9 <engine> FF E1` | The procedure whose descriptor is `<descriptor>` | 21 |
+| Procedure of an object | `B8 00 00 00 00 66 3D 33 C0 BA <descriptor> 68 <engine> C3` | The same, and the first argument of the call is the object | 19 |
+
+The export name of the `Declare` entry is the `Alias` of the source, or the
+name of the `Declare` when it has no `Alias`. The 19 calls of a procedure of
+an object are calls of a `Friend` procedure of a class.
+
+**The measure of the lift.** `check-pcode-table` holds the lift of each
+procedure against the body of its source procedure. The method table has
+the order of the source file, in 680 of 680 descriptors. A token is a
+string literal or a name after a `.`, in lower case, with `Me.` and `VBA.`
+removed. 3106 of the 4093 tokens of the source are in the lift. Of the 987
+that are not, most are the names of the fields of a user-defined type, such
+as `.lpstrFile` and `.bmHeight`: the lift gives `field_34`. `tests/lift.toml`
+pins the counts of each program.
+
 **What the measurement did not settle.** The layout of the external
 component entry of an OCX other than `MSWINSCK.OCX`: the corpus holds no
 other. `Print #` of more than one item: the corpus holds none.
