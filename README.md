@@ -217,10 +217,11 @@ deform6 disasm <path-to-exe> --pcode-table derived/pcode-table.toml
 The interfaces of the controls are not in this repository either. Derive
 them from a copy of `VB6.OLB` that you own. Give `MSVBVM60.DLL` too, and the
 file also holds the VBA library of the runtime, such as `Err` and
-`Collection`:
+`Collection`. Give an OCX too, such as `MSWINSCK.OCX`, and the file names
+the members of its controls:
 
 ```
-cargo run -p xtask -- derive-vb-types <path-to-VB6.OLB> <path-to-MSVBVM60.DLL>
+cargo run -p xtask -- derive-vb-types <path-to-VB6.OLB> <path-to-MSVBVM60.DLL> [<path-to-OCX>...]
 cargo run -p xtask -- check-pcode-table --vb-types derived/vb-types.toml
 deform6 disasm <path-to-exe> --pcode-table derived/pcode-table.toml --vb-types derived/vb-types.toml --lift
 ```
@@ -235,9 +236,10 @@ VBA library. The statements name each variable by its offset, such as
 `local_88` or `Me.field_54`, and each called procedure of the project by its
 index, such as `Me.method_16`. With `--vb-types` they name the controls and
 their properties, such as `Me.chkAutomatic.Value`, and the functions of the
-runtime, such as `VBA.Err().Clear()`. A late-bound call names its member by
-its `DISPID` when the binary gives no name, such as
-`Me.WskClient.[DISPID 0x43]("Msg_Eof_")` for `WskClient.SendData "Msg_Eof_"`.
+runtime, such as `VBA.Err().Clear()`. A late-bound call on a control of an
+OCX names its member when the file holds the OCX, such as
+`Me.WskClient.SendData("Msg_Eof_")`, and else it gives its `DISPID`, such as
+`Me.WskClient.[DISPID 0x43]("Msg_Eof_")`.
 The statements are not the source, and `extract` writes none of them.
 
 Run everything the gate runs, in one command:
