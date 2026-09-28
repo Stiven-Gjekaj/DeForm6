@@ -803,6 +803,19 @@ fn string_text(text: &str) -> String {
     parts.join(" & ")
 }
 
+/// Gives the name that Basic writes for the function of the runtime `name`:
+/// `Left$` for `_B_str_Left`, which returns a `String`, and `Left` for
+/// `_B_var_Left`, which returns a `Variant`.
+fn basic_name(name: &str) -> String {
+    if let Some(bare) = name.strip_prefix("_B_str_") {
+        format!("{bare}$")
+    } else if let Some(bare) = name.strip_prefix("_B_var_") {
+        bare.to_owned()
+    } else {
+        name.to_owned()
+    }
+}
+
 /// The text of the member `name` of `object`: with no object for a member
 /// of the global object of the runtime.
 fn member_text(object: &Expr, name: &str) -> String {
@@ -2404,7 +2417,7 @@ fn run(
                 let index = word16(0)?;
                 let (callee, class) = match callees.import(index) {
                     Some((name, class)) => (
-                        Callee::Member(Box::new(Expr::Word("VBA")), name.to_owned()),
+                        Callee::Member(Box::new(Expr::Word("VBA")), basic_name(name)),
                         class.map(str::to_owned),
                     ),
                     None => match callees.declare(index) {
@@ -3915,12 +3928,17 @@ dispid = 67
         let plain = Callees::default().with_import(1, "_B_var_Left", None);
         assert_eq!(
             lines_with(&body, &plain).unwrap()[0],
-            "       Call VBA._B_var_Left(local_88, 7)"
+            "       Call VBA.Left(local_88, 7)"
         );
         let variant = plain.with_variant_result(1);
         assert_eq!(
             lines_with(&body, &variant).unwrap()[0],
-            "       local_88 = VBA._B_var_Left(7)"
+            "       local_88 = VBA.Left(7)"
+        );
+        let string = Callees::default().with_import(1, "_B_str_Left", None);
+        assert_eq!(
+            lines_with(&body, &string).unwrap()[0],
+            "       Call VBA.Left$(local_88, 7)"
         );
     }
 
