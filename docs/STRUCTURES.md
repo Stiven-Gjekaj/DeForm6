@@ -1353,6 +1353,40 @@ event-name list (crediting `vic4key/VB-Exe-Parser`); SVBD carries a per-control
 index-remapping table; IDC hardcodes them per control GUID. **[C]** DeForm6
 needs the same table, built as derived data.
 
+**Measured on the P-code corpus, 2026-09-28.** **[C]** The ordinal is the
+order of the vtable offsets of the events interface, not the order of its
+function records. `FormEvents` holds `Load` first in its records, but at
+offset `0x24`, so `Load` is slot 6. The events of the interface fill the
+last slots of the table:
+
+| Control | Slots | Events | First event slot | Bound slots named as in the source |
+|---------|-------|--------|------------------|------------------------------------|
+| Intrinsic (14 kinds, and the form) | N | N | 0 | 375 of 375 |
+| `MSWINSCK.OCX` Winsock | 16 | 7 | 9 | 13 of 13 |
+
+The events interface is the one whose GUID the `ControlInfo` record names.
+A control array names that GUID plus 1 in its first 32 bits. A control of an
+OCX names a GUID of its entry of the external component table (§23c), and
+the entry names the GUID of its events interface at `+0x48`. The 9 slots
+before the events of an OCX control are likely the first 9 events of
+`VBControlExtenderEvents` (`GotFocus` to `Validate`), but no corpus program
+binds one of them.
+
+`derive-vb-types` writes the events of each events interface in the order
+of their offsets, with the declaration of each parameter in Basic. In
+`VB6.OLB` each parameter of an event is a pointer, so it is passed by
+reference, such as `KeyAscii As Integer`. In `MSWINSCK.OCX` a parameter
+that is not a pointer is `ByVal`, such as `ByVal bytesTotal As Long`.
+
+**The handler.** A P-code stub gives the descriptor of the handler, and the
+method table of the form gives the index of its procedure. `extract
+--vb-types` writes that procedure as `Private Sub <control>_<event>(...)`,
+or `Form_<event>`, with `Index As Integer` first for a control array. The
+361 handlers of the P-code corpus are lines of their source, in 361 of 361,
+when case and comments are left out. A native stub gives the address of
+machine code, which the method table of a native build does not hold, so
+a native handler keeps its generated name.
+
 The stub itself, in a **native** build: **[C]**
 
 ```
