@@ -806,11 +806,29 @@ the statements name the controls and their properties, such as
 `If Not (Me.chkAutomatic.Value = 1) Then GoTo L0035` for
 `If chkAutomatic.Value = 1 Then` in `UUID2.exe`.
 
-**Next.** The first stop is now most often a call on an object argument of
-a procedure (91 bodies), such as `srcPic As PictureBox`, whose class the
-binary does not seem to give. The class could come from the calls of the
-procedure, when each call gives an object of one class. After it come
-`ImpAdLdRf` (82 bodies), `FStStrCopy` (36) and `FLdZeroAd` (35).
+**The calls of other objects and of the runtime.** The class of an object
+argument comes from the `FuncTypDesc` record of a public method, or from the
+calls of the method in the project. The second argument of a `VCallHresult`
+names the GUID of the interface of the call, and the default interface of an
+object of the project has that GUID. A control array names the GUID of the
+events of its control plus 1. A late-bound call names its member by a name
+in the constant table. A call of a function of the runtime jumps through a
+slot of the import address table, which imports the function by an ordinal,
+and the VBA library in `MSVBVM60.DLL` names the function of each ordinal.
+The width tracer now follows a jump table of a handler, which gives
+`NextVar` its loop target. With these, 239 of the 680 bodies lift with no
+types file, 663 with a types file from `VB6.OLB`, and 666 when the file also
+holds the VBA library. Section 23c of `STRUCTURES.md` gives the rules. A
+read against the source found such statements as `VBA.Err().Clear()` and
+`Call local_A0.RegWrite(...)` in `PassGen.exe`, and
+`ReDim ImageData(0 To GetImageStreamLength(SrcPictureBox))` as
+`Call VBA.ReDim(arg_10((0 To Me.method_6(arg_C))))` in
+`Realtime_Brightness.exe`.
+
+**Next.** Each of the other 14 bodies calls a Winsock control, whose type
+library is in `MSWINSCK.OCX`. A types file that also holds that library can
+lift them. After that, the lift gives names of offsets, not of variables,
+and each statement stays in the form of `GoTo` and labels.
 
 **The gate.** The recovered code compiles, which Phase 8 already measures, and
 the rebuilt program behaves the same as the original.
