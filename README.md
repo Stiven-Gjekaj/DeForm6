@@ -85,9 +85,12 @@ The JSON report holds exactly three top level keys: `items`, `defects`, and
 
 ### How it behaves
 
-- Two subcommands, and no more. `inspect` reads one executable and prints what
-  DeForm6 found in it, and writes nothing to disk. `extract` reads one
-  executable and writes a project directory that VB6 can open.
+- Three subcommands, and no more. `inspect` reads one executable and prints
+  what DeForm6 found in it, and writes nothing to disk. `disasm` reads one
+  P-code executable and prints the P-code of each procedure. It decodes the
+  P-code with a table that `cargo run -p xtask -- derive-pcode-table` writes,
+  and it writes nothing to disk. `extract` reads one executable and writes a
+  project directory that VB6 can open.
 - One run is one process over one file.
 - The library never opens a file. The command line crate owns the file system.
 - `extract` plans every write before it writes anything. It refuses the whole
