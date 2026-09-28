@@ -2569,8 +2569,8 @@ Section 23c settles it for the arguments that a call of the project passes.
 ## 23c. The calls of other objects and of the runtime, measured on the P-code corpus, 2026-09-28
 
 These rules come from the handlers of `MSVBVM60.DLL` 6.0.98.2 and from the
-P-code corpus. With them, 666 of the 680 bodies lift with a types file from
-`VB6.OLB` and `MSVBVM60.DLL`. Each of the other 14 calls a Winsock control.
+P-code corpus. With them, 680 of the 680 bodies lift with a types file from
+`VB6.OLB` and `MSVBVM60.DLL`.
 
 **The class of an object argument.** A public method has a `FuncTypDesc`
 record (section 6.3). An argument of an external class in it names a side
@@ -2609,10 +2609,23 @@ holds `Item(Integer)` at `0x40`, then `LBound`, `UBound` and `Count` at
 
 **A late-bound call.** `LateMemCall`, `LateMemCallLdVar` and `LateMemLdVar`
 name the member by an entry of the constant table: UTF-16 characters up to
-a zero unit, with no length before them. The handler pops the arguments,
+a zero unit, with no length before them. `LateIdCall`, `LateIdCallLdVar`
+and `LateIdSt` name it by a 32-bit `DISPID` in the argument. A Winsock
+control is called so: in `TFTPClient.exe`, `0x43` is `SendData`, `0x40` is
+`Connect` and `0x46` is `Close`. `LateIdSt` pops one `Variant` and sets the
+member to it. The handler pops the arguments,
 16 bytes of a `Variant` each, in the order of the source, and calls the
 member of the object register. The `LdVar` forms write the result into a
 frame slot and push its address.
+
+**A control of an OCX.** The `ControlInfo` record of a Winsock control
+names a GUID that is not in the type library of `MSWINSCK.OCX`, so the
+accessor gives the control with no interface. The array of Winsock controls
+of `Server.exe` names a GUID that is not the GUID of the single Winsock
+control of `TFTPClient.exe` plus 1. Its `Item` call names the null GUID. Each
+of the 65 `VCallHresult` calls of the corpus that name the null GUID calls
+`Item` or `Count` right after a control accessor, so the null GUID names the
+object of a control array.
 
 **A function of the runtime.** The entry that an `ImpAdCall` names can be
 the address of `jmp dword ptr [slot]`, where the slot is in the import
@@ -2638,11 +2651,14 @@ of the `Variant` types, and each typed path reads the offset after the slot.
 In each of the 3 loops of a `Variant` of the corpus, the exit of `ForVar` is
 the offset of its `NextVar` plus 6.
 
-**What the measurement did not settle.** The Winsock control: its type
-library is in `MSWINSCK.OCX`, which is not in the types file. The array of
-Winsock controls in `Server.exe` names a GUID that is not the GUID of the
-single Winsock control of `TFTPClient.exe` plus 1. `Print #` of more than
-one item: the corpus holds none.
+**`BranchT` and `Resume`.** `BranchT` branches when the popped condition is
+not zero. `Resume` holds `0xFFFF` for `Resume Next`, `0xFFFE` for `Resume`,
+or the offset of a label; the corpus holds `Resume Next` only.
+
+**What the measurement did not settle.** What the GUID of the
+`ControlInfo` record of an OCX control names. The names of the `DISPID`
+members of such a control. `Print #` of more than one item: the corpus
+holds none.
 
 ---
 
