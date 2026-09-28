@@ -202,6 +202,19 @@ open:
 deform6 extract <path-to-exe> -o <output-directory>
 ```
 
+The file holds no name for an event. A types file that `derive-vb-types`
+writes from a copy of `VB6.OLB` that you own gives the events of each
+control, and of each OCX that you add. With it, `inspect` names each bound
+event slot, and `extract` writes each event handler of a P-code form under
+the name and the parameters of its event, such as
+`Private Sub Form_KeyPress(KeyAscii As Integer)`. A handler of a native build
+keeps its generated name.
+
+```
+cargo run -p xtask -- derive-vb-types <path-to-VB6.OLB> [<path-to-OCX>...]
+deform6 extract <path-to-exe> -o <output-directory> --vb-types derived/vb-types.toml
+```
+
 Print the P-code of each procedure of a P-code program. The opcode table is
 not in this repository. Fetch the symbols of a copy of `MSVBVM60.DLL` that you
 own, derive the table from the two files, and check it against the P-code
