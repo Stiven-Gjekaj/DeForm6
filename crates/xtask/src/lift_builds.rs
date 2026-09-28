@@ -148,6 +148,9 @@ const NOT_RUN: &[(&str, &str)] = &[(
     "it locks the session",
 )];
 
+/// The folder on the host where `runs.bat` starts each program.
+const RUN_DIR: &str = r"%SystemDrive%\deform6-run";
+
 /// The seconds that `runs.bat` gives a program to show its first window
 /// before it sends the marker, and after it.
 const RUN_WAIT_SECONDS: u8 = 6;
@@ -160,10 +163,13 @@ const RUN_WAIT_SECONDS: u8 = 6;
 /// through `COM1`, waits again, and ends the program. The other machine
 /// takes a picture of the screen at each marker, so the first window of each
 /// rebuilt program can be compared with the first window of its original.
-/// The file copies each executable into the folder of the source project,
-/// as `run-original.exe` or `run-extracted.exe`, and starts it there: a
-/// program reads its data files, such as `sample.jpg`, from the folder of
-/// its executable, and only the source project holds them.
+/// The file copies the source project of each program into
+/// [`RUN_DIR`]`\<short>`, copies each executable there as `run-original.exe`
+/// or `run-extracted.exe`, and starts it there: a program reads its data
+/// files, such as `sample.jpg`, from the folder of its executable, and only
+/// the source project holds them. The folder is the same for each export,
+/// so the firewall of the host asks once about a program that listens on
+/// the network, and not again for each export.
 /// A side with no executable sends `===NONE <short> <side>===`, and a
 /// program of [`NOT_RUN`] sends `===SKIP <short> <reason>===`. `ping`
 /// waits, because Windows XP has no `timeout`.
@@ -200,20 +206,21 @@ fn render_runs(programs: &[Exported]) -> String {
             "",
             ":run",
             "set FOUND=",
+            &format!(r#"xcopy /e /i /q /y "original\%1" "{RUN_DIR}\%1\" >nul"#),
             &format!(r#"for %%e in ("{HOST_OUT_DIR}\%1\%2\*.exe") do call :one %1 %2 "%%~e""#),
             r#"if "%FOUND%"=="" >COM1 echo ===NONE %1 %2==="#,
             "goto :eof",
             "",
             ":one",
             "set FOUND=1",
-            r#"copy /y %3 "original\%1\run-%2.exe" >nul"#,
-            r#"start "" "original\%1\run-%2.exe""#,
+            &format!(r#"copy /y %3 "{RUN_DIR}\%1\run-%2.exe" >nul"#),
+            &format!(r#"start "" "{RUN_DIR}\%1\run-%2.exe""#),
             &wait,
             ">COM1 echo ===SHOT %1 %2===",
             &wait,
             r#"taskkill /f /im run-%2.exe >nul 2>&1"#,
             &wait,
-            r#"del "original\%1\run-%2.exe""#,
+            &format!(r#"del "{RUN_DIR}\%1\run-%2.exe""#),
             "goto :eof",
         ]
         .iter()
@@ -287,8 +294,13 @@ mod tests {
         assert!(text.contains(">COM1 echo ===SHOT %1 %2==="));
         assert!(text.contains(">COM1 echo ===SKIP p03 it locks the session==="));
         assert!(text.contains("ping -n 7 127.0.0.1 >nul"));
-        assert!(text.contains(r#"copy /y %3 "original\%1\run-%2.exe" >nul"#));
-        assert!(text.contains(r#"start "" "original\%1\run-%2.exe""#));
+        assert!(
+            text.contains(
+                r#"xcopy /e /i /q /y "original\%1" "%SystemDrive%\deform6-run\%1\" >nul"#
+            )
+        );
+        assert!(text.contains(r#"copy /y %3 "%SystemDrive%\deform6-run\%1\run-%2.exe" >nul"#));
+        assert!(text.contains(r#"start "" "%SystemDrive%\deform6-run\%1\run-%2.exe""#));
         assert!(text.contains("taskkill /f /im run-%2.exe"));
         assert!(text.contains(r#"pushd "%~dp0""#));
     }
