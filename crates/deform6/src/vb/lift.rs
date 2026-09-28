@@ -378,6 +378,7 @@ pub struct Callees {
     function_stubs: Vec<u16>,
     stubs: Vec<(u16, ProjectCall)>,
     arguments: Vec<(u16, i16, String)>,
+    argument_sizes: Vec<(u16, Vec<u8>)>,
     procedures: Vec<(u16, String)>,
     form_name: Option<String>,
     object_name: Option<String>,
@@ -551,6 +552,25 @@ impl Callees {
     pub fn with_argument(mut self, method: u16, slot: i16, interface: &str) -> Self {
         self.arguments.push((method, slot, interface.to_owned()));
         self
+    }
+
+    /// Adds the bytes of each argument of the method `method`, first
+    /// argument first, that each call of it in the project gives.
+    #[must_use]
+    pub fn with_argument_sizes(mut self, method: u16, sizes: &[u8]) -> Self {
+        self.argument_sizes.retain(|(at, _)| *at != method);
+        self.argument_sizes.push((method, sizes.to_vec()));
+        self
+    }
+
+    /// Gives the bytes of each argument of the method `method`, when each
+    /// call of it gives the same.
+    #[must_use]
+    pub fn argument_sizes(&self, method: u16) -> Option<&[u8]> {
+        self.argument_sizes
+            .iter()
+            .find(|(at, _)| *at == method)
+            .map(|(_, sizes)| sizes.as_slice())
     }
 
     /// Gives the frame offset and the interface of each argument of the

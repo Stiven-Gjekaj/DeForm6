@@ -272,16 +272,39 @@ fn slots(bytes: &[u16]) -> Vec<u16> {
 /// of 1 byte takes 2.
 const RESULT_BASE: u16 = 0x84;
 
-/// Builds the parameters of a procedure with no prototype: one argument of
-/// 4 bytes in each slot from `first` to `end`, by reference. An argument of
-/// 8 or 16 bytes by value is not told apart from two or four arguments of 4
-/// bytes, so the lift takes the arguments of 4 bytes.
-fn built_parameters(first: u16, end: u16) -> Vec<String> {
+/// Builds the parameters of a procedure with no prototype, in the slots
+/// from `first` to `end`. When `sizes` gives the bytes of each argument, as
+/// each call of the procedure gives them, and they fill the slots, each
+/// argument takes its size: an argument of more than 4 bytes is a value,
+/// `ByVal`. Else each slot of 4 bytes is one argument by reference, because
+/// an argument of 8 or 16 bytes by value is not told apart from two or
+/// four arguments of 4 bytes.
+fn built_parameters(first: u16, end: u16, sizes: Option<&[u8]>) -> Vec<String> {
+    let fits = sizes.is_some_and(|sizes| {
+        sizes
+            .iter()
+            .try_fold(first, |at, size| at.checked_add(u16::from(*size)))
+            == Some(end)
+    });
     let mut out = Vec::new();
     let mut at = first;
-    while at < end {
-        out.push(format!("arg_{at:X} As Variant"));
-        at = at.saturating_add(4);
+    match sizes {
+        Some(sizes) if fits => {
+            for size in sizes {
+                if *size > 4 {
+                    out.push(format!("ByVal arg_{at:X} As Variant"));
+                } else {
+                    out.push(format!("arg_{at:X} As Variant"));
+                }
+                at = at.saturating_add(u16::from(*size));
+            }
+        }
+        _ => {
+            while at < end {
+                out.push(format!("arg_{at:X} As Variant"));
+                at = at.saturating_add(4);
+            }
+        }
     }
     out
 }
@@ -293,6 +316,7 @@ fn declare(
     index: u16,
     arg_size: u16,
     result: Option<u16>,
+    sizes: Option<&[u8]>,
     lines: &mut Vec<String>,
 ) -> (String, &'static str) {
     let name = procedure_name(procedures, index);
@@ -348,7 +372,14 @@ fn declare(
                 (true, false) => (FIRST_ARGUMENT, end.saturating_sub(4)),
                 (false, _) => (FIRST_ARGUMENT, end),
             };
-            let list = built_parameters(first, end);
+            // A call passes the address of the result as an argument too:
+            // first for a module, last for an object.
+            let sizes = match (function, module) {
+                (true, true) => sizes.and_then(|sizes| sizes.get(1..)),
+                (true, false) => sizes.and_then(|sizes| sizes.split_last().map(|(_, rest)| rest)),
+                (false, _) => sizes,
+            };
+            let list = built_parameters(first, end, sizes);
             if function {
                 (
                     format!("{scope} Function {name}({}) As Variant", list.join(", ")),
@@ -565,6 +596,7 @@ pub fn lift_objects(
                 *index,
                 descriptor.arg_size,
                 result,
+                callees.argument_sizes(*index),
                 &mut lines,
             );
             declare_arrays(&mut lines);
@@ -754,14 +786,28 @@ mod tests {
     #[test]
     fn each_slot_of_4_bytes_is_a_parameter() {
         assert_eq!(
-            built_parameters(0x10, 0x1C),
+            built_parameters(0x10, 0x1C, None),
             [
                 "arg_10 As Variant",
                 "arg_14 As Variant",
                 "arg_18 As Variant"
             ]
         );
-        assert!(built_parameters(0x0C, 0x0C).is_empty());
+        assert!(built_parameters(0x0C, 0x0C, None).is_empty());
+        // Four values of 8 bytes and one of 4, as each call gives them.
+        let sizes = [8, 8, 8, 8, 4];
+        assert_eq!(
+            built_parameters(0x0C, 0x30, Some(&sizes)),
+            [
+                "ByVal arg_C As Variant",
+                "ByVal arg_14 As Variant",
+                "ByVal arg_1C As Variant",
+                "ByVal arg_24 As Variant",
+                "arg_2C As Variant"
+            ]
+        );
+        // Sizes that do not fill the slots are not taken.
+        assert_eq!(built_parameters(0x0C, 0x14, Some(&sizes)).len(), 2);
     }
 
     /// A table with `ExitProcHresult`, `ExitProcCbHresult` with 4 argument
@@ -828,7 +874,7 @@ names = ["ExitProcCb"]
             prototype: Some(prototype),
         }]);
         let mut lines = vec!["local_88 = arg_C + arg_10 + arg_14".to_owned()];
-        let (declaration, closing) = declare(&slots, 0, 20, Some(4), &mut lines);
+        let (declaration, closing) = declare(&slots, 0, 20, Some(4), None, &mut lines);
         assert_eq!(
             declaration,
             "Public Function Draw(ByRef Box As Variant, ByRef Pixels As Variant, ByVal Size As Long) As Long"
@@ -863,19 +909,24 @@ names = ["ExitProcCb"]
         ]);
         let mut lines = vec!["local_88 = arg_C".to_owned()];
         assert_eq!(
-            declare(&slots, 0, 12, Some(4), &mut lines),
+            declare(&slots, 0, 12, Some(4), None, &mut lines),
             (
                 "Private Function UnnamedProcedure0(arg_C As Variant) As Variant".to_owned(),
                 "End Function"
             )
         );
         assert_eq!(lines, ["UnnamedProcedure0 = arg_C"]);
+        // The calls give a Double, then the address of the result.
+        assert_eq!(
+            declare(&slots, 0, 16, Some(4), Some(&[8, 4]), &mut Vec::new()).0,
+            "Private Function UnnamedProcedure0(ByVal arg_C As Variant) As Variant"
+        );
         let mut byte = vec!["local_86 = 1".to_owned(), "local_85 = 2".to_owned()];
-        let _ = declare(&slots, 0, 8, Some(1), &mut byte);
+        let _ = declare(&slots, 0, 8, Some(1), None, &mut byte);
         assert_eq!(byte, ["UnnamedProcedure0 = 1", "local_85 = 2"]);
         let mut handler = vec!["local_88 = arg_C".to_owned()];
         assert_eq!(
-            declare(&slots, 1, 8, None, &mut handler),
+            declare(&slots, 1, 8, None, None, &mut handler),
             (
                 "Private Sub Form_KeyPress(KeyAscii As Integer)".to_owned(),
                 "End Sub"
@@ -885,7 +936,7 @@ names = ["ExitProcCb"]
         let module = ObjectProcedures::NoNameArray { proc_count: 1 };
         let mut body = vec!["local_94 = arg_10".to_owned()];
         assert_eq!(
-            declare(&module, 0, 16, Some(16), &mut body),
+            declare(&module, 0, 16, Some(16), None, &mut body),
             (
                 "Public Function UnnamedProcedure0(arg_10 As Variant, arg_14 As Variant) As Variant"
                     .to_owned(),
@@ -895,8 +946,13 @@ names = ["ExitProcCb"]
         assert_eq!(body, ["UnnamedProcedure0 = arg_10"]);
         let mut sub = Vec::new();
         assert_eq!(
-            declare(&module, 0, 12, None, &mut sub).0,
+            declare(&module, 0, 12, None, None, &mut sub).0,
             "Public Sub UnnamedProcedure0(arg_C As Variant, arg_10 As Variant)"
+        );
+        // In a module the address of the result comes first.
+        assert_eq!(
+            declare(&module, 0, 16, Some(4), Some(&[4, 8]), &mut Vec::new()).0,
+            "Public Function UnnamedProcedure0(ByVal arg_10 As Variant) As Variant"
         );
     }
 }

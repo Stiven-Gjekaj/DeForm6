@@ -410,18 +410,33 @@ fn with_arguments(
         objects.into_iter().unzip();
     for _ in 0..ARGUMENT_ROUNDS {
         let mut seen: BTreeMap<(u16, u16, i16), Vec<Option<String>>> = BTreeMap::new();
+        let mut sizes: BTreeMap<(u16, u16), Vec<Vec<u8>>> = BTreeMap::new();
         for (callees, own) in all.iter().zip(&listings) {
             for (index, listing) in own {
                 for (owner, method, args) in method_calls(listing, table, callees, types, *index) {
                     let Some(owner) = owner else {
                         continue;
                     };
+                    sizes
+                        .entry((owner, method))
+                        .or_default()
+                        .push(args.iter().map(|(bytes, _)| *bytes).collect());
                     let mut slot = FIRST_ARGUMENT;
                     for (bytes, class) in args {
                         seen.entry((owner, method, slot)).or_default().push(class);
                         slot = slot.saturating_add(i16::from(bytes));
                     }
                 }
+            }
+        }
+        for ((owner, method), calls) in sizes {
+            let Some(first) = calls.first() else {
+                continue;
+            };
+            if let Some(callees) = all.get_mut(usize::from(owner))
+                && calls.iter().all(|call| call == first)
+            {
+                *callees = callees.clone().with_argument_sizes(method, first);
             }
         }
         for ((owner, method, slot), classes) in seen {
