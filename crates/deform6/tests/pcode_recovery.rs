@@ -799,6 +799,17 @@ fn each_pcode_descriptor_gives_the_argument_size_of_its_source_procedure() {
             let declared: Vec<(String, u32)> =
                 source::declared_argument_sizes(&sources[&object.name]);
             let expected: Vec<u32> = declared.iter().map(|(_, size)| *size).collect();
+            let bodies: Vec<String> = source::procedure_bodies(&sources[&object.name])
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect();
+            let names: Vec<String> = declared.iter().map(|(name, _)| name.clone()).collect();
+            if bodies != names {
+                failures.push(format!(
+                    "{key}: {} gives the bodies {bodies:?}, and the declarations {names:?}",
+                    object.name
+                ));
+            }
             checked += found.len();
             if found != expected {
                 failures.push(format!(
@@ -815,6 +826,24 @@ fn each_pcode_descriptor_gives_the_argument_size_of_its_source_procedure() {
         failures.join("\n")
     );
     assert_eq!(checked, EXPECTED_DESCRIPTORS);
+}
+
+/// `GetImageDataStream` of `FastDrawing.cls` gives the lines of its body,
+/// with no comment, and not the lines of the next procedure.
+#[test]
+fn a_procedure_body_gives_its_own_lines_and_no_comment() {
+    let path = build_record::corpus_root()
+        .join("vb6-code/Brightness-effect/Part 4 - Even faster DIBs/FastDrawing.cls");
+    let bodies = source::procedure_bodies(&path);
+    let (_, body) = bodies
+        .iter()
+        .find(|(name, _)| name == "GetImageDataStream")
+        .unwrap();
+    assert_eq!(body.first().map(String::as_str), Some("Dim bm As Bitmap"));
+    assert!(body.contains(&"ReDim ImageData(0 To GetImageStreamLength(SrcPictureBox))".to_owned()));
+    assert!(body.iter().all(|line| !line.contains('\'')
+        && !line.starts_with("Public Sub")
+        && !line.starts_with("End ")));
 }
 
 /// The method slots of the link tables of the P-code corpus: the 680

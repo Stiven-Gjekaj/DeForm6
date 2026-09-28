@@ -296,6 +296,70 @@ pub fn declared_argument_sizes(path: &Path) -> Vec<(String, u32)> {
     out
 }
 
+/// Gives the text of `line` before its comment: before the first `'` that
+/// is outside a string, or empty for a line that opens with `Rem`.
+fn without_comment(line: &str) -> &str {
+    let trimmed = line.trim_start();
+    if trimmed == "Rem" || trimmed.starts_with("Rem ") {
+        return "";
+    }
+    let mut in_string = false;
+    for (at, character) in line.char_indices() {
+        match character {
+            '"' => in_string = !in_string,
+            '\'' if !in_string => return &line[..at],
+            _ => {}
+        }
+    }
+    line
+}
+
+/// Gives the name and the body of each procedure that `path` declares, in
+/// the order of [`declared_argument_sizes`]: the logical lines between the
+/// declaration and its `End Sub`, `End Function` or `End Property`, trimmed,
+/// with no comment and no empty line.
+///
+/// Gives an empty list when the file cannot be read.
+#[must_use]
+pub fn procedure_bodies(path: &Path) -> Vec<(String, Vec<String>)> {
+    let Ok(bytes) = std::fs::read(path) else {
+        return Vec::new();
+    };
+    let text: String = bytes.iter().copied().map(char::from).collect();
+    let mut logical = Vec::new();
+    let mut current = String::new();
+    for line in text.lines() {
+        if continues_to_next_line(line) {
+            current.push_str(line.trim_end().trim_end_matches('_'));
+            current.push(' ');
+        } else {
+            current.push_str(line);
+            logical.push(std::mem::take(&mut current));
+        }
+    }
+    let mut out: Vec<(String, Vec<String>)> = Vec::new();
+    let mut inside = false;
+    for line in logical {
+        let line = without_comment(&line).trim().to_owned();
+        if let Some((_, name)) = declaration(&line) {
+            out.push((name, Vec::new()));
+            inside = true;
+        } else if inside {
+            if ["End Sub", "End Function", "End Property"]
+                .iter()
+                .any(|end| line.starts_with(end))
+            {
+                inside = false;
+            } else if !line.is_empty()
+                && let Some((_, body)) = out.last_mut()
+            {
+                body.push(line);
+            }
+        }
+    }
+    out
+}
+
 /// Gives each procedure that `path` declares, with whether it is public, by
 /// the rules of [`declared_procedures`].
 #[must_use]
