@@ -826,9 +826,10 @@ read against the source found such statements as `VBA.Err().Clear()` and
 `Call VBA.ReDim(arg_10((0 To Me.method_6(arg_C))))` in
 `Realtime_Brightness.exe`.
 
-**Next.** Each body now lifts. The lift gives names of offsets, not of
-variables, and each statement stays in the form of `GoTo` and labels. A
-member of an OCX control has its `DISPID`, not its name.
+**Next.** Each body now lifts, and a types file that holds `MSWINSCK.OCX`
+names the members of the Winsock controls. The lift gives names of offsets,
+not of variables, and each statement stays in the form of `GoTo` and
+labels.
 
 **The gate.** The recovered code compiles, which Phase 8 already measures, and
 the rebuilt program behaves the same as the original.
