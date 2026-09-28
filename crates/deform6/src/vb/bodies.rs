@@ -18,7 +18,9 @@
 //!
 //! A public procedure with a prototype and an event handler take the
 //! declaration that `extract` writes for them, and the lift names each of
-//! their arguments by its name. The frame slot of an argument follows from
+//! their arguments by its name. Each argument by reference and each array
+//! of a prototype is a `Variant` by reference, because a lifted caller passes
+//! a `Variant` local. The frame slot of an argument follows from
 //! the sizes of the arguments before it: 4 bytes for an argument by
 //! reference, and the size of the value for an argument by value.
 //!
@@ -259,7 +261,11 @@ fn declare(
             prototype: Some(prototype),
             ..
         }) => {
-            let signature = crate::write::code::format_signature("Public", &name, Some(prototype));
+            let signature = crate::write::code::format_signature(
+                "Public",
+                &name,
+                Some(&by_reference_variants(prototype)),
+            );
             rename_prototype(prototype, lines, &rename);
             (signature.declaration, signature.closing)
         }
@@ -302,6 +308,22 @@ fn declare(
             }
         }
     }
+}
+
+/// Gives `prototype` with each argument by reference, and each array, as a
+/// `Variant` by reference. A lifted caller passes a `Variant` local, which
+/// Basic refuses for an argument by reference of another type. A `Variant`
+/// by reference still passes the variable, and it can hold an array.
+fn by_reference_variants(prototype: &Prototype) -> Prototype {
+    let mut out = prototype.clone();
+    for argument in &mut out.arguments {
+        if argument.entry.by_ref || argument.entry.array {
+            argument.entry.vb_type = VbType::Variant;
+            argument.entry.array = false;
+            argument.entry.by_ref = true;
+        }
+    }
+    out
 }
 
 /// Renames the arguments of `prototype` in `lines`.
@@ -550,6 +572,51 @@ names = ["ExitProcCb"]
         assert_eq!(bytes(&[0x0C]), None);
         assert_eq!(bytes(&[0x0D, 0x10, 0x00, 0x04, 0x00]), Some(4));
         assert_eq!(bytes(&[0x0E, 0x10, 0x00]), Some(16));
+    }
+
+    #[test]
+    fn an_argument_by_reference_of_a_prototype_becomes_a_variant() {
+        use crate::vb::functyp::{
+            Argument, OptionalDefaultsOutcome, PropertyKind, Prototype, TypeEntry, VbType,
+        };
+        let entry = |vb_type, by_ref, array| TypeEntry {
+            vb_type,
+            optional: false,
+            array,
+            by_ref,
+        };
+        let argument = |name: &str, entry| Argument {
+            name: name.to_owned(),
+            entry,
+            default: None,
+        };
+        let prototype = Prototype {
+            member_id: 0,
+            v_off: 0,
+            const_ffff: 0xFFFF,
+            nul1: 0,
+            property_kind: PropertyKind::None,
+            is_function: true,
+            arguments: vec![
+                argument("Box", entry(VbType::Object, true, false)),
+                argument("Pixels", entry(VbType::Byte, true, true)),
+                argument("Size", entry(VbType::Long, false, false)),
+            ],
+            return_type: Some(entry(VbType::Long, false, false)),
+            optional_defaults: OptionalDefaultsOutcome::NoOptionalVals,
+        };
+        let slots = ObjectProcedures::Slots(vec![ProcedureEntry::Public {
+            name: "Draw".to_owned(),
+            prototype: Some(prototype),
+        }]);
+        let mut lines = vec!["local_88 = arg_C + arg_10 + arg_14".to_owned()];
+        let (declaration, closing) = declare(&slots, 0, 20, Some(4), &mut lines);
+        assert_eq!(
+            declaration,
+            "Public Function Draw(ByRef Box As Variant, ByRef Pixels As Variant, ByVal Size As Long) As Long"
+        );
+        assert_eq!(closing, "End Function");
+        assert_eq!(lines, ["Draw = Box + Pixels + Size"]);
     }
 
     #[test]
