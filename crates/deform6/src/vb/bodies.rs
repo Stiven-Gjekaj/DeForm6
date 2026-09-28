@@ -149,6 +149,35 @@ fn replace_word(line: &str, from: &str, to: &str) -> String {
 /// Gives each word of `lines` that starts with `prefix` and goes on with
 /// hexadecimal digits, and that no name character and no `.` comes before.
 fn words_with(lines: &[String], prefix: &str) -> BTreeSet<String> {
+    words_before(lines, prefix, |next| !next.is_some_and(is_name))
+}
+
+/// Gives each word of [`words_with`] that an index follows: the arrays of
+/// `lines`.
+fn indexed_words(lines: &[String], prefix: &str) -> BTreeSet<String> {
+    words_before(lines, prefix, |next| next == Some('('))
+}
+
+/// Puts a `Dim` before `lines` for each local that `lines` index. Basic
+/// reads an index of a name that is not declared as a call.
+fn declare_arrays(lines: &mut Vec<String>) {
+    let arrays = indexed_words(lines, "local_");
+    lines.splice(
+        0..0,
+        arrays
+            .iter()
+            .map(|array| format!("       Dim {array}() As Variant")),
+    );
+}
+
+/// Gives each word of `lines` that starts with `prefix` and goes on with
+/// hexadecimal digits, that no name character and no `.` comes before, and
+/// whose next character `next` accepts.
+fn words_before(
+    lines: &[String],
+    prefix: &str,
+    next: impl Fn(Option<char>) -> bool,
+) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     for line in lines {
         let characters: Vec<char> = line.chars().collect();
@@ -165,8 +194,8 @@ fn words_with(lines: &[String], prefix: &str) -> BTreeSet<String> {
                     .skip(prefix.len())
                     .take_while(char::is_ascii_hexdigit)
                     .collect();
-                let next = tail.chars().nth(prefix.len().saturating_add(digits.len()));
-                if !digits.is_empty() && !next.is_some_and(is_name) {
+                let after = tail.chars().nth(prefix.len().saturating_add(digits.len()));
+                if !digits.is_empty() && next(after) {
                     out.insert(format!("{prefix}{digits}"));
                 }
                 at = at.saturating_add(prefix.len().saturating_add(digits.len()).max(1));
@@ -518,6 +547,7 @@ pub fn lift_objects(
                 result,
                 &mut lines,
             );
+            declare_arrays(&mut lines);
             lifted.procedures.push(LiftedProcedure {
                 index: *index,
                 declaration,
@@ -563,8 +593,8 @@ pub fn lift_objects(
 )]
 mod tests {
     use super::{
-        built_parameters, call_arity, declare, declare_statements, declared_bytes, procedure_name,
-        replace_word, words_with,
+        built_parameters, call_arity, declare, declare_arrays, declare_statements, declared_bytes,
+        indexed_words, procedure_name, replace_word, words_with,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::lift::result_bytes;
@@ -636,6 +666,33 @@ mod tests {
         assert_eq!(
             words_with(&lines, "g_").into_iter().collect::<Vec<_>>(),
             ["g_40A1C0"]
+        );
+        let indexed = vec![
+            "local_B0(local_88) = local_C4".to_owned(),
+            "local_D4(1, 2).field_0 = x.local_E0(1) + local_F0 (2)".to_owned(),
+        ];
+        assert_eq!(
+            indexed_words(&indexed, "local_")
+                .into_iter()
+                .collect::<Vec<_>>(),
+            ["local_B0", "local_D4"]
+        );
+    }
+
+    #[test]
+    fn an_indexed_local_is_declared_as_an_array() {
+        let mut lines = vec![
+            "       local_B0(local_88) = local_C4".to_owned(),
+            "       Exit Sub".to_owned(),
+        ];
+        declare_arrays(&mut lines);
+        assert_eq!(
+            lines,
+            [
+                "       Dim local_B0() As Variant",
+                "       local_B0(local_88) = local_C4",
+                "       Exit Sub"
+            ]
         );
     }
 
