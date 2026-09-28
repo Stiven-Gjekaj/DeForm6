@@ -916,6 +916,17 @@ pub enum Keyword {
         /// `Get` or `Put`.
         name: &'static str,
     },
+    /// The `Line` method: the object, the two points, and the color when
+    /// the statement gives one.
+    Line {
+        /// Whether the statement ends with `BF`.
+        filled: bool,
+    },
+    /// The `Circle` method: the object, the center, the radius and the
+    /// color.
+    Circle,
+    /// The `PSet` method: the object, the point and the color.
+    PSet,
 }
 
 impl Keyword {
@@ -955,6 +966,38 @@ impl Keyword {
             Self::Close => format!("Close #{}", at(0)),
             Self::Print => format!("Print #{}, {}", at(0), all(1).join("; ")),
             Self::Record { name } => format!("{name} #{}, {}, {}", at(0), at(1), at(2)),
+            Self::Line { filled } => {
+                let mut text = format!(
+                    "{} ({}, {})-({}, {})",
+                    member_text(args.first().unwrap_or(&Expr::Implicit), "Line"),
+                    at(1),
+                    at(2),
+                    at(3),
+                    at(4)
+                );
+                if args.len() > 5 {
+                    text.push_str(&format!(", {}", at(5)));
+                }
+                if filled {
+                    text.push_str(", BF");
+                }
+                text
+            }
+            Self::Circle => format!(
+                "{} ({}, {}), {}, {}",
+                member_text(args.first().unwrap_or(&Expr::Implicit), "Circle"),
+                at(1),
+                at(2),
+                at(3),
+                at(4)
+            ),
+            Self::PSet => format!(
+                "{} ({}, {}), {}",
+                member_text(args.first().unwrap_or(&Expr::Implicit), "PSet"),
+                at(1),
+                at(2),
+                at(3)
+            ),
         }
     }
 }
@@ -1978,8 +2021,54 @@ fn interface_call(
                 Stmt::Set { target, value }
             }
         }
-        _ => Stmt::Call(Callee::Member(Box::new(object), name), expressions(args)),
+        _ => {
+            let args = expressions(args);
+            drawing(&name, &object, &args)
+                .unwrap_or_else(|| Stmt::Call(Callee::Member(Box::new(object), name), args))
+        }
     }))
+}
+
+/// Gives the statement of a call of `Line`, `Circle` or `PSet` on `object`.
+/// The first argument holds flags that tell which parts the statement
+/// gives. The corpus shows these values only: `Line` 4 with two points, 6
+/// with a color too, and 38 with `BF` too; `Circle` 2 and `PSet` 2 with a
+/// color. Another value gives `None`, and the call stays a call.
+fn drawing(name: &str, object: &Expr, args: &[Expr]) -> Option<Stmt> {
+    let with = |keyword: Keyword, parts: &[Expr]| {
+        let mut all = vec![object.clone()];
+        all.extend_from_slice(parts);
+        Some(Stmt::Keyword(keyword, all))
+    };
+    match (name, args) {
+        ("Line", [Expr::Const(4), points @ .., _]) if points.len() == 4 => {
+            with(Keyword::Line { filled: false }, points)
+        }
+        ("Line", [Expr::Const(6), parts @ ..]) if parts.len() == 5 => {
+            with(Keyword::Line { filled: false }, parts)
+        }
+        ("Line", [Expr::Const(38), parts @ ..]) if parts.len() == 5 => {
+            with(Keyword::Line { filled: true }, parts)
+        }
+        (
+            "Circle",
+            [
+                Expr::Const(2),
+                x,
+                y,
+                radius,
+                color,
+                Expr::Const(0),
+                Expr::Const(0),
+                Expr::Const(0),
+            ],
+        ) => with(
+            Keyword::Circle,
+            &[x.clone(), y.clone(), radius.clone(), color.clone()],
+        ),
+        ("PSet", [Expr::Const(2), parts @ ..]) if parts.len() == 3 => with(Keyword::PSet, parts),
+        _ => None,
+    }
 }
 
 /// Lifts a call on an object of the project whose vtable `profile` gives:
@@ -2378,7 +2467,13 @@ fn run(
                     });
                     None
                 } else {
-                    Some(Stmt::Call(callee, args))
+                    let Callee::Member(object, name) = callee else {
+                        return Err(LiftFault::NoCallee(at));
+                    };
+                    Some(
+                        drawing(&name, &object, &args)
+                            .unwrap_or(Stmt::Call(Callee::Member(object, name), args)),
+                    )
                 }
             }
             Family::LateStore => {
@@ -3277,8 +3372,8 @@ pub fn render(stmts: &[LiftedStmt]) -> Vec<String> {
 mod tests {
     use super::{
         Callees, Expr, Keyword, LiftFault, ProjectCall, Stmt, arguments_text, class_indexes,
-        global_indexes, import_indexes, interface_indexes, lift, lift_method, method_calls,
-        name_indexes, render, string_indexes,
+        drawing, global_indexes, import_indexes, interface_indexes, lift, lift_method,
+        method_calls, name_indexes, render, string_indexes,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::pcode::{PcodeTable, disassemble};
@@ -3571,6 +3666,12 @@ names = ["LateMemCallLdVar"]
 [primary.5E]
 width = 0
 names = ["FnUBound"]
+[primary.5F]
+width = 4
+names = ["LitVarI2"]
+[primary.60]
+width = 0
+names = ["PopAdLdVar"]
 [lead1.C8]
 width = 0
 names = ["End"]
@@ -4190,6 +4291,39 @@ dispid = 67
             "ReDim Preserve local_88(0 To 1)"
         );
         assert_eq!(text(Keyword::Erase, &[Expr::Arg(0xC)]), "Erase arg_C");
+    }
+
+    #[test]
+    fn a_drawing_call_has_the_form_of_basic() {
+        let object = Expr::Name("pic".to_owned());
+        let n = |value: i64| Expr::Const(value);
+        let text = |name: &str, args: &[Expr]| drawing(name, &object, args).map(|stmt| stmt.text());
+        assert_eq!(
+            text("Line", &[n(4), n(1), n(2), n(3), n(5), n(0)]).unwrap(),
+            "pic.Line (1, 2)-(3, 5)"
+        );
+        assert_eq!(
+            text("Line", &[n(6), n(1), n(2), n(3), n(5), n(9)]).unwrap(),
+            "pic.Line (1, 2)-(3, 5), 9"
+        );
+        assert_eq!(
+            text("Line", &[n(38), n(1), n(2), n(3), n(5), n(9)]).unwrap(),
+            "pic.Line (1, 2)-(3, 5), 9, BF"
+        );
+        assert_eq!(
+            text("Circle", &[n(2), n(1), n(2), n(4), n(9), n(0), n(0), n(0)]).unwrap(),
+            "pic.Circle (1, 2), 4, 9"
+        );
+        assert_eq!(
+            text("PSet", &[n(2), n(1), n(2), n(9)]).unwrap(),
+            "pic.PSet (1, 2), 9"
+        );
+        // A flag that the corpus does not show stays a call.
+        assert_eq!(text("Line", &[n(5), n(1), n(2), n(3), n(5), n(0)]), None);
+        assert_eq!(
+            text("Circle", &[n(2), n(1), n(2), n(4), n(9), n(1), n(0), n(0)]),
+            None
+        );
     }
 
     #[test]
@@ -4937,6 +5071,32 @@ dispid = 67
             ]
         );
         assert_eq!(name_indexes(&listing, &table), [7, 8]);
+        // local_1C.Line (1, 2)-(3, 4), 9, BF: a late Line with the flags 38.
+        let mut line = Vec::new();
+        for (slot, value) in [
+            (0x80_u8, 38_u8),
+            (0x70, 1),
+            (0x60, 2),
+            (0x50, 3),
+            (0x40, 4),
+            (0x30, 9),
+        ] {
+            line.extend_from_slice(&[0x5F, slot, 0xFF, value, 0x00, 0x60]);
+        }
+        line.extend_from_slice(&[0x06, 0xE4, 0xFF, 0x44, 0x07, 0x00, 0x06, 0x00, 0x0C]);
+        let listing_line = disassemble(&Region::new(&line, Off::new(0)), &table);
+        assert_eq!(
+            render(
+                &lift(
+                    &listing_line,
+                    &table,
+                    &Callees::default().with_name(7, "Line"),
+                    None
+                )
+                .unwrap()
+            )[0],
+            "       local_1C.Line (1, 2)-(3, 4), 9, BF"
+        );
         // local_1C.[DISPID 0x43] local_64; local_1C.[DISPID 0x3] = local_60
         let by_id = [
             0x06, 0xE4, 0xFF, 0x43, 0x9C, 0xFF, 0x59, 0x43, 0x00, 0x00, 0x00, 0x01, 0x00, 0x43,
