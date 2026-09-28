@@ -49,7 +49,7 @@
 //! the project declares each one `Public`. A project with no standard module
 //! declares each one `Private` in each object that names it.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::Refusal;
 use crate::read::pe::PeImage;
@@ -58,7 +58,7 @@ use crate::vb::functyp::{Prototype, TypeEntry, VbType};
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::lift::{lift_method, render, result_bytes};
 use crate::vb::object::ObjectTable;
-use crate::vb::pcode::{PcodeTable, disassemble};
+use crate::vb::pcode::{PcodeListing, PcodeTable, disassemble};
 use crate::vb::procdesc::{MethodEntry, read_method_table};
 use crate::vb::project::{Declaration, DeclareTable, ExportName, ObjectTableHead, ProjectInfo};
 use crate::vb::types::VbTypes;
@@ -176,6 +176,398 @@ fn field_declarations(used: &BTreeSet<String>, public: &BTreeSet<u32>) -> Vec<St
             .map(|field| format!("Private {field} As Variant")),
     );
     out
+}
+
+/// How a body uses one frame slot, from the names of the handlers of the
+/// opcodes that name it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct SlotUse {
+    /// An opcode takes the address of the slot.
+    address: bool,
+    /// The bytes and the Basic type of each load and store of a number in
+    /// the slot.
+    number: Option<(u8, &'static str)>,
+    /// An opcode uses the slot in another way, or as another number.
+    other: bool,
+}
+
+/// The loads and stores of a number, in a frame slot or in a field through
+/// a frame slot, with their bytes and their Basic type. The handler of an
+/// opcode can serve more than one name: `FLdAd`, `FLdI4`, `FLdR4` and
+/// `FLdStr` share one, which copies 4 bytes.
+const NUMBER_ACCESS: &[(&str, u8, &str)] = &[
+    ("FLdAd", 4, "Long"),
+    ("FLdI4", 4, "Long"),
+    ("FLdR4", 4, "Long"),
+    ("FLdStr", 4, "Long"),
+    ("ILdRf", 4, "Long"),
+    ("FStI4", 4, "Long"),
+    ("FStR4", 4, "Long"),
+    ("FLdI2", 2, "Integer"),
+    ("FStI2", 2, "Integer"),
+    ("FLdUI1", 1, "Byte"),
+    ("FStUI1", 1, "Byte"),
+    ("FLdCy", 8, "Double"),
+    ("FLdR8", 8, "Double"),
+    ("FStCy", 8, "Double"),
+    ("FStR8", 8, "Double"),
+    ("FLdFPR4", 4, "Single"),
+    ("FStFPR4", 4, "Single"),
+    ("FLdFPR8", 8, "Double"),
+    ("FStFPR8", 8, "Double"),
+    ("FMemLdAd", 4, "Long"),
+    ("FMemLdI4", 4, "Long"),
+    ("FMemLdR4", 4, "Long"),
+    ("FMemLdStr", 4, "Long"),
+    ("FMemStI4", 4, "Long"),
+    ("FMemStR4", 4, "Long"),
+    ("FMemLdI2", 2, "Integer"),
+    ("FMemStI2", 2, "Integer"),
+    ("FMemLdUI1", 1, "Byte"),
+    ("FMemStUI1", 1, "Byte"),
+    ("FMemLdCy", 8, "Double"),
+    ("FMemLdR8", 8, "Double"),
+    ("FMemStCy", 8, "Double"),
+    ("FMemStR8", 8, "Double"),
+    ("FMemLdFPR4", 4, "Single"),
+    ("FMemStFPR4", 4, "Single"),
+    ("FMemLdFPR8", 8, "Double"),
+    ("FMemStFPR8", 8, "Double"),
+];
+
+/// The prefixes of the names of the opcodes whose first argument is a frame
+/// slot.
+const FRAME_ACCESS: &[&str] = &["FLd", "FSt", "FFree1", "FMem", "FDup", "FCopy"];
+
+/// Gives the number that the opcode with the handler names `names` loads or
+/// stores: its bytes and its Basic type, when each name gives the same bytes.
+/// The type is the type of the first name that the bytes do not decide.
+fn number_access(names: &[String]) -> Option<(u8, &'static str)> {
+    let found: Vec<(u8, &'static str)> = names
+        .iter()
+        .map(|name| {
+            NUMBER_ACCESS
+                .iter()
+                .find(|(known, _, _)| known == name)
+                .map(|(_, width, basic)| (*width, *basic))
+        })
+        .collect::<Option<_>>()?;
+    let (width, basic) = *found.first()?;
+    found
+        .iter()
+        .all(|(other, _)| *other == width)
+        .then_some((width, basic))
+}
+
+/// The first argument of `arguments` as a frame slot of a local: its offset
+/// below the frame.
+fn local_slot(arguments: &[u8]) -> Option<u16> {
+    let offset = i16::from_le_bytes(arguments.get(..2)?.try_into().ok()?);
+    (offset < 0).then(|| offset.unsigned_abs())
+}
+
+/// One opcode of a body: the names of its handler and its arguments.
+type Op<'a> = (&'a [String], &'a [u8]);
+
+/// Gives how the opcodes `ops` use each frame slot of a local, by its offset
+/// below the frame.
+fn slot_uses(ops: &[Op<'_>]) -> BTreeMap<u16, SlotUse> {
+    let mut out: BTreeMap<u16, SlotUse> = BTreeMap::new();
+    for (names, arguments) in ops {
+        if !names
+            .iter()
+            .any(|name| FRAME_ACCESS.iter().any(|prefix| name.starts_with(prefix)))
+        {
+            continue;
+        }
+        let Some(slot) = local_slot(arguments) else {
+            continue;
+        };
+        let entry = out.entry(slot).or_default();
+        if names.iter().any(|name| name == "FLdRf") {
+            entry.address = true;
+            continue;
+        }
+        let is_field = names.iter().any(|name| name.starts_with("FMem"));
+        match number_access(names) {
+            Some(number) if !is_field && entry.number.is_none_or(|known| known.0 == number.0) => {
+                entry.number.get_or_insert(number);
+            }
+            _ => entry.other = true,
+        }
+    }
+    out
+}
+
+/// Gives each frame slot of `ops` that holds the address of another, with
+/// that other slot: an `FLdRf` of the struct, then an `FStI4` of the slot.
+/// Basic does this for a `With` block on a struct.
+fn struct_pointers(ops: &[Op<'_>]) -> BTreeMap<u16, u16> {
+    let mut out = BTreeMap::new();
+    for pair in ops.windows(2) {
+        let [(first, from), (second, to)] = pair else {
+            continue;
+        };
+        if first.iter().any(|name| name == "FLdRf")
+            && second.iter().any(|name| name == "FStI4")
+            && let (Some(target), Some(pointer)) = (local_slot(from), local_slot(to))
+        {
+            out.insert(pointer, target);
+        }
+    }
+    out
+}
+
+/// Gives the fields that `ops` read and write through each pointer of
+/// `pointers`, by the slot of the struct: the offset in the struct, the
+/// bytes and the Basic type. A struct with a field access that is not a
+/// number is in the second set.
+#[allow(
+    clippy::type_complexity,
+    reason = "a map of fields and a set, built in one pass"
+)]
+fn pointer_fields(
+    ops: &[Op<'_>],
+    pointers: &BTreeMap<u16, u16>,
+) -> (BTreeMap<u16, Vec<(u16, u8, &'static str)>>, BTreeSet<u16>) {
+    let mut fields: BTreeMap<u16, Vec<(u16, u8, &'static str)>> = BTreeMap::new();
+    let mut bad = BTreeSet::new();
+    for (names, arguments) in ops {
+        if !names.iter().any(|name| name.starts_with("FMem")) {
+            continue;
+        }
+        let Some(target) = local_slot(arguments).and_then(|slot| pointers.get(&slot)) else {
+            continue;
+        };
+        let offset = arguments
+            .get(2..4)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes);
+        match (number_access(names), offset) {
+            (Some((width, basic)), Some(offset)) => {
+                fields
+                    .entry(*target)
+                    .or_default()
+                    .push((offset, width, basic));
+            }
+            _ => {
+                bad.insert(*target);
+            }
+        }
+    }
+    (fields, bad)
+}
+
+/// A struct of the frame: a local whose address a call of a DLL takes, and
+/// the fields after it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FrameStruct {
+    /// The offset of its first byte below the frame.
+    start: u16,
+    /// Its bytes.
+    size: u16,
+    /// The offset in the struct, the bytes and the Basic type of each field,
+    /// in the order of the offsets.
+    fields: Vec<(u16, u8, &'static str)>,
+}
+
+/// Finds the structs of a frame. A local of `uses` whose address a call of
+/// a DLL takes (`passed`), and that the body does not load or store as a
+/// value, starts a struct. The struct holds each slot after it that the body
+/// loads and stores only as a number, up to the next slot that it uses in
+/// another way, the slot of the result `result`, or the end of the locals.
+/// A field that a pointer of a `With` block names, in `through`, is a field
+/// too. Basic lays out a struct of the source this way: the call writes its
+/// fields, and the body reads them as frame slots.
+fn frame_structs(
+    uses: &BTreeMap<u16, SlotUse>,
+    passed: &BTreeSet<u16>,
+    result: Option<u16>,
+    through: &BTreeMap<u16, Vec<(u16, u8, &'static str)>>,
+    bad: &BTreeSet<u16>,
+) -> Vec<FrameStruct> {
+    let mut out = Vec::new();
+    for (&start, used) in uses {
+        if !used.address
+            || used.number.is_some()
+            || used.other
+            || !passed.contains(&start)
+            || bad.contains(&start)
+        {
+            continue;
+        }
+        let end = uses
+            .iter()
+            .filter(|(slot, _)| **slot < start)
+            .filter(|(slot, used)| {
+                used.other || used.address || used.number.is_none() || Some(**slot) == result
+            })
+            .map(|(slot, _)| *slot)
+            .max()
+            .unwrap_or(RESULT_BASE)
+            .max(RESULT_BASE);
+        let size = start.saturating_sub(end);
+        let mut fields: Vec<(u16, u8, &'static str)> = uses
+            .iter()
+            .filter(|(slot, _)| **slot < start && **slot > end)
+            .filter_map(|(slot, used)| {
+                used.number
+                    .map(|(width, basic)| (start.saturating_sub(*slot), width, basic))
+            })
+            .collect();
+        fields.extend(through.get(&start).into_iter().flatten().copied());
+        fields.sort_unstable_by_key(|(offset, width, _)| (*offset, *width));
+        fields.dedup_by_key(|(offset, width, _)| (*offset, *width));
+        let fits = fields.iter().enumerate().all(|(at, (offset, width, _))| {
+            let after = offset.checked_add(u16::from(*width));
+            let next = fields.get(at.saturating_add(1)).map_or(size, |next| next.0);
+            after.is_some_and(|after| after <= next)
+        });
+        if fields.is_empty() || !fits {
+            continue;
+        }
+        out.push(FrameStruct {
+            start,
+            size,
+            fields,
+        });
+    }
+    out
+}
+
+/// Tells whether `line` is the statement `statement`, with or without a
+/// label.
+fn is_statement(line: &str, statement: &str) -> bool {
+    let text = line.trim_start();
+    let text = match text.split_once(": ") {
+        Some((label, rest)) if label.starts_with('L') && label.len() == 5 => rest,
+        _ => text,
+    };
+    text == statement
+}
+
+/// Writes each struct of `structs` into `lines`: a `Dim` of the local of
+/// its start as the type `T<tag>_<start>`, each field slot as a member of
+/// that local, and each field through a pointer of `pointers` as the same
+/// member. The statements that set a pointer go, and their labels stay.
+/// Gives the declaration of each type, for the object.
+fn apply_frame_structs(
+    lines: &mut Vec<String>,
+    structs: &[FrameStruct],
+    pointers: &BTreeMap<u16, u16>,
+    tag: u16,
+) -> Vec<String> {
+    let mut types = Vec::new();
+    let mut dims = Vec::new();
+    for frame in structs {
+        let name = format!("T{tag}_{:X}", frame.start);
+        let local = format!("local_{:X}", frame.start);
+        types.push(format!("Private Type {name}"));
+        let mut at = 0_u16;
+        let mut pad = 0_u32;
+        let mut members = Vec::new();
+        for (offset, width, basic) in &frame.fields {
+            if *offset > at {
+                types.push(format!(
+                    "    pad{pad}(0 To {}) As Byte",
+                    offset.saturating_sub(at).saturating_sub(1)
+                ));
+                pad = pad.saturating_add(1);
+            }
+            types.push(format!("    f{offset:X} As {basic}"));
+            let member = format!("{local}.f{offset:X}");
+            if let Some(slot) = frame.start.checked_sub(*offset)
+                && slot != frame.start
+            {
+                members.push((format!("local_{slot:X}"), member.clone()));
+            }
+            for (pointer, _) in pointers
+                .iter()
+                .filter(|(_, target)| **target == frame.start)
+            {
+                members.push((
+                    format!("local_{pointer:X}.field_{offset:X}"),
+                    member.clone(),
+                ));
+            }
+            at = offset.saturating_add(u16::from(*width));
+        }
+        if frame.size > at {
+            types.push(format!(
+                "    pad{pad}(0 To {}) As Byte",
+                frame.size.saturating_sub(at).saturating_sub(1)
+            ));
+        }
+        types.push("End Type".to_owned());
+        for (pointer, _) in pointers
+            .iter()
+            .filter(|(_, target)| **target == frame.start)
+        {
+            let set = format!("local_{pointer:X} = {local}");
+            let clear = format!("local_{pointer:X} = 0");
+            for line in lines.iter_mut() {
+                if is_statement(line, &set) || is_statement(line, &clear) {
+                    *line = match line.trim_start().split_once(": ") {
+                        Some((label, _)) if label.starts_with('L') => format!("{label}:"),
+                        _ => String::new(),
+                    };
+                }
+            }
+        }
+        lines.retain(|line| !line.is_empty());
+        for line in lines.iter_mut() {
+            for (from, to) in &members {
+                *line = replace_word(line, from, to);
+            }
+        }
+        dims.push(format!("       Dim {local} As {name}"));
+    }
+    lines.splice(0..0, dims);
+    types
+}
+
+/// Gives the frame slots of locals that a call of a DLL takes in `lines`:
+/// each `local_` word of a line that calls one of `calls`.
+fn passed_to_calls(lines: &[String], calls: &[String]) -> BTreeSet<u16> {
+    lines
+        .iter()
+        .filter(|line| calls.iter().any(|call| line.contains(&format!("{call}("))))
+        .flat_map(|line| words_with(std::slice::from_ref(line), "local_"))
+        .filter_map(|word| {
+            word.strip_prefix("local_")
+                .and_then(|digits| u16::from_str_radix(digits, 16).ok())
+        })
+        .collect()
+}
+
+/// Gives the structs of the frame of the body `listing`, whose lines are
+/// `lines`, and writes them into `lines` with [`apply_frame_structs`].
+fn declare_frame_structs(
+    listing: &PcodeListing,
+    table: &PcodeTable,
+    lines: &mut Vec<String>,
+    calls: &[String],
+    result: Option<u16>,
+    tag: u16,
+) -> Vec<String> {
+    let ops: Vec<Op<'_>> = listing
+        .instructions
+        .iter()
+        .map(|instruction| {
+            let names = table
+                .slot(instruction.lead, instruction.opcode)
+                .map(|slot| slot.names.as_slice())
+                .unwrap_or_default();
+            (names, instruction.arguments.as_slice())
+        })
+        .collect();
+    let uses = slot_uses(&ops);
+    let pointers = struct_pointers(&ops);
+    let (through, bad) = pointer_fields(&ops, &pointers);
+    let passed = passed_to_calls(lines, calls);
+    let result = result.map(|bytes| RESULT_BASE.saturating_add(bytes.max(2)));
+    let structs = frame_structs(&uses, &passed, result, &through, &bad);
+    apply_frame_structs(lines, &structs, &pointers, tag)
 }
 
 /// Puts a `Dim` before `lines` for each local that `lines` index. Basic
@@ -553,6 +945,13 @@ pub fn lift_objects(
         .collect();
     let callees = callees_of_project_named(&pe, &objects, table, types, &names);
     let declarations = DeclareTable::read(&pe, &info).declarations;
+    let calls: Vec<String> = declarations
+        .iter()
+        .filter_map(|declaration| match &declaration.export {
+            ExportName::Name(name) => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
     let mut out: Vec<Option<LiftedObject>> = Vec::new();
     let mut variables: Vec<BTreeSet<String>> = Vec::new();
     for own in &report.objects {
@@ -575,6 +974,7 @@ pub fn lift_objects(
         let mut globals = BTreeSet::new();
         let mut all_lines: Vec<String> = Vec::new();
         let mut fields = BTreeSet::new();
+        let mut frame_types = Vec::new();
         for entry in &methods.entries {
             let MethodEntry::Descriptor { index, descriptor } = entry else {
                 continue;
@@ -599,6 +999,9 @@ pub fn lift_objects(
                 callees.argument_sizes(*index),
                 &mut lines,
             );
+            frame_types.extend(declare_frame_structs(
+                &listing, table, &mut lines, &calls, result, *index,
+            ));
             declare_arrays(&mut lines);
             lifted.procedures.push(LiftedProcedure {
                 index: *index,
@@ -607,7 +1010,10 @@ pub fn lift_objects(
                 closing,
             });
         }
-        lifted.declarations = declare_statements(&declarations, &all_lines);
+        lifted.declarations = frame_types;
+        lifted
+            .declarations
+            .extend(declare_statements(&declarations, &all_lines));
         lifted
             .declarations
             .extend(field_declarations(&fields, &callees.variable_fields()));
@@ -645,8 +1051,9 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{
-        built_parameters, call_arity, declare, declare_arrays, declare_statements, declared_bytes,
-        field_declarations, indexed_words, procedure_name, replace_word, words_with,
+        apply_frame_structs, built_parameters, call_arity, declare, declare_arrays,
+        declare_statements, declared_bytes, field_declarations, frame_structs, indexed_words,
+        pointer_fields, procedure_name, replace_word, slot_uses, struct_pointers, words_with,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::lift::result_bytes;
@@ -741,6 +1148,124 @@ mod tests {
                 "Public field_42 As Variant",
                 "Public field_80 As Variant",
                 "Private field_34 As Variant"
+            ]
+        );
+    }
+
+    /// The names of one opcode, and its arguments.
+    fn op(names: &[&str], arguments: &[u8]) -> (Vec<String>, Vec<u8>) {
+        (
+            names.iter().map(|name| (*name).to_owned()).collect(),
+            arguments.to_vec(),
+        )
+    }
+
+    /// Runs the struct analysis over `ops`, with `passed` as the slots that
+    /// a call of a DLL takes, and writes the structs into `lines`.
+    fn structs_of(
+        ops: &[(Vec<String>, Vec<u8>)],
+        passed: &[u16],
+        result: Option<u16>,
+        lines: &mut Vec<String>,
+    ) -> Vec<String> {
+        let ops: Vec<(&[String], &[u8])> = ops
+            .iter()
+            .map(|(names, arguments)| (names.as_slice(), arguments.as_slice()))
+            .collect();
+        let uses = slot_uses(&ops);
+        let pointers = struct_pointers(&ops);
+        let (through, bad) = pointer_fields(&ops, &pointers);
+        let passed: BTreeSet<u16> = passed.iter().copied().collect();
+        let structs = frame_structs(&uses, &passed, result, &through, &bad);
+        apply_frame_structs(lines, &structs, &pointers, 4)
+    }
+
+    #[test]
+    fn a_local_that_a_dll_fills_is_a_struct_with_the_slots_after_it() {
+        // GetObject srcPictureBox.Image, Len(bm), bm, then a read of
+        // bm.bmWidth at 4, and the result of the Function at 0x88.
+        let load = ["FLdAd", "FLdI4", "FLdR4", "FLdStr", "ILdRf"];
+        let ops = [
+            op(&["FLdRf", "FLdRfVar"], &[0x60, 0xFF]),
+            op(&load, &[0x64, 0xFF]),
+            op(&["FStI4", "FStR4"], &[0x78, 0xFF]),
+        ];
+        let mut lines = vec![
+            "       Call GetObjectA(local_4C, 24, local_A0)".to_owned(),
+            "       GetImageWidth = local_9C".to_owned(),
+        ];
+        let types = structs_of(&ops, &[0xA0, 0x4C], Some(0x88), &mut lines);
+        assert_eq!(
+            types,
+            [
+                "Private Type T4_A0",
+                "    pad0(0 To 3) As Byte",
+                "    f4 As Long",
+                "    pad1(0 To 15) As Byte",
+                "End Type"
+            ]
+        );
+        assert_eq!(
+            lines,
+            [
+                "       Dim local_A0 As T4_A0",
+                "       Call GetObjectA(local_4C, 24, local_A0)",
+                "       GetImageWidth = local_A0.f4"
+            ]
+        );
+        // A local that the body also reads as a value is no struct.
+        let mut read = vec!["       Call GetObjectA(local_A0)".to_owned()];
+        let value = [
+            op(&["FLdRf"], &[0x60, 0xFF]),
+            op(&load, &[0x60, 0xFF]),
+            op(&load, &[0x64, 0xFF]),
+        ];
+        assert!(structs_of(&value, &[0xA0], None, &mut read).is_empty());
+        // A local that no call of a DLL takes is no struct.
+        let mut other = vec!["       Call Me.Fill(local_A0)".to_owned()];
+        assert!(structs_of(&ops, &[], Some(0x88), &mut other).is_empty());
+    }
+
+    #[test]
+    fn a_with_block_on_a_struct_writes_its_fields_through_the_struct() {
+        // With bmi.bmHeader: FLdRf of bmi at 0x4DC, FStI4 of the pointer at
+        // 0x4E0, then .bmPlanes = 1 at 12 and .bmSize = 40 at 0 through it.
+        let ops = [
+            op(&["FLdRf", "FLdRfVar"], &[0x24, 0xFB]),
+            op(&["FStI4", "FStR4"], &[0x20, 0xFB]),
+            op(&["FMemStI2"], &[0x20, 0xFB, 0x0C, 0x00]),
+            op(&["FMemStI4", "FMemStR4"], &[0x20, 0xFB, 0x00, 0x00]),
+            op(&["FStI4", "FStR4"], &[0x20, 0xFB]),
+            op(&["FStI4", "FStR4"], &[0x70, 0xFF]),
+        ];
+        let mut lines = vec![
+            "       local_4E0 = local_4DC".to_owned(),
+            "       local_4E0.field_C = 1".to_owned(),
+            "       local_4E0.field_0 = 40".to_owned(),
+            "L0020: local_4E0 = 0".to_owned(),
+            "       Call GetDIBits(local_4DC, 0)".to_owned(),
+        ];
+        // The slot of the result, at 0x90, ends the struct.
+        let types = structs_of(&ops, &[0x4DC], Some(0x90), &mut lines);
+        assert_eq!(
+            types,
+            [
+                "Private Type T4_4DC",
+                "    f0 As Long",
+                "    pad0(0 To 7) As Byte",
+                "    fC As Integer",
+                "    pad1(0 To 1085) As Byte",
+                "End Type"
+            ]
+        );
+        assert_eq!(
+            lines,
+            [
+                "       Dim local_4DC As T4_4DC",
+                "       local_4DC.fC = 1",
+                "       local_4DC.f0 = 40",
+                "L0020:",
+                "       Call GetDIBits(local_4DC, 0)"
             ]
         );
     }
