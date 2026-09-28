@@ -265,10 +265,32 @@ pub fn callees_of_project(
     table: &PcodeTable,
     types: Option<&VbTypes>,
 ) -> Vec<Callees> {
+    callees_of_project_named(pe, objects, table, types, &[])
+}
+
+/// Gives the [`Callees`] of each object of `objects`, as
+/// [`callees_of_project`] does, with the names of `names`: for each object,
+/// in the same order, the name of each procedure by its index in the method
+/// table. A name of `names` replaces the name that the file gives.
+#[must_use]
+pub fn callees_of_project_named(
+    pe: &PeImage<'_>,
+    objects: &[Object],
+    table: &PcodeTable,
+    types: Option<&VbTypes>,
+    names: &[Vec<(u16, String)>],
+) -> Vec<Callees> {
     let profiles: Vec<Callees> = objects
         .iter()
         .zip(0_u16..)
-        .map(|(object, owner)| profile(pe, object, types).with_owner(owner))
+        .enumerate()
+        .map(|(at, (object, owner))| {
+            let mut profile = profile(pe, object, types).with_owner(owner);
+            for (index, name) in names.get(at).map(Vec::as_slice).unwrap_or_default() {
+                profile = profile.with_procedure(*index, name);
+            }
+            profile
+        })
         .collect();
     let declares = header_region(pe)
         .and_then(|region| VbHeader::read(&region))

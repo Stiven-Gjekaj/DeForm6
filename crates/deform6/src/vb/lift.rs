@@ -452,9 +452,10 @@ impl Callees {
     }
 
     /// Adds the name `name` of the method `index` of the method table: the
-    /// name of a public procedure.
+    /// name of a public procedure. It replaces a name that the method had.
     #[must_use]
     pub fn with_procedure(mut self, index: u16, name: &str) -> Self {
+        self.procedures.retain(|(at, _)| *at != index);
         self.procedures.push((index, name.to_owned()));
         self
     }
@@ -3833,6 +3834,17 @@ dispid = 67
             "ReDim Preserve local_88(0 To 1)"
         );
         assert_eq!(text(Keyword::Erase, &[Expr::Arg(0xC)]), "Erase arg_C");
+    }
+
+    #[test]
+    fn a_second_name_of_a_procedure_replaces_the_first() {
+        let callees = Callees::default()
+            .with_procedure(2, "First")
+            .with_procedure(3, "Other")
+            .with_procedure(2, "Second");
+        assert_eq!(callees.procedure(2), "Second");
+        assert_eq!(callees.procedure(3), "Other");
+        assert_eq!(callees.procedure(4), "method_4");
     }
 
     #[test]

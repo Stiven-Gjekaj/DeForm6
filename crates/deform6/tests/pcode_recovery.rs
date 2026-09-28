@@ -55,7 +55,7 @@ use deform6::read::region::{Off, Va};
 use deform6::vb::Report;
 use deform6::vb::classify::ObjectKind as RecoveredKind;
 use deform6::vb::constants::{constant_declare, constant_procedure};
-use deform6::vb::context::callees_of_project;
+use deform6::vb::context::{callees_of_project, callees_of_project_named};
 use deform6::vb::controlinfo::{
     ControlInfoTable, EventReport, EventSlot, StubShape, read_event_table,
 };
@@ -1650,4 +1650,27 @@ fn the_profile_of_a_form_names_the_form() {
         named_forms("vb6-code/Blacklight-effect/Blacklight.exe"),
         ["frmBlacklight"]
     );
+}
+
+/// A name that `callees_of_project_named` takes replaces the name of the
+/// procedure at its index, in the profile of its object only.
+#[test]
+fn a_given_name_replaces_the_name_of_a_procedure() {
+    let bytes = read(&pcode_root().join("public-domain/PassGen/PassGen.exe"));
+    let pe = PeImage::parse(&bytes).unwrap();
+    let header = VbHeader::read(&header_region(&pe).unwrap()).unwrap();
+    let info = ProjectInfo::read(&pe, header.lp_project_data).unwrap();
+    let head = ObjectTableHead::read(&pe, info.lp_object_table).unwrap();
+    let objects = ObjectTable::walk(&pe, info.lp_object_table, &head)
+        .unwrap()
+        .objects;
+    let names = vec![vec![
+        (0, "Renamed".to_owned()),
+        (7, "cmdClose_Click".to_owned()),
+    ]];
+    let callees = callees_of_project_named(&pe, &objects, &PcodeTable::default(), None, &names);
+    assert_eq!(callees[0].procedure(0), "Renamed");
+    assert_eq!(callees[0].procedure(7), "cmdClose_Click");
+    assert_eq!(callees[0].procedure(3), "makeSpecialString");
+    assert_eq!(callees[1].procedure(0), "method_0");
 }
