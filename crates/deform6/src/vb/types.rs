@@ -363,7 +363,7 @@ impl VbTypes {
 
     /// Gives the 16 bytes of the GUID that `control` names, when the image
     /// holds them.
-    fn guid(pe: &PeImage<'_>, control: &ControlInfo) -> Option<[u8; 16]> {
+    pub(crate) fn guid(pe: &PeImage<'_>, control: &ControlInfo) -> Option<[u8; 16]> {
         pe.region_at_va(control.lp_guid)?
             .take(Off::new(0), 16)?
             .try_into()

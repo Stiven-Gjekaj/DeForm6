@@ -1470,3 +1470,101 @@ fn each_procedure_stub_of_a_pcode_program_goes_to_an_object_of_its_kind() {
     assert!(failures.is_empty(), "{failures:#?}");
     assert_eq!((modules, objects), (21, 19));
 }
+
+/// A types file with the events of the Winsock control, in the order of
+/// their vtable offsets, by the GUID of its events interface.
+const WINSOCK_EVENTS: &str = r#"
+[[events."{248DD893-BB45-11CF-9ABC-0080C7E7B78D}"]]
+name = "Error"
+[[events."{248DD893-BB45-11CF-9ABC-0080C7E7B78D}"]]
+name = "DataArrival"
+parameters = ["ByVal bytesTotal As Long"]
+[[events."{248DD893-BB45-11CF-9ABC-0080C7E7B78D}"]]
+name = "Connect"
+parameters = []
+[[events."{248DD893-BB45-11CF-9ABC-0080C7E7B78D}"]]
+name = "ConnectionRequest"
+parameters = ["ByVal requestID As Long"]
+[[events."{248DD893-BB45-11CF-9ABC-0080C7E7B78D}"]]
+name = "Close"
+parameters = []
+[[events."{248DD893-BB45-11CF-9ABC-0080C7E7B78D}"]]
+name = "SendProgress"
+parameters = ["ByVal bytesSent As Long", "ByVal bytesRemaining As Long"]
+[[events."{248DD893-BB45-11CF-9ABC-0080C7E7B78D}"]]
+name = "SendComplete"
+parameters = []
+"#;
+
+/// Each bound event slot of a Winsock control of the two P-code programs
+/// that hold one gets the name of its event from the types file, and the
+/// handler is the procedure of the source named for the control and that
+/// event. The control of `Server.exe` is a control array.
+#[test]
+fn each_bound_slot_of_a_winsock_control_names_the_event_of_its_source_handler() {
+    let root = build_record::corpus_root();
+    let projects = vbp::project_files();
+    let types = VbTypes::parse(WINSOCK_EVENTS.as_bytes()).unwrap();
+    let mut named = Vec::new();
+    for key in [
+        "public-domain/SK-TFTP-Sample__VB6/Client/demo/TFTPClient.exe",
+        "public-domain/SK-TFTP-Sample__VB6/Server/demo/Server.exe",
+    ] {
+        let bytes = read(&pcode_root().join(key));
+        let pe = PeImage::parse(&bytes).unwrap();
+        let objects = objects_by_name(&pe);
+        let project = vbp::select_project_file(&root.join(key), &projects).unwrap();
+        let sources: BTreeMap<String, PathBuf> = vbp::Project::read(&project)
+            .declared_objects()
+            .into_iter()
+            .filter_map(|object| Some((object.name?, object.source_file)))
+            .collect();
+        let report = deform6::inspect_with_types(
+            &bytes,
+            &OpcodeTable::builtin(),
+            Some(&types),
+            Mode::Strict,
+        )
+        .unwrap();
+        for form in &report.forms {
+            let methods = method_table(&pe, &objects[&form.name]);
+            let procedures = source::declared_procedures(&sources[&form.name]);
+            let first = methods.len() - procedures.len();
+            for control in &form.controls {
+                for event in &control.events {
+                    let EventReport::Named {
+                        control_name,
+                        event_name,
+                        handler_address: Some(address),
+                        ..
+                    } = event
+                    else {
+                        continue;
+                    };
+                    let at = methods.iter().position(|method| method == address).unwrap();
+                    assert_eq!(
+                        procedures[at - first],
+                        format!("{control_name}_{event_name}"),
+                        "{key}"
+                    );
+                    named.push(format!("{control_name}_{event_name}"));
+                }
+            }
+        }
+    }
+    assert_eq!(
+        named,
+        [
+            "WskClient_Error",
+            "WskClient_DataArrival",
+            "WskClient_Connect",
+            "WskClient_Close",
+            "WskClient_SendProgress",
+            "WskClient_SendComplete",
+            "WskServer_Error",
+            "WskServer_DataArrival",
+            "WskServer_ConnectionRequest",
+            "WskServer_Close",
+        ]
+    );
+}

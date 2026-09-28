@@ -19,4 +19,4 @@ pub mod vb;
 pub mod write;
 
 pub use error::Refusal;
-pub use vb::{Report, inspect};
+pub use vb::{Report, inspect, inspect_with_types};

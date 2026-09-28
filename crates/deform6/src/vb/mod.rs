@@ -366,6 +366,22 @@ pub struct Report {
 /// Visual Basic 6 structure does not resolve, or when `mode` is
 /// [`Mode::Strict`] and a `Recoverable` defect was found.
 pub fn inspect(data: &[u8], opcode_table: &OpcodeTable, mode: Mode) -> Result<Report, Refusal> {
+    inspect_with_types(data, opcode_table, None, mode)
+}
+
+/// Reads `data` as [`inspect`] does, and names each bound event slot from
+/// `types`, a types file that the user derived (`vb/types.rs`), when it is
+/// given.
+///
+/// # Errors
+///
+/// The errors of [`inspect`].
+pub fn inspect_with_types(
+    data: &[u8],
+    opcode_table: &OpcodeTable,
+    types: Option<&types::VbTypes>,
+    mode: Mode,
+) -> Result<Report, Refusal> {
     let pe = PeImage::parse(data)?;
     let (runtime, runtime_dll) = runtime_of(&pe)?;
 
@@ -423,6 +439,7 @@ pub fn inspect(data: &[u8], opcode_table: &OpcodeTable, mode: Mode) -> Result<Re
         opcode_table,
         components: &component_table,
         event_names: &event_names,
+        types,
     };
     let forms: Vec<FormReport> = gui_table
         .entries
@@ -662,6 +679,9 @@ struct ComposeTables<'a> {
     /// The event ordinal to name table, per `03-CONTEXT.md` D-02: empty by
     /// design in this phase.
     event_names: &'a EventNameTable,
+    /// The types file that names the events of a control, when the caller
+    /// gives one.
+    types: Option<&'a types::VbTypes>,
 }
 
 /// Composes one form's report: its name, its control tree, and the defects
@@ -822,6 +842,33 @@ fn compose_form(
     }
 }
 
+/// Gives the event names of the slots of `table`, the event table of the
+/// control whose `ControlInfo` record is `info`, from `types`. Gives `None`
+/// when the record names no GUID that the image holds, or when the table
+/// has more slots than a `u16` counts.
+fn own_events(
+    pe: &PeImage<'_>,
+    types: &types::VbTypes,
+    info: &ControlInfo,
+    control_type_name: &str,
+    table: &controlinfo::EventTable,
+) -> Option<EventNameTable> {
+    let guid = types::VbTypes::guid(pe, info)?;
+    let slots = u16::try_from(table.slots.len()).ok()?;
+    let mut names = EventNameTable::default();
+    for slot in 0..slots {
+        if let Some(event) = types.event(pe, &guid, slot, slots) {
+            names.insert(
+                control_type_name,
+                slot,
+                &event.name,
+                event.parameters.clone(),
+            );
+        }
+    }
+    Some(names)
+}
+
 /// Composes one control's report: its type, its properties, its external
 /// control facts when its type is 255, and its event slots.
 ///
@@ -871,7 +918,15 @@ fn compose_control(
         Some(info) => match read_event_table(pe, info) {
             Ok(table) => {
                 defects.extend(table.defects().iter().cloned());
-                report_events(&header.name, &control_type_name, &table, tables.event_names)
+                let own = tables
+                    .types
+                    .and_then(|types| own_events(pe, types, info, &control_type_name, &table));
+                report_events(
+                    &header.name,
+                    &control_type_name,
+                    &table,
+                    own.as_ref().unwrap_or(tables.event_names),
+                )
             }
             Err(refusal) => {
                 defects.push(structure_defect(0, None, "EventTable", &refusal));

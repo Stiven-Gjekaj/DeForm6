@@ -1082,13 +1082,33 @@ fn decode_pcode_stub(bytes: [u8; 20]) -> Option<StubHandler> {
 /// [`report_events`] call uses until a caller supplies one; a supplied
 /// table plugs into this same [`EventNameTable::lookup`] path, so it can
 /// never behave differently from the empty one, the same seam plan 03-02
-/// gave [`crate::vb::opcodes::OpcodeTable`].
+/// gave [`crate::vb::opcodes::OpcodeTable`]. `inspect` fills one for each
+/// control from a types file that the user derived (`vb/types.rs`).
 #[derive(Clone, Debug, Default)]
 pub struct EventNameTable {
-    entries: std::collections::HashMap<(String, u16), String>,
+    entries: std::collections::HashMap<(String, u16), NamedEvent>,
 }
 
+/// The name of an event, and the declaration of each of its parameters when
+/// they are known.
+type NamedEvent = (String, Option<Vec<String>>);
+
 impl EventNameTable {
+    /// Adds the event `name` at the ordinal `index` of `control_type`, with
+    /// the declaration of each of its parameters when they are known.
+    pub fn insert(
+        &mut self,
+        control_type: &str,
+        index: u16,
+        name: &str,
+        parameters: Option<Vec<String>>,
+    ) {
+        self.entries.insert(
+            (control_type.to_owned(), index),
+            (name.to_owned(), parameters),
+        );
+    }
+
     /// Looks up the event name for one control type's own ordinal.
     ///
     /// Gives `None` for every ordinal on an empty table, and for any
@@ -1099,7 +1119,16 @@ impl EventNameTable {
     pub fn lookup(&self, control_type: &str, index: u16) -> Option<&str> {
         self.entries
             .get(&(control_type.to_owned(), index))
-            .map(String::as_str)
+            .map(|(name, _)| name.as_str())
+    }
+
+    /// Gives the declaration of each parameter of the event at the ordinal
+    /// `index` of `control_type`, when the table knows them.
+    #[must_use]
+    pub fn parameters(&self, control_type: &str, index: u16) -> Option<&[String]> {
+        self.entries
+            .get(&(control_type.to_owned(), index))
+            .and_then(|(_, parameters)| parameters.as_deref())
     }
 }
 
@@ -1134,6 +1163,9 @@ pub enum EventReport {
         index: u16,
         /// The event name a supplied table gave.
         event_name: String,
+        /// The declaration of each parameter of the event in Basic, such
+        /// as `KeyAscii As Integer`, when the table gave them.
+        parameters: Option<Vec<String>>,
         /// The bound handler's own address, taken from
         /// [`EventSlot::Bound`]'s own decoded `handler` unchanged: the
         /// target of the jump of a native stub, or the value that a P-code
@@ -1182,16 +1214,15 @@ impl EventReport {
                 ..
             } => Some(format!(
                 "Event slot {index} on {control_name}: bound, name not available, no event \
-                 name table loaded. Run with --event-name-table to supply one naming this \
-                 control's own vtable ordering."
+                 name table loaded. Run with --vb-types to supply the events of this \
+                 control."
             )),
             Self::Unbound {
                 control_name,
                 index,
             } => Some(format!(
-                "Event slot {index} on {control_name}: unbound, name not available, no event \
-                 name table loaded. Run with --event-name-table to supply one naming this \
-                 control's own vtable ordering."
+                "Event slot {index} on {control_name}: unbound, no handler in the source, so \
+                 no event is named."
             )),
             Self::Named { .. } => None,
         }
@@ -1232,6 +1263,9 @@ pub fn report_events(
                         control_name: control_name.to_owned(),
                         index: *index,
                         event_name: event_name.to_owned(),
+                        parameters: names
+                            .parameters(control_type_name, *index)
+                            .map(<[String]>::to_vec),
                         handler_address,
                     },
                     None => EventReport::BoundUnnamed {
@@ -2536,9 +2570,7 @@ mod tests {
     #[test]
     fn a_bound_slot_with_a_named_table_entry_gives_the_named_state() {
         let mut names = EventNameTable::default();
-        names
-            .entries
-            .insert(("CommandButton".to_owned(), 0), "Click".to_owned());
+        names.insert("CommandButton", 0, "Click", None);
         let table = super::EventTable {
             slots: vec![EventSlot::Bound {
                 index: 0,
@@ -2557,10 +2589,28 @@ mod tests {
                 control_name: "Command1".to_owned(),
                 index: 0,
                 event_name: "Click".to_owned(),
+                parameters: None,
                 handler_address: None,
             }
         );
         assert!(reports[0].no_name_message().is_none());
+        names.insert(
+            "CommandButton",
+            0,
+            "KeyPress",
+            Some(vec!["KeyAscii As Integer".to_owned()]),
+        );
+        let reports = report_events("Command1", "CommandButton", &table, &names);
+        assert_eq!(
+            reports[0],
+            EventReport::Named {
+                control_name: "Command1".to_owned(),
+                index: 0,
+                event_name: "KeyPress".to_owned(),
+                parameters: Some(vec!["KeyAscii As Integer".to_owned()]),
+                handler_address: None,
+            }
+        );
     }
 
     #[test]
@@ -2588,7 +2638,7 @@ mod tests {
         let message = reports[0].no_name_message().unwrap();
         assert!(message.contains('3'), "{message}");
         assert!(message.contains("Command1"), "{message}");
-        assert!(message.contains("--event-name-table"), "{message}");
+        assert!(message.contains("--vb-types"), "{message}");
     }
 
     #[test]
@@ -2621,9 +2671,7 @@ mod tests {
         );
 
         let mut names = EventNameTable::default();
-        names
-            .entries
-            .insert(("CommandButton".to_owned(), 0), "Click".to_owned());
+        names.insert("CommandButton", 0, "Click", None);
         let named = report_events("Command1", "CommandButton", &table, &names);
         assert_eq!(
             named[0],
@@ -2631,6 +2679,7 @@ mod tests {
                 control_name: "Command1".to_owned(),
                 index: 0,
                 event_name: "Click".to_owned(),
+                parameters: None,
                 handler_address: Some(0x0040_10ED),
             }
         );
@@ -2656,15 +2705,13 @@ mod tests {
         let message = reports[0].no_name_message().unwrap();
         assert!(message.contains('7'), "{message}");
         assert!(message.contains("Picture1"), "{message}");
-        assert!(message.contains("--event-name-table"), "{message}");
+        assert!(!message.contains("--vb-types"), "{message}");
     }
 
     #[test]
     fn a_slot_on_a_control_type_with_no_table_entry_reports_no_name() {
         let mut names = EventNameTable::default();
-        names
-            .entries
-            .insert(("CommandButton".to_owned(), 0), "Click".to_owned());
+        names.insert("CommandButton", 0, "Click", None);
         let table = super::EventTable {
             slots: vec![EventSlot::Bound {
                 index: 0,

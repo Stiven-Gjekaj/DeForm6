@@ -93,6 +93,13 @@ enum Command {
         /// dropped, with nothing invented in its place) never refuses.
         #[arg(long)]
         salvage: bool,
+
+        /// The interfaces and the events of the controls, which `cargo run
+        /// -p xtask -- derive-vb-types` writes from `VB6.OLB`. With them,
+        /// each bound event slot gets the name of its event. This repository
+        /// does not ship them.
+        #[arg(long)]
+        vb_types: Option<PathBuf>,
     },
 
     /// Reads one executable and writes a Visual Basic 6 project directory
@@ -169,6 +176,13 @@ enum Command {
         /// misstate its own provenance.
         #[arg(long)]
         salvage: bool,
+
+        /// The interfaces and the events of the controls, which `cargo run
+        /// -p xtask -- derive-vb-types` writes from `VB6.OLB`. With them,
+        /// each bound event slot gets the name of its event. This repository
+        /// does not ship them.
+        #[arg(long)]
+        vb_types: Option<PathBuf>,
     },
 }
 
@@ -230,7 +244,13 @@ fn run(cli: &Cli) -> Exit {
             input,
             opcode_table,
             salvage,
-        } => run_inspect(input, opcode_table.as_deref(), mode_for(*salvage)),
+            vb_types,
+        } => run_inspect(
+            input,
+            opcode_table.as_deref(),
+            vb_types.as_deref(),
+            mode_for(*salvage),
+        ),
         Command::Disasm {
             input,
             pcode_table,
@@ -243,7 +263,40 @@ fn run(cli: &Cli) -> Exit {
             report,
             force,
             salvage,
-        } => run_extract(input, output, report.as_deref(), *force, mode_for(*salvage)),
+            vb_types,
+        } => run_extract(
+            input,
+            output,
+            report.as_deref(),
+            *force,
+            vb_types.as_deref(),
+            mode_for(*salvage),
+        ),
+    }
+}
+
+/// Reads the types file at `path`, when a path is given.
+///
+/// # Errors
+///
+/// Gives [`Exit::Internal`], after it prints the reason, when the file
+/// cannot be read or is not a types file.
+fn load_vb_types(path: Option<&Path>) -> Result<Option<VbTypes>, Exit> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    match std::fs::read(path) {
+        Ok(bytes) => match VbTypes::parse(&bytes) {
+            Ok(types) => Ok(Some(types)),
+            Err(err) => {
+                eprintln!("{}: {err}", path.display());
+                Err(Exit::Internal)
+            }
+        },
+        Err(err) => {
+            eprintln!("could not read {}: {err}", path.display());
+            Err(Exit::Internal)
+        }
     }
 }
 
@@ -328,19 +381,9 @@ fn run_disasm(path: &Path, table_path: &Path, lift: bool, types_path: Option<&Pa
             return Exit::Internal;
         }
     };
-    let types = match types_path.map(|types_path| (types_path, std::fs::read(types_path))) {
-        None => None,
-        Some((types_path, Ok(bytes))) => match VbTypes::parse(&bytes) {
-            Ok(types) => Some(types),
-            Err(err) => {
-                eprintln!("{}: {err}", types_path.display());
-                return Exit::Internal;
-            }
-        },
-        Some((types_path, Err(err))) => {
-            eprintln!("could not read {}: {err}", types_path.display());
-            return Exit::Internal;
-        }
+    let types = match load_vb_types(types_path) {
+        Ok(types) => types,
+        Err(exit) => return exit,
     };
     let data = match std::fs::read(path) {
         Ok(data) => data,
@@ -500,10 +543,15 @@ fn format_end(end: PcodeEnd) -> String {
 fn run_inspect(
     path: &Path,
     opcode_table_path: Option<&Path>,
+    types_path: Option<&Path>,
     mode: deform6::journal::Mode,
 ) -> Exit {
     let (table, table_summary) = match load_opcode_table(opcode_table_path) {
         Ok(loaded) => loaded,
+        Err(exit) => return exit,
+    };
+    let types = match load_vb_types(types_path) {
+        Ok(types) => types,
         Err(exit) => return exit,
     };
 
@@ -515,7 +563,7 @@ fn run_inspect(
         }
     };
 
-    match deform6::inspect(&data, &table, mode) {
+    match deform6::inspect_with_types(&data, &table, types.as_ref(), mode) {
         Ok(report) => {
             print_report(path, &report, &table_summary);
             Exit::Ok
@@ -551,8 +599,13 @@ fn run_extract(
     output: &Path,
     report_path: Option<&Path>,
     force: bool,
+    types_path: Option<&Path>,
     mode: deform6::journal::Mode,
 ) -> Exit {
+    let types = match load_vb_types(types_path) {
+        Ok(types) => types,
+        Err(exit) => return exit,
+    };
     // Kept alive for the whole call: `deform6::write::project` re-reads a
     // resource blob's own bytes out of this same slice, so it must outlive
     // the write step. A later refactor that drops this early would compile
@@ -566,7 +619,7 @@ fn run_extract(
     };
 
     let table = OpcodeTable::builtin();
-    let inspected = match deform6::inspect(&data, &table, mode) {
+    let inspected = match deform6::inspect_with_types(&data, &table, types.as_ref(), mode) {
         Ok(inspected) => inspected,
         Err(refusal) => {
             eprintln!("{refusal}");
@@ -1428,17 +1481,16 @@ fn print_event(indent: &str, event: &EventReport) {
         } => match handler_address {
             Some(address) => println!(
                 "{indent}  event slot {index}: bound, handler at {address:#010x}, name not \
-                 decoded. Run with --event-name-table to supply one."
+                 decoded. Run with --vb-types to supply the events of this control."
             ),
             None => println!(
                 "{indent}  event slot {index}: bound, handler address not decoded, name not \
-                 decoded. Run with --event-name-table to supply one."
+                 decoded. Run with --vb-types to supply the events of this control."
             ),
         },
-        EventReport::Unbound { index, .. } => println!(
-            "{indent}  event slot {index}: unbound, not decoded. Run with --event-name-table to \
-             supply one."
-        ),
+        EventReport::Unbound { index, .. } => {
+            println!("{indent}  event slot {index}: unbound, no handler")
+        }
     }
 }
 

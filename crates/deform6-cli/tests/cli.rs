@@ -1671,3 +1671,55 @@ fn disasm_names_the_types_file_and_refuses_a_bad_one() {
     assert_eq!(code, 5, "{stderr}");
     assert!(stderr.contains("could not read"), "{stderr}");
 }
+
+/// `inspect --vb-types` names a bound event slot of a Winsock control from
+/// the events of the types file, and `extract --vb-types` refuses a file
+/// that it cannot read.
+#[test]
+fn inspect_names_a_bound_event_from_the_types_file() {
+    let types = std::env::temp_dir().join(format!("deform6-events-{}.toml", std::process::id()));
+    let mut text = String::new();
+    for name in [
+        "Error",
+        "DataArrival",
+        "Connect",
+        "ConnectionRequest",
+        "Close",
+        "SendProgress",
+        "SendComplete",
+    ] {
+        text.push_str(&format!(
+            "[[events.\"{{248DD893-BB45-11CF-9ABC-0080C7E7B78D}}\"]]\nname = \"{name}\"\n"
+        ));
+    }
+    fs::write(&types, text).unwrap();
+    let path = winsock_sample_path();
+    let (code, stdout, stderr) = run(&[
+        OsStr::new("inspect"),
+        path.as_os_str(),
+        OsStr::new("--vb-types"),
+        types.as_os_str(),
+    ]);
+    fs::remove_file(&types).unwrap();
+    assert_eq!(code, 0, "{stderr}");
+    assert!(
+        stdout.contains("event slot 10: bound, DataArrival, handler at 0x00403500"),
+        "{stdout}"
+    );
+    let (code, plain, stderr) = run(&[OsStr::new("inspect"), path.as_os_str()]);
+    assert_eq!(code, 0, "{stderr}");
+    assert!(!plain.contains("DataArrival"), "{plain}");
+
+    let output = std::env::temp_dir().join(format!("deform6-events-out-{}", std::process::id()));
+    let (code, _, stderr) = run(&[
+        OsStr::new("extract"),
+        path.as_os_str(),
+        OsStr::new("-o"),
+        output.as_os_str(),
+        OsStr::new("--vb-types"),
+        OsStr::new("/nonexistent/deform6-vb-types.toml"),
+    ]);
+    assert_eq!(code, 5, "{stderr}");
+    assert!(stderr.contains("could not read"), "{stderr}");
+    assert!(!output.exists(), "a refused run writes no directory");
+}
