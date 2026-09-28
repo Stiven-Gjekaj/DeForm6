@@ -163,6 +163,38 @@ fn default_iid(pe: &PeImage<'_>, object: &Object) -> Option<[u8; 16]> {
     pe.region_at_va(iid)?.take(Off::new(0), 16)?.try_into().ok()
 }
 
+/// The class that the interface GUID of a `VCallHresult` names.
+#[derive(Debug, PartialEq, Eq)]
+enum CallClass<'a> {
+    /// The object of a control array: the null GUID.
+    Array,
+    /// The object of the project whose default interface has the GUID.
+    Project(&'a Callees),
+    /// The interface of the types file that has the GUID.
+    Runtime(&'a str),
+}
+
+/// Gives the class that `iid` names. `defaults` gives the default interface
+/// of each object of the project, with its profile. The null GUID names the
+/// object of a control array: each of the 65 calls of the corpus that name
+/// it calls `Item` or `Count` right after a control accessor.
+fn call_class<'a>(
+    iid: &[u8; 16],
+    defaults: &[(Option<[u8; 16]>, &'a Callees)],
+    types: Option<&'a VbTypes>,
+) -> Option<CallClass<'a>> {
+    if *iid == [0; 16] {
+        return Some(CallClass::Array);
+    }
+    if let Some((_, profile)) = defaults
+        .iter()
+        .find(|(default, _)| default.as_ref() == Some(iid))
+    {
+        return Some(CallClass::Project(profile));
+    }
+    types?.interface_of_iid(iid).map(CallClass::Runtime)
+}
+
 /// Gives the vtable of `object`: its methods and accessors, and its control
 /// accessors when `types` is given.
 fn profile(pe: &PeImage<'_>, object: &Object, types: Option<&VbTypes>) -> Callees {
@@ -225,18 +257,19 @@ pub fn callees_of_project(
                 let Some(iid) = constant_guid(pe, object.lp_object_info, index) else {
                     continue;
                 };
-                if iid == [0; 16] {
-                    callees = callees.with_class_interface(index, CONTROL_ARRAY);
-                } else if let Some((_, profile)) = objects
+                let defaults: Vec<(Option<[u8; 16]>, &Callees)> = objects
                     .iter()
+                    .map(|other| default_iid(pe, other))
                     .zip(&profiles)
-                    .find(|(other, _)| default_iid(pe, other) == Some(iid))
-                {
-                    callees = callees.with_class(index, profile.clone());
-                } else if let Some(interface) = types.and_then(|types| types.interface_of_iid(&iid))
-                {
-                    callees = callees.with_class_interface(index, interface);
-                }
+                    .collect();
+                callees = match call_class(&iid, &defaults, types) {
+                    Some(CallClass::Array) => callees.with_class_interface(index, CONTROL_ARRAY),
+                    Some(CallClass::Project(profile)) => callees.with_class(index, profile.clone()),
+                    Some(CallClass::Runtime(interface)) => {
+                        callees.with_class_interface(index, interface)
+                    }
+                    None => callees,
+                };
             }
             for index in class_indexes(listing, table) {
                 let Some(target) = constant(pe, object.lp_object_info, index) else {
@@ -313,17 +346,52 @@ fn with_arguments(
     reason = "a test reads a file of the corpus and must fail loudly when it cannot"
 )]
 mod tests {
-    use super::default_iid;
+    use super::{CallClass, call_class, default_iid};
     use crate::read::pe::PeImage;
     use crate::vb::constants::constant_guid;
     use crate::vb::header::{VbHeader, header_region};
+    use crate::vb::lift::Callees;
     use crate::vb::object::ObjectTable;
     use crate::vb::project::{ObjectTableHead, ProjectInfo};
+    use crate::vb::types::VbTypes;
 
     const DIFFUSE_P_CODE: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../corpus-pcode/vb6-code/Diffuse-effect/Diffuse.exe"
     ));
+
+    /// The null GUID names a control array; the default interface of an
+    /// object of the project comes before an interface of the types file;
+    /// and a GUID that neither gives names nothing.
+    #[test]
+    fn the_guid_of_a_call_names_an_array_an_object_or_an_interface() {
+        let project = [7_u8; 16];
+        let runtime = [
+            0x22, 0x3D, 0xFB, 0xFC, 0xFA, 0xA0, 0x68, 0x10, 0xA7, 0x38, 0x08, 0x00, 0x2B, 0x33,
+            0x71, 0xB5,
+        ];
+        let profile = Callees::default().with_owner(3);
+        let defaults = [(None, &profile), (Some(project), &profile)];
+        let types = VbTypes::parse(
+            b"[iids]\n\"{FCFB3D22-A0FA-1068-A738-08002B3371B5}\" = \"VBGlobal\"\n\
+              \"{07070707-0707-0707-0707-070707070707}\" = \"_Other\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            call_class(&[0; 16], &defaults, Some(&types)),
+            Some(CallClass::Array)
+        );
+        assert_eq!(
+            call_class(&project, &defaults, Some(&types)),
+            Some(CallClass::Project(&profile))
+        );
+        assert_eq!(
+            call_class(&runtime, &defaults, Some(&types)),
+            Some(CallClass::Runtime("VBGlobal"))
+        );
+        assert_eq!(call_class(&runtime, &defaults, None), None);
+        assert_eq!(call_class(&[9; 16], &defaults, Some(&types)), None);
+    }
 
     /// `frmDiffuse` in the P-code `Diffuse.exe` calls the methods of its
     /// `FastDrawing` object with `VCallHresult`, whose second argument names
