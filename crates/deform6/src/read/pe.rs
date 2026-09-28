@@ -13,7 +13,8 @@
 //! crash inside `object` is found here and reported upstream.
 
 use object::LittleEndian as LE;
-use object::read::pe::{ImageNtHeaders as _, ImageOptionalHeader as _, PeFile32};
+use object::pe::ImageNtHeaders32;
+use object::read::pe::{ImageNtHeaders as _, ImageOptionalHeader as _, Import, PeFile32};
 
 use crate::error::{Defect, DefectKind, Refusal, Site};
 use crate::read::region::{Off, Region, Rva, Va};
@@ -22,6 +23,9 @@ use crate::read::region::{Off, Region, Rva, Va};
 ///
 /// Four bytes of signature and twenty bytes of COFF file header.
 const SIGNATURE_AND_FILE_HEADER: u32 = 24;
+
+/// The DLL of the Visual Basic 6 runtime.
+const RUNTIME_DLL: &str = "MSVBVM60.DLL";
 
 /// The number of bytes one section header takes in the section table.
 const SECTION_HEADER_LEN: u32 = 40;
@@ -356,6 +360,42 @@ impl<'a> PeImage<'a> {
             out.push(String::from_utf8_lossy(name).to_ascii_uppercase());
         }
         Ok(out)
+    }
+
+    /// Gives the ordinal of the import of the Visual Basic 6 runtime whose
+    /// slot of the import address table is at `slot`, when the file imports
+    /// that function by its ordinal.
+    ///
+    /// Gives `None` when no import of `MSVBVM60.DLL` has that slot, when it
+    /// imports the function by name, and when the import directory cannot
+    /// be read.
+    #[must_use]
+    pub fn runtime_ordinal(&self, slot: Va) -> Option<u16> {
+        let table = self.file.import_table().ok()??;
+        let mut descriptors = table.descriptors().ok()?;
+        while let Some(descriptor) = descriptors.next().ok()? {
+            let name = table.name(descriptor.name.get(LE)).ok()?;
+            if !name.eq_ignore_ascii_case(RUNTIME_DLL.as_bytes()) {
+                continue;
+            }
+            let first = descriptor.first_thunk.get(LE);
+            let lookup = match descriptor.original_first_thunk.get(LE) {
+                0 => first,
+                rva => rva,
+            };
+            let mut thunks = table.thunks(lookup).ok()?;
+            let mut at = self.image_base.checked_add(first)?;
+            while let Some(thunk) = thunks.next::<ImageNtHeaders32>().ok()? {
+                if at == slot.get() {
+                    return match table.import::<ImageNtHeaders32>(thunk).ok()? {
+                        Import::Ordinal(ordinal) => Some(ordinal),
+                        Import::Name(..) => None,
+                    };
+                }
+                at = at.checked_add(4)?;
+            }
+        }
+        None
     }
 
     /// Gives the upper cased name of every DLL in the delay load directory.
@@ -879,6 +919,23 @@ mod tests {
     fn the_corpus_file_imports_the_visual_basic_6_runtime_and_nothing_else() {
         let image = PeImage::parse(MANDELBROT).unwrap();
         assert_eq!(image.imported_dlls().unwrap(), vec!["MSVBVM60.DLL"]);
+    }
+
+    const PASSGEN_P_CODE: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus-pcode/public-domain/PassGen/PassGen.exe"
+    ));
+
+    /// `PassGen.exe` imports `rtcErrObj` of the runtime by the ordinal 685
+    /// through the slot at `0x401054`, and `rtcCreateObject2` by 716
+    /// through `0x401048`. A slot that is not in the table gives nothing.
+    #[test]
+    fn a_slot_of_the_import_address_table_gives_its_ordinal() {
+        let image = PeImage::parse(PASSGEN_P_CODE).unwrap();
+        assert_eq!(image.runtime_ordinal(Va::new(0x0040_1054)), Some(685));
+        assert_eq!(image.runtime_ordinal(Va::new(0x0040_1048)), Some(716));
+        assert_eq!(image.runtime_ordinal(Va::new(0x0040_1055)), None);
+        assert_eq!(image.runtime_ordinal(Va::new(0x0090_0000)), None);
     }
 
     #[test]
