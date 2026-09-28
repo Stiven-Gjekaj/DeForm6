@@ -140,6 +140,14 @@ fn export(options: &Options) -> Result<usize, String> {
     Ok(exported.len())
 }
 
+/// The programs that `runs.bat` does not start, by key, with the reason.
+/// `LockWorkStation.exe` locks the session of the host, and the host then
+/// shows the Welcome screen, where no run can go on.
+const NOT_RUN: &[(&str, &str)] = &[(
+    "public-domain/LockWorkStation/LockWorkStation.exe",
+    "it locks the session",
+)];
+
 /// The seconds that `runs.bat` gives a program to show its first window
 /// before it sends the marker, and after it.
 const RUN_WAIT_SECONDS: u8 = 6;
@@ -152,7 +160,8 @@ const RUN_WAIT_SECONDS: u8 = 6;
 /// through `COM1`, waits again, and ends the program. The other machine
 /// takes a picture of the screen at each marker, so the first window of each
 /// rebuilt program can be compared with the first window of its original.
-/// A side with no executable sends `===NONE <short> <side>===`. `ping`
+/// A side with no executable sends `===NONE <short> <side>===`, and a
+/// program of [`NOT_RUN`] sends `===SKIP <short> <reason>===`. `ping`
 /// waits, because Windows XP has no `timeout`.
 fn render_runs(programs: &[Exported]) -> String {
     let wait = format!(
@@ -170,6 +179,10 @@ fn render_runs(programs: &[Exported]) -> String {
     .map(|line| (*line).to_owned())
     .collect();
     for program in programs {
+        if let Some((_, reason)) = NOT_RUN.iter().find(|(key, _)| *key == program.key) {
+            lines.push(format!(">COM1 echo ===SKIP {} {reason}===", program.short));
+            continue;
+        }
         for side in ["original", "extracted"] {
             lines.push(format!("call :run {} {side}", program.short));
         }
@@ -245,7 +258,9 @@ mod tests {
             extracted_vbp: "b.vbp".to_owned(),
             files: "h".to_owned(),
         };
-        let text = render_runs(&[program("p01"), program("p02")]);
+        let mut locking = program("p03");
+        locking.key = "public-domain/LockWorkStation/LockWorkStation.exe".to_owned();
+        let text = render_runs(&[program("p01"), program("p02"), locking]);
         assert!(!text.replace("\r\n", "").contains('\n'));
         assert!(text.ends_with("\r\n"));
         let calls: Vec<&str> = text
@@ -263,6 +278,7 @@ mod tests {
         );
         assert!(text.contains(r#"for %%e in ("%SystemDrive%\deform6-out\%1\%2\*.exe")"#));
         assert!(text.contains(">COM1 echo ===SHOT %1 %2==="));
+        assert!(text.contains(">COM1 echo ===SKIP p03 it locks the session==="));
         assert!(text.contains("ping -n 7 127.0.0.1 >nul"));
         assert!(text.contains("taskkill /f /im %4"));
     }
