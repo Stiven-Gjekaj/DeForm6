@@ -284,8 +284,12 @@ pub enum Expr {
     Arg(u16),
     /// A field of an object, at an offset.
     Field(Box<Expr>, u16),
-    /// A global, at an index.
+    /// A global, at an index of the constant table.
     Global(u16),
+    /// A variable of a module, by the address that the constant table
+    /// gives for it. Each object that names the variable gives the same
+    /// address, at an index of its own.
+    Variable(u32),
     /// Two values and an operator.
     Binary(BinaryOp, Box<Expr>, Box<Expr>),
     /// A conversion, by the name of the Basic function.
@@ -373,6 +377,7 @@ pub struct Callees {
     arguments: Vec<(u16, i16, String)>,
     procedures: Vec<(u16, String)>,
     form_name: Option<String>,
+    globals: Vec<(u16, u32)>,
     base: Option<String>,
     owner: Option<u16>,
 }
@@ -468,6 +473,14 @@ impl Callees {
             .iter()
             .find(|(at, _)| *at == index)
             .map_or_else(|| format!("method_{index}"), |(_, name)| name.clone())
+    }
+
+    /// Adds the address `address` of the variable at `index` of the constant
+    /// table.
+    #[must_use]
+    pub fn with_global(mut self, index: u16, address: u32) -> Self {
+        self.globals.push((index, address));
+        self
     }
 
     /// Sets the name of the form whose vtable the profile gives. A global of
@@ -675,6 +688,7 @@ impl Expr {
             Self::Field(object, offset) if **object == Self::Arg(8) => format!("field_{offset:X}"),
             Self::Field(object, offset) => format!("{}.field_{offset:X}", object.text()),
             Self::Global(index) => format!("global_{index:X}"),
+            Self::Variable(address) => format!("g_{address:X}"),
             Self::Binary(op, left, right) => {
                 format!("({} {} {})", left.text(), op.text(), right.text())
             }
@@ -728,6 +742,16 @@ impl Expr {
             other => other,
         }
     }
+}
+
+/// Gives the expression of the variable at `index` of the constant table:
+/// by its address when `callees` gives it.
+fn global_at(callees: &Callees, index: u16) -> Expr {
+    callees
+        .globals
+        .iter()
+        .find(|(at, _)| *at == index)
+        .map_or(Expr::Global(index), |(_, address)| Expr::Variable(*address))
 }
 
 /// The text of the member `name` of `object`: with no object for a member
@@ -2241,7 +2265,7 @@ fn run(
             Family::GlobalObjectStore => {
                 let value = pop(&mut state)?;
                 Some(Stmt::Set {
-                    target: Expr::Global(word16(0)?),
+                    target: global_at(callees, word16(0)?),
                     value,
                 })
             }
@@ -2275,7 +2299,7 @@ fn run(
             Family::GlobalStore => {
                 let value = pop(&mut state)?;
                 Some(Stmt::Assign {
-                    target: Expr::Global(word16(0)?),
+                    target: global_at(callees, word16(0)?),
                     value,
                 })
             }
@@ -2412,13 +2436,14 @@ fn run(
                 object_call(&mut state, callees, types, word16(0)?, pushes, at, calls)?
             }
             Family::GlobalLoad => {
-                state
-                    .stack
-                    .push(Value::sized(Expr::Global(word16(0)?), load_bytes(names)));
+                state.stack.push(Value::sized(
+                    global_at(callees, word16(0)?),
+                    load_bytes(names),
+                ));
                 None
             }
             Family::GlobalObjectRegister => {
-                state.object = Some((Expr::Global(word16(0)?), None));
+                state.object = Some((global_at(callees, word16(0)?), None));
                 None
             }
             Family::FieldLoad | Family::FieldObjectRegister => {
@@ -2548,10 +2573,12 @@ fn run(
                     reference.class
                 };
                 let object = match (&reference.expr, callees.class(index)) {
-                    (Expr::Global(_), Some(profile)) => profile
+                    (Expr::Global(_) | Expr::Variable(_), Some(profile)) => profile
                         .form_name()
                         .map_or(reference.expr, |form| Expr::Name(form.to_owned())),
-                    (Expr::Global(_), None) if class.as_deref() == Some(GLOBAL_INTERFACE) => {
+                    (Expr::Global(_) | Expr::Variable(_), None)
+                        if class.as_deref() == Some(GLOBAL_INTERFACE) =>
+                    {
                         Expr::Implicit
                     }
                     _ => reference.expr,
@@ -2927,6 +2954,33 @@ pub fn import_indexes(listing: &PcodeListing, table: &PcodeTable) -> Vec<u16> {
     out
 }
 
+/// Gives the index of each variable of the constant table that `listing`
+/// loads or stores. A caller gives [`Callees`] the address of each one.
+#[must_use]
+pub fn global_indexes(listing: &PcodeListing, table: &PcodeTable) -> Vec<u16> {
+    let mut out = Vec::new();
+    for instruction in &listing.instructions {
+        let names = table
+            .slot(instruction.lead, instruction.opcode)
+            .map(|slot| slot.names.as_slice())
+            .unwrap_or_default();
+        if matches!(
+            family(names),
+            Some(
+                Family::GlobalLoad
+                    | Family::GlobalStore
+                    | Family::GlobalObjectStore
+                    | Family::GlobalObjectRegister
+            )
+        ) && let Some(index) = u16_at(&instruction.arguments, 0)
+            && !out.contains(&index)
+        {
+            out.push(index);
+        }
+    }
+    out
+}
+
 /// Gives the index of each member name of the constant table that a
 /// late-bound call of `listing` names. A caller gives [`Callees`] each one.
 #[must_use]
@@ -3010,8 +3064,8 @@ pub fn render(stmts: &[LiftedStmt]) -> Vec<String> {
 mod tests {
     use super::{
         Callees, Expr, Keyword, LiftFault, ProjectCall, Stmt, arguments_text, class_indexes,
-        import_indexes, interface_indexes, lift, lift_method, method_calls, name_indexes, render,
-        string_indexes,
+        global_indexes, import_indexes, interface_indexes, lift, lift_method, method_calls,
+        name_indexes, render, string_indexes,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::pcode::{PcodeTable, disassemble};
@@ -4360,6 +4414,15 @@ dispid = 67
         // Set global_5 = New class_9
         let set = [0x27, 0x09, 0x00, 0x3D, 0x05, 0x00, 0x0C];
         assert_eq!(lines(&set).unwrap()[0], "       Set global_5 = New class_9");
+        // The same store to a variable whose address the constant table
+        // gives.
+        assert_eq!(
+            lines_with(&set, &Callees::default().with_global(5, 0x0040_A1C0)).unwrap()[0],
+            "       Set g_40A1C0 = New class_9"
+        );
+        let table = PcodeTable::parse(TABLE.as_bytes()).unwrap();
+        let listing = disassemble(&Region::new(&set, Off::new(0)), &table);
+        assert_eq!(global_indexes(&listing, &table), [5]);
         // local_68 = local_64; local_88 = local_68 & local_60;
         // local_88 = local_78.field_34
         let variants = [

@@ -38,8 +38,8 @@ use std::collections::BTreeMap;
 
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::lift::{
-    CONTROL_ARRAY, Callees, ProjectCall, class_indexes, import_indexes, interface_indexes,
-    method_calls, name_indexes, string_indexes,
+    CONTROL_ARRAY, Callees, ProjectCall, class_indexes, global_indexes, import_indexes,
+    interface_indexes, method_calls, name_indexes, string_indexes,
 };
 use crate::vb::links::read_method_links;
 use crate::vb::object::Object;
@@ -314,6 +314,11 @@ pub fn callees_of_project_named(
             for index in name_indexes(listing, table) {
                 if let Some(name) = constant_name(pe, object.lp_object_info, index) {
                     callees = callees.with_name(index, &name);
+                }
+            }
+            for index in global_indexes(listing, table) {
+                if let Some(address) = constant(pe, object.lp_object_info, index) {
+                    callees = callees.with_global(index, address.get());
                 }
             }
             for index in import_indexes(listing, table) {
