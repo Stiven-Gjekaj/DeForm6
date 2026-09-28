@@ -36,7 +36,8 @@
 //!   a `Currency` and a `Date`, and 16 for a `Variant`. It leaves out the
 //!   4 bytes of the object itself. `result` tells whether the last
 //!   parameter receives the result, and `result_interface` gives the
-//!   interface of an object result when the library holds it.
+//!   interface of an object result when the library holds it. `dispid` is
+//!   the member id of the function: the `DISPID` of a late-bound call of it.
 //!
 //! Two functions can share a vtable offset: a property let and a property
 //! set of the same name. The tool writes the offset one time, and it stops
@@ -91,6 +92,7 @@ pub(crate) struct Slot {
     result: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     result_interface: Option<String>,
+    dispid: u32,
 }
 
 /// One interface.
@@ -171,6 +173,7 @@ fn slot(function: &Function, infos: &[TypeInfo]) -> Slot {
             .last()
             .filter(|parameter| parameter.flags & PARAMFLAG_FRETVAL != 0)
             .and_then(|parameter| interface_name(infos, parameter.user_type?)),
+        dispid: function.member_id,
     }
 }
 
@@ -430,6 +433,8 @@ mod tests {
             Some("BoxEvents")
         );
         assert_eq!(interface.functions["0028"].result_interface, None);
+        assert_eq!(interface.functions["0024"].dispid, 0x43);
+        assert!(text.contains("dispid = 67"), "{text}");
     }
 
     #[test]
