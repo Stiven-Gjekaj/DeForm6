@@ -572,6 +572,7 @@ mod tests {
             vtable_offset: 0x40,
             invoke_kind,
             parameters: vec![Parameter {
+                name: None,
                 vt,
                 flags: 1,
                 user_type: None,

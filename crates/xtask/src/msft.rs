@@ -74,8 +74,10 @@ pub(crate) enum Kind {
 }
 
 /// One parameter of a function.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Parameter {
+    /// The name, when the name table gives one.
+    pub name: Option<String>,
     /// The variant type: the simple type, or the type of the type
     /// description.
     pub vt: u16,
@@ -318,7 +320,10 @@ fn functions(
                 i32_at(bytes, p).ok_or_else(|| format!("the parameter at {p:#x} is cut"))?;
             let flags = u32_at(bytes, add(p, 8, "a parameter")?)
                 .ok_or_else(|| format!("the parameter at {p:#x} is cut"))?;
+            let name_offset = i32_at(bytes, add(p, 4, "a parameter")?)
+                .ok_or_else(|| format!("the parameter at {p:#x} is cut"))?;
             parameters.push(Parameter {
+                name: name(bytes, names, name_offset)?,
                 vt: parameter_vt(bytes, descs, data_type)?,
                 flags,
                 user_type: parameter_user_type(bytes, descs, data_type),
@@ -486,8 +491,8 @@ pub(crate) mod tests {
     /// functions: `Text` at 0x24, a property get with one parameter, a
     /// pointer that receives the result, whose return type points to
     /// `BoxEvents` and whose entry is the ordinal 685; and `Move` at 0x29
-    /// with the low bit set, a method with a `Single` and a `Variant` that
-    /// returns an `HRESULT`. The second is the interface `BoxEvents` with
+    /// with the low bit set, a method with a `Single` named `Left` and a
+    /// `Variant` with no name that returns an `HRESULT`. The second is the interface `BoxEvents` with
     /// [`GUID`] and no function.
     ///
     /// Layout: the header at 0, the 2 type info offsets at 0x54, the
@@ -520,6 +525,7 @@ pub(crate) mod tests {
             (0x420, "BoxEvents"),
             (0x440, "Text"),
             (0x460, "Move"),
+            (0x480, "Left"),
         ] {
             out[at + 8] = u8::try_from(text.len()).unwrap();
             out[at + 12..at + 12 + text.len()].copy_from_slice(text.as_bytes());
@@ -539,6 +545,7 @@ pub(crate) mod tests {
         put_u32(&mut out, text + 0x14, 1);
         put_u32(&mut out, text + 0x20, 685);
         put_u32(&mut out, text + 0x24, 0);
+        put_u32(&mut out, text + 0x28, u32::MAX);
         put_u32(&mut out, text + 0x2C, 0xA);
         // Move: 0x18 + 24 bytes.
         let moving = text + 0x30;
@@ -548,6 +555,8 @@ pub(crate) mod tests {
         put_u32(&mut out, moving + 0x10, 1 << 3);
         put_u32(&mut out, moving + 0x14, 2);
         put_u32(&mut out, moving + 0x18, 0x8000_0004);
+        put_u32(&mut out, moving + 0x1C, 0x80);
+        put_u32(&mut out, moving + 0x28, u32::MAX);
         put_u32(&mut out, moving + 0x20, 1);
         put_u32(&mut out, moving + 0x24, 0x8000_000C);
         put_u32(&mut out, moving + 0x2C, 1);
@@ -577,6 +586,7 @@ pub(crate) mod tests {
                     vtable_offset: 0x24,
                     invoke_kind: 2,
                     parameters: vec![Parameter {
+                        name: None,
                         vt: 26,
                         flags: 0xA,
                         user_type: Some(1)
@@ -591,11 +601,13 @@ pub(crate) mod tests {
                     invoke_kind: 1,
                     parameters: vec![
                         Parameter {
+                            name: Some("Left".to_owned()),
                             vt: 4,
                             flags: 1,
                             user_type: None
                         },
                         Parameter {
+                            name: None,
                             vt: 12,
                             flags: 1,
                             user_type: None
