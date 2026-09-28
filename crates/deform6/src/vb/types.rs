@@ -236,8 +236,9 @@ impl VbTypes {
     /// vtable size of that interface, plus 4 times the `wIndex` of the
     /// control. A control array gets the class that
     /// [`VbTypes::control_array_interface`] gives. A control whose GUID names
-    /// no interface of the file is left out, and so is each control of an
-    /// object that is not a form. The
+    /// no interface of the file, such as a control of an OCX, gets its
+    /// accessor with no interface. Each control of an object that is not a
+    /// form is left out. The
     /// interface of the form becomes the base interface of `callees`.
     #[must_use]
     pub fn with_controls(&self, callees: Callees, pe: &PeImage<'_>, object: &Object) -> Callees {
@@ -269,8 +270,14 @@ impl VbTypes {
                     .map(str::to_owned)
                     .or_else(|| self.control_array_interface(&guid))
             });
-            if let (Some(offset), Some(interface)) = (offset, interface) {
-                callees = callees.with_control(offset, &control.name, &interface);
+            match (offset, interface) {
+                (Some(offset), Some(interface)) => {
+                    callees = callees.with_control(offset, &control.name, &interface);
+                }
+                (Some(offset), None) => {
+                    callees = callees.with_untyped_control(offset, &control.name);
+                }
+                (None, _) => {}
             }
         }
         callees

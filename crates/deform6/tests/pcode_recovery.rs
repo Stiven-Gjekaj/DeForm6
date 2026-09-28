@@ -1182,6 +1182,22 @@ fn each_control_of_a_pcode_form_gets_the_accessor_of_its_source_position() {
             }
             let types = VbTypes::parse(text.as_bytes()).unwrap();
             let callees = types.with_controls(Callees::default(), &pe, object);
+            // A file that names the form and no control: each control gets
+            // its accessor with no interface.
+            let form_guid = by_guid
+                .iter()
+                .find(|(_, (interface, _))| interface == "_Form0")
+                .map(|(guid, _)| guid.clone())
+                .unwrap();
+            let bare = VbTypes::parse(
+                format!(
+                    "[controls]\n\"{form_guid}\" = \"_Form0\"\n\
+                     [interfaces._Form0]\nvtable_size = {FORM_VTABLE_SIZE}\n"
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+            let untyped = bare.with_controls(Callees::default(), &pe, object);
 
             let mut blocks = Vec::new();
             begin_blocks(&frm::Form::read(path).blocks(), &mut blocks);
@@ -1204,6 +1220,12 @@ fn each_control_of_a_pcode_form_gets_the_accessor_of_its_source_position() {
                     .position(|name| **name == control.name)
                     .unwrap();
                 let offset = u16::try_from(4 * (position + 1)).unwrap() + FORM_VTABLE_SIZE;
+                if untyped.control(offset) != Some((control.name.as_str(), None)) {
+                    failures.push(format!(
+                        "{key}: {}.{} has no untyped accessor at {offset:#x}",
+                        object.name, control.name
+                    ));
+                }
                 if callees.control(offset).map(|(name, _)| name) != Some(control.name.as_str()) {
                     failures.push(format!(
                         "{key}: {}.{} is not at {offset:#x}: {:?}",

@@ -345,7 +345,7 @@ impl Callee {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Callees {
     methods: Vec<(u16, CalledMethod)>,
-    controls: Vec<(u16, String, String)>,
+    controls: Vec<(u16, String, Option<String>)>,
     strings: Vec<(u16, String)>,
     names: Vec<(u16, String)>,
     variables: Vec<(u16, u32, bool)>,
@@ -382,7 +382,15 @@ impl Callees {
     #[must_use]
     pub fn with_control(mut self, vtable_offset: u16, name: &str, interface: &str) -> Self {
         self.controls
-            .push((vtable_offset, name.to_owned(), interface.to_owned()));
+            .push((vtable_offset, name.to_owned(), Some(interface.to_owned())));
+        self
+    }
+
+    /// Adds the accessor of the control `name` at `vtable_offset`, whose
+    /// interface the lift does not know, such as a control of an OCX.
+    #[must_use]
+    pub fn with_untyped_control(mut self, vtable_offset: u16, name: &str) -> Self {
+        self.controls.push((vtable_offset, name.to_owned(), None));
         self
     }
 
@@ -527,13 +535,14 @@ impl Callees {
             .map_or(Expr::Constant(index), |(_, text)| Expr::Str(text.clone()))
     }
 
-    /// Gives the name and the interface of the control at `vtable_offset`.
+    /// Gives the name of the control at `vtable_offset`, and its interface
+    /// when the lift knows it.
     #[must_use]
-    pub fn control(&self, vtable_offset: u16) -> Option<(&str, &str)> {
+    pub fn control(&self, vtable_offset: u16) -> Option<(&str, Option<&str>)> {
         self.controls
             .iter()
             .find(|(offset, _, _)| *offset == vtable_offset)
-            .map(|(_, name, interface)| (name.as_str(), interface.as_str()))
+            .map(|(_, name, interface)| (name.as_str(), interface.as_deref()))
     }
 
     /// Gives the method at `vtable_offset`.
@@ -1577,7 +1586,7 @@ fn project_call(
             expr: Expr::Member(Box::new(object), name.to_owned()),
             bytes: 4,
             slot: None,
-            class: Some(interface.to_owned()),
+            class: interface.map(str::to_owned),
         });
         return Ok(None);
     }
@@ -3112,6 +3121,21 @@ result = false
                 "       Call local_68.Cls()",
                 "       Exit"
             ]
+        );
+    }
+
+    #[test]
+    fn the_accessor_of_an_untyped_control_gives_the_control_with_no_class() {
+        // Set local_68 = Me.wsk1; the call on it names no interface that
+        // the lift knows.
+        let body = [0x16, 0x1A, 0x2C, 0x03, 0x1B, 0x98, 0xFF, 0x0C];
+        let table = PcodeTable::parse(TABLE.as_bytes()).unwrap();
+        let listing = disassemble(&Region::new(&body, Off::new(0)), &table);
+        let callees = Callees::default().with_untyped_control(0x32C, "wsk1");
+        assert_eq!(callees.control(0x32C), Some(("wsk1", None)));
+        assert_eq!(
+            render(&lift(&listing, &table, &callees, None).unwrap()),
+            ["       Set local_68 = Me.wsk1", "       Exit"]
         );
     }
 
