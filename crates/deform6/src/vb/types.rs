@@ -18,11 +18,46 @@
 use std::collections::BTreeMap;
 
 use crate::read::pe::PeImage;
-use crate::read::region::Off;
+use crate::read::region::{Off, Va};
 use crate::vb::controlinfo::{ControlInfo, ControlInfoTable};
+use crate::vb::header::{VbHeader, header_region};
 use crate::vb::lift::{CONTROL_ARRAY, Callees};
 use crate::vb::object::Object;
 use crate::vb::opcodes::{TableError, line_at};
+
+/// The offsets in an entry of the external component table of the GUID of
+/// the default interface of the control, of the GUID that the `ControlInfo`
+/// record of one control names, and of the GUID that the record of a control
+/// array names. `STRUCTURES.md` section 23c gives the measurement.
+const EXTERNAL_INTERFACE_AT: u32 = 0x58;
+const EXTERNAL_CONTROL_AT: u32 = 0x98;
+const EXTERNAL_ARRAY_AT: u32 = 0xA8;
+
+/// Gives, for the GUID that the `ControlInfo` record of a control of an OCX
+/// names, the GUID of the interface of the control, and whether the record
+/// is a control array. It reads each entry of the external component table.
+fn external_control(pe: &PeImage<'_>, guid: &[u8; 16]) -> Option<([u8; 16], bool)> {
+    let header = VbHeader::read(&header_region(pe).ok()?).ok()?;
+    let mut at = header.lp_external_table.get();
+    for _ in 0..header.w_external_count {
+        let entry = pe.region_at_va(Va::new(at))?;
+        let read =
+            |offset: u32| -> Option<[u8; 16]> { entry.take(Off::new(offset), 16)?.try_into().ok() };
+        let array = if read(EXTERNAL_CONTROL_AT).as_ref() == Some(guid) {
+            Some(false)
+        } else if read(EXTERNAL_ARRAY_AT).as_ref() == Some(guid) {
+            Some(true)
+        } else {
+            None
+        };
+        if let Some(array) = array {
+            return Some((read(EXTERNAL_INTERFACE_AT)?, array));
+        }
+        let length = entry.u32_le(Off::new(0)).filter(|length| *length > 0)?;
+        at = at.checked_add(length)?;
+    }
+    None
+}
 
 /// The `wIndex` of the `ControlInfo` record of a form itself.
 const FORM_RECORD_INDEX: u16 = 0xFFFF;
@@ -233,6 +268,19 @@ impl VbTypes {
             .map(|interface| format!("{CONTROL_ARRAY}{interface}"))
     }
 
+    /// Gives the class of a control of an OCX whose `ControlInfo` record names
+    /// `guid`: the interface that the external component table gives, as a
+    /// control array when the record names the GUID of an array.
+    fn external_interface(&self, pe: &PeImage<'_>, guid: &[u8; 16]) -> Option<String> {
+        let (iid, array) = external_control(pe, guid)?;
+        let interface = self.interface_of_iid(&iid)?;
+        Some(if array {
+            format!("{CONTROL_ARRAY}{interface}")
+        } else {
+            interface.to_owned()
+        })
+    }
+
     /// Gives the 16 bytes of the GUID that `control` names, when the image
     /// holds them.
     fn guid(pe: &PeImage<'_>, control: &ControlInfo) -> Option<[u8; 16]> {
@@ -250,8 +298,9 @@ impl VbTypes {
     /// vtable size of that interface, plus 4 times the `wIndex` of the
     /// control. A control array gets the class that
     /// [`VbTypes::control_array_interface`] gives. A control whose GUID names
-    /// no interface of the file, such as a control of an OCX, gets its
-    /// accessor with no interface. Each control of an object that is not a
+    /// no interface of the file gets the interface that the external
+    /// component table gives for it, when it is a control of an OCX, or else
+    /// its accessor with no interface. Each control of an object that is not a
     /// form is left out. The
     /// interface of the form becomes the base interface of `callees`.
     #[must_use]
@@ -283,6 +332,7 @@ impl VbTypes {
                 self.control_interface(&guid)
                     .map(str::to_owned)
                     .or_else(|| self.control_array_interface(&guid))
+                    .or_else(|| self.external_interface(pe, &guid))
             });
             match (offset, interface) {
                 (Some(offset), Some(interface)) => {
@@ -410,6 +460,62 @@ result = false
         let error = VbTypes::parse(b"[interfaces._Box]\nvtable_size = \"big\"\n").unwrap_err();
         assert_eq!(error.line, 2);
         assert!(VbTypes::parse(&[0xFF, 0xFE]).is_err());
+    }
+
+    /// A types file with the form and `IMSWinsockControl` by their GUIDs.
+    const WINSOCK_TYPES: &str = r#"
+[controls]
+"{33AD4F3A-6699-11CF-B70C-00AA0060D393}" = "_Form0"
+
+[iids]
+"{248DD892-BB45-11CF-9ABC-0080C7E7B78D}" = "IMSWinsockControl"
+
+[interfaces._Form0]
+vtable_size = 760
+
+[interfaces.IMSWinsockControl]
+vtable_size = 128
+"#;
+
+    /// Gives the callees of `Form1` of the P-code program at `path`.
+    fn form1(bytes: &[u8]) -> crate::vb::lift::Callees {
+        use crate::read::pe::PeImage;
+        use crate::vb::header::{VbHeader, header_region};
+        use crate::vb::object::ObjectTable;
+        use crate::vb::project::{ObjectTableHead, ProjectInfo};
+        let pe = PeImage::parse(bytes).unwrap();
+        let header = VbHeader::read(&header_region(&pe).unwrap()).unwrap();
+        let info = ProjectInfo::read(&pe, header.lp_project_data).unwrap();
+        let head = ObjectTableHead::read(&pe, info.lp_object_table).unwrap();
+        let objects = ObjectTable::walk(&pe, info.lp_object_table, &head)
+            .unwrap()
+            .objects;
+        let form = objects.iter().find(|o| o.name == "Form1").unwrap();
+        let types = VbTypes::parse(WINSOCK_TYPES.as_bytes()).unwrap();
+        types.with_controls(crate::vb::lift::Callees::default(), &pe, form)
+    }
+
+    /// The Winsock control of `TFTPClient.exe` and the array of Winsock
+    /// controls of `Server.exe` get `IMSWinsockControl`, through the GUIDs of
+    /// the external component table.
+    #[test]
+    fn a_control_of_an_ocx_gets_the_interface_of_its_component() {
+        let client = form1(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus-pcode/public-domain/SK-TFTP-Sample__VB6/Client/demo/TFTPClient.exe"
+        )));
+        assert_eq!(
+            client.control(0x328),
+            Some(("WskClient", Some("IMSWinsockControl")))
+        );
+        let server = form1(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus-pcode/public-domain/SK-TFTP-Sample__VB6/Server/demo/Server.exe"
+        )));
+        assert_eq!(
+            server.control(0x308),
+            Some(("WskServer", Some("[]IMSWinsockControl")))
+        );
     }
 
     #[test]
