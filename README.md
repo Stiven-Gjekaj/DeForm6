@@ -215,10 +215,12 @@ deform6 disasm <path-to-exe> --pcode-table derived/pcode-table.toml
 ```
 
 The interfaces of the controls are not in this repository either. Derive
-them from a copy of `VB6.OLB` that you own:
+them from a copy of `VB6.OLB` that you own. Give `MSVBVM60.DLL` too, and the
+file also holds the VBA library of the runtime, such as `Err` and
+`Collection`:
 
 ```
-cargo run -p xtask -- derive-vb-types <path-to-VB6.OLB>
+cargo run -p xtask -- derive-vb-types <path-to-VB6.OLB> <path-to-MSVBVM60.DLL>
 cargo run -p xtask -- check-pcode-table --vb-types derived/vb-types.toml
 deform6 disasm <path-to-exe> --pcode-table derived/pcode-table.toml --vb-types derived/vb-types.toml --lift
 ```
@@ -227,11 +229,15 @@ The listing gives each opcode, its bytes and the name of its handler. It is
 not Basic.
 
 With `--lift`, `disasm` prints a procedure as statements when it can follow
-the stack of every opcode: 115 of the 680 procedures of the P-code corpus, and
-143 with `--vb-types`. The statements name each variable by its offset, such
-as `local_88` or `Me.field_54`, and each called procedure by its index, such
-as `Me.method_16`. With `--vb-types` they name the controls and their
-properties, such as `Me.chkAutomatic.Value`. They are not the source, and `extract` writes none of them.
+the stack of every opcode: 239 of the 680 procedures of the P-code corpus,
+663 with `--vb-types` from `VB6.OLB`, and 666 when the file also holds the
+VBA library. The statements name each variable by its offset, such as
+`local_88` or `Me.field_54`, and each called procedure of the project by its
+index, such as `Me.method_16`. With `--vb-types` they name the controls and
+their properties, such as `Me.chkAutomatic.Value`, and the functions of the
+runtime, such as `VBA.Err().Clear()`. The other 14 procedures call a Winsock
+control, whose type library is not in the file. The statements are not the
+source, and `extract` writes none of them.
 
 Run everything the gate runs, in one command:
 
