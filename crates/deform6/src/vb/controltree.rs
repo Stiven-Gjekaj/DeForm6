@@ -638,7 +638,8 @@ fn read_block<'a>(
         )));
     }
 
-    let block_span = u32::from(length)
+    let length = true_length(region, at, length);
+    let block_span = length
         .checked_add(2)
         .ok_or(Refusal::Damaged("a control block's Length overflows a u32"))?;
     let block = region.subregion(at, block_span).ok_or_else(|| {
@@ -648,7 +649,52 @@ fn read_block<'a>(
     })?;
 
     let (header, defects) = read_control_header(&block);
-    Ok((header, defects, u32::from(length), block))
+    Ok((header, defects, length, block))
+}
+
+/// The size of the span that a `Length` field can not give: VB6 writes only
+/// the low 16 bits of the length of a block.
+const LENGTH_WRAP: u32 = 0x1_0000;
+
+/// Gives the length of the control block at `at` whose `Length` field holds
+/// `length`.
+///
+/// The scope separator of a block starts at `at + Length - 1`. VB6 writes
+/// only the low 16 bits of the length, so a block that holds a picture of
+/// more than 64 KiB declares its length less a multiple of `0x10000`:
+/// `corpus/vb6-code/Map-editor-2D/Map Editor.exe` gives `PicTilesBuffer` the
+/// `Length` `0x7C` and a picture of `0x3003E` bytes, and its separator is at
+/// the length `0x3007C`. When no separator is at the declared length, and
+/// exactly one of the lengths `length + k * 0x10000` inside `region` has
+/// one, this gives that length. Else it gives the declared length, and the
+/// walk refuses the tree as before.
+fn true_length(region: &Region<'_>, at: Off, length: u16) -> u32 {
+    let declared = u32::from(length);
+    let separator_at = |length: u32| {
+        length
+            .checked_sub(1)
+            .and_then(|last| at.checked_add(last))
+            .and_then(|last| region.u8(last))
+            == Some(0xFF)
+    };
+    if separator_at(declared) {
+        return declared;
+    }
+    let mut found = None;
+    let mut candidate = declared;
+    while let Some(next) = candidate.checked_add(LENGTH_WRAP) {
+        if next > region.len() {
+            break;
+        }
+        candidate = next;
+        if separator_at(candidate) {
+            if found.is_some() {
+                return declared;
+            }
+            found = Some(candidate);
+        }
+    }
+    found.unwrap_or(declared)
 }
 
 /// Applies `pops` to the parent stack, refusing rather than popping the
@@ -900,13 +946,56 @@ pub fn walk<'a>(
 mod tests {
     use super::{
         ARRAY_FLAG, ControlKind, ScopeRun, classify_control_type, read_array_index,
-        read_control_header, walk,
+        read_control_header, true_length, walk,
     };
     use crate::error::{DefectKind, Refusal, Site};
     use crate::read::pe::PeImage;
     use crate::read::region::{Off, Region, Rva};
     use crate::vb::gui::{GuiObjectInfo, GuiTable, Tiling};
     use crate::vb::header::{VbHeader, header_region};
+
+    // --- The length of a block of more than 64 KiB -----------------------
+
+    /// Builds a block whose `Length` field holds `declared`, with a
+    /// separator at each offset of `separators`, in `total` bytes.
+    fn wrapped_block(declared: u16, separators: &[u32], total: usize) -> Vec<u8> {
+        let mut bytes = vec![0u8; total];
+        bytes[..2].copy_from_slice(&declared.to_le_bytes());
+        for at in separators {
+            bytes[*at as usize] = 0xFF;
+        }
+        bytes
+    }
+
+    #[test]
+    fn a_block_of_more_than_64_kib_takes_the_length_that_its_separator_gives() {
+        let length = |bytes: &[u8]| {
+            let region = Region::new(bytes, Off::new(0));
+            true_length(
+                &region,
+                Off::new(0),
+                u16::from_le_bytes([bytes[0], bytes[1]]),
+            )
+        };
+        // The declared length has its separator: it stays.
+        assert_eq!(
+            length(&wrapped_block(0x7C, &[0x7B, 0x1_007B], 0x2_0000)),
+            0x7C
+        );
+        // The shape of PicTilesBuffer: the separator is at 0x3007C - 1.
+        assert_eq!(
+            length(&wrapped_block(0x7C, &[0x3_007B], 0x3_0100)),
+            0x3_007C
+        );
+        // Two lengths with a separator: the declared length stays, and the
+        // walk refuses.
+        assert_eq!(
+            length(&wrapped_block(0x7C, &[0x1_007B, 0x2_007B], 0x3_0000)),
+            0x7C
+        );
+        // No length with a separator: the declared length stays.
+        assert_eq!(length(&wrapped_block(0x7C, &[], 0x3_0000)), 0x7C);
+    }
 
     // --- Task 1: the control block header --------------------------------
 

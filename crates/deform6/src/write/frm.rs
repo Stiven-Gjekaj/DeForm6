@@ -1903,8 +1903,13 @@ mod tests {
         let (_lock_files, lock_items) =
             write_form(&lock_form, &lock_defects, &lock_data).expect("write_form must succeed");
 
-        let map_data = std::fs::read(corpus_path("vb6-code/Map-editor-2D/Map Editor.exe"))
+        // Map Editor.exe with the Length of the root block of the form Main
+        // set to 0, at the first byte of its property stream: the walk
+        // refuses the tree.
+        let mut map_data = std::fs::read(corpus_path("vb6-code/Map-editor-2D/Map Editor.exe"))
             .expect("reading Map Editor.exe");
+        assert_eq!(&map_data[0x1561..0x1563], [0x6A, 0x00]);
+        map_data[0x1561..0x1563].copy_from_slice(&[0, 0]);
         let map_report = crate::vb::inspect(&map_data, &table, crate::journal::Mode::Strict)
             .expect("inspect must succeed");
         let (map_model, _items) = crate::write::model::from_report(&map_report, &map_data);

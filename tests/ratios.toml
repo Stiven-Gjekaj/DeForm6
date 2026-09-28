@@ -43,10 +43,9 @@
 # already the reason `form_recovered` is short one, and counting it twice
 # would double it.
 #
-# The totals over all 44 programs are 52 of 53 forms recovered and 686 of
-# 686 controls recovered, over the forms whose own tree the tool built. The
-# one form still refusing is named in `WINDOWS.md`, with its own byte
-# offset. `xtask update-ratios` writes these four keys along with the two
+# The totals over all 44 programs are 53 of 53 forms recovered and 708 of
+# 708 controls recovered, over the forms whose own tree the tool built.
+# `xtask update-ratios` writes these four keys along with the two
 # procedure counts, from the same `Report` `deform6::inspect` builds.
 #
 # Plan 04-09 adds two more keys per program: `property_declared` and
@@ -469,11 +468,11 @@ recovered = 0
 declared = 36
 ratio = 0.00
 form_declared = 2
-form_recovered = 1
-control_declared = 9
-control_recovered = 9
-property_declared = 12
-property_written = 3
+form_recovered = 2
+control_declared = 31
+control_recovered = 31
+property_declared = 36
+property_written = 5
 
 ["vb6-code/Nature-effects/Nature_Filters.exe"]
 recovered = 16

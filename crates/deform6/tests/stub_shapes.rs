@@ -54,12 +54,13 @@ const EXPECTED_EXECUTABLE_COUNT: usize = 44;
 /// The number of bound events whose handler address `inspect` reports
 /// across the corpus.
 ///
-/// Measured on 2026-09-16. This is not a number of stubs. `inspect` reports
-/// the events of a `ControlInfo` for each control that joins it by name, and
-/// all the elements of a control array join the same one. So one stub can
-/// give more than one event here: 34 of the 396 events belong to elements of
-/// control arrays.
-const EXPECTED_REPORTED_HANDLERS: usize = 396;
+/// Measured on 2026-09-16, and again on 2026-09-28, when the form `Main` of
+/// `Map Editor.exe` gave its tree and its 20 handlers. This is not a number
+/// of stubs. `inspect` reports the events of a `ControlInfo` for each
+/// control that joins it by name, and all the elements of a control array
+/// join the same one. So one stub can give more than one event here: 34 of
+/// the 416 events belong to elements of control arrays.
+const EXPECTED_REPORTED_HANDLERS: usize = 416;
 
 /// The native stub bytes at `+0x00` (`STRUCTURES.md` section 8.6).
 const SUB_OPCODE: [u8; 4] = [0x81, 0x6C, 0x24, 0x04];

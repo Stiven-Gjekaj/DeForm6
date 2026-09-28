@@ -104,24 +104,25 @@ const EXPECTED_TOTAL_RECOVERED: u32 = 185;
 const EXPECTED_TOTAL_DECLARED: u32 = 904;
 
 /// The pinned form and control totals over all 44 programs, plan 03-10's
-/// own measurement (49 of 53, 607 of 607) as re-measured this plan: the
-/// scope-separator grammar closure raises `FrmHex`, `frmUUID2` and
-/// `frmPassGen` from refusing to recovered, leaving `Map Editor.exe`'s
-/// `Main` form as the one form still refusing, for a different, separately
-/// diagnosed reason (`WINDOWS.md`).
+/// own measurement (49 of 53, 607 of 607) as re-measured since: the
+/// scope-separator grammar closure raised `FrmHex`, `frmUUID2` and
+/// `frmPassGen` from refusing to recovered, and the length of a control
+/// block of more than 64 KiB raised the form `Main` of `Map Editor.exe`
+/// with its 22 controls.
 const EXPECTED_TOTAL_FORM_DECLARED: u32 = 53;
-const EXPECTED_TOTAL_FORM_RECOVERED: u32 = 52;
-const EXPECTED_TOTAL_CONTROL_DECLARED: u32 = 686;
-const EXPECTED_TOTAL_CONTROL_RECOVERED: u32 = 686;
+const EXPECTED_TOTAL_FORM_RECOVERED: u32 = 53;
+const EXPECTED_TOTAL_CONTROL_DECLARED: u32 = 708;
+const EXPECTED_TOTAL_CONTROL_RECOVERED: u32 = 708;
 
 /// The pinned write side property totals over all 44 programs, plan 04-09's
-/// own measurement this session: 807 property records recovered (matching
-/// the 807 total FRM-03's own re-measured count states, across six
-/// distinct property names), of which 136 property lines were actually
-/// written. This is a coverage number for this tool's own writer, not a
+/// own measurement: 807 property records recovered (matching the 807
+/// total FRM-03's own re-measured count states, across six distinct
+/// property names), of which 136 property lines were actually written. The
+/// form `Main` of `Map Editor.exe` adds 24 records and 2 lines: 831 and
+/// 138. This is a coverage number for this tool's own writer, not a
 /// recovery number against source; see `tests/ratios.toml`'s own header.
-const EXPECTED_TOTAL_PROPERTY_DECLARED: u32 = 807;
-const EXPECTED_TOTAL_PROPERTY_WRITTEN: u32 = 136;
+const EXPECTED_TOTAL_PROPERTY_DECLARED: u32 = 831;
+const EXPECTED_TOTAL_PROPERTY_WRITTEN: u32 = 138;
 
 /// Editing a pinned number **up** means the pin now claims more procedures
 /// than the tool recovers: something the pin expects went missing. This
@@ -201,10 +202,9 @@ pub(crate) const HEADER: &str = r#"# The pinned procedure recovery ratio, one en
 # already the reason `form_recovered` is short one, and counting it twice
 # would double it.
 #
-# The totals over all 44 programs are 52 of 53 forms recovered and 686 of
-# 686 controls recovered, over the forms whose own tree the tool built. The
-# one form still refusing is named in `WINDOWS.md`, with its own byte
-# offset. `xtask update-ratios` writes these four keys along with the two
+# The totals over all 44 programs are 53 of 53 forms recovered and 708 of
+# 708 controls recovered, over the forms whose own tree the tool built.
+# `xtask update-ratios` writes these four keys along with the two
 # procedure counts, from the same `Report` `deform6::inspect` builds.
 #
 # Plan 04-09 adds two more keys per program: `property_declared` and
@@ -998,8 +998,7 @@ fn the_pinned_file_holds_forty_four_entries_and_the_totals_one_hundred_eighty_fi
 }
 
 #[test]
-fn the_pinned_file_holds_fifty_two_of_fifty_three_forms_and_six_hundred_eighty_six_of_six_hundred_eighty_six_controls()
- {
+fn the_pinned_file_holds_each_of_the_fifty_three_forms_and_the_seven_hundred_eight_controls() {
     let pinned = read_pinned();
 
     let total_form_declared: u32 = pinned.values().map(|e| e.form_declared).sum();
@@ -1013,7 +1012,7 @@ fn the_pinned_file_holds_fifty_two_of_fifty_three_forms_and_six_hundred_eighty_s
 }
 
 #[test]
-fn the_pinned_file_holds_eight_hundred_seven_property_records_and_one_hundred_thirty_six_written_lines()
+fn the_pinned_file_holds_eight_hundred_thirty_one_property_records_and_one_hundred_thirty_eight_written_lines()
  {
     let pinned = read_pinned();
 

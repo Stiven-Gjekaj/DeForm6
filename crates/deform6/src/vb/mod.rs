@@ -1747,12 +1747,23 @@ mod tests {
         );
     }
 
-    /// `Map Editor.exe` holds one form whose control tree refuses. The defect
-    /// names the first byte of the form's property stream: its file offset,
-    /// and the address that the section table maps that offset to.
+    /// Gives `Map Editor.exe` with the `Length` of the root block of its
+    /// form `Main` set to 0, at file offset `0x1561`, the first byte of the
+    /// property stream of the form. The walk refuses such a tree.
+    fn map_editor_with_a_refused_tree() -> Vec<u8> {
+        let mut bytes = MAP_EDITOR.to_vec();
+        assert_eq!(&bytes[0x1561..0x1563], [0x6A, 0x00]);
+        bytes[0x1561..0x1563].copy_from_slice(&[0, 0]);
+        bytes
+    }
+
+    /// A form whose control tree refuses gives a defect that names the
+    /// first byte of the form's property stream: its file offset, and the
+    /// address that the section table maps that offset to.
     #[test]
     fn a_control_tree_refusal_gives_the_file_offset_and_the_address_of_the_stream() {
-        let report = inspect(MAP_EDITOR, &builtin_table(), Mode::Strict).unwrap();
+        let refused = map_editor_with_a_refused_tree();
+        let report = inspect(&refused, &builtin_table(), Mode::Strict).unwrap();
         let trees: Vec<&Defect> = report
             .defects
             .iter()
@@ -1765,7 +1776,8 @@ mod tests {
             DefectKind::StructureUnreadable { offset: at, .. } if at == offset
         ));
 
-        let image = PeImage::parse(MAP_EDITOR).unwrap();
+        assert_eq!(offset, 0x1561);
+        let image = PeImage::parse(&refused).unwrap();
         let section = image
             .sections()
             .iter()

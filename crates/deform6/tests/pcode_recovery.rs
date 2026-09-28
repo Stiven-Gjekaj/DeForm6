@@ -291,8 +291,9 @@ fn bound_slots(report: &Report) -> (usize, usize) {
 /// The number of bound events whose handler address `inspect` reports across
 /// the P-code corpus. As in the native corpus, this is not a number of stubs:
 /// all the elements of a control array report the events of one
-/// `ControlInfo`.
-const EXPECTED_REPORTED_HANDLERS: usize = 388;
+/// `ControlInfo`. The form `Main` of `Map Editor.exe` gives 20 of them, one
+/// for each handler of its source.
+const EXPECTED_REPORTED_HANDLERS: usize = 408;
 
 /// The number of bound event slots that the `ControlInfo` records of the
 /// P-code corpus hold. Each names one stub.

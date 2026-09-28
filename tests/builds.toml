@@ -217,7 +217,7 @@ original = "built"
 extracted = "built"
 
 [program."vb6-code/Map-editor-2D/Map Editor.exe"]
-files = "sha256:6e56656b7c8e2e227ba941658fa3c364ccf8f9822be87118b5b7ae8eab2014c3"
+files = "sha256:99da3991b4fd309952e8c299c7d5f216ff6a899b98267485d34722fa1ba244e7"
 original = "built"
 extracted = "built"
 
