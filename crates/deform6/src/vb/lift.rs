@@ -1319,6 +1319,19 @@ fn dispid_name(dispid: u32) -> String {
     format!("[DISPID {dispid:#X}]")
 }
 
+/// Gives the name of the member `dispid` of the interface `class`, when the
+/// types file gives it.
+fn named_dispid(types: Option<&VbTypes>, class: Option<&str>, dispid: u32) -> Option<String> {
+    let function = types?.interface(class?)?.function_of_dispid(dispid)?;
+    Some(member_name(function))
+}
+
+/// Gives the name of the member `dispid` of the interface `class`, or else
+/// the `DISPID` itself.
+fn dispid_member(types: Option<&VbTypes>, class: Option<&str>, dispid: u32) -> String {
+    named_dispid(types, class, dispid).unwrap_or_else(|| dispid_name(dispid))
+}
+
 /// Reads an unsigned 32-bit argument.
 fn u32_at(arguments: &[u8], at: usize) -> Option<u32> {
     let bytes = arguments.get(at..at.checked_add(4)?)?;
@@ -1955,10 +1968,11 @@ fn run(
                 arguments: with_arguments,
                 by_id,
             } => {
-                let (object, _) = state.object.clone().ok_or(LiftFault::NoObject(at))?;
+                let (object, class) = state.object.clone().ok_or(LiftFault::NoObject(at))?;
                 let skip = if result { 2 } else { 0 };
                 let (name, count_at) = if by_id {
-                    (dispid_name(u32_at(arguments, skip).ok_or_else(short)?), 4)
+                    let dispid = u32_at(arguments, skip).ok_or_else(short)?;
+                    (dispid_member(types, class.as_deref(), dispid), 4)
                 } else {
                     let name = callees
                         .name(u16_at(arguments, skip).ok_or_else(short)?)
@@ -1998,8 +2012,9 @@ fn run(
                 }
             }
             Family::LateStore => {
-                let (object, _) = state.object.clone().ok_or(LiftFault::NoObject(at))?;
-                let name = dispid_name(u32_at(arguments, 0).ok_or_else(short)?);
+                let (object, class) = state.object.clone().ok_or(LiftFault::NoObject(at))?;
+                let dispid = u32_at(arguments, 0).ok_or_else(short)?;
+                let name = dispid_member(types, class.as_deref(), dispid);
                 let value = expressions(call_arguments(&mut state.stack, 16, at)?);
                 Some(Stmt::Assign {
                     target: Expr::Member(Box::new(object), name),
@@ -2468,14 +2483,17 @@ fn run(
                 None
             }
             Family::LateGet => {
-                let (object, _) = state.object.clone().ok_or(LiftFault::NoObject(at))?;
+                let (object, class) = state.object.clone().ok_or(LiftFault::NoObject(at))?;
                 let slot = offset16()?;
                 let dispid = arguments
                     .get(2..6)
                     .and_then(|bytes| bytes.try_into().ok())
                     .map(u32::from_le_bytes)
                     .ok_or_else(short)?;
-                let expr = Expr::Late(Box::new(object), dispid);
+                let expr = match named_dispid(types, class.as_deref(), dispid) {
+                    Some(name) => Expr::Member(Box::new(object), name),
+                    None => Expr::Late(Box::new(object), dispid),
+                };
                 state.bindings.insert(slot, (expr.clone(), None));
                 state.stack.push(Value {
                     expr,
@@ -3101,6 +3119,7 @@ names = ["Cls"]
 kinds = ["method"]
 arg_bytes = 0
 result = false
+dispid = 67
 "#;
 
     /// Lifts `body` with the control `box1` at the accessor offset `0x32C`
@@ -4119,6 +4138,35 @@ result = false
         ];
         let listing_id = disassemble(&Region::new(&by_id, Off::new(0)), &table);
         assert!(name_indexes(&listing_id, &table).is_empty());
+        // The same calls on Me.box1, of the interface _Box, whose Cls has
+        // the DISPID 0x43.
+        let types = VbTypes::parse(TYPES.as_bytes()).unwrap();
+        let mut on_box = BOX1_IN_LOCAL_68.to_vec();
+        on_box.extend_from_slice(&[
+            0xFF, 0x59, 0x43, 0x00, 0x00, 0x00, 0x00, 0x00, 0x43, 0xA0, 0xFF, 0x06, 0x98, 0xFF,
+            0x5A, 0x43, 0x00, 0x00, 0x00, 0x18, 0x98, 0xFF, 0x0C,
+        ]);
+        let listing_box = disassemble(&Region::new(&on_box, Off::new(0)), &table);
+        let boxed = Callees::default().with_control(0x32C, "box1", "_Box");
+        assert_eq!(
+            render(&lift(&listing_box, &table, &boxed, Some(&types)).unwrap()),
+            [
+                "       Call Me.box1.Cls()",
+                "       Me.box1.Cls = local_60",
+                "       Exit"
+            ]
+        );
+        // local_88 = Me.box1.Cls through LateIdLdVar.
+        let mut get = BOX1_IN_LOCAL_68.to_vec();
+        get.extend_from_slice(&[
+            0xFF, 0x33, 0xB4, 0xFF, 0x43, 0x00, 0x00, 0x00, 0x05, 0x78, 0xFF, 0x18, 0x98, 0xFF,
+            0x0C,
+        ]);
+        let listing_get = disassemble(&Region::new(&get, Off::new(0)), &table);
+        assert_eq!(
+            render(&lift(&listing_get, &table, &boxed, Some(&types)).unwrap())[0],
+            "       local_88 = Me.box1.Cls"
+        );
         assert_eq!(
             render(&lift(&listing_id, &table, &Callees::default(), None).unwrap()),
             [
