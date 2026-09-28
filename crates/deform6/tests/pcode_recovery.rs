@@ -54,7 +54,7 @@ use deform6::read::pe::PeImage;
 use deform6::read::region::{Off, Va};
 use deform6::vb::Report;
 use deform6::vb::classify::ObjectKind as RecoveredKind;
-use deform6::vb::constants::constant_declare;
+use deform6::vb::constants::{constant_declare, constant_procedure};
 use deform6::vb::context::callees_of_project;
 use deform6::vb::controlinfo::{
     ControlInfoTable, EventReport, EventSlot, StubShape, read_event_table,
@@ -1410,4 +1410,63 @@ fn each_declare_stub_of_a_pcode_program_names_a_declare_of_its_source() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
     assert_eq!(stubs, 186);
+}
+
+/// Each entry of a constant table that is the stub of a procedure of the
+/// project names a descriptor of the method table of one object. A stub
+/// that takes no object goes to a module of the source, and a stub that
+/// takes an object goes to an object that is not a module.
+#[test]
+fn each_procedure_stub_of_a_pcode_program_goes_to_an_object_of_its_kind() {
+    let root = build_record::corpus_root();
+    let projects = vbp::project_files();
+    let (mut modules, mut objects, mut failures) = (0, 0, Vec::new());
+    for (key, exe) in pcode_programs() {
+        let project = vbp::select_project_file(&root.join(&key), &projects)
+            .unwrap_or_else(|err| panic!("{key}: {err}"));
+        let kinds: BTreeMap<String, vbp::ObjectKind> = vbp::Project::read(&project)
+            .declared_objects()
+            .into_iter()
+            .filter_map(|object| Some((object.name?, object.kind)))
+            .collect();
+        let bytes = read(&exe);
+        let pe = PeImage::parse(&bytes).unwrap();
+        let by_name = objects_by_name(&pe);
+        let owners: BTreeMap<u32, &String> = by_name
+            .iter()
+            .flat_map(|(name, object)| {
+                method_table(&pe, object)
+                    .into_iter()
+                    .map(move |descriptor| (descriptor, name))
+            })
+            .collect();
+        for object in by_name.values() {
+            let count = pe
+                .region_at_va(object.lp_object_info)
+                .and_then(|region| region.u16_le(Off::new(CONSTANT_COUNT_AT)))
+                .unwrap_or(0);
+            for index in 0..count {
+                let Some(stub) = constant_procedure(&pe, object.lp_object_info, index) else {
+                    continue;
+                };
+                let kind = owners
+                    .get(&stub.descriptor.get())
+                    .and_then(|owner| kinds.get(*owner));
+                let is_module = kind == Some(&vbp::ObjectKind::Module);
+                if stub.of_object {
+                    objects += 1;
+                } else {
+                    modules += 1;
+                }
+                if kind.is_none() || stub.of_object == is_module {
+                    failures.push(format!(
+                        "{key}: {} constant {index:#x} goes to {kind:?}",
+                        object.name
+                    ));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+    assert_eq!((modules, objects), (21, 19));
 }

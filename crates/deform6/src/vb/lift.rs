@@ -321,6 +321,9 @@ pub enum Callee {
     Import(u16),
     /// A procedure of a DLL that a `Declare` names, by its export name.
     Declare(String),
+    /// A procedure of a module of the project: the name of the module and
+    /// the name of the procedure.
+    Module(String, String),
     /// A named function of an object.
     Member(Box<Expr>, String),
 }
@@ -331,6 +334,7 @@ impl Callee {
         match self {
             Self::Import(index) => format!("import_{index:X}"),
             Self::Declare(name) => name.clone(),
+            Self::Module(module, name) => format!("{module}.{name}"),
             Self::Member(object, name) => format!("{}.{name}", object.text()),
         }
     }
@@ -357,10 +361,22 @@ pub struct Callees {
     class_interfaces: Vec<(u16, String)>,
     imports: Vec<(u16, String, Option<String>)>,
     declares: Vec<(u16, String)>,
+    stubs: Vec<(u16, ProjectCall)>,
     arguments: Vec<(u16, i16, String)>,
     procedures: Vec<(u16, String)>,
     base: Option<String>,
     owner: Option<u16>,
+}
+
+/// A procedure of the project that an `ImpAdCall` goes to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProjectCall {
+    /// A procedure of a module: the name of the module and of the
+    /// procedure.
+    Module(String, String),
+    /// A procedure of an object, by its name. The first argument of the
+    /// call is the object.
+    Object(String),
 }
 
 /// A method that [`Callees`] gives.
@@ -500,6 +516,23 @@ impl Callees {
         self.imports
             .push((index, name.to_owned(), result.map(str::to_owned)));
         self
+    }
+
+    /// Adds the procedure of the project `call` that the stub at `index` of
+    /// the constant table goes to.
+    #[must_use]
+    pub fn with_project_call(mut self, index: u16, call: ProjectCall) -> Self {
+        self.stubs.push((index, call));
+        self
+    }
+
+    /// Gives the procedure of the project that the stub at `index` of the
+    /// constant table goes to.
+    fn project_call(&self, index: u16) -> Option<&ProjectCall> {
+        self.stubs
+            .iter()
+            .find(|(at, _)| *at == index)
+            .map(|(_, call)| call)
     }
 
     /// Adds the export name `name` of the procedure of a DLL at `index` of
@@ -1422,15 +1455,11 @@ struct Value {
 
 impl Value {
     /// Tells whether the value is the result of an import call on the
-    /// floating point unit. When no opcode takes it before the end of the
-    /// statement, the call is a statement of its own.
-    fn is_float_call(&self) -> bool {
-        self.bytes == 0
-            && match &self.expr {
-                Expr::Call(Callee::Import(_) | Callee::Declare(_), _) => true,
-                Expr::Call(Callee::Member(object, _), _) => **object == Expr::Word("VBA"),
-                _ => false,
-            }
+    /// floating point unit: a call with 0 bytes on the stack. When no opcode
+    /// takes it before the end of the statement, the call is a statement of
+    /// its own.
+    const fn is_float_call(&self) -> bool {
+        self.bytes == 0 && matches!(self.expr, Expr::Call(..))
     }
 
     /// A value of `bytes` bytes, with no slot and no class.
@@ -2162,7 +2191,19 @@ fn run(
                         None => (Callee::Import(index), None),
                     },
                 };
-                let args = expressions(call_arguments(&mut state.stack, word16(2)?, at)?);
+                let mut args = expressions(call_arguments(&mut state.stack, word16(2)?, at)?);
+                let callee = match callees.project_call(index) {
+                    Some(ProjectCall::Module(module, name)) => {
+                        Callee::Module(module.clone(), name.clone())
+                    }
+                    Some(ProjectCall::Object(name)) => {
+                        if args.is_empty() {
+                            return Err(LiftFault::CallArguments(at));
+                        }
+                        Callee::Member(Box::new(args.remove(0)), name.clone())
+                    }
+                    None => callee,
+                };
                 let float = names
                     .iter()
                     .any(|name| name.ends_with("FPR4") || name.ends_with("FPR8"));
@@ -2832,8 +2873,8 @@ pub fn render(stmts: &[LiftedStmt]) -> Vec<String> {
 )]
 mod tests {
     use super::{
-        Callees, LiftFault, class_indexes, import_indexes, interface_indexes, lift, lift_method,
-        method_calls, name_indexes, render, string_indexes,
+        Callees, LiftFault, ProjectCall, class_indexes, import_indexes, interface_indexes, lift,
+        lift_method, method_calls, name_indexes, render, string_indexes,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::pcode::{PcodeTable, disassemble};
@@ -3288,6 +3329,13 @@ dispid = 67
                 "       Exit"
             ]
         );
+        // A call of a procedure of an object needs the object.
+        let object =
+            Callees::default().with_project_call(2, ProjectCall::Object("Save".to_owned()));
+        assert_eq!(
+            lift(&listing_beep, &table, &object, None),
+            Err(LiftFault::CallArguments(0))
+        );
         // The same call of a procedure of a DLL gives its export name.
         let declared = Callees::default()
             .with_declare(1, "GetObjectA")
@@ -3609,6 +3657,24 @@ dispid = 67
                 "       Call import_1(Missing, 7, New class_4)",
                 "       Exit"
             ]
+        );
+        // The same call of a procedure of a module, and of an object, whose
+        // first argument is the object.
+        let module = Callees::default()
+            .with_project_call(0, ProjectCall::Object("Other".to_owned()))
+            .with_project_call(
+                1,
+                ProjectCall::Module("Module1".to_owned(), "Draw".to_owned()),
+            );
+        assert_eq!(
+            lines_with(&body, &module).unwrap()[1],
+            "       Call Module1.Draw(Missing, 7, New class_4)"
+        );
+        let object =
+            Callees::default().with_project_call(1, ProjectCall::Object("Save".to_owned()));
+        assert_eq!(
+            lines_with(&body, &object).unwrap()[1],
+            "       Call Missing.Save(7, New class_4)"
         );
         assert_eq!(
             lines(&[0x21, 0x05, 0x00, 0x2A, 0x78, 0xFF, 0x0C]).unwrap()[0],

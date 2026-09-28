@@ -30,16 +30,16 @@ use crate::read::pe::PeImage;
 use crate::read::region::{Off, Va};
 use crate::vb::classify::has_optional_info;
 use crate::vb::constants::{
-    class_reference_iid, constant, constant_declare, constant_guid, constant_name,
-    constant_runtime_ordinal, constant_string,
+    ProcedureStub, class_reference_iid, constant, constant_declare, constant_guid, constant_name,
+    constant_procedure, constant_runtime_ordinal, constant_string,
 };
 use crate::vb::functyp::{FuncTypeWalk, ProcedureSignature, PrototypeList, TypeEntry, VbType};
 use std::collections::BTreeMap;
 
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::lift::{
-    CONTROL_ARRAY, Callees, class_indexes, import_indexes, interface_indexes, method_calls,
-    name_indexes, string_indexes,
+    CONTROL_ARRAY, Callees, ProjectCall, class_indexes, import_indexes, interface_indexes,
+    method_calls, name_indexes, string_indexes,
 };
 use crate::vb::links::read_method_links;
 use crate::vb::object::Object;
@@ -217,6 +217,40 @@ fn profile(pe: &PeImage<'_>, object: &Object, types: Option<&VbTypes>) -> Callee
     }
 }
 
+/// Gives, for each descriptor of the method tables of `objects`, the index
+/// of its object and its index in the method table.
+fn descriptor_owners(pe: &PeImage<'_>, objects: &[Object]) -> BTreeMap<u32, (usize, u16)> {
+    let mut out = BTreeMap::new();
+    for (owner, object) in objects.iter().enumerate() {
+        let Ok(methods) = read_method_table(pe, object.lp_object_info) else {
+            continue;
+        };
+        for entry in &methods.entries {
+            if let MethodEntry::Descriptor { index, descriptor } = entry {
+                out.insert(descriptor.va.get(), (owner, *index));
+            }
+        }
+    }
+    out
+}
+
+/// Gives the procedure of the project that `stub` goes to: the name of its
+/// module and its name, or its name when it is of an object.
+fn project_call(
+    stub: ProcedureStub,
+    owners: &BTreeMap<u32, (usize, u16)>,
+    objects: &[Object],
+    profiles: &[Callees],
+) -> Option<ProjectCall> {
+    let (owner, index) = *owners.get(&stub.descriptor.get())?;
+    let name = profiles.get(owner)?.procedure(index);
+    if stub.of_object {
+        Some(ProjectCall::Object(name))
+    } else {
+        Some(ProjectCall::Module(objects.get(owner)?.name.clone(), name))
+    }
+}
+
 /// Gives the [`Callees`] of each object of `objects`, in the same order.
 ///
 /// A table or a record that cannot be read gives nothing, and the lift of
@@ -238,6 +272,7 @@ pub fn callees_of_project(
         .and_then(|header| ProjectInfo::read(pe, header.lp_project_data))
         .ok()
         .map(|info| DeclareTable::read(pe, &info));
+    let owners = descriptor_owners(pe, objects);
     let mut out = Vec::new();
     for (object, own) in objects.iter().zip(&profiles) {
         let mut callees = match types {
@@ -261,6 +296,11 @@ pub fn callees_of_project(
                     .and_then(|descriptor| declares.as_ref()?.export_at(pe, descriptor))
                 {
                     callees = callees.with_declare(index, &name);
+                }
+                if let Some(call) = constant_procedure(pe, object.lp_object_info, index)
+                    .and_then(|stub| project_call(stub, &owners, objects, &profiles))
+                {
+                    callees = callees.with_project_call(index, call);
                 }
                 if let Some(import) = constant_runtime_ordinal(pe, object.lp_object_info, index)
                     .and_then(|ordinal| types?.import(ordinal))

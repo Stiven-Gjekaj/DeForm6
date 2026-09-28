@@ -81,6 +81,71 @@ pub fn constant_declare(pe: &PeImage<'_>, lp_object_info: Va, index: u16) -> Opt
     stub.va_le(Off::new(DECLARE_PUSH_AT))
 }
 
+/// The bytes of the stub of a procedure of a module, with the place of
+/// the descriptor: `mov edx, <descriptor>`, `mov ecx, <engine>`, `jmp ecx`.
+const MODULE_STUB: ([(u32, &[u8]); 3], u32) =
+    ([(0, &[0xBA]), (5, &[0xB9]), (10, &[0xFF, 0xE1])], 1);
+
+/// The bytes of the stub of a procedure of an object, with the place of
+/// the descriptor: `mov eax, 0`, `cmp ax, <word>`, `xor eax, eax`,
+/// `mov edx, <descriptor>`, `push <engine>`, `ret`. The word of the `cmp`
+/// is the `xor`, so the processor runs the `xor` only after a jump to it.
+const OBJECT_STUB: ([(u32, &[u8]); 4], u32) = (
+    [
+        (0, &[0xB8, 0x00, 0x00, 0x00, 0x00, 0x66, 0x3D]),
+        (7, &[0x33, 0xC0, 0xBA]),
+        (14, &[0x68]),
+        (19, &[0xC3]),
+    ],
+    10,
+);
+
+/// A procedure of the project that the stub at an entry of the constant
+/// table goes to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ProcedureStub {
+    /// The descriptor of the procedure.
+    pub descriptor: Va,
+    /// Whether the procedure is of an object, whose first argument is the
+    /// object, and not of a module.
+    pub of_object: bool,
+}
+
+/// Tells whether `stub` holds each of `parts` at its place.
+fn holds(stub: &crate::read::region::Region<'_>, parts: &[(u32, &[u8])]) -> Option<bool> {
+    for (at, bytes) in parts {
+        if stub.take(Off::new(*at), u32::try_from(bytes.len()).ok()?)? != *bytes {
+            return Some(false);
+        }
+    }
+    Some(true)
+}
+
+/// Gives the procedure of the project that the stub at `index` of the
+/// constant table goes to. `ImpAdCall` names such a stub for a procedure of
+/// another module or object of the project.
+#[must_use]
+pub fn constant_procedure(
+    pe: &PeImage<'_>,
+    lp_object_info: Va,
+    index: u16,
+) -> Option<ProcedureStub> {
+    let stub = pe.region_at_va(constant(pe, lp_object_info, index)?)?;
+    let (parts, at, of_object) = if holds(&stub, &MODULE_STUB.0).unwrap_or(false) {
+        (&MODULE_STUB.0[..], MODULE_STUB.1, false)
+    } else {
+        (&OBJECT_STUB.0[..], OBJECT_STUB.1, true)
+    };
+    if !holds(&stub, parts)? {
+        return None;
+    }
+    Some(ProcedureStub {
+        descriptor: stub.va_le(Off::new(at))?,
+        of_object,
+    })
+}
+
 /// The first word of a class reference: the number of GUIDs that follow.
 const CLASS_REFERENCE_GUIDS: u32 = 2;
 
@@ -157,8 +222,8 @@ pub fn constant_string(pe: &PeImage<'_>, lp_object_info: Va, index: u16) -> Opti
 )]
 mod tests {
     use super::{
-        class_reference_iid, constant, constant_declare, constant_guid, constant_name,
-        constant_runtime_ordinal, constant_string,
+        ProcedureStub, class_reference_iid, constant, constant_declare, constant_guid,
+        constant_name, constant_procedure, constant_runtime_ordinal, constant_string,
     };
     use crate::read::pe::PeImage;
     use crate::read::region::Va;
@@ -241,6 +306,56 @@ mod tests {
             let bytes = synthetic_image(&other);
             let pe = PeImage::parse(&bytes).unwrap();
             assert_eq!(constant_declare(&pe, info, 3), None, "a byte at {at:#x}");
+        }
+    }
+
+    /// The stub of a procedure of a module with the descriptor `0x401234`.
+    const MODULE_STUB_BYTES: [u8; 12] = [
+        0xBA, 0x34, 0x12, 0x40, 0x00, 0xB9, 0x00, 0x20, 0x40, 0x00, 0xFF, 0xE1,
+    ];
+
+    /// The stub of a procedure of an object with the descriptor `0x401238`.
+    const OBJECT_STUB_BYTES: [u8; 20] = [
+        0xB8, 0x00, 0x00, 0x00, 0x00, 0x66, 0x3D, 0x33, 0xC0, 0xBA, 0x38, 0x12, 0x40, 0x00, 0x68,
+        0x00, 0x20, 0x40, 0x00, 0xC3,
+    ];
+
+    #[test]
+    fn the_stub_of_a_procedure_gives_its_descriptor_and_whether_it_takes_an_object() {
+        let mut extra = table();
+        put_u32(&mut extra, 0x4C, 0x0040_10D0);
+        put_u32(&mut extra, 0x50, 0x0040_10E0);
+        extra[0xD0..0xDC].copy_from_slice(&MODULE_STUB_BYTES);
+        extra[0xE0..0xF4].copy_from_slice(&OBJECT_STUB_BYTES);
+        let bytes = synthetic_image(&extra);
+        let pe = PeImage::parse(&bytes).unwrap();
+        let info = Va::new(0x0040_1000);
+        assert_eq!(
+            constant_procedure(&pe, info, 3),
+            Some(ProcedureStub {
+                descriptor: Va::new(0x0040_1234),
+                of_object: false
+            })
+        );
+        assert_eq!(
+            constant_procedure(&pe, info, 4),
+            Some(ProcedureStub {
+                descriptor: Va::new(0x0040_1238),
+                of_object: true
+            })
+        );
+        assert_eq!(constant_procedure(&pe, info, 0), None, "a string");
+        for at in [0xD0, 0xD5, 0xDA, 0xDB, 0xE0, 0xE6, 0xE7, 0xE9, 0xEE, 0xF3] {
+            let mut other = extra.clone();
+            other[at] ^= 0xFF;
+            let bytes = synthetic_image(&other);
+            let pe = PeImage::parse(&bytes).unwrap();
+            let index = if at < 0xE0 { 3 } else { 4 };
+            assert_eq!(
+                constant_procedure(&pe, info, index),
+                None,
+                "a byte at {at:#x}"
+            );
         }
     }
 
