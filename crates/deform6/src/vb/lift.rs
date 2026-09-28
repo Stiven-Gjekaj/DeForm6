@@ -380,6 +380,7 @@ pub struct Callees {
     arguments: Vec<(u16, i16, String)>,
     procedures: Vec<(u16, String)>,
     form_name: Option<String>,
+    object_name: Option<String>,
     globals: Vec<(u16, u32)>,
     base: Option<String>,
     owner: Option<u16>,
@@ -493,6 +494,20 @@ impl Callees {
     pub fn with_form_name(mut self, name: &str) -> Self {
         self.form_name = Some(name.to_owned());
         self
+    }
+
+    /// Sets the name of the object whose vtable the profile gives. `New`
+    /// of the class writes this name.
+    #[must_use]
+    pub fn with_object_name(mut self, name: &str) -> Self {
+        self.object_name = Some(name.to_owned());
+        self
+    }
+
+    /// Gives the name of the object whose vtable the profile gives.
+    #[must_use]
+    pub fn object_name(&self) -> Option<&str> {
+        self.object_name.as_deref()
     }
 
     /// Gives the name of the form whose vtable the profile gives.
@@ -2703,7 +2718,11 @@ fn run(
             }
             Family::NewObject => {
                 let index = word16(0)?;
-                let mut value = Value::plain(Expr::New(index), true);
+                let expr = callees
+                    .class(index)
+                    .and_then(Callees::object_name)
+                    .map_or(Expr::New(index), |name| Expr::Name(format!("New {name}")));
+                let mut value = Value::plain(expr, true);
                 value.class = class_at(callees, index);
                 state.stack.push(value);
                 None
@@ -4673,6 +4692,12 @@ dispid = 67
         assert_eq!(
             lines_with(&set, &Callees::default().with_global(5, 0x0040_A1C0)).unwrap()[0],
             "       Set g_40A1C0 = New class_9"
+        );
+        // New of a class of the project writes the name of its object.
+        let named = Callees::default().with_class(9, Callees::default().with_object_name("cImage"));
+        assert_eq!(
+            lines_with(&set, &named).unwrap()[0],
+            "       Set global_5 = New cImage"
         );
         let table = PcodeTable::parse(TABLE.as_bytes()).unwrap();
         let listing = disassemble(&Region::new(&set, Off::new(0)), &table);

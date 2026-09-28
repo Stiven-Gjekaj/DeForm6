@@ -203,7 +203,8 @@ fn profile(pe: &PeImage<'_>, object: &Object, types: Option<&VbTypes>) -> Callee
     let methods = read_method_table(pe, object.lp_object_info).unwrap_or_default();
     let mut callees = read_method_links(pe, object)
         .map(|links| links.callees(&methods))
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .with_object_name(&object.name);
     if classify(object.f_object_type) == ObjectKind::Form {
         callees = callees.with_form_name(&object.name);
     }

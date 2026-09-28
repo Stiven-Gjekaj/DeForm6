@@ -1619,9 +1619,9 @@ fn each_handler_of_a_winsock_control_is_written_with_its_source_declaration() {
     assert_eq!(written, 10);
 }
 
-/// Gives the form that each profile of the P-code program `key` names.
-fn named_forms(key: &str) -> Vec<String> {
-    let bytes = read(&pcode_root().join(key));
+/// Gives the profile of each object of the P-code binary at `path`.
+fn profiles(path: &Path) -> Vec<Callees> {
+    let bytes = read(path);
     let pe = PeImage::parse(&bytes).unwrap();
     let header = VbHeader::read(&header_region(&pe).unwrap()).unwrap();
     let info = ProjectInfo::read(&pe, header.lp_project_data).unwrap();
@@ -1629,12 +1629,45 @@ fn named_forms(key: &str) -> Vec<String> {
     let objects = ObjectTable::walk(&pe, info.lp_object_table, &head)
         .unwrap()
         .objects;
-    let callees = callees_of_project(&pe, &objects, &PcodeTable::default(), None);
-    callees
+    callees_of_project(&pe, &objects, &PcodeTable::default(), None)
+}
+
+/// Gives the form that each profile of the P-code program `key` names.
+fn named_forms(key: &str) -> Vec<String> {
+    profiles(&pcode_root().join(key))
         .iter()
         .filter_map(Callees::form_name)
         .map(str::to_owned)
         .collect()
+}
+
+/// Each profile of a P-code program names its object, and the names are
+/// the names of the objects that the source project declares. `New` of a
+/// class of the project writes this name.
+#[test]
+fn each_profile_names_an_object_of_the_source() {
+    let root = build_record::corpus_root();
+    let projects = vbp::project_files();
+    let mut failures = Vec::new();
+    for (key, exe) in pcode_programs() {
+        let project = vbp::select_project_file(&root.join(&key), &projects)
+            .unwrap_or_else(|err| panic!("{key}: {err}"));
+        let mut declared: Vec<String> = vbp::Project::read(&project)
+            .declared_objects()
+            .iter()
+            .map(|object| object.name.clone().unwrap_or_default())
+            .collect();
+        let mut named: Vec<String> = profiles(&exe)
+            .iter()
+            .map(|profile| profile.object_name().unwrap_or_default().to_owned())
+            .collect();
+        declared.sort();
+        named.sort();
+        if declared != named {
+            failures.push(format!("{key}: {named:?} against {declared:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// `callees_of_project` names the form of each profile that is a form, and
