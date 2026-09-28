@@ -701,9 +701,26 @@ impl Expr {
     }
 }
 
-/// The text of a list of arguments.
+/// The text of a list of arguments. An optional argument that the call
+/// leaves out is `Missing`: Basic writes it as nothing, and drops it at the
+/// end of the list.
 fn arguments_text(args: &[Expr]) -> String {
-    args.iter().map(Expr::text).collect::<Vec<_>>().join(", ")
+    let missing = |expr: &Expr| *expr == Expr::Word("Missing");
+    let given = args
+        .iter()
+        .rposition(|expr| !missing(expr))
+        .map_or(0, |last| last.saturating_add(1));
+    args.iter()
+        .take(given)
+        .map(|expr| {
+            if missing(expr) {
+                String::new()
+            } else {
+                expr.text()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// A statement.
@@ -2873,8 +2890,8 @@ pub fn render(stmts: &[LiftedStmt]) -> Vec<String> {
 )]
 mod tests {
     use super::{
-        Callees, LiftFault, ProjectCall, class_indexes, import_indexes, interface_indexes, lift,
-        lift_method, method_calls, name_indexes, render, string_indexes,
+        Callees, Expr, LiftFault, ProjectCall, arguments_text, class_indexes, import_indexes,
+        interface_indexes, lift, lift_method, method_calls, name_indexes, render, string_indexes,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::pcode::{PcodeTable, disassemble};
@@ -3641,8 +3658,24 @@ dispid = 67
     }
 
     #[test]
+    fn a_missing_argument_is_empty_and_is_dropped_at_the_end() {
+        let missing = Expr::Word("Missing");
+        assert_eq!(
+            arguments_text(&[
+                missing.clone(),
+                Expr::Const(1),
+                missing.clone(),
+                missing.clone()
+            ]),
+            ", 1"
+        );
+        assert_eq!(arguments_text(&[missing.clone(), missing]), "");
+        assert_eq!(arguments_text(&[Expr::Const(1), Expr::Const(2)]), "1, 2");
+    }
+
+    #[test]
     fn literals_give_their_constants() {
-        // local_A0 = 2.5, then Call import_1(Missing, 7, New class_4), with a
+        // local_A0 = 2.5, then Call import_1(, 7, New class_4), with a
         // Bos before it.
         let mut body = vec![0x24];
         body.extend_from_slice(&2.5_f64.to_le_bytes());
@@ -3654,7 +3687,7 @@ dispid = 67
             lines(&body).unwrap(),
             [
                 "       local_A0 = 2.5",
-                "       Call import_1(Missing, 7, New class_4)",
+                "       Call import_1(, 7, New class_4)",
                 "       Exit"
             ]
         );
@@ -3668,7 +3701,7 @@ dispid = 67
             );
         assert_eq!(
             lines_with(&body, &module).unwrap()[1],
-            "       Call Module1.Draw(Missing, 7, New class_4)"
+            "       Call Module1.Draw(, 7, New class_4)"
         );
         let object =
             Callees::default().with_project_call(1, ProjectCall::Object("Save".to_owned()));
