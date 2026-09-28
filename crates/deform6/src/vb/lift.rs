@@ -1209,6 +1209,9 @@ impl Stmt {
 pub struct LiftedStmt {
     /// The offset of the first opcode of the statement.
     pub offset: u32,
+    /// The offsets of the opcodes with no effect before the first opcode,
+    /// such as `Bos` and `FFree`, which a branch can name.
+    pub also_at: Vec<u32>,
     /// The statement.
     pub stmt: Stmt,
 }
@@ -1240,6 +1243,9 @@ pub enum LiftFault {
     /// A property get gives its result through an argument that is not the
     /// address of a frame slot.
     NoResultSlot(u32),
+    /// A branch names an offset inside the body where no statement starts.
+    /// A label there would change where the branch goes.
+    BranchTarget(u32),
 }
 
 /// What an opcode does, from the names of its handler.
@@ -1879,6 +1885,11 @@ type PendingSet = (u32, usize, LiftedStmt);
 #[derive(Default)]
 struct State {
     stack: Vec<Value>,
+    /// The offsets of the opcodes with no effect before the next statement.
+    leading: Vec<u32>,
+    /// The offsets of the opcodes with no effect after a call that stays on
+    /// the floating point unit, before the statement after it.
+    resumed: Vec<u32>,
     object: Option<Object>,
     bindings: BTreeMap<i16, Object>,
     pending: BTreeMap<i16, PendingSet>,
@@ -2424,6 +2435,7 @@ fn run(
                 let slot = offset16()?;
                 let assign = LiftedStmt {
                     offset: first,
+                    also_at: state.leading.clone(),
                     stmt: Stmt::Assign {
                         target: Expr::frame(slot),
                         value: value.expr.clone(),
@@ -2542,6 +2554,7 @@ fn run(
                 let slot = i16_at(arguments, 2).ok_or_else(short)?;
                 let copy = LiftedStmt {
                     offset: first,
+                    also_at: state.leading.clone(),
                     stmt: Stmt::Assign {
                         target: Expr::frame(slot),
                         value: source.expr.clone(),
@@ -2708,6 +2721,7 @@ fn run(
                 if state.depth() == 0 {
                     let set = LiftedStmt {
                         offset: first,
+                        also_at: state.leading.clone(),
                         stmt: Stmt::Set {
                             target: Expr::frame(slot),
                             value: value.expr.clone(),
@@ -2789,6 +2803,7 @@ fn run(
                 };
                 let stmt = LiftedStmt {
                     offset: first,
+                    also_at: state.leading.clone(),
                     stmt,
                 };
                 state.bind_pending(slot, value, out.len(), stmt);
@@ -3138,16 +3153,31 @@ fn run(
                 target => Some(target),
             })),
         };
+        // A free or an opcode with no effect after a statement, or after a
+        // call that stays on the floating point unit, does not start the
+        // next statement. The next statement keeps its offset, which a
+        // branch can name.
+        if matches!(family, Family::Free | Family::Nop) && stmt.is_none() {
+            if state.stack.is_empty() {
+                state.leading.push(at);
+                start = None;
+            } else if state.resume == Some(at) {
+                state.resumed.push(at);
+                state.resume = next_offset;
+            }
+        }
         if let Some(stmt) = stmt {
             if !state.stack.iter().all(Value::is_float_call) {
                 return Err(LiftFault::StackLeft(at));
             }
             let mut offset = first;
+            let mut leading = std::mem::take(&mut state.leading);
             for (count, value) in std::mem::take(&mut state.stack).into_iter().enumerate() {
                 if let Expr::Call(callee, args) = value.expr {
                     let begin = state.floats.get(count).copied().unwrap_or(first);
                     out.push(LiftedStmt {
                         offset: begin,
+                        also_at: std::mem::take(&mut leading),
                         stmt: Stmt::Call(callee, args),
                     });
                     offset = state.resume.unwrap_or(first);
@@ -3155,7 +3185,12 @@ fn run(
             }
             state.floats.clear();
             state.resume = None;
-            out.push(LiftedStmt { offset, stmt });
+            leading.append(&mut state.resumed);
+            out.push(LiftedStmt {
+                offset,
+                also_at: leading,
+                stmt,
+            });
             start = None;
         }
     }
@@ -3166,10 +3201,21 @@ fn run(
     for (_, index, set) in pending {
         out.insert(index.min(out.len()), set);
     }
+    let last = listing.instructions.last().map_or(0, |last| last.offset);
+    for target in branch_targets(&out) {
+        let target = u32::from(target);
+        let starts = out
+            .iter()
+            .any(|lifted| lifted.offset == target || lifted.also_at.contains(&target));
+        if !starts && target < last {
+            return Err(LiftFault::BranchTarget(target));
+        }
+    }
     Ok(out
         .into_iter()
         .map(|lifted| LiftedStmt {
             offset: lifted.offset,
+            also_at: lifted.also_at,
             stmt: lifted.stmt.resolve(&kept),
         })
         .collect())
@@ -3348,6 +3394,38 @@ pub fn name_indexes(listing: &PcodeListing, table: &PcodeTable) -> Vec<u16> {
 /// line of its own at the end.
 #[must_use]
 pub fn render(stmts: &[LiftedStmt]) -> Vec<String> {
+    let targets = branch_targets(stmts);
+    let mut lines = Vec::new();
+    let mut labelled = Vec::new();
+    for lifted in stmts {
+        for also in &lifted.also_at {
+            if let Ok(offset) = u16::try_from(*also)
+                && targets.contains(&offset)
+                && !labelled.contains(&offset)
+            {
+                labelled.push(offset);
+                lines.push(format!("L{offset:04X}:"));
+            }
+        }
+        let label = u16::try_from(lifted.offset)
+            .ok()
+            .filter(|offset| targets.contains(offset) && !labelled.contains(offset));
+        labelled.extend(label);
+        match label {
+            Some(offset) => lines.push(format!("L{offset:04X}: {}", lifted.stmt.text())),
+            None => lines.push(format!("       {}", lifted.stmt.text())),
+        }
+    }
+    for target in targets {
+        if !labelled.contains(&target) {
+            lines.push(format!("L{target:04X}:"));
+        }
+    }
+    lines
+}
+
+/// Gives the offset that each branch of `stmts` names, once each, in order.
+fn branch_targets(stmts: &[LiftedStmt]) -> Vec<u16> {
     let mut targets: Vec<u16> = stmts
         .iter()
         .filter_map(|lifted| match lifted.stmt {
@@ -3367,27 +3445,7 @@ pub fn render(stmts: &[LiftedStmt]) -> Vec<String> {
         .collect();
     targets.sort_unstable();
     targets.dedup();
-    let mut lines = Vec::new();
-    let mut labelled = Vec::new();
-    for lifted in stmts {
-        let label = u16::try_from(lifted.offset)
-            .ok()
-            .filter(|offset| targets.contains(offset) && !labelled.contains(offset));
-        labelled.extend(label);
-        match label {
-            Some(offset) => lines.push(format!("L{offset:04X}: {}", lifted.stmt.text())),
-            None => lines.push(format!("       {}", lifted.stmt.text())),
-        }
-    }
-    for target in targets {
-        if !stmts
-            .iter()
-            .any(|lifted| u16::try_from(lifted.offset).ok() == Some(target))
-        {
-            lines.push(format!("L{target:04X}:"));
-        }
-    }
-    lines
+    targets
 }
 
 #[cfg(test)]
@@ -4268,6 +4326,50 @@ dispid = 67
             lines_with(&body, &string).unwrap()[0],
             "       Call VBA.Left$(local_88, 7)"
         );
+    }
+
+    #[test]
+    fn a_branch_names_the_statement_after_the_opcodes_with_no_effect() {
+        // If Not (local_88 = 7) Then GoTo <target>; local_8C = 1; then an
+        // opcode with no effect at 0x14; local_90 = 2 at 0x16; Exit Sub.
+        let body = |target: u8, between: &[u8]| {
+            let mut out = vec![
+                0x03, 0x78, 0xFF, 0x01, 7, 0, 0, 0, 0x09, 0x0A, target, 0x00, 0x01, 1, 0, 0, 0,
+                0x05, 0x74, 0xFF,
+            ];
+            out.extend_from_slice(between);
+            out.extend_from_slice(&[0x01, 2, 0, 0, 0, 0x05, 0x70, 0xFF, 0x0C]);
+            out
+        };
+        // Bos at 0x14 does not start the statement at 0x16.
+        let bos = [0x29, 0x00];
+        assert_eq!(
+            lines(&body(0x16, &bos)).unwrap(),
+            [
+                "       If Not (local_88 = 7) Then GoTo L0016",
+                "       local_8C = 1",
+                "L0016: local_90 = 2",
+                "       Exit Sub"
+            ]
+        );
+        // A branch to the Bos names the same statement, with a label of its
+        // own.
+        assert_eq!(
+            lines(&body(0x14, &bos)).unwrap(),
+            [
+                "       If Not (local_88 = 7) Then GoTo L0014",
+                "       local_8C = 1",
+                "L0014:",
+                "       local_90 = 2",
+                "       Exit Sub"
+            ]
+        );
+        // A free at 0x14 does not start it either.
+        let free = [0x18, 0x6C, 0xFF];
+        assert_eq!(lines(&body(0x17, &free)).unwrap()[2], "L0017: local_90 = 2");
+        // A branch into a statement, where none starts, is a fault: a label
+        // there would move the branch.
+        assert_eq!(lines(&body(0x0E, &bos)), Err(LiftFault::BranchTarget(0x0E)));
     }
 
     #[test]
