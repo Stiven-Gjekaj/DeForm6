@@ -574,6 +574,7 @@ mod tests {
             parameters: vec![Parameter {
                 name: None,
                 vt,
+                pointee: None,
                 flags: 1,
                 user_type: None,
             }],

@@ -81,6 +81,9 @@ pub(crate) struct Parameter {
     /// The variant type: the simple type, or the type of the type
     /// description.
     pub vt: u16,
+    /// The variant type that the parameter points to, when it is a
+    /// `VT_PTR`: the parameter is passed by reference.
+    pub pointee: Option<u16>,
     /// The `PARAMFLAG` bits.
     pub flags: u32,
     /// The index of the type info that the parameter names, through
@@ -195,7 +198,17 @@ fn parameter_vt(bytes: &[u8], descs: usize, data_type: i32) -> Result<u16, Strin
 }
 
 /// The `VT_PTR` variant type.
-const VT_PTR: u16 = 26;
+pub(crate) const VT_PTR: u16 = 26;
+
+/// Gives the variant type that a parameter of the type `data_type` points
+/// to, when it is a `VT_PTR`.
+fn parameter_pointee(bytes: &[u8], descs: usize, data_type: i32) -> Option<u16> {
+    let at = descs.checked_add(usize::try_from(data_type).ok()?)?;
+    if u16_at(bytes, at)? != VT_PTR {
+        return None;
+    }
+    parameter_vt(bytes, descs, i32_at(bytes, at.checked_add(4)?)?).ok()
+}
 
 /// The `VT_USERDEFINED` variant type.
 const VT_USERDEFINED: u16 = 29;
@@ -325,6 +338,7 @@ fn functions(
             parameters.push(Parameter {
                 name: name(bytes, names, name_offset)?,
                 vt: parameter_vt(bytes, descs, data_type)?,
+                pointee: parameter_pointee(bytes, descs, data_type),
                 flags,
                 user_type: parameter_user_type(bytes, descs, data_type),
             });
@@ -470,7 +484,7 @@ pub(crate) fn guid_text(guid: &[u8; 16]) -> String {
     reason = "a test builds the state it needs and must fail loudly when that state is wrong"
 )]
 pub(crate) mod tests {
-    use super::{Function, Kind, Parameter, guid_text, parse};
+    use super::{Function, Kind, Parameter, guid_text, parameter_pointee, parse};
 
     fn put_u16(out: &mut [u8], at: usize, value: u16) {
         out[at..at + 2].copy_from_slice(&value.to_le_bytes());
@@ -588,6 +602,7 @@ pub(crate) mod tests {
                     parameters: vec![Parameter {
                         name: None,
                         vt: 26,
+                        pointee: Some(26),
                         flags: 0xA,
                         user_type: Some(1)
                     }],
@@ -603,12 +618,14 @@ pub(crate) mod tests {
                         Parameter {
                             name: Some("Left".to_owned()),
                             vt: 4,
+                            pointee: None,
                             flags: 1,
                             user_type: None
                         },
                         Parameter {
                             name: None,
                             vt: 12,
+                            pointee: None,
                             flags: 1,
                             user_type: None
                         }
@@ -625,6 +642,17 @@ pub(crate) mod tests {
         assert_eq!(infos[1].name.as_deref(), Some("BoxEvents"));
         assert_eq!(infos[1].guid, Some(GUID));
         assert!(infos[1].functions.is_empty());
+    }
+
+    #[test]
+    fn a_pointer_gives_the_type_that_it_points_to() {
+        let bytes = library();
+        // At 0x500 a pointer to the pointer at 0x508, which points to the
+        // user type at 0x510.
+        assert_eq!(parameter_pointee(&bytes, 0x500, 0), Some(26));
+        assert_eq!(parameter_pointee(&bytes, 0x500, 8), Some(29));
+        assert_eq!(parameter_pointee(&bytes, 0x500, 0x10), None, "no pointer");
+        assert_eq!(parameter_pointee(&bytes, 0x500, -4), None, "a simple type");
     }
 
     #[test]
