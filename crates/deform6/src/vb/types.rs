@@ -6,6 +6,9 @@
 //!
 //! - `[controls]` maps the GUID that a `ControlInfo` record names, in the
 //!   registry form, to the name of the interface of the control.
+//! - `[events]` maps the GUID of an events interface to its events, in the
+//!   order of the slots of an event table: each with `name`, and with
+//!   `parameters` when the tool could declare each of them.
 //! - `[iids]` maps the GUID of an interface to its name.
 //! - `[imports]` maps the ordinal of an export of the runtime to the name
 //!   of its function, with `result_interface` when the result is an
@@ -32,6 +35,31 @@ use crate::vb::opcodes::{TableError, line_at};
 const EXTERNAL_INTERFACE_AT: u32 = 0x58;
 const EXTERNAL_CONTROL_AT: u32 = 0x98;
 const EXTERNAL_ARRAY_AT: u32 = 0xA8;
+
+/// The offset in an entry of the external component table of the GUID of
+/// the events interface of the control.
+const EXTERNAL_EVENTS_AT: u32 = 0x48;
+
+/// Gives, for the GUID that the `ControlInfo` record of a control of an OCX
+/// names, the GUID at `at` of its entry of the external component table.
+fn external_guid(pe: &PeImage<'_>, guid: &[u8; 16], at: u32) -> Option<[u8; 16]> {
+    let header = VbHeader::read(&header_region(pe).ok()?).ok()?;
+    let mut entry_at = header.lp_external_table.get();
+    for _ in 0..header.w_external_count {
+        let entry = pe.region_at_va(Va::new(entry_at))?;
+        let read =
+            |offset: u32| -> Option<[u8; 16]> { entry.take(Off::new(offset), 16)?.try_into().ok() };
+        if [EXTERNAL_CONTROL_AT, EXTERNAL_ARRAY_AT]
+            .iter()
+            .any(|offset| read(*offset).as_ref() == Some(guid))
+        {
+            return read(at);
+        }
+        let length = entry.u32_le(Off::new(0)).filter(|length| *length > 0)?;
+        entry_at = entry_at.checked_add(length)?;
+    }
+    None
+}
 
 /// Gives, for the GUID that the `ControlInfo` record of a control of an OCX
 /// names, the GUID of the interface of the control, and whether the record
@@ -118,10 +146,34 @@ impl InterfaceType {
     }
 }
 
+/// Gives the GUID of the events of the control of a control array whose
+/// `ControlInfo` record names `guid`: `guid` less 1 in its first 32 bits.
+fn array_element(guid: &[u8; 16]) -> Option<[u8; 16]> {
+    let (first, _) = guid.split_first_chunk::<4>()?;
+    let events = u32::from_le_bytes(*first).checked_sub(1)?;
+    let mut single = *guid;
+    let (head, _) = single.split_first_chunk_mut::<4>()?;
+    *head = events.to_le_bytes();
+    Some(single)
+}
+
+/// One event of an events interface.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[non_exhaustive]
+pub struct EventType {
+    /// The name, such as `Click`.
+    pub name: String,
+    /// The declaration of each parameter in Basic, such as
+    /// `KeyAscii As Integer`, when the file gives each of them.
+    #[serde(default)]
+    pub parameters: Option<Vec<String>>,
+}
+
 /// The interfaces and the controls of the file.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VbTypes {
     controls: BTreeMap<String, String>,
+    events: BTreeMap<String, Vec<EventType>>,
     iids: BTreeMap<String, String>,
     imports: BTreeMap<u16, ImportType>,
     interfaces: BTreeMap<String, InterfaceType>,
@@ -132,6 +184,8 @@ pub struct VbTypes {
 struct RawTypes {
     #[serde(default)]
     controls: BTreeMap<String, String>,
+    #[serde(default)]
+    events: BTreeMap<String, Vec<EventType>>,
     #[serde(default)]
     iids: BTreeMap<String, String>,
     #[serde(default)]
@@ -237,10 +291,41 @@ impl VbTypes {
         }
         Ok(Self {
             controls: raw.controls,
+            events: raw.events,
             iids: raw.iids,
             imports,
             interfaces,
         })
+    }
+
+    /// Gives the event at `slot` of an event table of `slots` slots, of the
+    /// control whose `ControlInfo` record names `guid`.
+    ///
+    /// The events of the interface fill the last slots of the table, in
+    /// their order. The table of an intrinsic control has no other slot,
+    /// and the table of a control of an OCX has the slots of the extender
+    /// before them. The events interface is the one that `guid` names, or
+    /// for a control array the one of its control (see
+    /// [`VbTypes::control_array_interface`]), or for a control of an OCX the
+    /// one that its entry of the external component table names.
+    #[must_use]
+    pub fn event(
+        &self,
+        pe: &PeImage<'_>,
+        guid: &[u8; 16],
+        slot: u16,
+        slots: u16,
+    ) -> Option<&EventType> {
+        let events = self
+            .events
+            .get(&guid_text(guid))
+            .or_else(|| self.events.get(&guid_text(&array_element(guid)?)))
+            .or_else(|| {
+                self.events
+                    .get(&guid_text(&external_guid(pe, guid, EXTERNAL_EVENTS_AT)?))
+            })?;
+        let first = slots.checked_sub(u16::try_from(events.len()).ok()?)?;
+        events.get(usize::from(slot.checked_sub(first)?))
     }
 
     /// Gives the name of the interface of the control whose `ControlInfo`
@@ -259,12 +344,7 @@ impl VbTypes {
     /// holds for each control array of the P-code corpus.
     #[must_use]
     pub fn control_array_interface(&self, guid: &[u8; 16]) -> Option<String> {
-        let (first, _) = guid.split_first_chunk::<4>()?;
-        let events = u32::from_le_bytes(*first).checked_sub(1)?;
-        let mut single = *guid;
-        let (head, _) = single.split_first_chunk_mut::<4>()?;
-        *head = events.to_le_bytes();
-        self.control_interface(&single)
+        self.control_interface(&array_element(guid)?)
             .map(|interface| format!("{CONTROL_ARRAY}{interface}"))
     }
 
@@ -475,6 +555,21 @@ vtable_size = 760
 
 [interfaces.IMSWinsockControl]
 vtable_size = 128
+
+[[events."{248DD893-BB45-11CF-9ABC-0080C7E7B78D}"]]
+name = "Error"
+
+[[events."{248DD893-BB45-11CF-9ABC-0080C7E7B78D}"]]
+name = "DataArrival"
+parameters = ["ByVal bytesTotal As Long"]
+
+[[events."{33AD4ED2-6699-11CF-B70C-00AA0060D393}"]]
+name = "Change"
+parameters = []
+
+[[events."{33AD4ED2-6699-11CF-B70C-00AA0060D393}"]]
+name = "KeyPress"
+parameters = ["KeyAscii As Integer"]
 "#;
 
     /// Gives the callees of `Form1` of the P-code program at `path`.
@@ -516,6 +611,64 @@ vtable_size = 128
             server.control(0x308),
             Some(("WskServer", Some("[]IMSWinsockControl")))
         );
+    }
+
+    /// A slot names the event at its place among the last slots of the
+    /// table: for a control, for a control array and for a control of an
+    /// OCX, whose table has the slots of the extender first.
+    #[test]
+    fn a_slot_of_an_event_table_names_its_event() {
+        use crate::read::pe::PeImage;
+        use crate::vb::controlinfo::ControlInfoTable;
+        use crate::vb::header::{VbHeader, header_region};
+        use crate::vb::object::ObjectTable;
+        use crate::vb::project::{ObjectTableHead, ProjectInfo};
+        let bytes = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus-pcode/public-domain/SK-TFTP-Sample__VB6/Client/demo/TFTPClient.exe"
+        ));
+        let pe = PeImage::parse(bytes).unwrap();
+        let types = VbTypes::parse(WINSOCK_TYPES.as_bytes()).unwrap();
+        let name = |guid: &[u8; 16], slot: u16, slots: u16| {
+            types
+                .event(&pe, guid, slot, slots)
+                .map(|event| event.name.as_str())
+        };
+        assert_eq!(name(&GUID, 0, 2), Some("Change"));
+        assert_eq!(name(&GUID, 1, 2), Some("KeyPress"));
+        assert_eq!(name(&GUID, 2, 2), None);
+        assert_eq!(name(&GUID, 0, 3), None, "a slot before the events");
+        assert_eq!(name(&GUID, 2, 3), Some("KeyPress"));
+        assert_eq!(name(&GUID, 0, 1), None, "fewer slots than events");
+        let mut array = GUID;
+        array[0] = 0xD3;
+        assert_eq!(name(&array, 1, 2), Some("KeyPress"));
+        let key_press = types.event(&pe, &GUID, 1, 2).unwrap();
+        assert_eq!(
+            key_press.parameters.as_deref(),
+            Some(&["KeyAscii As Integer".to_owned()][..])
+        );
+        assert_eq!(
+            types.event(&pe, &GUID, 0, 2).unwrap().parameters,
+            Some(Vec::new())
+        );
+        let header = VbHeader::read(&header_region(&pe).unwrap()).unwrap();
+        let info = ProjectInfo::read(&pe, header.lp_project_data).unwrap();
+        let head = ObjectTableHead::read(&pe, info.lp_object_table).unwrap();
+        let objects = ObjectTable::walk(&pe, info.lp_object_table, &head)
+            .unwrap()
+            .objects;
+        let form = objects.iter().find(|o| o.name == "Form1").unwrap();
+        let controls = ControlInfoTable::read(&pe, form).unwrap();
+        let winsock = controls
+            .entries
+            .iter()
+            .find(|control| control.name == "WskClient")
+            .unwrap();
+        let guid = VbTypes::guid(&pe, winsock).unwrap();
+        assert_eq!(name(&guid, 10, 11), Some("DataArrival"));
+        assert_eq!(types.event(&pe, &guid, 9, 11).unwrap().parameters, None);
+        assert_eq!(name(&guid, 8, 11), None, "a slot of the extender");
     }
 
     #[test]
