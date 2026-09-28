@@ -2244,16 +2244,17 @@ fn run(
         let offset16 = || i16_at(arguments, 0).ok_or_else(short);
         let word16 = |from: usize| u16_at(arguments, from).ok_or_else(short);
         let float = names.iter().any(|name| takes_a_float(name));
-        let pop = |state: &mut State| {
+        let pop_value = |state: &mut State| {
             let at_top = if float {
                 state.stack.len().checked_sub(1)
             } else {
                 state.stack.iter().rposition(|value| !value.is_float_call())
             };
             at_top
-                .map(|index| state.stack.remove(index).expr)
+                .map(|index| state.stack.remove(index))
                 .ok_or(LiftFault::StackShort(at))
         };
+        let pop = |state: &mut State| pop_value(state).map(|value| value.expr);
         let stmt = match family {
             Family::Lit(len) => {
                 let value = constant(arguments, len).ok_or_else(short)?;
@@ -2943,10 +2944,20 @@ fn run(
             Family::ArrayStore => {
                 let array = pop(&mut state)?;
                 let index = pop(&mut state)?;
-                let value = pop(&mut state)?;
-                Some(Stmt::Assign {
-                    target: Expr::Index(Box::new(array), vec![index]),
-                    value,
+                let value = pop_value(&mut state)?;
+                let target = Expr::Index(Box::new(array), vec![index]);
+                // A value of a known class is an object, which Basic stores
+                // with Set.
+                Some(if value.class.is_some() {
+                    Stmt::Set {
+                        target,
+                        value: value.expr,
+                    }
+                } else {
+                    Stmt::Assign {
+                        target,
+                        value: value.expr,
+                    }
                 })
             }
             Family::ArrayObjectRegister => {
@@ -4565,6 +4576,14 @@ dispid = 67
         // arg_C(1) = 7
         let store = [0x02, 0x07, 0x02, 0x01, 0x15, 0x0C, 0x00, 0x36, 0x0C];
         assert_eq!(lines(&store).unwrap()[0], "       arg_C(1) = 7");
+        // Set arg_C(1) = New class_9: an object of a known class.
+        let object = [0x27, 0x09, 0x00, 0x02, 0x01, 0x15, 0x0C, 0x00, 0x36, 0x0C];
+        let class = Callees::default().with_class(9, Callees::default());
+        assert_eq!(
+            lines_with(&object, &class).unwrap()[0],
+            "       Set arg_C(1) = New class_9"
+        );
+        assert_eq!(lines(&object).unwrap()[0], "       arg_C(1) = New class_9");
     }
 
     #[test]
