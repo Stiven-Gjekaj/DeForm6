@@ -8,7 +8,9 @@
 //! of a class of the runtime that it names so. For the GUID that a
 //! `VCallHresult` names, it gives the object of the project whose default
 //! interface has that GUID, or else the interface that [`VbTypes`] names.
-//! For an import call of a function of the runtime, it gives the name and
+//! The null GUID names the object of a control array: each of the 65 calls
+//! of the corpus that name it calls `Item` or `Count` after a control
+//! accessor. For an import call of a function of the runtime, it gives the name and
 //! the result interface that [`VbTypes`] gives for its ordinal.
 //!
 //! A public method has a `FuncTypDesc` record (`STRUCTURES.md` section
@@ -35,8 +37,8 @@ use crate::vb::functyp::{FuncTypeWalk, ProcedureSignature, PrototypeList, TypeEn
 use std::collections::BTreeMap;
 
 use crate::vb::lift::{
-    Callees, class_indexes, import_indexes, interface_indexes, method_calls, name_indexes,
-    string_indexes,
+    CONTROL_ARRAY, Callees, class_indexes, import_indexes, interface_indexes, method_calls,
+    name_indexes, string_indexes,
 };
 use crate::vb::links::read_method_links;
 use crate::vb::object::Object;
@@ -223,7 +225,9 @@ pub fn callees_of_project(
                 let Some(iid) = constant_guid(pe, object.lp_object_info, index) else {
                     continue;
                 };
-                if let Some((_, profile)) = objects
+                if iid == [0; 16] {
+                    callees = callees.with_class_interface(index, CONTROL_ARRAY);
+                } else if let Some((_, profile)) = objects
                     .iter()
                     .zip(&profiles)
                     .find(|(other, _)| default_iid(pe, other) == Some(iid))
