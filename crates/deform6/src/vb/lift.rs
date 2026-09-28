@@ -2387,7 +2387,7 @@ fn run(
                         .collect(),
                 ));
                 let callee =
-                    Callee::Member(Box::new(Expr::Word("Me")), callees.procedure(method.index));
+                    Callee::Member(Box::new(Expr::Implicit), callees.procedure(method.index));
                 call_or_function(&mut state, callee, args)
             }
             Family::ImportCall { result } => {
@@ -3676,7 +3676,7 @@ dispid = 67
 
     #[test]
     fn a_call_of_a_method_of_me_records_the_classes_of_its_arguments() {
-        // Call Me.method_5(Me.box1, 1): the control is passed by the address
+        // Call method_5(Me.box1, 1): the control is passed by the address
         // of its temporary slot.
         let table = PcodeTable::parse(TABLE.as_bytes()).unwrap();
         let types = VbTypes::parse(TYPES.as_bytes()).unwrap();
@@ -3740,10 +3740,7 @@ dispid = 67
         let callees = Callees::default().with_method(0x6F8, 5, 12);
         assert_eq!(
             lines_with(&body, &callees).unwrap(),
-            [
-                "       Call Me.method_5(arg_C, local_88)",
-                "       Exit Sub"
-            ]
+            ["       Call method_5(arg_C, local_88)", "       Exit Sub"]
         );
         // A public procedure gives its name.
         let named = Callees::default()
@@ -3752,10 +3749,7 @@ dispid = 67
             .with_procedure(5, "SaveFile");
         assert_eq!(
             lines_with(&body, &named).unwrap(),
-            [
-                "       Call Me.SaveFile(arg_C, local_88)",
-                "       Exit Sub"
-            ]
+            ["       Call SaveFile(arg_C, local_88)", "       Exit Sub"]
         );
         let fewer = Callees::default().with_method(0x6F8, 5, 8);
         assert_eq!(lines_with(&body, &fewer), Err(LiftFault::StackLeft(6)));
@@ -4513,7 +4507,7 @@ dispid = 67
         // import_2(local_64): FLdR8 pushes the 8 bytes of a Double.
         let double = [0x49, 0x9C, 0xFF, 0x12, 0x02, 0x00, 0x08, 0x00, 0x0C];
         assert_eq!(lines(&double).unwrap()[0], "       Call import_2(local_64)");
-        // ReDim arg_10(0 To Me.method_2(arg_C)): a call with a value under
+        // ReDim arg_10(0 To method_2(arg_C)): a call with a value under
         // its arguments is a Function, whose last argument is the local that
         // takes the result.
         let function = [
@@ -4526,7 +4520,7 @@ dispid = 67
         let callees = Callees::default().with_method(0x24, 2, 12);
         assert_eq!(
             render(&lift(&listing, &table, &callees, None).unwrap())[0],
-            "       ReDim arg_10(0 To Me.method_2(arg_C))"
+            "       ReDim arg_10(0 To method_2(arg_C))"
         );
         // Open "a" For Binary As #1, with the length -1 of no Len clause.
         let open = [
