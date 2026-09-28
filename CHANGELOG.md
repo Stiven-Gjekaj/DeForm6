@@ -89,7 +89,9 @@ heading its version and its date.
   the bodies that lift: 239 of 680 with no types file, 673 with a types
   file from `VB6.OLB`, and 680 of 680 when the file also holds the VBA
   library. A call of an OCX control, such as a Winsock control, lifts
-  late-bound by its `DISPID`.
+  late-bound by its `DISPID`. When the types file also holds the OCX, the
+  external component table gives the control its interface, and the lift
+  names the member of each `DISPID`, such as `SendData`.
 - The width tracer of `derive-pcode-table` follows a jump table of a
   handler. `NextVar` and `NextStepVar` get the width 4 in place of 2, and
   680 of 680 bodies still decode.
