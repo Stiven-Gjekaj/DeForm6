@@ -86,8 +86,10 @@ heading its version and its date.
 - The lift follows the calls of other objects: an object argument, an
   object of a class of the project, a control array, a late-bound call,
   and the interface that a `VCallHresult` names. `check-pcode-table` counts
-  the bodies that lift: 239 of 680 with no types file, 663 with a types
-  file from `VB6.OLB`, and 666 when the file also holds the VBA library.
+  the bodies that lift: 239 of 680 with no types file, 673 with a types
+  file from `VB6.OLB`, and 680 of 680 when the file also holds the VBA
+  library. A call of an OCX control, such as a Winsock control, lifts
+  late-bound by its `DISPID`.
 - The width tracer of `derive-pcode-table` follows a jump table of a
   handler. `NextVar` and `NextStepVar` get the width 4 in place of 2, and
   680 of 680 bodies still decode.
@@ -96,8 +98,6 @@ heading its version and its date.
 
 - Two corpus programs have no P-code build, because their source does not
   build: `Edge_Detection` and `HMM`.
-- 14 bodies do not lift. Each one calls a Winsock control, whose type
-  library `MSWINSCK.OCX` is not in the types file.
 
 ### What this does not do
 
