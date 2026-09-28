@@ -1618,3 +1618,36 @@ fn each_handler_of_a_winsock_control_is_written_with_its_source_declaration() {
     }
     assert_eq!(written, 10);
 }
+
+/// Gives the form that each profile of the P-code program `key` names.
+fn named_forms(key: &str) -> Vec<String> {
+    let bytes = read(&pcode_root().join(key));
+    let pe = PeImage::parse(&bytes).unwrap();
+    let header = VbHeader::read(&header_region(&pe).unwrap()).unwrap();
+    let info = ProjectInfo::read(&pe, header.lp_project_data).unwrap();
+    let head = ObjectTableHead::read(&pe, info.lp_object_table).unwrap();
+    let objects = ObjectTable::walk(&pe, info.lp_object_table, &head)
+        .unwrap()
+        .objects;
+    let callees = callees_of_project(&pe, &objects, &PcodeTable::default(), None);
+    callees
+        .iter()
+        .filter_map(Callees::form_name)
+        .map(str::to_owned)
+        .collect()
+}
+
+/// `callees_of_project` names the form of each profile that is a form, and
+/// no other: `PassGen.exe` holds 4 forms, in the order of its project file,
+/// and `Blacklight.exe` holds 1 form and 2 classes.
+#[test]
+fn the_profile_of_a_form_names_the_form() {
+    assert_eq!(
+        named_forms("public-domain/PassGen/PassGen.exe"),
+        ["frmPassGen", "frmSpecial", "frmOverride", "frmAbout"]
+    );
+    assert_eq!(
+        named_forms("vb6-code/Blacklight-effect/Blacklight.exe"),
+        ["frmBlacklight"]
+    );
+}

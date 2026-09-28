@@ -295,6 +295,12 @@ pub enum Expr {
     Member(Box<Expr>, String),
     /// A Basic word: `Missing`, `Empty` or `Null`.
     Word(&'static str),
+    /// A name of the project, such as the form of a global that holds the
+    /// instance of the form.
+    Name(String),
+    /// The global object of the runtime, whose members Basic writes with no
+    /// object, such as `Screen` and `App`.
+    Implicit,
     /// An 8-byte floating point constant, by its bits.
     Real(u64),
     /// A string of the constant table.
@@ -335,7 +341,7 @@ impl Callee {
             Self::Import(index) => format!("import_{index:X}"),
             Self::Declare(name) => name.clone(),
             Self::Module(module, name) => format!("{module}.{name}"),
-            Self::Member(object, name) => format!("{}.{name}", object.text()),
+            Self::Member(object, name) => member_text(object, name),
         }
     }
 
@@ -364,6 +370,7 @@ pub struct Callees {
     stubs: Vec<(u16, ProjectCall)>,
     arguments: Vec<(u16, i16, String)>,
     procedures: Vec<(u16, String)>,
+    form_name: Option<String>,
     base: Option<String>,
     owner: Option<u16>,
 }
@@ -458,6 +465,21 @@ impl Callees {
             .iter()
             .find(|(at, _)| *at == index)
             .map_or_else(|| format!("method_{index}"), |(_, name)| name.clone())
+    }
+
+    /// Sets the name of the form whose vtable the profile gives. A global of
+    /// the class of a form holds the instance of the form, which Basic
+    /// names by the name of the form.
+    #[must_use]
+    pub fn with_form_name(mut self, name: &str) -> Self {
+        self.form_name = Some(name.to_owned());
+        self
+    }
+
+    /// Gives the name of the form whose vtable the profile gives.
+    #[must_use]
+    pub fn form_name(&self) -> Option<&str> {
+        self.form_name.as_deref()
     }
 
     /// Sets the owner of the profile: the index of its object in the
@@ -654,8 +676,10 @@ impl Expr {
             }
             Self::Convert(function, value) => format!("{function}({})", value.text()),
             Self::Call(callee, args) => format!("{}({})", callee.text(), arguments_text(args)),
-            Self::Member(object, name) => format!("{}.{name}", object.text()),
+            Self::Member(object, name) => member_text(object, name),
             Self::Word(word) => (*word).to_owned(),
+            Self::Name(name) => name.clone(),
+            Self::Implicit => String::new(),
             Self::Real(bits) => format!("{:?}", f64::from_bits(*bits)),
             Self::Str(text) => format!("\"{}\"", text.replace('"', "\"\"")),
             Self::Constant(index) => format!("const_{index:X}"),
@@ -699,6 +723,15 @@ impl Expr {
             Self::Bound(_, _, value) => value.unbound(),
             other => other,
         }
+    }
+}
+
+/// The text of the member `name` of `object`: with no object for a member
+/// of the global object of the runtime.
+fn member_text(object: &Expr, name: &str) -> String {
+    match object {
+        Expr::Implicit => name.to_owned(),
+        _ => format!("{}.{name}", object.text()),
     }
 }
 
@@ -1753,6 +1786,10 @@ fn control_array_function(element: &str, vtable_offset: u16) -> Option<TypeFunct
 /// its class in the constant table.
 const PROJECT_CLASS: char = '@';
 
+/// The interface of the global object of the runtime, such as `Screen` and
+/// `App`, in `VB6.OLB`.
+const GLOBAL_INTERFACE: &str = "VBGlobal";
+
 /// Lifts a call of the function at `vtable_offset` of the interface
 /// `interface` on `object`.
 fn interface_call(
@@ -2506,7 +2543,16 @@ fn run(
                 } else {
                     reference.class
                 };
-                state.object = Some((reference.expr, class));
+                let object = match (&reference.expr, callees.class(index)) {
+                    (Expr::Global(_), Some(profile)) => profile
+                        .form_name()
+                        .map_or(reference.expr, |form| Expr::Name(form.to_owned())),
+                    (Expr::Global(_), None) if class.as_deref() == Some(GLOBAL_INTERFACE) => {
+                        Expr::Implicit
+                    }
+                    _ => reference.expr,
+                };
+                state.object = Some((object, class));
                 None
             }
             Family::Nop => None,
@@ -4014,6 +4060,23 @@ dispid = 67
                 "       Exit Sub"
             ]
         );
+        // A global of the class of a form holds the instance of the form.
+        let form = Callees::default().with_class(
+            9,
+            Callees::default()
+                .with_form_name("frmMain")
+                .with_method(0x6F8, 2, 8)
+                .with_variable(0x700, 0x34, true)
+                .with_variable(0x704, 0x34, false),
+        );
+        assert_eq!(
+            render(&lift(&listing, &table, &form, None).unwrap()),
+            [
+                "       frmMain.field_34 = 5",
+                "       Call frmMain.method_2(frmMain.field_34)",
+                "       Exit Sub"
+            ]
+        );
         let owned = Callees::default().with_class(
             9,
             Callees::default()
@@ -4057,6 +4120,18 @@ dispid = 67
         assert_eq!(
             render(&lift(&listing_get, &table, &runtime, Some(&types)).unwrap())[0],
             "       local_88 = global_3.Text"
+        );
+        // The same get on the global object of the runtime has no object.
+        let global = VbTypes::parse(
+            TYPES
+                .replace("[interfaces._Box", "[interfaces.VBGlobal")
+                .as_bytes(),
+        )
+        .unwrap();
+        let implicit = Callees::default().with_class_interface(9, "VBGlobal");
+        assert_eq!(
+            render(&lift(&listing_get, &table, &implicit, Some(&global)).unwrap())[0],
+            "       local_88 = Text"
         );
         // Set local_1C = New class 9, then the get of 0x00A8 of _Box on
         // local_1C: New gives the class of its index.

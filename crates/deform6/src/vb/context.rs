@@ -28,7 +28,7 @@
 
 use crate::read::pe::PeImage;
 use crate::read::region::{Off, Va};
-use crate::vb::classify::has_optional_info;
+use crate::vb::classify::{ObjectKind, classify, has_optional_info};
 use crate::vb::constants::{
     ProcedureStub, class_reference_iid, constant, constant_declare, constant_guid, constant_name,
     constant_procedure, constant_runtime_ordinal, constant_string,
@@ -204,6 +204,9 @@ fn profile(pe: &PeImage<'_>, object: &Object, types: Option<&VbTypes>) -> Callee
     let mut callees = read_method_links(pe, object)
         .map(|links| links.callees(&methods))
         .unwrap_or_default();
+    if classify(object.f_object_type) == ObjectKind::Form {
+        callees = callees.with_form_name(&object.name);
+    }
     if let ProcNames::Slots(slots) = ProcedureList::read(pe, object).procs {
         for (slot, index) in slots.iter().zip(0_u16..) {
             if let Procedure::Public(name) = slot {
