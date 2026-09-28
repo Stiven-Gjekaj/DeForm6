@@ -298,7 +298,7 @@ pub fn declared_argument_sizes(path: &Path) -> Vec<(String, u32)> {
 
 /// Gives the text of `line` before its comment: before the first `'` that
 /// is outside a string, or empty for a line that opens with `Rem`.
-fn without_comment(line: &str) -> &str {
+pub fn without_comment(line: &str) -> &str {
     let trimmed = line.trim_start();
     if trimmed == "Rem" || trimmed.starts_with("Rem ") {
         return "";

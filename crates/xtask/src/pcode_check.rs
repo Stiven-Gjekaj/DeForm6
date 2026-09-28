@@ -15,6 +15,11 @@
 //! [`crate::lift_measure`] gives it. With `--lift-pins <file>` it compares
 //! that measure with the file, and exits with 1 and the new numbers when
 //! one program moves. `--write-lift-pins <file>` writes the file.
+//!
+//! With `--vb-types`, it also writes the project of each program as
+//! `extract --vb-types` does, and holds each event handler that it writes
+//! against the source: the declaration line of the handler must be a line
+//! of the source. It exits with 1 when one is not.
 
 use deform6::read::pe::PeImage;
 use deform6::vb::context::callees_of_project;
@@ -33,7 +38,7 @@ use crate::build_record;
 use crate::lift_measure::{Measure, parse_pins, render_pins};
 use crate::pcode_record;
 use crate::pcode_table::DEFAULT_OUTPUT_PATH;
-use crate::ratios::differential::support::source::procedure_bodies;
+use crate::ratios::differential::support::source::{procedure_bodies, without_comment};
 use crate::ratios::differential::support::vbp::{Project, project_files, select_project_file};
 
 /// The options of `check-pcode-table`.
@@ -90,6 +95,27 @@ pub(crate) fn run(args: &[String]) -> i32 {
                 total.matched, total.source, total.lifted
             );
             let mut status = i32::from(!failures.is_empty());
+            if let Some(types) = &options.types {
+                match check_handlers(types) {
+                    Ok((written, strays)) => {
+                        for stray in &strays {
+                            println!("{stray}");
+                        }
+                        println!(
+                            "{} of {written} event handlers that extract writes are lines of \
+                             their source",
+                            written.saturating_sub(strays.len())
+                        );
+                        if !strays.is_empty() {
+                            status = 1;
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!("check-pcode-table: {err}");
+                        status = 1;
+                    }
+                }
+            }
             if let Some(out) = &options.write_pins
                 && let Err(err) = std::fs::write(out, render_pins(&measures))
             {
@@ -129,6 +155,77 @@ pub(crate) fn run(args: &[String]) -> i32 {
             1
         }
     }
+}
+
+/// Gives `line` as Basic compares a declaration: in lower case, with no
+/// comment and no space at its ends. Basic does not tell the case of a
+/// name apart.
+fn declaration_key(line: &str) -> String {
+    without_comment(line).trim().to_lowercase()
+}
+
+/// Writes the project of each program in `corpus-pcode/` with the types
+/// file at `types_path`, and gives the number of event handlers that it
+/// writes and a line for each one whose declaration is not a line of the
+/// source of its program, as [`declaration_key`] compares them.
+fn check_handlers(types_path: &str) -> Result<(usize, Vec<String>), String> {
+    let bytes = std::fs::read(types_path).map_err(|err| format!("reading {types_path}: {err}"))?;
+    let types = VbTypes::parse(&bytes).map_err(|err| format!("{types_path}: {err}"))?;
+    let root = pcode_record::pcode_root();
+    let corpus = build_record::corpus_root();
+    let projects = project_files();
+    let mut written = 0_usize;
+    let mut strays = Vec::new();
+    for exe in build_record::executables(&root)? {
+        let key = build_record::program_key(&exe, &root)?;
+        let project = select_project_file(&corpus.join(&key), &projects)
+            .map_err(|err| format!("{key}: {err:?}"))?;
+        let mut source = std::collections::BTreeSet::new();
+        for object in Project::read(&project).declared_objects() {
+            let text = std::fs::read(&object.source_file).unwrap_or_default();
+            for line in String::from_utf8_lossy(&text).lines() {
+                source.insert(declaration_key(line));
+            }
+        }
+        let bytes = std::fs::read(&exe).map_err(|err| format!("reading {key}: {err}"))?;
+        let report = deform6::inspect_with_types(
+            &bytes,
+            &deform6::vb::opcodes::OpcodeTable::builtin(),
+            Some(&types),
+            deform6::journal::Mode::Salvage,
+        )
+        .map_err(|err| format!("{key}: {err}"))?;
+        let handlers: Vec<String> = report
+            .objects
+            .iter()
+            .filter_map(|object| match &object.procedures {
+                deform6::vb::ObjectProcedures::Slots(slots) => Some(slots),
+                deform6::vb::ObjectProcedures::NoNameArray { .. } => None,
+            })
+            .flatten()
+            .filter_map(|slot| match slot {
+                deform6::vb::ProcedureEntry::Handler { name, .. } => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        let project = deform6::write::project(&report, &bytes, deform6::journal::Mode::Salvage)
+            .map_err(|err| format!("{key}: {err}"))?;
+        for file in &project.files {
+            for line in String::from_utf8_lossy(&file.bytes).lines() {
+                let is_handler = handlers
+                    .iter()
+                    .any(|name| line.starts_with(&format!("Private Sub {name}(")));
+                if !is_handler {
+                    continue;
+                }
+                written = written.saturating_add(1);
+                if !source.contains(&declaration_key(line)) {
+                    strays.push(format!("{key}: {}: {line}", file.name));
+                }
+            }
+        }
+    }
+    Ok((written, strays))
 }
 
 /// Decodes each body of each program in `corpus-pcode/`, and gives the
@@ -220,4 +317,25 @@ fn check(
         measures.insert(key, measure);
     }
     Ok((bodies, failures, lifted, measures))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::declaration_key;
+
+    #[test]
+    fn a_declaration_compares_with_no_case_and_no_comment() {
+        assert_eq!(
+            declaration_key("Private Sub Command16_Click()      ' Prev CD Track"),
+            declaration_key("Private Sub command16_click()")
+        );
+        assert_eq!(
+            declaration_key("Private Sub P_MouseUp(x As Single)"),
+            "private sub p_mouseup(x as single)"
+        );
+        assert_ne!(
+            declaration_key("Private Sub A_Click(Index As Integer)"),
+            declaration_key("Private Sub A_Click()")
+        );
+    }
 }
