@@ -102,8 +102,6 @@ enum Command {
         vb_types: Option<PathBuf>,
     },
 
-    /// Reads one executable and writes a Visual Basic 6 project directory
-    /// that VB6 can open.
     /// Reads one P-code executable and prints the P-code of each procedure,
     /// decoded with a table that `cargo run -p xtask --
     /// derive-pcode-table` wrote from a runtime that you own.
@@ -128,6 +126,8 @@ enum Command {
         vb_types: Option<PathBuf>,
     },
 
+    /// Reads one executable and writes a Visual Basic 6 project directory
+    /// that VB6 can open.
     Extract {
         /// The executable to read.
         ///

@@ -1759,3 +1759,23 @@ fn extract_writes_a_lifted_body_with_the_pcode_table() {
     let text = String::from_utf8_lossy(&form);
     assert!(text.contains("' The lift stopped"), "{text}");
 }
+
+/// Each command names its own work in its help, and no other.
+#[test]
+fn each_command_help_names_its_own_work() {
+    let help = |command: &str| run(&[OsStr::new(command), OsStr::new("--help")]).1;
+    let extract = help("extract");
+    let disasm = help("disasm");
+    assert!(
+        extract.contains("writes a Visual Basic 6 project directory"),
+        "{extract}"
+    );
+    assert!(
+        !disasm.contains("writes a Visual Basic 6 project directory"),
+        "{disasm}"
+    );
+    assert!(
+        disasm.contains("prints the P-code of each procedure"),
+        "{disasm}"
+    );
+}
