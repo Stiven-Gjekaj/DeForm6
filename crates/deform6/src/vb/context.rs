@@ -8,6 +8,8 @@
 //! of a class of the runtime that it names so. For the GUID that a
 //! `VCallHresult` names, it gives the object of the project whose default
 //! interface has that GUID, or else the interface that [`VbTypes`] names.
+//! For an import call of a function of the runtime, it gives the name and
+//! the result interface that [`VbTypes`] gives for its ordinal.
 //!
 //! A public method has a `FuncTypDesc` record (`STRUCTURES.md` section
 //! 6.3). An argument of an external class in it names a side structure,
@@ -26,13 +28,15 @@ use crate::read::pe::PeImage;
 use crate::read::region::{Off, Va};
 use crate::vb::classify::has_optional_info;
 use crate::vb::constants::{
-    class_reference_iid, constant, constant_guid, constant_name, constant_string,
+    class_reference_iid, constant, constant_guid, constant_name, constant_runtime_ordinal,
+    constant_string,
 };
 use crate::vb::functyp::{FuncTypeWalk, ProcedureSignature, PrototypeList, TypeEntry, VbType};
 use std::collections::BTreeMap;
 
 use crate::vb::lift::{
-    Callees, class_indexes, interface_indexes, method_calls, name_indexes, string_indexes,
+    Callees, class_indexes, import_indexes, interface_indexes, method_calls, name_indexes,
+    string_indexes,
 };
 use crate::vb::links::read_method_links;
 use crate::vb::object::Object;
@@ -202,6 +206,17 @@ pub fn callees_of_project(
             for index in name_indexes(listing, table) {
                 if let Some(name) = constant_name(pe, object.lp_object_info, index) {
                     callees = callees.with_name(index, &name);
+                }
+            }
+            for index in import_indexes(listing, table) {
+                if let Some(import) = constant_runtime_ordinal(pe, object.lp_object_info, index)
+                    .and_then(|ordinal| types?.import(ordinal))
+                {
+                    callees = callees.with_import(
+                        index,
+                        &import.name,
+                        import.result_interface.as_deref(),
+                    );
                 }
             }
             for index in interface_indexes(listing, table) {
