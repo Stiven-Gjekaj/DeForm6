@@ -98,6 +98,7 @@
 //! | `LitR4FP` | Push a 4-byte floating point constant on the floating point unit |
 //! | `PopTmpLdAdFPR4`, `CVarBoolI2` | Pop a value into a temporary slot, and push its address |
 //! | `FLdVar` | Push the 16 bytes of the `Variant` of a frame slot |
+//! | `ImpAdCall` of a function of the runtime | As `ImpAdCall`, with the name of the function and the class of its result when [`Callees`] gives them |
 //! | `LateMemCall` | Pop a count of `Variant` values, and call the member of the object register whose name is at an index of the constant table |
 //! | `LateMemCallLdVar`, `LateMemLdVar` | As `LateMemCall`, or with no arguments, into a frame slot, and push the address of the slot |
 //! | `ImpAdStAdFunc` | Pop an object, and `Set` a global at a 16-bit index to it |
@@ -350,6 +351,7 @@ pub struct Callees {
     variables: Vec<(u16, u32, bool)>,
     classes: Vec<(u16, Callees)>,
     class_interfaces: Vec<(u16, String)>,
+    imports: Vec<(u16, String, Option<String>)>,
     arguments: Vec<(u16, i16, String)>,
     base: Option<String>,
     owner: Option<u16>,
@@ -457,6 +459,24 @@ impl Callees {
     pub fn with_class_interface(mut self, index: u16, interface: &str) -> Self {
         self.class_interfaces.push((index, interface.to_owned()));
         self
+    }
+
+    /// Adds the function of the runtime `name` that the entry at `index` of
+    /// the constant table calls, with the interface of its object result.
+    #[must_use]
+    pub fn with_import(mut self, index: u16, name: &str, result: Option<&str>) -> Self {
+        self.imports
+            .push((index, name.to_owned(), result.map(str::to_owned)));
+        self
+    }
+
+    /// Gives the name of the function of the runtime at `index` of the
+    /// constant table, and the interface of its result.
+    fn import(&self, index: u16) -> Option<(&str, Option<&str>)> {
+        self.imports
+            .iter()
+            .find(|(at, _, _)| *at == index)
+            .map(|(_, name, result)| (name.as_str(), result.as_deref()))
     }
 
     /// Gives the interface of the class of the runtime at `index` of the
@@ -1290,7 +1310,12 @@ impl Value {
     /// floating point unit. When no opcode takes it before the end of the
     /// statement, the call is a statement of its own.
     fn is_float_call(&self) -> bool {
-        self.bytes == 0 && matches!(self.expr, Expr::Call(Callee::Import(_), _))
+        self.bytes == 0
+            && match &self.expr {
+                Expr::Call(Callee::Import(_), _) => true,
+                Expr::Call(Callee::Member(object, _), _) => **object == Expr::Word("VBA"),
+                _ => false,
+            }
     }
 
     /// A value of `bytes` bytes, with no slot and no class.
@@ -1975,15 +2000,22 @@ fn run(
                 call_or_function(&mut state, Callee::Method(method.index), args)
             }
             Family::ImportCall { result } => {
-                let callee = Callee::Import(word16(0)?);
+                let index = word16(0)?;
+                let (callee, class) = match callees.import(index) {
+                    Some((name, class)) => (
+                        Callee::Member(Box::new(Expr::Word("VBA")), name.to_owned()),
+                        class.map(str::to_owned),
+                    ),
+                    None => (Callee::Import(index), None),
+                };
                 let args = expressions(call_arguments(&mut state.stack, word16(2)?, at)?);
                 let float = names
                     .iter()
                     .any(|name| name.ends_with("FPR4") || name.ends_with("FPR8"));
                 if result {
-                    state
-                        .stack
-                        .push(Value::plain(Expr::Call(callee, args), true));
+                    let mut value = Value::plain(Expr::Call(callee, args), true);
+                    value.class = class;
+                    state.stack.push(value);
                     None
                 } else if float {
                     let begin = if !state.stack.is_empty()
@@ -2543,6 +2575,27 @@ pub fn interface_indexes(listing: &PcodeListing, table: &PcodeTable) -> Vec<u16>
     out
 }
 
+/// Gives the index of each entry of the constant table that an import call
+/// of `listing` names. A caller gives [`Callees`] the function of the
+/// runtime of each one.
+#[must_use]
+pub fn import_indexes(listing: &PcodeListing, table: &PcodeTable) -> Vec<u16> {
+    let mut out = Vec::new();
+    for instruction in &listing.instructions {
+        let names = table
+            .slot(instruction.lead, instruction.opcode)
+            .map(|slot| slot.names.as_slice())
+            .unwrap_or_default();
+        if matches!(family(names), Some(Family::ImportCall { .. }))
+            && let Some(index) = u16_at(&instruction.arguments, 0)
+            && !out.contains(&index)
+        {
+            out.push(index);
+        }
+    }
+    out
+}
+
 /// Gives the index of each member name of the constant table that a
 /// late-bound call of `listing` names. A caller gives [`Callees`] each one.
 #[must_use]
@@ -2616,8 +2669,8 @@ pub fn render(stmts: &[LiftedStmt]) -> Vec<String> {
 )]
 mod tests {
     use super::{
-        Callees, LiftFault, class_indexes, interface_indexes, lift, lift_method, method_calls,
-        name_indexes, render, string_indexes,
+        Callees, LiftFault, class_indexes, import_indexes, interface_indexes, lift, lift_method,
+        method_calls, name_indexes, render, string_indexes,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::pcode::{PcodeTable, disassemble};
@@ -3001,6 +3054,47 @@ result = false
         assert_eq!(
             render(&lift(&listing, &table, &callees, Some(&types)).unwrap()),
             ["       local_88 = Me.box1.Item(0).Text", "       Exit"]
+        );
+    }
+
+    #[test]
+    fn a_named_import_gives_its_name_and_the_class_of_its_result() {
+        // Set local_1C = Err(): Err.Cls through VCall, which names no
+        // interface.
+        let body = [
+            0x13, 0x02, 0x00, 0x00, 0x00, 0x1B, 0xE4, 0xFF, 0x06, 0xE4, 0xFF, 0x58, 0xB0, 0x00,
+            0x0C,
+        ];
+        let table = PcodeTable::parse(TABLE.as_bytes()).unwrap();
+        let types = VbTypes::parse(TYPES.as_bytes()).unwrap();
+        let listing = disassemble(&Region::new(&body, Off::new(0)), &table);
+        assert_eq!(import_indexes(&listing, &table), [2]);
+        let named = Callees::default().with_import(2, "Err", Some("_Box"));
+        assert_eq!(
+            render(&lift(&listing, &table, &named, Some(&types)).unwrap()),
+            [
+                "       Set local_1C = VBA.Err()",
+                "       Call local_1C.Cls()",
+                "       Exit"
+            ]
+        );
+        assert_eq!(
+            lift(&listing, &table, &Callees::default(), Some(&types)),
+            Err(LiftFault::NoFunction(11))
+        );
+        // Beep, a named call whose result nothing takes, then a store.
+        let beep = [
+            0x12, 0x02, 0x00, 0x00, 0x00, 0x0F, 0x9C, 0xFF, 0x05, 0x78, 0xFF, 0x0C,
+        ];
+        let listing_beep = disassemble(&Region::new(&beep, Off::new(0)), &table);
+        let named_beep = Callees::default().with_import(2, "Beep", None);
+        assert_eq!(
+            render(&lift(&listing_beep, &table, &named_beep, None).unwrap()),
+            [
+                "       Call VBA.Beep()",
+                "       local_88 = local_64",
+                "       Exit"
+            ]
         );
     }
 
