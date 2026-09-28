@@ -96,6 +96,7 @@ mod builds;
 mod fetch_corpus;
 mod fuzz;
 mod licences;
+mod lift_measure;
 mod msft;
 mod opcode_table;
 mod pcode;
