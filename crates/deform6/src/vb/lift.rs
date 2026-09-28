@@ -1968,6 +1968,16 @@ fn interface_call(
             target,
             value: expressions(args).remove(0),
         },
+        ([_, _, ..], true, _) | ([_, _, ..], false, true) => {
+            let mut indexes = expressions(args);
+            let value = indexes.pop().ok_or(LiftFault::CallArguments(at))?;
+            let target = Expr::Call(Callee::Member(Box::new(object), name), indexes);
+            if has("let") {
+                Stmt::Assign { target, value }
+            } else {
+                Stmt::Set { target, value }
+            }
+        }
         _ => Stmt::Call(Callee::Member(Box::new(object), name), expressions(args)),
     }))
 }
@@ -3574,6 +3584,11 @@ names = ["_Default", "Text"]
 kinds = ["let", "let"]
 arg_bytes = 4
 result = false
+[interfaces._Box.functions.00B8]
+names = ["Selected"]
+kinds = ["let"]
+arg_bytes = 8
+result = false
 [interfaces._Box.functions.00B4]
 names = ["Container"]
 kinds = ["get"]
@@ -3862,6 +3877,16 @@ dispid = 67
         assert_eq!(
             lift(&listing, &table, &Callees::default(), Some(&types)),
             Err(LiftFault::NoFunction(5))
+        );
+        // The let of Selected with an index: Basic pushes the value 7
+        // first and the index 3 last, so the index is the first argument.
+        let indexed = [
+            0x02, 0x07, 0x02, 0x03, 0x06, 0x08, 0x00, 0x1C, 0xB8, 0x00, 0x00, 0x00, 0x0C,
+        ];
+        let listing = disassemble(&Region::new(&indexed, Off::new(0)), &table);
+        assert_eq!(
+            render(&lift(&listing, &table, &callees, Some(&types)).unwrap())[0],
+            "       Me.Selected(3) = 7"
         );
     }
 
