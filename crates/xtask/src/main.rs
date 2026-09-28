@@ -96,6 +96,7 @@ mod builds;
 mod fetch_corpus;
 mod fuzz;
 mod licences;
+mod lift_builds;
 mod lift_measure;
 mod msft;
 mod opcode_table;
@@ -129,6 +130,7 @@ fn run(args: Vec<String>) -> i32 {
         Some("export-builds") => builds::run_export(args.get(1..).unwrap_or(&[])),
         Some("import-builds") => builds::run_import(args.get(1..).unwrap_or(&[])),
         Some("export-pcode") => pcode::run_export(args.get(1..).unwrap_or(&[])),
+        Some("export-lift-builds") => lift_builds::run(args.get(1..).unwrap_or(&[])),
         Some("import-pcode") => pcode::run_import(args.get(1..).unwrap_or(&[])),
         Some("derive-opcode-table") => {
             opcode_table::derive_opcode_table(args.get(1..).unwrap_or(&[]))

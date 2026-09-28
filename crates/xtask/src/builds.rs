@@ -393,7 +393,7 @@ fn export_probe(dir: &Path) -> Result<usize, String> {
 }
 
 /// Writes `manifest.txt` and `build.bat` into `dir`.
-fn write_lists(dir: &Path, exported: &[Exported]) -> Result<(), String> {
+pub(crate) fn write_lists(dir: &Path, exported: &[Exported]) -> Result<(), String> {
     let manifest = dir.join("manifest.txt");
     std::fs::write(&manifest, render_manifest(exported))
         .map_err(|err| format!("writing {}: {err}", manifest.display()))?;
