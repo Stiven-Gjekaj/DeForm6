@@ -22,6 +22,10 @@
 //!   interface of the control. The record names the events interface of the
 //!   control, such as `PictureBoxEvents`, and the interface of the control
 //!   is `_PictureBox`.
+//! - `[events]` maps the GUID of each events interface to the names of its
+//!   events, in the order of their vtable offsets. The event table of a
+//!   control has one slot for each event, in this order. The event table of
+//!   an OCX control has more slots before them.
 //! - `[iids]` maps the GUID of each interface to its name. A class
 //!   reference of a constant table, such as the one of the global object of
 //!   the runtime, names an interface by its GUID.
@@ -114,6 +118,7 @@ pub(crate) struct Import {
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub(crate) struct Types {
     controls: BTreeMap<String, String>,
+    events: BTreeMap<String, Vec<String>>,
     iids: BTreeMap<String, String>,
     imports: BTreeMap<String, Import>,
     interfaces: BTreeMap<String, Interface>,
@@ -245,6 +250,15 @@ pub(crate) fn derive(infos: &[TypeInfo]) -> Result<Types, String> {
         let Some(class) = name.strip_suffix(EVENTS_SUFFIX) else {
             continue;
         };
+        let mut events: Vec<&Function> = info.functions.iter().collect();
+        events.sort_by_key(|function| function.vtable_offset);
+        types.events.insert(
+            guid_text(guid),
+            events
+                .iter()
+                .map(|function| function.name.clone().unwrap_or_default())
+                .collect(),
+        );
         let interface = format!("_{class}");
         if types.interfaces.contains_key(&interface) {
             types.controls.insert(guid_text(guid), interface);
@@ -259,6 +273,9 @@ impl Types {
     fn merge(&mut self, other: Self) {
         for (key, value) in other.controls {
             self.controls.entry(key).or_insert(value);
+        }
+        for (key, value) in other.events {
+            self.events.entry(key).or_insert(value);
         }
         for (key, value) in other.iids {
             self.iids.entry(key).or_insert(value);
@@ -339,7 +356,8 @@ pub(crate) fn render(types: &Types) -> Result<String, String> {
     Ok(format!(
         "# The interfaces of the Visual Basic 6 controls, written by\n# `cargo run -p xtask -- \
          derive-vb-types`. Do not commit this file.\n#\n# `controls` maps the GUID of the events \
-         interface that a ControlInfo record\n# names to the interface of the control. `iids` maps the GUID of each\n# interface to its name. Each \
+         interface that a ControlInfo record\n# names to the interface of the control. `events` \
+         maps the GUID of each\n# events interface to its events, in vtable order. `iids` maps the GUID of each\n# interface to its name. Each \
          function is keyed by its vtable\n# offset in hexadecimal. `arg_bytes` leaves out the 4 \
          bytes of the object.\n\n{body}"
     ))
@@ -438,6 +456,38 @@ mod tests {
     }
 
     #[test]
+    fn an_events_interface_gives_its_events_in_the_order_of_their_offsets() {
+        let mut info = interface(vec![
+            Function {
+                vtable_offset: 0x10,
+                ..function("Load", 1, 3)
+            },
+            Function {
+                vtable_offset: 0x0C,
+                ..function("Click", 1, 3)
+            },
+            Function {
+                vtable_offset: 0x14,
+                ..function("Unload", 1, 3)
+            },
+        ]);
+        info.name = Some("BoxEvents".to_owned());
+        info.guid = Some([7; 16]);
+        let types = derive(&[info]).unwrap();
+        assert_eq!(
+            types.events["{07070707-0707-0707-0707-070707070707}"],
+            ["Click", "Load", "Unload"]
+        );
+        assert!(
+            render(&types).unwrap().contains(
+                "[events]\n\"{07070707-0707-0707-0707-070707070707}\" = [\"Click\", \"Load\", \"Unload\"]"
+            ),
+            "{}",
+            render(&types).unwrap()
+        );
+    }
+
+    #[test]
     fn a_second_library_adds_only_what_the_first_does_not_hold() {
         let first = derive(&parse(&library()).unwrap()).unwrap();
         let mut merged = first.clone();
@@ -453,7 +503,18 @@ mod tests {
                 result_interface: None,
             },
         );
+        second
+            .events
+            .insert("{E}".to_owned(), vec!["Error".to_owned()]);
+        merged
+            .events
+            .insert("{F}".to_owned(), vec!["Load".to_owned()]);
+        second
+            .events
+            .insert("{F}".to_owned(), vec!["Other".to_owned()]);
         merged.merge(second);
+        assert_eq!(merged.events["{E}"], ["Error"]);
+        assert_eq!(merged.events["{F}"], ["Load"]);
         assert_eq!(merged.imports["685"].name, "Err");
         assert_eq!(merged.interfaces["_Box"].vtable_size, 0x30);
         assert_eq!(merged.interfaces["_Other"].vtable_size, 0x99);
