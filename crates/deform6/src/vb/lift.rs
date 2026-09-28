@@ -3038,6 +3038,30 @@ pub fn import_indexes(listing: &PcodeListing, table: &PcodeTable) -> Vec<u16> {
     out
 }
 
+/// The size of the value that a `Function` returns when its exit opcode is
+/// `ExitProcCb`, which gives no size: a `Variant`. Both such procedures of
+/// the corpus return a `Variant`.
+const VARIANT_BYTES: u16 = 16;
+
+/// Gives the bytes of the value that `listing` returns, or `None` for a
+/// procedure that returns none. The exit opcode `ExitProcCbHresult` gives
+/// them in its second word.
+#[must_use]
+pub fn result_bytes(listing: &PcodeListing, table: &PcodeTable) -> Option<u16> {
+    listing.instructions.iter().find_map(|instruction| {
+        let names = &table.slot(instruction.lead, instruction.opcode)?.names;
+        if names.iter().any(|name| name == "ExitProcCbHresult") {
+            let low = *instruction.arguments.get(2)?;
+            let high = *instruction.arguments.get(3)?;
+            Some(u16::from_le_bytes([low, high]))
+        } else if names.iter().any(|name| name.starts_with("ExitProcCb")) {
+            Some(VARIANT_BYTES)
+        } else {
+            None
+        }
+    })
+}
+
 /// Gives the index of each variable of the constant table that `listing`
 /// loads or stores. A caller gives [`Callees`] the address of each one.
 #[must_use]

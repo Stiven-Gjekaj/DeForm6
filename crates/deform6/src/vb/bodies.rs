@@ -49,9 +49,9 @@ use crate::read::pe::PeImage;
 use crate::vb::context::callees_of_project_named;
 use crate::vb::functyp::{Prototype, TypeEntry, VbType};
 use crate::vb::header::{VbHeader, header_region};
-use crate::vb::lift::{lift_method, render};
+use crate::vb::lift::{lift_method, render, result_bytes};
 use crate::vb::object::ObjectTable;
-use crate::vb::pcode::{PcodeListing, PcodeTable, disassemble};
+use crate::vb::pcode::{PcodeTable, disassemble};
 use crate::vb::procdesc::{MethodEntry, read_method_table};
 use crate::vb::project::{ObjectTableHead, ProjectInfo};
 use crate::vb::types::VbTypes;
@@ -209,29 +209,6 @@ fn slots(bytes: &[u16]) -> Vec<u16> {
         at = at.saturating_add(*size);
     }
     out
-}
-
-/// The size of the value that a `Function` returns when its exit opcode is
-/// `ExitProcCb`, which gives no size: a `Variant`. Both such procedures of
-/// the corpus return a `Variant`.
-const VARIANT_BYTES: u16 = 16;
-
-/// Gives the bytes of the value that `listing` returns, or `None` for a
-/// procedure that returns none. The exit opcode `ExitProcCbHresult` gives
-/// them in its second word.
-fn result_bytes(listing: &PcodeListing, table: &PcodeTable) -> Option<u16> {
-    listing.instructions.iter().find_map(|instruction| {
-        let names = &table.slot(instruction.lead, instruction.opcode)?.names;
-        if names.iter().any(|name| name == "ExitProcCbHresult") {
-            let low = *instruction.arguments.get(2)?;
-            let high = *instruction.arguments.get(3)?;
-            Some(u16::from_le_bytes([low, high]))
-        } else if names.iter().any(|name| name.starts_with("ExitProcCb")) {
-            Some(VARIANT_BYTES)
-        } else {
-            None
-        }
-    })
 }
 
 /// The frame offset below which a `Function` keeps the value that it
@@ -481,10 +458,10 @@ pub fn lift_objects(
 )]
 mod tests {
     use super::{
-        built_parameters, declare, declared_bytes, procedure_name, replace_word, result_bytes,
-        words_with,
+        built_parameters, declare, declared_bytes, procedure_name, replace_word, words_with,
     };
     use crate::read::region::{Off, Region};
+    use crate::vb::lift::result_bytes;
     use crate::vb::pcode::{PcodeTable, disassemble};
     use crate::vb::{ObjectProcedures, ProcedureEntry};
 
