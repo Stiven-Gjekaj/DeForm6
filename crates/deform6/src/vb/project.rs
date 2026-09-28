@@ -800,6 +800,22 @@ impl DeclareTable {
     pub fn defects(&self) -> &[Defect] {
         &self.defects
     }
+
+    /// Gives the export name of the entry of type 7 whose descriptor is at
+    /// `descriptor_va`. The stub that a `Declare` call goes through pushes
+    /// this address. Gives `None` for an address that no entry names, for a
+    /// name that does not resolve, and for an ordinal.
+    #[must_use]
+    pub fn export_at(&self, pe: &PeImage<'_>, descriptor_va: Va) -> Option<String> {
+        let entry = self.entries.iter().find(|entry| {
+            entry.dw_entry_type == 7 && entry.lp_import_descriptor == descriptor_va
+        })?;
+        let (_, export) = read_declare_names(pe, entry.descriptor?).ok()?;
+        match parse_export_name(export) {
+            ExportName::Name(name) => Some(name),
+            ExportName::OrdinalInferred(_) => None,
+        }
+    }
 }
 
 /// Why a `dwEntryType == 7` entry did not resolve to a declaration.

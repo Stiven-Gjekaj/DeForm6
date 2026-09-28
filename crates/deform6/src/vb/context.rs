@@ -30,12 +30,13 @@ use crate::read::pe::PeImage;
 use crate::read::region::{Off, Va};
 use crate::vb::classify::has_optional_info;
 use crate::vb::constants::{
-    class_reference_iid, constant, constant_guid, constant_name, constant_runtime_ordinal,
-    constant_string,
+    class_reference_iid, constant, constant_declare, constant_guid, constant_name,
+    constant_runtime_ordinal, constant_string,
 };
 use crate::vb::functyp::{FuncTypeWalk, ProcedureSignature, PrototypeList, TypeEntry, VbType};
 use std::collections::BTreeMap;
 
+use crate::vb::header::{VbHeader, header_region};
 use crate::vb::lift::{
     CONTROL_ARRAY, Callees, class_indexes, import_indexes, interface_indexes, method_calls,
     name_indexes, string_indexes,
@@ -45,6 +46,7 @@ use crate::vb::object::Object;
 use crate::vb::pcode::{PcodeListing, PcodeTable, disassemble};
 use crate::vb::privateobj::{ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureList};
 use crate::vb::procdesc::{MethodEntry, read_method_table};
+use crate::vb::project::{DeclareTable, ProjectInfo};
 use crate::vb::types::VbTypes;
 
 /// Gives the index and the listing of each body of the method table of
@@ -231,6 +233,11 @@ pub fn callees_of_project(
         .zip(0_u16..)
         .map(|(object, owner)| profile(pe, object, types).with_owner(owner))
         .collect();
+    let declares = header_region(pe)
+        .and_then(|region| VbHeader::read(&region))
+        .and_then(|header| ProjectInfo::read(pe, header.lp_project_data))
+        .ok()
+        .map(|info| DeclareTable::read(pe, &info));
     let mut out = Vec::new();
     for (object, own) in objects.iter().zip(&profiles) {
         let mut callees = match types {
@@ -250,6 +257,11 @@ pub fn callees_of_project(
                 }
             }
             for index in import_indexes(listing, table) {
+                if let Some(name) = constant_declare(pe, object.lp_object_info, index)
+                    .and_then(|descriptor| declares.as_ref()?.export_at(pe, descriptor))
+                {
+                    callees = callees.with_declare(index, &name);
+                }
                 if let Some(import) = constant_runtime_ordinal(pe, object.lp_object_info, index)
                     .and_then(|ordinal| types?.import(ordinal))
                 {

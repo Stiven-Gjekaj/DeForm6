@@ -319,6 +319,8 @@ pub enum Expr {
 pub enum Callee {
     /// A procedure, by its index in the constant table of the object.
     Import(u16),
+    /// A procedure of a DLL that a `Declare` names, by its export name.
+    Declare(String),
     /// A named function of an object.
     Member(Box<Expr>, String),
 }
@@ -328,6 +330,7 @@ impl Callee {
     fn text(&self) -> String {
         match self {
             Self::Import(index) => format!("import_{index:X}"),
+            Self::Declare(name) => name.clone(),
             Self::Member(object, name) => format!("{}.{name}", object.text()),
         }
     }
@@ -353,6 +356,7 @@ pub struct Callees {
     classes: Vec<(u16, Callees)>,
     class_interfaces: Vec<(u16, String)>,
     imports: Vec<(u16, String, Option<String>)>,
+    declares: Vec<(u16, String)>,
     arguments: Vec<(u16, i16, String)>,
     procedures: Vec<(u16, String)>,
     base: Option<String>,
@@ -496,6 +500,23 @@ impl Callees {
         self.imports
             .push((index, name.to_owned(), result.map(str::to_owned)));
         self
+    }
+
+    /// Adds the export name `name` of the procedure of a DLL at `index` of
+    /// the constant table.
+    #[must_use]
+    pub fn with_declare(mut self, index: u16, name: &str) -> Self {
+        self.declares.push((index, name.to_owned()));
+        self
+    }
+
+    /// Gives the export name of the procedure of a DLL at `index` of the
+    /// constant table.
+    fn declare(&self, index: u16) -> Option<&str> {
+        self.declares
+            .iter()
+            .find(|(at, _)| *at == index)
+            .map(|(_, name)| name.as_str())
     }
 
     /// Gives the name of the function of the runtime at `index` of the
@@ -1406,7 +1427,7 @@ impl Value {
     fn is_float_call(&self) -> bool {
         self.bytes == 0
             && match &self.expr {
-                Expr::Call(Callee::Import(_), _) => true,
+                Expr::Call(Callee::Import(_) | Callee::Declare(_), _) => true,
                 Expr::Call(Callee::Member(object, _), _) => **object == Expr::Word("VBA"),
                 _ => false,
             }
@@ -2136,7 +2157,10 @@ fn run(
                         Callee::Member(Box::new(Expr::Word("VBA")), name.to_owned()),
                         class.map(str::to_owned),
                     ),
-                    None => (Callee::Import(index), None),
+                    None => match callees.declare(index) {
+                        Some(name) => (Callee::Declare(name.to_owned()), None),
+                        None => (Callee::Import(index), None),
+                    },
                 };
                 let args = expressions(call_arguments(&mut state.stack, word16(2)?, at)?);
                 let float = names
@@ -3260,6 +3284,18 @@ dispid = 67
             render(&lift(&listing_beep, &table, &named_beep, None).unwrap()),
             [
                 "       Call VBA.Beep()",
+                "       local_88 = local_64",
+                "       Exit"
+            ]
+        );
+        // The same call of a procedure of a DLL gives its export name.
+        let declared = Callees::default()
+            .with_declare(1, "GetObjectA")
+            .with_declare(2, "Beep");
+        assert_eq!(
+            render(&lift(&listing_beep, &table, &declared, None).unwrap()),
+            [
+                "       Call Beep()",
                 "       local_88 = local_64",
                 "       Exit"
             ]

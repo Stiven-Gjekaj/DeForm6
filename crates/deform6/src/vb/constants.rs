@@ -56,6 +56,31 @@ pub fn constant_runtime_ordinal(pe: &PeImage<'_>, lp_object_info: Va, index: u16
     pe.runtime_ordinal(thunk.va_le(Off::new(2))?)
 }
 
+/// The bytes of the stub of a `Declare` call before the address that it
+/// pushes: `mov eax, [cache]`, `or eax, eax`, `je +2`, `jmp eax`, `push`.
+/// The 4 bytes of the address of the cache are left out.
+const DECLARE_STUB: [(u32, &[u8]); 2] = [
+    (0, &[0xA1]),
+    (5, &[0x0B, 0xC0, 0x74, 0x02, 0xFF, 0xE0, 0x68]),
+];
+
+/// Where the stub of a `Declare` call holds the address that it pushes.
+const DECLARE_PUSH_AT: u32 = 12;
+
+/// Gives the address that the stub of a `Declare` call at `index` of the
+/// constant table pushes: the descriptor of the entry of the `Declare`
+/// table. `ImpAdCall` names such a stub for a procedure of a DLL.
+#[must_use]
+pub fn constant_declare(pe: &PeImage<'_>, lp_object_info: Va, index: u16) -> Option<Va> {
+    let stub = pe.region_at_va(constant(pe, lp_object_info, index)?)?;
+    for (at, bytes) in DECLARE_STUB {
+        if stub.take(Off::new(at), u32::try_from(bytes.len()).ok()?)? != bytes {
+            return None;
+        }
+    }
+    stub.va_le(Off::new(DECLARE_PUSH_AT))
+}
+
 /// The first word of a class reference: the number of GUIDs that follow.
 const CLASS_REFERENCE_GUIDS: u32 = 2;
 
@@ -132,8 +157,8 @@ pub fn constant_string(pe: &PeImage<'_>, lp_object_info: Va, index: u16) -> Opti
 )]
 mod tests {
     use super::{
-        class_reference_iid, constant, constant_guid, constant_name, constant_runtime_ordinal,
-        constant_string,
+        class_reference_iid, constant, constant_declare, constant_guid, constant_name,
+        constant_runtime_ordinal, constant_string,
     };
     use crate::read::pe::PeImage;
     use crate::read::region::Va;
@@ -192,6 +217,31 @@ mod tests {
         put_u32(&mut extra, 0xC0, 2);
         extra[0xC4..0xC6].copy_from_slice(&0xD800_u16.to_le_bytes());
         extra
+    }
+
+    /// The stub of a `Declare` call that pushes `0x401234`, at `0xE0`.
+    const DECLARE_STUB: [u8; 16] = [
+        0xA1, 0x00, 0x20, 0x40, 0x00, 0x0B, 0xC0, 0x74, 0x02, 0xFF, 0xE0, 0x68, 0x34, 0x12, 0x40,
+        0x00,
+    ];
+
+    #[test]
+    fn the_stub_of_a_declare_call_gives_the_address_that_it_pushes() {
+        let mut extra = table();
+        put_u32(&mut extra, 0x4C, 0x0040_10E0);
+        extra[0xE0..0xF0].copy_from_slice(&DECLARE_STUB);
+        let bytes = synthetic_image(&extra);
+        let pe = PeImage::parse(&bytes).unwrap();
+        let info = Va::new(0x0040_1000);
+        assert_eq!(constant_declare(&pe, info, 3), Some(Va::new(0x0040_1234)));
+        assert_eq!(constant_declare(&pe, info, 0), None, "a string");
+        for at in [0xE0, 0xE5, 0xEB] {
+            let mut other = extra.clone();
+            other[at] ^= 0xFF;
+            let bytes = synthetic_image(&other);
+            let pe = PeImage::parse(&bytes).unwrap();
+            assert_eq!(constant_declare(&pe, info, 3), None, "a byte at {at:#x}");
+        }
     }
 
     #[test]

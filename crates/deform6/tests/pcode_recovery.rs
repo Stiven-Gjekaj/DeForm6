@@ -54,6 +54,7 @@ use deform6::read::pe::PeImage;
 use deform6::read::region::{Off, Va};
 use deform6::vb::Report;
 use deform6::vb::classify::ObjectKind as RecoveredKind;
+use deform6::vb::constants::constant_declare;
 use deform6::vb::context::callees_of_project;
 use deform6::vb::controlinfo::{
     ControlInfoTable, EventReport, EventSlot, StubShape, read_event_table,
@@ -65,7 +66,7 @@ use deform6::vb::object::{Object, ObjectTable};
 use deform6::vb::opcodes::OpcodeTable;
 use deform6::vb::pcode::PcodeTable;
 use deform6::vb::procdesc::{MethodEntry, read_method_table};
-use deform6::vb::project::{ObjectTableHead, ProjectInfo};
+use deform6::vb::project::{DeclareTable, ObjectTableHead, ProjectInfo};
 use deform6::vb::types::{VbTypes, guid_text};
 use object::LittleEndian as LE;
 use object::pe::ImageNtHeaders32;
@@ -1327,4 +1328,86 @@ fn a_public_method_gives_the_interface_of_its_control_argument() {
         );
         assert_eq!(callees[at].procedure(*index), *name);
     }
+}
+
+/// Gives the name that each `Declare` statement of `path` binds in the DLL:
+/// the text of its `Alias`, or else its own name.
+fn declared_exports(path: &Path) -> Vec<String> {
+    let text = String::from_utf8_lossy(&read(path)).into_owned();
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        let Some(at) = words.iter().position(|word| *word == "Declare") else {
+            continue;
+        };
+        let Some(name) = words.get(at + 2) else {
+            continue;
+        };
+        let alias = words
+            .iter()
+            .position(|word| *word == "Alias")
+            .and_then(|at| words.get(at + 1))
+            .map(|alias| alias.trim_matches('"'));
+        out.push(alias.unwrap_or(name).to_owned());
+    }
+    out
+}
+
+/// `ObjectInfo + 0x28`: `wConstants`, the number of entries of the
+/// constant table.
+const CONSTANT_COUNT_AT: u32 = 0x28;
+
+/// Each entry of a constant table that is the stub of a `Declare` call
+/// names a `Declare` entry of the program, and its export name is the
+/// `Alias` or the name of a `Declare` statement of the source. No two
+/// descriptors of one program give one name.
+#[test]
+fn each_declare_stub_of_a_pcode_program_names_a_declare_of_its_source() {
+    let root = build_record::corpus_root();
+    let projects = vbp::project_files();
+    let (mut stubs, mut failures) = (0, Vec::new());
+    for (key, exe) in pcode_programs() {
+        let project = vbp::select_project_file(&root.join(&key), &projects)
+            .unwrap_or_else(|err| panic!("{key}: {err}"));
+        let exports: Vec<String> = vbp::Project::read(&project)
+            .declared_objects()
+            .iter()
+            .flat_map(|object| declared_exports(&object.source_file))
+            .collect();
+        let bytes = read(&exe);
+        let pe = PeImage::parse(&bytes).unwrap();
+        let header = VbHeader::read(&header_region(&pe).unwrap()).unwrap();
+        let info = ProjectInfo::read(&pe, header.lp_project_data).unwrap();
+        let declares = DeclareTable::read(&pe, &info);
+        let mut named = BTreeMap::new();
+        for object in objects_by_name(&pe).values() {
+            let count = pe
+                .region_at_va(object.lp_object_info)
+                .and_then(|region| region.u16_le(Off::new(CONSTANT_COUNT_AT)))
+                .unwrap_or(0);
+            for index in 0..count {
+                let Some(descriptor) = constant_declare(&pe, object.lp_object_info, index) else {
+                    continue;
+                };
+                stubs += 1;
+                match declares.export_at(&pe, descriptor) {
+                    Some(name) if exports.contains(&name) => {
+                        named.insert(descriptor, name);
+                    }
+                    other => failures.push(format!(
+                        "{key}: {} constant {index:#x} gives {other:?}",
+                        object.name
+                    )),
+                }
+            }
+        }
+        let mut names: Vec<&String> = named.values().collect();
+        names.sort();
+        names.dedup();
+        if names.len() != named.len() {
+            failures.push(format!("{key}: two descriptors give one name: {named:x?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+    assert_eq!(stubs, 186);
 }
