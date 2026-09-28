@@ -724,6 +724,77 @@ fn arguments_text(args: &[Expr]) -> String {
         .join(", ")
 }
 
+/// A statement of Basic with a form of its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Keyword {
+    /// `ReDim` or `ReDim Preserve`: the array, then the lower and the upper
+    /// bound of each dimension.
+    ReDim {
+        /// Whether the statement keeps the values.
+        preserve: bool,
+    },
+    /// `Erase`: the array.
+    Erase,
+    /// `Open`: the path, the file number and the record length, which is
+    /// `-1` when the statement gives none.
+    Open {
+        /// The mode, such as `Binary`, or `None` for a mode that the lift
+        /// does not know.
+        mode: Option<&'static str>,
+    },
+    /// `Close`: the file number.
+    Close,
+    /// `Print #`: the file number and the value.
+    Print,
+    /// `Get` or `Put`: the file number, the record or an empty word, and the
+    /// variable.
+    Record {
+        /// `Get` or `Put`.
+        name: &'static str,
+    },
+}
+
+impl Keyword {
+    /// The text of the statement with the expressions `args`.
+    fn text(self, args: &[Expr]) -> String {
+        let all = |from: usize| {
+            args.get(from..)
+                .unwrap_or_default()
+                .iter()
+                .map(Expr::text)
+                .collect::<Vec<_>>()
+        };
+        let at = |index: usize| args.get(index).map(Expr::text).unwrap_or_default();
+        match self {
+            Self::ReDim { preserve } => {
+                let ranges: Vec<String> = args
+                    .get(1..)
+                    .unwrap_or_default()
+                    .chunks(2)
+                    .map(|pair| {
+                        let texts: Vec<String> = pair.iter().map(Expr::text).collect();
+                        texts.join(" To ")
+                    })
+                    .collect();
+                let word = if preserve { "ReDim Preserve" } else { "ReDim" };
+                format!("{word} {}({})", at(0), ranges.join(", "))
+            }
+            Self::Erase => format!("Erase {}", all(0).join(", ")),
+            Self::Open { mode } => {
+                let mode = mode.map_or_else(String::new, |mode| format!(" For {mode}"));
+                let length = match args.get(2) {
+                    Some(Expr::Const(-1)) | None => String::new(),
+                    Some(length) => format!(" Len = {}", length.text()),
+                };
+                format!("Open {}{mode} As #{}{length}", at(0), at(1))
+            }
+            Self::Close => format!("Close #{}", at(0)),
+            Self::Print => format!("Print #{}, {}", at(0), all(1).join("; ")),
+            Self::Record { name } => format!("{name} #{}, {}, {}", at(0), at(1), at(2)),
+        }
+    }
+}
+
 /// A statement.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Stmt {
@@ -756,6 +827,9 @@ pub enum Stmt {
     Exit,
     /// A call whose result is not used.
     Call(Callee, Vec<Expr>),
+    /// A statement of Basic that is not a call, with its expressions in the
+    /// order that [`Keyword`] gives.
+    Keyword(Keyword, Vec<Expr>),
     /// The start of a `For` loop. When the counter is past the end, the
     /// loop goes to `exit`.
     For {
@@ -817,6 +891,10 @@ impl Stmt {
                 callee.resolve(kept),
                 args.into_iter().map(|arg| arg.resolve(kept)).collect(),
             ),
+            Self::Keyword(keyword, args) => Self::Keyword(
+                keyword,
+                args.into_iter().map(|arg| arg.resolve(kept)).collect(),
+            ),
             Self::For {
                 counter,
                 start,
@@ -856,6 +934,7 @@ impl Stmt {
             Self::End => "End".to_owned(),
             Self::Exit => "Exit".to_owned(),
             Self::Call(callee, args) => format!("Call {}({})", callee.text(), arguments_text(args)),
+            Self::Keyword(keyword, args) => keyword.text(args),
             Self::Set { target, value } => format!("Set {} = {}", target.text(), value.text()),
             Self::For {
                 counter,
@@ -2459,8 +2538,8 @@ fn run(
                     Expr::Word("")
                 };
                 let file = pop(&mut state)?;
-                Some(Stmt::Call(
-                    Callee::Member(Box::new(Expr::Word("VBA")), name.to_owned()),
+                Some(Stmt::Keyword(
+                    Keyword::Record { name },
                     vec![file, number, variable],
                 ))
             }
@@ -2472,30 +2551,24 @@ fn run(
                 if args.len() != 2 {
                     return Err(LiftFault::CallArguments(at));
                 }
-                Some(Stmt::Call(
-                    Callee::Member(Box::new(Expr::Word("VBA")), "Print".to_owned()),
-                    args,
-                ))
+                Some(Stmt::Keyword(Keyword::Print, args))
             }
-            Family::Close => Some(Stmt::Call(
-                Callee::Member(Box::new(Expr::Word("VBA")), "Close".to_owned()),
-                vec![pop(&mut state)?],
-            )),
+            Family::Close => Some(Stmt::Keyword(Keyword::Close, vec![pop(&mut state)?])),
             Family::Open => {
                 let length = pop(&mut state)?;
                 let number = pop(&mut state)?;
                 let file = pop(&mut state)?;
                 let mode = match word16(0)? & 0xFF {
-                    0x01 => Expr::Word("Input"),
-                    0x02 => Expr::Word("Output"),
-                    0x04 => Expr::Word("Random"),
-                    0x08 => Expr::Word("Append"),
-                    0x20 => Expr::Word("Binary"),
-                    other => Expr::Const(i64::from(other)),
+                    0x01 => Some("Input"),
+                    0x02 => Some("Output"),
+                    0x04 => Some("Random"),
+                    0x08 => Some("Append"),
+                    0x20 => Some("Binary"),
+                    _ => None,
                 };
-                Some(Stmt::Call(
-                    Callee::Member(Box::new(Expr::Word("VBA")), "Open".to_owned()),
-                    vec![file, mode, number, length],
+                Some(Stmt::Keyword(
+                    Keyword::Open { mode },
+                    vec![file, number, length],
                 ))
             }
             Family::Redim { preserve } => {
@@ -2505,24 +2578,9 @@ fn run(
                     bounds.push(pop(&mut state)?);
                 }
                 bounds.reverse();
-                let ranges = bounds
-                    .chunks(2)
-                    .map(|pair| match pair {
-                        [lower, upper] => Expr::Binary(
-                            BinaryOp::To,
-                            Box::new(lower.clone()),
-                            Box::new(upper.clone()),
-                        ),
-                        _ => Expr::Word("?"),
-                    })
-                    .collect();
-                Some(Stmt::Call(
-                    Callee::Member(
-                        Box::new(Expr::Word("VBA")),
-                        if preserve { "ReDimPreserve" } else { "ReDim" }.to_owned(),
-                    ),
-                    vec![Expr::Index(Box::new(array), ranges)],
-                ))
+                let mut args = vec![array];
+                args.extend(bounds);
+                Some(Stmt::Keyword(Keyword::ReDim { preserve }, args))
             }
             Family::ArrayReference {
                 dimensions_argument,
@@ -2550,10 +2608,7 @@ fn run(
                 ));
                 None
             }
-            Family::ArrayErase => Some(Stmt::Call(
-                Callee::Member(Box::new(Expr::Word("VBA")), "Erase".to_owned()),
-                vec![pop(&mut state)?],
-            )),
+            Family::ArrayErase => Some(Stmt::Keyword(Keyword::Erase, vec![pop(&mut state)?])),
             Family::CopyBytes => {
                 let target = pop(&mut state)?;
                 let value = pop(&mut state)?;
@@ -2853,9 +2908,12 @@ pub fn render(stmts: &[LiftedStmt]) -> Vec<String> {
             | Stmt::For { exit: target, .. }
             | Stmt::Next { body: target, .. } => Some(target),
             Stmt::OnError(target) | Stmt::Resume(target) => target.filter(|target| *target != 0),
-            Stmt::Assign { .. } | Stmt::Set { .. } | Stmt::End | Stmt::Exit | Stmt::Call(..) => {
-                None
-            }
+            Stmt::Assign { .. }
+            | Stmt::Set { .. }
+            | Stmt::End
+            | Stmt::Exit
+            | Stmt::Call(..)
+            | Stmt::Keyword(..) => None,
         })
         .collect();
     targets.sort_unstable();
@@ -2891,8 +2949,9 @@ pub fn render(stmts: &[LiftedStmt]) -> Vec<String> {
 )]
 mod tests {
     use super::{
-        Callees, Expr, LiftFault, ProjectCall, arguments_text, class_indexes, import_indexes,
-        interface_indexes, lift, lift_method, method_calls, name_indexes, render, string_indexes,
+        Callees, Expr, Keyword, LiftFault, ProjectCall, Stmt, arguments_text, class_indexes,
+        import_indexes, interface_indexes, lift, lift_method, method_calls, name_indexes, render,
+        string_indexes,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::pcode::{PcodeTable, disassemble};
@@ -3659,6 +3718,56 @@ dispid = 67
     }
 
     #[test]
+    fn a_keyword_statement_has_the_form_of_basic() {
+        let one = Expr::Const(1);
+        let path = Expr::Str("a.map".to_owned());
+        let text = |keyword: Keyword, args: &[Expr]| Stmt::Keyword(keyword, args.to_vec()).text();
+        assert_eq!(
+            text(
+                Keyword::Open {
+                    mode: Some("Binary")
+                },
+                &[path.clone(), one.clone(), Expr::Const(-1)]
+            ),
+            "Open \"a.map\" For Binary As #1"
+        );
+        assert_eq!(
+            text(
+                Keyword::Open { mode: None },
+                &[path, one.clone(), Expr::Const(64)]
+            ),
+            "Open \"a.map\" As #1 Len = 64"
+        );
+        assert_eq!(text(Keyword::Close, std::slice::from_ref(&one)), "Close #1");
+        assert_eq!(
+            text(Keyword::Print, &[one.clone(), Expr::Local(0xC0)]),
+            "Print #1, local_C0"
+        );
+        assert_eq!(
+            text(
+                Keyword::Record { name: "Get" },
+                &[one.clone(), Expr::Word(""), Expr::Local(0x88)]
+            ),
+            "Get #1, , local_88"
+        );
+        assert_eq!(
+            text(
+                Keyword::Record { name: "Put" },
+                &[one.clone(), one.clone(), Expr::Local(0x88)]
+            ),
+            "Put #1, 1, local_88"
+        );
+        assert_eq!(
+            text(
+                Keyword::ReDim { preserve: true },
+                &[Expr::Local(0x88), Expr::Const(0), one]
+            ),
+            "ReDim Preserve local_88(0 To 1)"
+        );
+        assert_eq!(text(Keyword::Erase, &[Expr::Arg(0xC)]), "Erase arg_C");
+    }
+
+    #[test]
     fn a_missing_argument_is_empty_and_is_dropped_at_the_end() {
         let missing = Expr::Word("Missing");
         assert_eq!(
@@ -4014,7 +4123,7 @@ dispid = 67
         assert_eq!(
             lines(&body).unwrap(),
             [
-                "       Call VBA.Erase(arg_C)",
+                "       Erase arg_C",
                 "       local_88 = arg_10",
                 "       local_90 = Abs(arg_14)",
                 "       Exit"
@@ -4031,7 +4140,7 @@ dispid = 67
         ];
         assert_eq!(
             lines(&redim).unwrap()[0],
-            "       Call VBA.ReDim(arg_C((0 To 7), (1 To 3)))"
+            "       ReDim arg_C(0 To 7, 1 To 3)"
         );
         // import_2() * import_3(), both on the floating point unit, into
         // local_A0 as a Double.
@@ -4180,7 +4289,7 @@ dispid = 67
         let callees = Callees::default().with_method(0x24, 2, 12);
         assert_eq!(
             render(&lift(&listing, &table, &callees, None).unwrap())[0],
-            "       Call VBA.ReDim(arg_10((0 To Me.method_2(arg_C))))"
+            "       ReDim arg_10(0 To Me.method_2(arg_C))"
         );
         // Open "a" For Binary As #1, with the length -1 of no Len clause.
         let open = [
@@ -4191,7 +4300,7 @@ dispid = 67
         let callees = Callees::default().with_string(4, "a");
         assert_eq!(
             render(&lift(&listing, &table, &callees, None).unwrap())[0],
-            "       Call VBA.Open(\"a\", Binary, 1, -1)"
+            "       Open \"a\" For Binary As #1"
         );
         // ReDim Preserve arg_C(0 To 7)
         let preserve = [
@@ -4200,7 +4309,7 @@ dispid = 67
         ];
         assert_eq!(
             lines(&preserve).unwrap()[0],
-            "       Call VBA.ReDimPreserve(arg_C((0 To 7)))"
+            "       ReDim Preserve arg_C(0 To 7)"
         );
         // arg_C = 5; then import_2(local_54) through an ANSI copy of the
         // record into local_88.
@@ -4225,18 +4334,15 @@ dispid = 67
         assert_eq!(
             lines(&file).unwrap(),
             [
-                "       Call VBA.Get(1, 1, local_64)",
-                "       Call VBA.Get(1, , local_60)",
-                "       Call VBA.Print(1, local_5C)",
+                "       Get #1, 1, local_64",
+                "       Get #1, , local_60",
+                "       Print #1, local_5C",
                 "       Exit"
             ]
         );
         // Get #1, , local_64 of a record or an array.
         let own = [0x02, 0x01, 0x15, 0x9C, 0xFF, 0x51, 0x0D, 0x00, 0x0C];
-        assert_eq!(
-            lines(&own).unwrap()[0],
-            "       Call VBA.Get(1, , local_64)"
-        );
+        assert_eq!(lines(&own).unwrap()[0], "       Get #1, , local_64");
         // For local_64 = 1 To 3: local_88 = local_60 + local_64: Next;
         // Close #1
         let loop_of_variants = [
@@ -4250,7 +4356,7 @@ dispid = 67
                 "       For local_64 = 1 To 3  ' past the end: GoTo L0020",
                 "L000C: local_88 = (local_60 + local_64)",
                 "       Next local_64  ' loop: GoTo L000C",
-                "L0020: Call VBA.Close(1)",
+                "L0020: Close #1",
                 "       Exit"
             ]
         );
