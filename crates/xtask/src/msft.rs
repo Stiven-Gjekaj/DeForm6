@@ -114,6 +114,9 @@ pub(crate) struct Function {
     pub result_type: Option<usize>,
     /// The member id: the `DISPID` of a late-bound call of the function.
     pub member_id: u32,
+    /// The variant type of the return value: the simple type, or the type
+    /// of the type description.
+    pub return_vt: u16,
 }
 
 /// The bit of the `FKCCIC` field of a function record that tells that the
@@ -364,6 +367,7 @@ fn functions(
             parameters,
             ordinal,
             result_type,
+            return_vt: parameter_vt(bytes, descs, return_type)?,
             member_id,
         });
         at = add(at, size, "a record")?;
@@ -609,6 +613,7 @@ pub(crate) mod tests {
                     ordinal: Some(685),
                     result_type: Some(1),
                     member_id: 0x43,
+                    return_vt: 26,
                 },
                 Function {
                     name: Some("Move".to_owned()),
@@ -633,6 +638,7 @@ pub(crate) mod tests {
                     ordinal: None,
                     result_type: None,
                     member_id: 0x6003_0001,
+                    return_vt: 25,
                 },
             ]
         );

@@ -706,6 +706,7 @@ mod tests {
             ordinal: None,
             result_type: None,
             member_id: 0x40,
+            return_vt: 24,
         }
     }
 
