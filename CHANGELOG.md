@@ -70,22 +70,34 @@ heading its version and its date.
 - `vb::lift` follows the stack of a decoded body and gives its statements,
   and `deform6 disasm --lift` prints them. It lifts a procedure only when it
   knows the stack effect of each opcode. It lifts a call of a method of `Me`
-  and a call through the constant table of the object, and no other call.
-  `check-pcode-table` counts the bodies that lift: 115 of 680. The
-  statements name each variable and each called procedure by its offset or
-  its index, and `extract` writes none of them.
+  and a call through the constant table of the object.
+  The statements name each variable and each called procedure by its
+  offset or its index, and `extract` writes none of them.
 - `cargo run -p xtask -- derive-vb-types <VB6.OLB>` writes the interfaces of
   the controls from a copy of `VB6.OLB` that the user owns, and
   `vb::types` reads them. `ControlInfo::w_index` gives the position of a
   control in the source, in 613 of 613 records of the corpus. With
   `--vb-types`, `deform6 disasm --lift` and `check-pcode-table` lift the
-  calls of the controls of a form: 143 of 680 bodies lift. Neither file
-  enters the repository.
+  calls of the controls of a form. Neither file enters the repository.
+- `derive-vb-types` also reads the type libraries of a PE file, such as the
+  VBA library of `MSVBVM60.DLL`, and writes the functions of the runtime by
+  the ordinals of their exports. The lift names such a call, such as
+  `VBA.Err()`, and gives its result the class of its interface.
+- The lift follows the calls of other objects: an object argument, an
+  object of a class of the project, a control array, a late-bound call,
+  and the interface that a `VCallHresult` names. `check-pcode-table` counts
+  the bodies that lift: 239 of 680 with no types file, 663 with a types
+  file from `VB6.OLB`, and 666 when the file also holds the VBA library.
+- The width tracer of `derive-pcode-table` follows a jump table of a
+  handler. `NextVar` and `NextStepVar` get the width 4 in place of 2, and
+  680 of 680 bodies still decode.
 
 ### What stays open
 
 - Two corpus programs have no P-code build, because their source does not
   build: `Edge_Detection` and `HMM`.
+- 14 bodies do not lift. Each one calls a Winsock control, whose type
+  library `MSWINSCK.OCX` is not in the types file.
 
 ### What this does not do
 
