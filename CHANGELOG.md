@@ -112,6 +112,14 @@ heading its version and its date.
   `check-pcode-table` holds each one against the source: 361 of 361 are
   lines of their source. A handler of a native build keeps its generated
   name.
+- The lift writes more of its statements in the forms of Basic: `ReDim`,
+  `Erase`, `Open`, `Close`, `Print #`, `Get` and `Put` as statements, not
+  as calls; `Exit Sub` or `Exit Function` by the exit opcode, which agrees
+  with the source in 680 of 680 bodies; a member of the global object of
+  the runtime with no object, such as `Screen.Width`; the global of a form
+  by the name of the form; a field of `Me` with no `Me.`; the default
+  member with no name; and an empty place for an argument that a call
+  leaves out.
 - An unbound event slot now prints as unbound, with no handler, and gives
   no hint to load a table.
 - The width tracer of `derive-pcode-table` follows a jump table of a
