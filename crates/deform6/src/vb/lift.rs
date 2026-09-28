@@ -317,8 +317,6 @@ pub enum Expr {
 /// The procedure that a call names.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Callee {
-    /// A method of `Me`, by its index in the method table of the object.
-    Method(u16),
     /// A procedure, by its index in the constant table of the object.
     Import(u16),
     /// A named function of an object.
@@ -329,7 +327,6 @@ impl Callee {
     /// The text of the callee.
     fn text(&self) -> String {
         match self {
-            Self::Method(index) => format!("Me.method_{index}"),
             Self::Import(index) => format!("import_{index:X}"),
             Self::Member(object, name) => format!("{}.{name}", object.text()),
         }
@@ -357,6 +354,7 @@ pub struct Callees {
     class_interfaces: Vec<(u16, String)>,
     imports: Vec<(u16, String, Option<String>)>,
     arguments: Vec<(u16, i16, String)>,
+    procedures: Vec<(u16, String)>,
     base: Option<String>,
     owner: Option<u16>,
 }
@@ -422,6 +420,24 @@ impl Callees {
     pub fn with_class(mut self, index: u16, profile: Self) -> Self {
         self.classes.push((index, profile));
         self
+    }
+
+    /// Adds the name `name` of the method `index` of the method table: the
+    /// name of a public procedure.
+    #[must_use]
+    pub fn with_procedure(mut self, index: u16, name: &str) -> Self {
+        self.procedures.push((index, name.to_owned()));
+        self
+    }
+
+    /// Gives the name of the method `index` of the method table, or
+    /// `method_` and the index when the procedure is private.
+    #[must_use]
+    pub fn procedure(&self, index: u16) -> String {
+        self.procedures
+            .iter()
+            .find(|(at, _)| *at == index)
+            .map_or_else(|| format!("method_{index}"), |(_, name)| name.clone())
     }
 
     /// Sets the owner of the profile: the index of its object in the
@@ -1681,7 +1697,7 @@ fn project_call(
                 .map(|value| (value.bytes, value.class.clone()))
                 .collect(),
         ));
-        let callee = Callee::Member(Box::new(object), format!("method_{}", method.index));
+        let callee = Callee::Member(Box::new(object), profile.procedure(method.index));
         return Ok(call_or_function(state, callee, args));
     }
     let (field, get) = profile
@@ -2109,7 +2125,9 @@ fn run(
                         .map(|value| (value.bytes, value.class.clone()))
                         .collect(),
                 ));
-                call_or_function(&mut state, Callee::Method(method.index), args)
+                let callee =
+                    Callee::Member(Box::new(Expr::Word("Me")), callees.procedure(method.index));
+                call_or_function(&mut state, callee, args)
             }
             Family::ImportCall { result } => {
                 let index = word16(0)?;
@@ -3407,6 +3425,15 @@ dispid = 67
             lines_with(&body, &callees).unwrap(),
             ["       Call Me.method_5(arg_C, local_88)", "       Exit"]
         );
+        // A public procedure gives its name.
+        let named = Callees::default()
+            .with_method(0x6F8, 5, 12)
+            .with_procedure(4, "Other")
+            .with_procedure(5, "SaveFile");
+        assert_eq!(
+            lines_with(&body, &named).unwrap(),
+            ["       Call Me.SaveFile(arg_C, local_88)", "       Exit"]
+        );
         let fewer = Callees::default().with_method(0x6F8, 5, 8);
         assert_eq!(lines_with(&body, &fewer), Err(LiftFault::StackLeft(6)));
     }
@@ -3698,6 +3725,22 @@ dispid = 67
             ]
         );
         assert_eq!(class_indexes(&listing, &table), [9]);
+        let named = Callees::default().with_class(
+            9,
+            Callees::default()
+                .with_method(0x6F8, 2, 8)
+                .with_procedure(2, "GetImageWidth")
+                .with_variable(0x700, 0x34, true)
+                .with_variable(0x704, 0x34, false),
+        );
+        assert_eq!(
+            render(&lift(&listing, &table, &named, None).unwrap()),
+            [
+                "       global_3.field_34 = 5",
+                "       Call global_3.GetImageWidth(global_3.field_34)",
+                "       Exit"
+            ]
+        );
         let owned = Callees::default().with_class(
             9,
             Callees::default()

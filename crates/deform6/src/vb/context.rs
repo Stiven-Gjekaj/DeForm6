@@ -43,7 +43,7 @@ use crate::vb::lift::{
 use crate::vb::links::read_method_links;
 use crate::vb::object::Object;
 use crate::vb::pcode::{PcodeListing, PcodeTable, disassemble};
-use crate::vb::privateobj::{ObjectInfo, PrivateObj};
+use crate::vb::privateobj::{ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureList};
 use crate::vb::procdesc::{MethodEntry, read_method_table};
 use crate::vb::types::VbTypes;
 
@@ -199,9 +199,16 @@ fn call_class<'a>(
 /// accessors when `types` is given.
 fn profile(pe: &PeImage<'_>, object: &Object, types: Option<&VbTypes>) -> Callees {
     let methods = read_method_table(pe, object.lp_object_info).unwrap_or_default();
-    let callees = read_method_links(pe, object)
+    let mut callees = read_method_links(pe, object)
         .map(|links| links.callees(&methods))
         .unwrap_or_default();
+    if let ProcNames::Slots(slots) = ProcedureList::read(pe, object).procs {
+        for (slot, index) in slots.iter().zip(0_u16..) {
+            if let Procedure::Public(name) = slot {
+                callees = callees.with_procedure(index, name);
+            }
+        }
+    }
     match types {
         Some(types) => types.with_controls(callees, pe, object),
         None => callees,

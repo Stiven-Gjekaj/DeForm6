@@ -15,7 +15,7 @@ source = 1
 lifted = 1
 
 ["public-domain/PassGen/PassGen.exe"]
-matched = 742
+matched = 744
 source = 828
 lifted = 844
 
@@ -70,12 +70,12 @@ source = 6
 lifted = 6
 
 ["vb6-code/Artificial-life/Artificial Life.exe"]
-matched = 96
+matched = 107
 source = 183
 lifted = 339
 
 ["vb6-code/Blacklight-effect/Blacklight.exe"]
-matched = 44
+matched = 52
 source = 84
 lifted = 123
 
@@ -90,42 +90,42 @@ source = 13
 lifted = 13
 
 ["vb6-code/Brightness-effect/Part 4 - Even faster DIBs/Realtime_Brightness.exe"]
-matched = 40
+matched = 54
 source = 157
 lifted = 62
 
 ["vb6-code/Color-shift-effect/ColorShift.exe"]
-matched = 41
+matched = 49
 source = 81
 lifted = 123
 
 ["vb6-code/Colorize-effect/Colorize.exe"]
-matched = 59
+matched = 67
 source = 99
 lifted = 138
 
 ["vb6-code/Contrast-effect/Contrast.exe"]
-matched = 44
+matched = 52
 source = 84
 lifted = 123
 
 ["vb6-code/Curves-effect/Curves.exe"]
-matched = 70
+matched = 78
 source = 110
 lifted = 153
 
 ["vb6-code/Custom-image-filters/Custom_Filters.exe"]
-matched = 65
+matched = 74
 source = 106
 lifted = 255
 
 ["vb6-code/Diffuse-effect/Diffuse.exe"]
-matched = 64
+matched = 73
 source = 105
 lifted = 150
 
 ["vb6-code/Emboss-engrave-effect/Emboss_Engrave.exe"]
-matched = 57
+matched = 77
 source = 110
 lifted = 198
 
@@ -135,7 +135,7 @@ source = 4
 lifted = 4
 
 ["vb6-code/Fire-effect/Fast_Flames.exe"]
-matched = 19
+matched = 23
 source = 35
 lifted = 58
 
@@ -145,27 +145,27 @@ source = 94
 lifted = 95
 
 ["vb6-code/Gradient-2D/Gradient.exe"]
-matched = 35
+matched = 37
 source = 38
 lifted = 42
 
 ["vb6-code/Grayscale-effect/Grayscale.exe"]
-matched = 97
+matched = 129
 source = 161
 lifted = 238
 
 ["vb6-code/Histograms-advanced/Advanced Histogram Viewer.exe"]
-matched = 102
+matched = 129
 source = 161
 lifted = 245
 
 ["vb6-code/Histograms-basic/Basic Histogram Viewer.exe"]
-matched = 87
+matched = 96
 source = 128
 lifted = 185
 
 ["vb6-code/Levels-effect/Image Levels.exe"]
-matched = 136
+matched = 149
 source = 181
 lifted = 245
 
@@ -180,12 +180,12 @@ source = 179
 lifted = 215
 
 ["vb6-code/Nature-effects/Nature_Filters.exe"]
-matched = 63
+matched = 103
 source = 135
 lifted = 220
 
 ["vb6-code/Randomize-effects/RandomizationFX.exe"]
-matched = 83
+matched = 99
 source = 228
 lifted = 171
 
@@ -200,16 +200,16 @@ source = 4
 lifted = 8
 
 ["vb6-code/Sepia-effect/Sepia.exe"]
-matched = 41
+matched = 49
 source = 81
 lifted = 120
 
 ["vb6-code/Threshold-effect/Threshold.exe"]
-matched = 47
+matched = 55
 source = 87
 lifted = 129
 
 ["vb6-code/Transparency-2D/Transparency.exe"]
-matched = 14
+matched = 24
 source = 36
 lifted = 53

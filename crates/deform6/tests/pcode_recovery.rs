@@ -1283,7 +1283,8 @@ const PICTURE_BOX_IID: &str = "{33AD4ED1-6699-11CF-B70C-00AA0060D393}";
 /// takes a `PictureBox` as its first argument in the source, and
 /// `callees_of_project` gives that argument, at frame offset `0x0C`, the
 /// interface that the types file names for its GUID. The types file is
-/// built here, with a placeholder name.
+/// built here, with a placeholder name. Each method also gets the name of
+/// its source procedure.
 #[test]
 fn a_public_method_gives_the_interface_of_its_control_argument() {
     let key = "vb6-code/Brightness-effect/Part 4 - Even faster DIBs/Realtime_Brightness.exe";
@@ -1324,5 +1325,6 @@ fn a_public_method_gives_the_interface_of_its_control_argument() {
             [(0x0C, "_Picture".to_owned())],
             "{name}"
         );
+        assert_eq!(callees[at].procedure(*index), *name);
     }
 }
