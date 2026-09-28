@@ -22,10 +22,13 @@
 //!   interface of the control. The record names the events interface of the
 //!   control, such as `PictureBoxEvents`, and the interface of the control
 //!   is `_PictureBox`.
-//! - `[events]` maps the GUID of each events interface to the names of its
-//!   events, in the order of their vtable offsets. The event table of a
-//!   control has one slot for each event, in this order. The event table of
-//!   an OCX control has more slots before them.
+//! - `[events]` maps the GUID of each events interface to its events, in
+//!   the order of their vtable offsets. The event table of a control has
+//!   one slot for each event, in this order. The event table of an OCX
+//!   control has more slots before them. Each event gives its `name`, and
+//!   the declaration of each of its `parameters` in Basic, such as
+//!   `KeyAscii As Integer` or `ByVal bytesTotal As Long`. An event with a
+//!   parameter that the tool cannot declare has no `parameters`.
 //! - `[iids]` maps the GUID of each interface to its name. A class
 //!   reference of a constant table, such as the one of the global object of
 //!   the runtime, names an interface by its GUID.
@@ -54,7 +57,9 @@
 
 use std::collections::BTreeMap;
 
-use crate::msft::{Function, Kind, PARAMFLAG_FRETVAL, TypeInfo, guid_text, parse};
+use crate::msft::{
+    Function, Kind, PARAMFLAG_FRETVAL, Parameter, TypeInfo, VT_PTR, guid_text, parse,
+};
 
 /// The default output path, relative to the workspace root.
 pub(crate) const DEFAULT_OUTPUT_PATH: &str = "derived/vb-types.toml";
@@ -73,6 +78,39 @@ fn parameter_bytes(vt: u16) -> Option<u16> {
         12 | 14 => Some(16),
         _ => None,
     }
+}
+
+/// The `VT_USERDEFINED` variant type.
+const VT_USERDEFINED: u16 = 29;
+
+/// Gives the declaration of `parameter` in Basic, such as `X As Single`
+/// for a pointer to a `Single` and `ByVal Number As Integer` for an
+/// `Integer`. A pointer passes the parameter by reference. Gives `None` for
+/// a parameter with no name, and for a type that this tool does not name.
+fn declaration(parameter: &Parameter, infos: &[TypeInfo]) -> Option<String> {
+    let name = parameter.name.as_deref()?;
+    let (by_value, vt) = if parameter.vt == VT_PTR {
+        (false, parameter.pointee?)
+    } else {
+        (true, parameter.vt)
+    };
+    let basic = match vt {
+        2 => "Integer",
+        3 => "Long",
+        4 => "Single",
+        5 => "Double",
+        6 => "Currency",
+        7 => "Date",
+        8 => "String",
+        9 => "Object",
+        11 => "Boolean",
+        12 => "Variant",
+        17 => "Byte",
+        VT_PTR | VT_USERDEFINED => infos.get(parameter.user_type?)?.name.as_deref()?,
+        _ => return None,
+    };
+    let by_value = if by_value { "ByVal " } else { "" };
+    Some(format!("{by_value}{name} As {basic}"))
 }
 
 /// The name of an `INVOKEKIND`.
@@ -114,11 +152,19 @@ pub(crate) struct Import {
     result_interface: Option<String>,
 }
 
+/// One event of an events interface.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct Event {
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parameters: Option<Vec<String>>,
+}
+
 /// The whole file.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub(crate) struct Types {
     controls: BTreeMap<String, String>,
-    events: BTreeMap<String, Vec<String>>,
+    events: BTreeMap<String, Vec<Event>>,
     iids: BTreeMap<String, String>,
     imports: BTreeMap<String, Import>,
     interfaces: BTreeMap<String, Interface>,
@@ -256,7 +302,14 @@ pub(crate) fn derive(infos: &[TypeInfo]) -> Result<Types, String> {
             guid_text(guid),
             events
                 .iter()
-                .map(|function| function.name.clone().unwrap_or_default())
+                .map(|function| Event {
+                    name: function.name.clone().unwrap_or_default(),
+                    parameters: function
+                        .parameters
+                        .iter()
+                        .map(|parameter| declaration(parameter, infos))
+                        .collect(),
+                })
                 .collect(),
         );
         let interface = format!("_{class}");
@@ -422,7 +475,7 @@ fn derive_file(inputs: &[String], out: &str) -> Result<String, String> {
     reason = "a test builds the state it needs and must fail loudly when that state is wrong"
 )]
 mod tests {
-    use super::{derive, libraries, render};
+    use super::{declaration, derive, libraries, render};
     use crate::msft::tests::library;
     use crate::msft::{Function, Kind, Parameter, TypeInfo, parse};
 
@@ -455,36 +508,108 @@ mod tests {
         assert!(text.contains("dispid = 67"), "{text}");
     }
 
+    /// A parameter named `name` of the type `vt`, or of a pointer to
+    /// `pointee`.
+    fn parameter(name: &str, vt: u16, pointee: Option<u16>) -> Parameter {
+        Parameter {
+            name: Some(name.to_owned()),
+            vt,
+            pointee,
+            flags: 1,
+            user_type: None,
+        }
+    }
+
     #[test]
     fn an_events_interface_gives_its_events_in_the_order_of_their_offsets() {
         let mut info = interface(vec![
             Function {
                 vtable_offset: 0x10,
+                parameters: vec![
+                    parameter("KeyAscii", 26, Some(2)),
+                    parameter("bytesTotal", 3, None),
+                ],
                 ..function("Load", 1, 3)
             },
             Function {
                 vtable_offset: 0x0C,
+                parameters: Vec::new(),
                 ..function("Click", 1, 3)
             },
             Function {
                 vtable_offset: 0x14,
+                parameters: vec![parameter("Odd", 99, None)],
                 ..function("Unload", 1, 3)
             },
         ]);
         info.name = Some("BoxEvents".to_owned());
         info.guid = Some([7; 16]);
         let types = derive(&[info]).unwrap();
+        let events = &types.events["{07070707-0707-0707-0707-070707070707}"];
+        let names: Vec<&str> = events.iter().map(|event| event.name.as_str()).collect();
+        assert_eq!(names, ["Click", "Load", "Unload"]);
+        assert_eq!(events[0].parameters, Some(Vec::new()));
         assert_eq!(
-            types.events["{07070707-0707-0707-0707-070707070707}"],
-            ["Click", "Load", "Unload"]
+            events[1].parameters,
+            Some(vec![
+                "KeyAscii As Integer".to_owned(),
+                "ByVal bytesTotal As Long".to_owned()
+            ])
         );
+        assert_eq!(events[2].parameters, None);
+        let text = render(&types).unwrap();
         assert!(
-            render(&types).unwrap().contains(
-                "[events]\n\"{07070707-0707-0707-0707-070707070707}\" = [\"Click\", \"Load\", \"Unload\"]"
+            text.contains(
+                "[[events.\"{07070707-0707-0707-0707-070707070707}\"]]\nname = \"Load\"\nparameters = [\"KeyAscii As Integer\", \"ByVal bytesTotal As Long\"]"
             ),
-            "{}",
-            render(&types).unwrap()
+            "{text}"
         );
+    }
+
+    #[test]
+    fn a_parameter_is_declared_by_its_type_and_how_it_is_passed() {
+        let mut infos = vec![interface(Vec::new())];
+        infos[0].name = Some("Control".to_owned());
+        let declare = |parameter: Parameter| declaration(&parameter, &infos);
+        assert_eq!(declare(parameter("X", 26, Some(4))).unwrap(), "X As Single");
+        assert_eq!(
+            declare(parameter("On", 11, None)).unwrap(),
+            "ByVal On As Boolean"
+        );
+        assert_eq!(
+            declare(parameter("P", 26, None)),
+            None,
+            "a pointer to nothing"
+        );
+        assert_eq!(declare(parameter("U", 26, Some(26))), None, "no user type");
+        let source = Parameter {
+            user_type: Some(0),
+            ..parameter("Source", 26, Some(26))
+        };
+        assert_eq!(declare(source).unwrap(), "Source As Control");
+        let unnamed = Parameter {
+            name: None,
+            ..parameter("X", 3, None)
+        };
+        assert_eq!(declare(unnamed), None);
+        for (vt, basic) in [
+            (2, "Integer"),
+            (3, "Long"),
+            (4, "Single"),
+            (5, "Double"),
+            (6, "Currency"),
+            (7, "Date"),
+            (8, "String"),
+            (9, "Object"),
+            (11, "Boolean"),
+            (12, "Variant"),
+            (17, "Byte"),
+        ] {
+            assert_eq!(
+                declare(parameter("A", vt, None)).unwrap(),
+                format!("ByVal A As {basic}")
+            );
+        }
     }
 
     #[test]
@@ -503,18 +628,18 @@ mod tests {
                 result_interface: None,
             },
         );
-        second
-            .events
-            .insert("{E}".to_owned(), vec!["Error".to_owned()]);
-        merged
-            .events
-            .insert("{F}".to_owned(), vec!["Load".to_owned()]);
-        second
-            .events
-            .insert("{F}".to_owned(), vec!["Other".to_owned()]);
+        let event = |name: &str| {
+            vec![super::Event {
+                name: name.to_owned(),
+                parameters: None,
+            }]
+        };
+        second.events.insert("{E}".to_owned(), event("Error"));
+        merged.events.insert("{F}".to_owned(), event("Load"));
+        second.events.insert("{F}".to_owned(), event("Other"));
         merged.merge(second);
-        assert_eq!(merged.events["{E}"], ["Error"]);
-        assert_eq!(merged.events["{F}"], ["Load"]);
+        assert_eq!(merged.events["{E}"], event("Error"));
+        assert_eq!(merged.events["{F}"], event("Load"));
         assert_eq!(merged.imports["685"].name, "Err");
         assert_eq!(merged.interfaces["_Box"].vtable_size, 0x30);
         assert_eq!(merged.interfaces["_Other"].vtable_size, 0x99);
