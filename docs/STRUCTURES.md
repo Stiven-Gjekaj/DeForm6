@@ -2619,13 +2619,19 @@ member of the object register. The `LdVar` forms write the result into a
 frame slot and push its address.
 
 **A control of an OCX.** The `ControlInfo` record of a Winsock control
-names a GUID that is not in the type library of `MSWINSCK.OCX`, so the
-accessor gives the control with no interface. The array of Winsock controls
-of `Server.exe` names a GUID that is not the GUID of the single Winsock
-control of `TFTPClient.exe` plus 1. Its `Item` call names the null GUID. Each
-of the 65 `VCallHresult` calls of the corpus that name the null GUID calls
-`Item` or `Count` right after a control accessor, so the null GUID names the
-object of a control array.
+names a GUID that is not in the type library of `MSWINSCK.OCX`. The entry of
+the external component table of the OCX (section 7.3) links it: the GUID of
+the class at `0x38`, of the events at `0x48`, of the default interface
+`IMSWinsockControl` at `0x58`, and the GUID that the record of one control
+names at `0x98` and of a control array at `0xA8`. The three Winsock programs
+of the corpus agree. A control whose GUID names no interface gets its
+accessor with no class. The `Item` call of the array of `Server.exe` names
+the null GUID. Each of the 65 `VCallHresult` calls of the corpus that name
+the null GUID calls `Item` or `Count` right after a control accessor, so the
+null GUID names the object of a control array. The member id of a function
+of a type library is its `DISPID`: with `MSWINSCK.OCX` in the types file,
+the Winsock calls read as `SendData`, `Connect`, `GetData`, `Close`,
+`Accept`, `Listen` and `State`.
 
 **A function of the runtime.** The entry that an `ImpAdCall` names can be
 the address of `jmp dword ptr [slot]`, where the slot is in the import
@@ -2655,10 +2661,9 @@ the offset of its `NextVar` plus 6.
 not zero. `Resume` holds `0xFFFF` for `Resume Next`, `0xFFFE` for `Resume`,
 or the offset of a label; the corpus holds `Resume Next` only.
 
-**What the measurement did not settle.** What the GUID of the
-`ControlInfo` record of an OCX control names. The names of the `DISPID`
-members of such a control. `Print #` of more than one item: the corpus
-holds none.
+**What the measurement did not settle.** The layout of the external
+component entry of an OCX other than `MSWINSCK.OCX`: the corpus holds no
+other. `Print #` of more than one item: the corpus holds none.
 
 ---
 
