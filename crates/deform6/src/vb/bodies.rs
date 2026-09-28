@@ -158,6 +158,26 @@ fn indexed_words(lines: &[String], prefix: &str) -> BTreeSet<String> {
     words_before(lines, prefix, |next| next == Some('('))
 }
 
+/// Gives the declaration of each field: `Public` for a field that has an
+/// accessor of a public variable in `public`, which another object can
+/// use, and `Private` for each other field in `used`.
+fn field_declarations(used: &BTreeSet<String>, public: &BTreeSet<u32>) -> Vec<String> {
+    let public: BTreeSet<String> = public
+        .iter()
+        .map(|field| format!("field_{field:X}"))
+        .collect();
+    let mut out: Vec<String> = public
+        .iter()
+        .map(|field| format!("Public {field} As Variant"))
+        .collect();
+    out.extend(
+        used.iter()
+            .filter(|field| !public.contains(*field))
+            .map(|field| format!("Private {field} As Variant")),
+    );
+    out
+}
+
 /// Puts a `Dim` before `lines` for each local that `lines` index. Basic
 /// reads an index of a name that is not declared as a call.
 fn declare_arrays(lines: &mut Vec<String>) {
@@ -556,11 +576,9 @@ pub fn lift_objects(
             });
         }
         lifted.declarations = declare_statements(&declarations, &all_lines);
-        lifted.declarations.extend(
-            fields
-                .iter()
-                .map(|field| format!("Private {field} As Variant")),
-        );
+        lifted
+            .declarations
+            .extend(field_declarations(&fields, &callees.variable_fields()));
         out.push(Some(lifted));
         variables.push(globals);
     }
@@ -592,9 +610,11 @@ pub fn lift_objects(
     reason = "a test builds the state it needs and must fail loudly when that state is wrong"
 )]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::{
         built_parameters, call_arity, declare, declare_arrays, declare_statements, declared_bytes,
-        indexed_words, procedure_name, replace_word, words_with,
+        field_declarations, indexed_words, procedure_name, replace_word, words_with,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::lift::result_bytes;
@@ -676,6 +696,20 @@ mod tests {
                 .into_iter()
                 .collect::<Vec<_>>(),
             ["local_B0", "local_D4"]
+        );
+    }
+
+    #[test]
+    fn a_field_with_an_accessor_is_public() {
+        let used: BTreeSet<String> = ["field_34".to_owned(), "field_42".to_owned()].into();
+        let public: BTreeSet<u32> = [0x42, 0x80].into();
+        assert_eq!(
+            field_declarations(&used, &public),
+            [
+                "Public field_42 As Variant",
+                "Public field_80 As Variant",
+                "Private field_34 As Variant"
+            ]
         );
     }
 

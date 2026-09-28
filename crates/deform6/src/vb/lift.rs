@@ -442,6 +442,13 @@ impl Callees {
         self
     }
 
+    /// Gives the field of each accessor of a public variable, once each, in
+    /// the order of the fields.
+    #[must_use]
+    pub fn variable_fields(&self) -> BTreeSet<u32> {
+        self.variables.iter().map(|(_, field, _)| *field).collect()
+    }
+
     /// Gives the field and whether it is the get of the accessor at
     /// `vtable_offset`.
     #[must_use]

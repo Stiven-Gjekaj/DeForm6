@@ -1763,3 +1763,39 @@ fn each_lifted_procedure_takes_the_declaration_that_extract_writes() {
         "{text}"
     );
 }
+
+/// Counts the public variables that the source file at `path` declares at
+/// the level of the module: each `Public` line that declares no procedure
+/// and no other item, one per name.
+fn public_variables(path: &Path) -> usize {
+    let text = String::from_utf8_lossy(&read(path)).into_owned();
+    let items = [
+        "Sub ",
+        "Function ",
+        "Property ",
+        "Const ",
+        "Declare ",
+        "Enum ",
+        "Type ",
+        "Event ",
+    ];
+    text.lines()
+        .filter_map(|line| line.strip_prefix("Public "))
+        .filter(|rest| !items.iter().any(|item| rest.starts_with(item)))
+        .map(|rest| rest.split(',').count())
+        .sum()
+}
+
+/// Each public variable of the source of `frmPassGen` has an accessor in
+/// the vtable of the form, and so a field that the lift declares `Public`.
+#[test]
+fn each_public_variable_of_a_form_gives_a_public_field() {
+    let dir = build_record::corpus_root().join("public-domain/PassGen");
+    let form = profiles(&pcode_root().join("public-domain/PassGen/PassGen.exe"))
+        .into_iter()
+        .find(|profile| profile.object_name() == Some("frmPassGen"))
+        .unwrap();
+    let expected = public_variables(&dir.join("frmPassGen.frm"));
+    assert!(expected > 0);
+    assert_eq!(form.variable_fields().len(), expected);
+}
