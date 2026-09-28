@@ -2768,11 +2768,14 @@ fn run(
                     args.push(pop(&mut state)?);
                 }
                 args.reverse();
+                // `UBound` is a word of Basic, not a member of `VBA`.
+                let owner = if function == "UBound" {
+                    Expr::Implicit
+                } else {
+                    Expr::Word("VBA")
+                };
                 state.stack.push(Value::plain(
-                    Expr::Call(
-                        Callee::Member(Box::new(Expr::Word("VBA")), function.to_owned()),
-                        args,
-                    ),
+                    Expr::Call(Callee::Member(Box::new(owner), function.to_owned()), args),
                     true,
                 ));
                 None
@@ -3554,6 +3557,9 @@ names = ["LateMemCall"]
 [primary.45]
 width = 6
 names = ["LateMemCallLdVar"]
+[primary.5E]
+width = 0
+names = ["FnUBound"]
 [lead1.C8]
 width = 0
 names = ["End"]
@@ -4549,6 +4555,12 @@ dispid = 67
         assert_eq!(
             lines(&body).unwrap()[0],
             "       local_88 = VBA.InStr(1, Me, arg_C(2), 0)"
+        );
+        // local_88 = UBound(arg_C, 1): Basic has no VBA.UBound.
+        let bound = [0x03, 0x0C, 0x00, 0x02, 0x01, 0x5E, 0x05, 0x78, 0xFF, 0x0C];
+        assert_eq!(
+            lines(&bound).unwrap()[0],
+            "       local_88 = UBound(arg_C, 1)"
         );
         // arg_C(1) = 7
         let store = [0x02, 0x07, 0x02, 0x01, 0x15, 0x0C, 0x00, 0x36, 0x0C];
