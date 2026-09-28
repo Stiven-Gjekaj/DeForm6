@@ -41,6 +41,21 @@ pub fn constant_guid(pe: &PeImage<'_>, lp_object_info: Va, index: u16) -> Option
         .ok()
 }
 
+/// The bytes of `jmp dword ptr [address]`, before the address.
+const JUMP_THROUGH_ADDRESS: [u8; 2] = [0xFF, 0x25];
+
+/// Gives the ordinal of the function of the runtime that the entry at
+/// `index` of the constant table calls. `ImpAdCall` names such an entry:
+/// the address of a jump through a slot of the import address table.
+#[must_use]
+pub fn constant_runtime_ordinal(pe: &PeImage<'_>, lp_object_info: Va, index: u16) -> Option<u16> {
+    let thunk = pe.region_at_va(constant(pe, lp_object_info, index)?)?;
+    if thunk.take(Off::new(0), 2)? != JUMP_THROUGH_ADDRESS {
+        return None;
+    }
+    pe.runtime_ordinal(thunk.va_le(Off::new(2))?)
+}
+
 /// The first word of a class reference: the number of GUIDs that follow.
 const CLASS_REFERENCE_GUIDS: u32 = 2;
 
@@ -116,7 +131,10 @@ pub fn constant_string(pe: &PeImage<'_>, lp_object_info: Va, index: u16) -> Opti
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{class_reference_iid, constant, constant_guid, constant_name, constant_string};
+    use super::{
+        class_reference_iid, constant, constant_guid, constant_name, constant_runtime_ordinal,
+        constant_string,
+    };
     use crate::read::pe::PeImage;
     use crate::read::region::Va;
 
@@ -237,6 +255,17 @@ mod tests {
             constant_string(&pe, info, 0x42).as_deref(),
             Some("REG_DWORD")
         );
+    }
+
+    /// `frmPassGen` in the P-code `PassGen.exe`: entry `0x3D` of its
+    /// constant table is a jump through the slot of the ordinal 685 of the
+    /// runtime, `rtcErrObj`. Entry `0x43` is a name, not a jump.
+    #[test]
+    fn passgen_gives_the_ordinal_of_an_import_call() {
+        let pe = PeImage::parse(PASSGEN_P_CODE).unwrap();
+        let info = Va::new(0x0040_599C);
+        assert_eq!(constant_runtime_ordinal(&pe, info, 0x3D), Some(685));
+        assert_eq!(constant_runtime_ordinal(&pe, info, 0x43), None);
     }
 
     #[test]
