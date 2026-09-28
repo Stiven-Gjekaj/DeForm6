@@ -112,6 +112,8 @@
 //! | `ForStepI2` | As `ForStepI4` |
 //! | `FnFixR4`, `FnFixR8` | `Fix` of a value of the floating point unit |
 //! | `VCall` | As `VCallHresult`, with no argument that names the interface |
+//! | `BranchT` | Pop a condition, and branch when it is true |
+//! | `Resume` | `Resume Next` for `0xFFFF`, `Resume` for `0xFFFE`, else `Resume` to the label at the offset |
 //! | `OnErrorGoto` | `On Error GoTo` a label, `On Error Resume Next` for `0xFFFF`, or `On Error GoTo 0` for `0xFFFE` |
 //!
 //! All the names of one slot must give one family. A conversion whose names
@@ -644,6 +646,13 @@ pub enum Stmt {
         /// The value.
         value: Expr,
     },
+    /// A branch to `target` when `condition` is true.
+    IfGoTo {
+        /// The condition.
+        condition: Expr,
+        /// The offset of the target in the body.
+        target: u16,
+    },
     /// A branch to `target` when `condition` is false.
     IfNotGoTo {
         /// The condition.
@@ -684,6 +693,9 @@ pub enum Stmt {
     /// `On Error`: `Some` target offset, or `None` for `Resume Next`, or
     /// `Some(0)` for `GoTo 0`.
     OnError(Option<u16>),
+    /// `Resume`: `None` for `Resume Next`, `Some(0)` for `Resume` of the
+    /// statement of the error, or `Some` target offset.
+    Resume(Option<u16>),
     /// A store of an object.
     Set {
         /// Where the object goes.
@@ -704,6 +716,10 @@ impl Stmt {
             Self::Set { target, value } => Self::Set {
                 target: target.resolve(kept),
                 value: value.resolve(kept),
+            },
+            Self::IfGoTo { condition, target } => Self::IfGoTo {
+                condition: condition.resolve(kept),
+                target,
             },
             Self::IfNotGoTo { condition, target } => Self::IfNotGoTo {
                 condition: condition.resolve(kept),
@@ -739,9 +755,15 @@ impl Stmt {
     pub fn text(&self) -> String {
         match self {
             Self::Assign { target, value } => format!("{} = {}", target.text(), value.text()),
+            Self::IfGoTo { condition, target } => {
+                format!("If {} Then GoTo L{target:04X}", condition.text())
+            }
             Self::IfNotGoTo { condition, target } => {
                 format!("If Not {} Then GoTo L{target:04X}", condition.text())
             }
+            Self::Resume(None) => "Resume Next".to_owned(),
+            Self::Resume(Some(0)) => "Resume".to_owned(),
+            Self::Resume(Some(target)) => format!("Resume L{target:04X}"),
             Self::GoTo(target) => format!("GoTo L{target:04X}"),
             Self::End => "End".to_owned(),
             Self::Exit => "Exit".to_owned(),
@@ -829,6 +851,8 @@ enum Family {
     Binary(BinaryOp),
     Convert(Option<&'static str>),
     BranchFalse,
+    BranchTrue,
+    Resume,
     Branch,
     End,
     Exit,
@@ -1000,6 +1024,8 @@ fn family_of(name: &str) -> Option<Family> {
         "FLdPr" | "ILdPr" => Family::ObjectRegister,
         "FLdPrThis" => Family::ObjectRegisterThis,
         "BranchF" => Family::BranchFalse,
+        "BranchT" => Family::BranchTrue,
+        "Resume" => Family::Resume,
         "Branch" => Family::Branch,
         "End" => Family::End,
         "ThisVCallHresult" => Family::ThisCall,
@@ -2031,6 +2057,18 @@ fn run(
                     target: target.cast_unsigned(),
                 })
             }
+            Family::BranchTrue => {
+                let condition = pop(&mut state)?;
+                Some(Stmt::IfGoTo {
+                    condition,
+                    target: offset16()?.cast_unsigned(),
+                })
+            }
+            Family::Resume => Some(Stmt::Resume(match word16(0)? {
+                0xFFFF => None,
+                0xFFFE => Some(0),
+                target => Some(target),
+            })),
             Family::Branch => Some(Stmt::GoTo(offset16()?.cast_unsigned())),
             Family::End => Some(Stmt::End),
             Family::Exit => Some(Stmt::Exit),
@@ -2690,10 +2728,11 @@ pub fn render(stmts: &[LiftedStmt]) -> Vec<String> {
         .iter()
         .filter_map(|lifted| match lifted.stmt {
             Stmt::IfNotGoTo { target, .. }
+            | Stmt::IfGoTo { target, .. }
             | Stmt::GoTo(target)
             | Stmt::For { exit: target, .. }
             | Stmt::Next { body: target, .. } => Some(target),
-            Stmt::OnError(target) => target.filter(|target| *target != 0),
+            Stmt::OnError(target) | Stmt::Resume(target) => target.filter(|target| *target != 0),
             Stmt::Assign { .. } | Stmt::Set { .. } | Stmt::End | Stmt::Exit | Stmt::Call(..) => {
                 None
             }
@@ -3008,6 +3047,12 @@ names = ["LateIdCall"]
 [primary.5A]
 width = 4
 names = ["LateIdSt"]
+[primary.5B]
+width = 2
+names = ["BranchT"]
+[primary.5C]
+width = 2
+names = ["Resume"]
 [primary.44]
 width = 4
 names = ["LateMemCall"]
@@ -4012,6 +4057,21 @@ result = false
         // import_2(Nothing)
         let nothing = [0x57, 0x12, 0x02, 0x00, 0x04, 0x00, 0x0C];
         assert_eq!(lines(&nothing).unwrap()[0], "       Call import_2(Nothing)");
+        // If local_64 Then GoTo L000C; Resume Next; Resume L0006; Resume
+        let resume = [
+            0x0F, 0x9C, 0xFF, 0x5B, 0x0C, 0x00, 0x5C, 0xFF, 0xFF, 0x5C, 0x06, 0x00, 0x5C, 0xFE,
+            0xFF, 0x0C,
+        ];
+        assert_eq!(
+            lines(&resume).unwrap(),
+            [
+                "       If local_64 Then GoTo L000C",
+                "L0006: Resume Next",
+                "       Resume L0006",
+                "L000C: Resume",
+                "       Exit"
+            ]
+        );
         let destruct = [0x52, 0x88, 0xFE, 0x03, 0x00, 0x0C];
         assert_eq!(lines(&destruct).unwrap(), ["       Exit"]);
         let two = [
