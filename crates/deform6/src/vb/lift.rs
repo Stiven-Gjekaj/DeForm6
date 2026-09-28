@@ -1512,7 +1512,8 @@ impl State {
 pub(crate) const CONTROL_ARRAY: &str = "[]";
 
 /// Gives the function at `vtable_offset` of the object of a control array
-/// whose controls have the interface `element`.
+/// whose controls have the interface `element`, or an interface that the
+/// lift does not know when `element` is empty.
 ///
 /// The runtime calls this object `tagCARR`. Its vtable for `IVBControl` in
 /// `MSVBVM60.DLL` 6.0.98.2 holds `Item(Integer, CTL**)` at `0x40`, then
@@ -1520,7 +1521,7 @@ pub(crate) const CONTROL_ARRAY: &str = "[]";
 /// last three writes an `Integer`. No type library gives them.
 fn control_array_function(element: &str, vtable_offset: u16) -> Option<TypeFunction> {
     let (name, arg_bytes, result_interface) = match vtable_offset {
-        0x40 => ("Item", 8, Some(element.to_owned())),
+        0x40 => ("Item", 8, (!element.is_empty()).then(|| element.to_owned())),
         0x44 => ("LBound", 4, None),
         0x48 => ("UBound", 4, None),
         0x4C => ("Count", 4, None),
@@ -3122,6 +3123,22 @@ result = false
         assert_eq!(
             render(&lift(&listing, &table, &callees, Some(&types)).unwrap()),
             ["       local_88 = Me.box1.Item(0).Text", "       Exit"]
+        );
+        // An array of controls whose interface is not known: Item gives a
+        // control with no class, and the call on it names entry 5, the
+        // interface _Box.
+        let untyped = [
+            0x15, 0x9C, 0xFF, 0x02, 0x00, 0x16, 0x1A, 0x2C, 0x03, 0x1B, 0x98, 0xFF, 0x06, 0x98,
+            0xFF, 0x1C, 0x40, 0x00, 0x00, 0x00, 0x06, 0x9C, 0xFF, 0x1C, 0xB0, 0x00, 0x05, 0x00,
+            0x18, 0x98, 0xFF, 0x0C,
+        ];
+        let listing_untyped = disassemble(&Region::new(&untyped, Off::new(0)), &table);
+        let array = Callees::default()
+            .with_control(0x32C, "wsk", "[]")
+            .with_class_interface(5, "_Box");
+        assert_eq!(
+            render(&lift(&listing_untyped, &table, &array, Some(&types)).unwrap()),
+            ["       Call Me.wsk.Item(0).Cls()", "       Exit"]
         );
     }
 
