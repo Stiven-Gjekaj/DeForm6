@@ -160,6 +160,10 @@ const RUN_WAIT_SECONDS: u8 = 6;
 /// through `COM1`, waits again, and ends the program. The other machine
 /// takes a picture of the screen at each marker, so the first window of each
 /// rebuilt program can be compared with the first window of its original.
+/// The file copies each executable into the folder of the source project,
+/// as `run-original.exe` or `run-extracted.exe`, and starts it there: a
+/// program reads its data files, such as `sample.jpg`, from the folder of
+/// its executable, and only the source project holds them.
 /// A side with no executable sends `===NONE <short> <side>===`, and a
 /// program of [`NOT_RUN`] sends `===SKIP <short> <reason>===`. `ping`
 /// waits, because Windows XP has no `timeout`.
@@ -174,6 +178,7 @@ fn render_runs(programs: &[Exported]) -> String {
         "rem COM1 while its first window shows, for the other machine to take a",
         "rem picture of the screen.",
         "mode COM1: baud=115200 parity=n data=8 stop=1 to=off xon=off odsr=off octs=off dtr=on rts=on idsr=off >nul",
+        r#"pushd "%~dp0""#,
     ]
     .iter()
     .map(|line| (*line).to_owned())
@@ -190,23 +195,25 @@ fn render_runs(programs: &[Exported]) -> String {
     lines.extend(
         [
             ">COM1 echo ===END===",
+            "popd",
             "exit /b 0",
             "",
             ":run",
             "set FOUND=",
-            &format!(
-                r#"for %%e in ("{HOST_OUT_DIR}\%1\%2\*.exe") do call :one %1 %2 "%%~e" "%%~nxe""#
-            ),
+            &format!(r#"for %%e in ("{HOST_OUT_DIR}\%1\%2\*.exe") do call :one %1 %2 "%%~e""#),
             r#"if "%FOUND%"=="" >COM1 echo ===NONE %1 %2==="#,
             "goto :eof",
             "",
             ":one",
             "set FOUND=1",
-            r#"start "" %3"#,
+            r#"copy /y %3 "original\%1\run-%2.exe" >nul"#,
+            r#"start "" "original\%1\run-%2.exe""#,
             &wait,
             ">COM1 echo ===SHOT %1 %2===",
             &wait,
-            r#"taskkill /f /im %4 >nul 2>&1"#,
+            r#"taskkill /f /im run-%2.exe >nul 2>&1"#,
+            &wait,
+            r#"del "original\%1\run-%2.exe""#,
             "goto :eof",
         ]
         .iter()
@@ -280,7 +287,10 @@ mod tests {
         assert!(text.contains(">COM1 echo ===SHOT %1 %2==="));
         assert!(text.contains(">COM1 echo ===SKIP p03 it locks the session==="));
         assert!(text.contains("ping -n 7 127.0.0.1 >nul"));
-        assert!(text.contains("taskkill /f /im %4"));
+        assert!(text.contains(r#"copy /y %3 "original\%1\run-%2.exe" >nul"#));
+        assert!(text.contains(r#"start "" "original\%1\run-%2.exe""#));
+        assert!(text.contains("taskkill /f /im run-%2.exe"));
+        assert!(text.contains(r#"pushd "%~dp0""#));
     }
 
     #[test]
