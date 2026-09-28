@@ -131,11 +131,12 @@ heading its version and its date.
 - `cargo run -p xtask -- export-lift-builds <dir>` writes each P-code
   program as `extract --lift` writes it, next to its source, with a
   `build.bat` for the Visual Basic 6 IDE. On the Windows XP host, VB6 makes
-  an executable from 41 of the 42 lifted projects, and from 42 of the 42
-  source projects. The one that fails is `Map-Editor`: DeForm6 refuses the
-  control tree of its form, in the native build too, so the lifted code
-  names controls that the form does not hold. The first such run made an
-  executable from 1 of the 42.
+  an executable from 42 of the 42 lifted projects, and from 42 of the 42
+  source projects. The first such run made an executable from 1 of the 42.
+  The export also writes `runs.bat`, which starts each built program and
+  sends a marker through `COM1` while its first window shows, so that the
+  other machine can take a picture of the screen. It does not start
+  `LockWorkStation.exe`, which locks the session of the host.
 - The fixes that this run found: a call of a `Function` of the project
   assigns its result; a function of the runtime that returns a `Variant`
   takes the address of its result first; `New` of a class of the project
@@ -145,6 +146,16 @@ heading its version and its date.
   that the corpus shows; an argument by reference of a prototype is a
   `Variant`; and a private procedure takes the argument sizes that each of
   its calls gives.
+- A fault of 2.0.0: the control tree of the form `Main` of
+  `Map Editor.exe` refused. VB6 writes only the low 16 bits of the `Length`
+  of a control block, and `PicTilesBuffer` holds a picture of more than 64
+  KiB. The walk now takes the one length, larger by a multiple of
+  `0x10000`, that a scope separator follows. The corpus now gives 53 of 53
+  forms, 708 of 708 controls, and 831 property records of which 138 lines
+  reach the `.frm`. The P-code corpus gives 408 handler addresses, 20 more,
+  one for each handler of the source of `Main`.
+- A fault of 2.0.0: `build.bat` left the executables of an earlier export
+  in its output folders. It now deletes them before each build.
 - A fault of 2.0.0: `extract` wrote an argument by value without `ByVal`.
   It now writes `ByVal`. The 24 corpus programs whose files changed still
   build on the Windows host, and `tests/builds.toml` holds the new hashes.

@@ -1121,6 +1121,16 @@ Each control block is:
 loop runs while the cursor is below `blockStart + Length - 2`, and the next
 sibling block starts at `blockStart + Length + 2`.
 
+**`Length` holds only the low 16 bits.** **[C]** Measured 2026-09-28 on
+`corpus/vb6-code/Map-editor-2D/Map Editor.exe`, in the native and in the
+P-code build. `PicTilesBuffer` holds a `Picture` of `0x3003E` bytes and
+declares the `Length` `0x7C`. Its scope separator is at the length
+`0x3007C`, which is `0x7C + 3 * 0x10000`. DeForm6 takes the declared length
+when a separator follows it. Else it takes the one length, larger by a
+multiple of `0x10000`, that a separator follows, and it refuses when two
+lengths have one. The tiling of `lPropertiesLength` then checks the whole
+stream.
+
 **The byte at +0x02 is a lead worth chasing.** **[G]** SVBD names it `uni` in
 its `ArrayTestType` and never uses it. If it is a Unicode flag for the name that
 follows, it would settle a large part of §9. Test it early.
@@ -1765,7 +1775,7 @@ answer stated confidently would be worse than no answer.
 | 11 | Control array index location (§8.4) | `Index = N` in `.frm` | CLOSED 2026-09-10, 30 array elements across 2 files. The array `Index` is the two byte value at control block offset 0x05. Method and worked example in §14. |
 | 12 | Byte at control-block +0x02 ("uni") (§8.3) | possibly the string encoding flag | Compile ASCII vs non-Latin-1 caption, diff |
 | 13 | String encoding rule (§9.3) | every string property | Three named experiments in §9.3 |
-| 14 | Scope separator grammar (§8.9) | correct control nesting | PARTIALLY CLOSED 2026-09-11, 5 transitions across 2 programs. The two-level-deep menu close (a top-level menu with a child, then a second top-level menu with children) is measured; method and worked example in §15. What remains open, narrowed from this row's own prior text: (1) a menu that is itself a sibling within an already-open menu group, opening its own child, is byte-identical to a confirmed sibling case and unresolved (`corpus/public-domain/PassGen/PassGen.exe`, `menuAbout`, offset `0x21d0`); (2) a separate, unexplained failure where an expected scope separator (`0xFF`) is not there at all (`corpus/vb6-code/Map-editor-2D/Map Editor.exe`, `Main`, offset `0x170e`, byte `0x37`). Both tracked in `WINDOWS.md`. |
+| 14 | Scope separator grammar (§8.9) | correct control nesting | PARTIALLY CLOSED 2026-09-11, 5 transitions across 2 programs. The two-level-deep menu close (a top-level menu with a child, then a second top-level menu with children) is measured; method and worked example in §15. What remains open, narrowed from this row's own prior text: (1) a menu that is itself a sibling within an already-open menu group, opening its own child, is byte-identical to a confirmed sibling case and unresolved (`corpus/public-domain/PassGen/PassGen.exe`, `menuAbout`, offset `0x21d0`); (2) closed 2026-09-28: the separator that was not there at all (`corpus/vb6-code/Map-editor-2D/Map Editor.exe`, `Main`, offset `0x170e`) follows a block of more than 64 KiB whose `Length` holds only its low 16 bits (§8). Tracked in `WINDOWS.md`. |
 | 15 | Full opcode-to-property tables per control type (§8.5) | every property | Build from a type-library dump; ship as derived data |
 | 16 | Nine unknown dwords in `GUIObjectInfo` 0x35-0x58 (§8.2) | nothing known | Leave opaque |
 | 17 | Five unknown dwords in the external component entry (§7.3) | nothing known | Leave opaque. Not touched by plan 03-16 (§7.3.1): that plan measured the two already-named fields, `oUuid` and `GUIDoffset`/`GUIDlength`, not these unknown ones. Still open. |
@@ -1998,9 +2008,10 @@ a tree (the byte count tiles exactly, no control is lost), but
 `menuAboutForm`, `menuSeparatorC` and `menuWebsite` recover with `menuHelp`
 as their parent rather than `menuAbout`. Tracked as `WINDOWS.md`'s own
 finding for this program, open. `corpus/vb6-code/Map-editor-2D/Map Editor.exe`'s
-`Main` form fails for an unrelated reason (an expected scope separator
-that is not there, at file offset `0x170e`) and is tracked separately too;
-this session's own measurement did not explain it.
+`Main` form failed for an unrelated reason (an expected scope separator
+that is not there, at file offset `0x170e`). The cause, measured
+2026-09-28, is a block of more than 64 KiB whose `Length` holds only its
+low 16 bits (§8), and the walk now reads that form.
 
 ---
 

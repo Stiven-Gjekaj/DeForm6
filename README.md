@@ -356,14 +356,13 @@ single derived figure calculated from a part.
 | -------- | ------- | ----------- |
 | 44 Visual Basic 6 programs in the test corpus | | `cargo test -p deform6 --test corpus_sweep` |
 | 185 procedure signatures recovered | 904 declared | `cargo test -p deform6 --test ratios` |
-| 52 forms recovered | 53 declared | `cargo test -p deform6 --test ratios` |
-| 686 controls recovered | 686 declared | `cargo test -p deform6 --test ratios` |
-| 807 property records recovered, of which 136 written lines reach the `.frm` | | `cargo test -p deform6 --test ratios` |
+| 53 forms recovered | 53 declared | `cargo test -p deform6 --test ratios` |
+| 708 controls recovered | 708 declared | `cargo test -p deform6 --test ratios` |
+| 831 property records recovered, of which 138 written lines reach the `.frm` | | `cargo test -p deform6 --test ratios` |
 
-One corpus form refuses.
-The refusal names the byte offset and the byte the code expected to find
-there, and a refusal is the correct result, because the tool does not print a
-tree it cannot prove.
+When a form refuses, the refusal names the byte offset and the byte the
+code expected to find there. A refusal is the correct result, because the
+tool does not print a tree it cannot prove. No corpus form refuses now.
 
 A single recovered `Position` record becomes four written lines and a single
 `Font` record becomes seven, so the property pair is a coverage count for
@@ -436,7 +435,7 @@ The same test changes a file in memory to make each kind of shortfall happen,
 and requires the count to name it.
 
 The 706 `ControlInfo` entries are not controls.
-`ControlInfo` is the table that binds controls to their events, and the 686 in
+`ControlInfo` is the table that binds controls to their events, and the 708 in
 the first table count the nodes in the control tree, which is a different
 quantity.
 

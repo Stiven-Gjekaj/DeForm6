@@ -211,7 +211,7 @@ the 8 standard modules `inspect` reports, and exactly the 8 objects with no
 
 **Every class carries exactly one `ControlInfo` entry**, 44 of 44. The 706
 `ControlInfo` entries are rows of the table that binds controls to events, and
-the README's 686 controls count nodes in the control tree, which is a
+the README's 708 controls count nodes in the control tree, which is a
 different quantity.
 
 **The GUI table clamp fires only when the table ends its section.** Anywhere
@@ -843,11 +843,12 @@ to a rebuilt form.
 
 **The build of the lift.** `extract --lift` writes the lift into each
 body, and `export-lift-builds` writes the corpus for the Windows host. VB6
-makes an executable from 41 of the 42 lifted projects, and from 42 of 42
+makes an executable from 42 of the 42 lifted projects, and from 42 of 42
 sources. The first run made one. Each run named the first error of each
 project, and each group of errors became one fix with its own test. The
-one project that fails is `Map-Editor`, whose control tree DeForm6 refuses
-in the native build too.
+last one was not in the lift: DeForm6 refused the control tree of
+`Map-Editor`, because VB6 writes only the low 16 bits of the length of a
+control block.
 
 **Next.** The lift gives names of offsets, not of variables, each variable
 is a `Variant`, and each statement stays in the form of `GoTo` and labels.
