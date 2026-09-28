@@ -374,6 +374,8 @@ pub struct Callees {
     imports: Vec<(u16, String, Option<String>)>,
     declares: Vec<(u16, String)>,
     variant_results: Vec<u16>,
+    functions: Vec<u16>,
+    function_stubs: Vec<u16>,
     stubs: Vec<(u16, ProjectCall)>,
     arguments: Vec<(u16, i16, String)>,
     procedures: Vec<(u16, String)>,
@@ -598,6 +600,30 @@ impl Callees {
             .iter()
             .find(|(at, _, _)| *at == index)
             .map(|(_, name, result)| (name.as_str(), result.as_deref()))
+    }
+
+    /// Marks the method `index` of the method table as a `Function`: a call
+    /// of it passes the address of its result last.
+    #[must_use]
+    pub fn with_function(mut self, index: u16) -> Self {
+        self.functions.push(index);
+        self
+    }
+
+    /// Tells whether the method `index` of the method table is a `Function`.
+    #[must_use]
+    pub fn is_function(&self, index: u16) -> bool {
+        self.functions.contains(&index)
+    }
+
+    /// Marks the procedure of the project that the stub at `index` of the
+    /// constant table goes to as a `Function`. A call of a `Function` of a
+    /// module passes the address of its result first, and a call of one of
+    /// an object passes it last.
+    #[must_use]
+    pub fn with_function_stub(mut self, index: u16) -> Self {
+        self.function_stubs.push(index);
+        self
     }
 
     /// Marks the function of the runtime at `index` of the constant table as
@@ -1982,7 +2008,8 @@ fn project_call(
                 .collect(),
         ));
         let callee = Callee::Member(Box::new(object), profile.procedure(method.index));
-        return Ok(call_or_function(state, callee, args));
+        let function = profile.is_function(method.index);
+        return Ok(call_or_function(state, callee, args, function));
     }
     let (field, get) = profile
         .variable(vtable_offset)
@@ -2015,23 +2042,40 @@ fn class_at(callees: &Callees, index: u16) -> Option<String> {
 }
 
 /// Gives the call of a method of the project with `args`, first argument
-/// first. A call with values under its arguments is part of an expression,
-/// so it calls a Function: its last argument is the local that takes the
-/// result, and the lift binds that local to the call. Else the call is a
+/// first. A call of a `Function`, or a call with values under its arguments,
+/// which is part of an expression, passes the local that takes the result
+/// last. Inside an expression the lift binds that local to the call, and
+/// else the call is an assignment to the local. Any other call is a
 /// statement.
-fn call_or_function(state: &mut State, callee: Callee, mut args: Vec<Value>) -> Option<Stmt> {
-    if state.depth() > 0
-        && let Some(slot) = args
-            .last()
-            .and_then(|value| value.slot)
-            .filter(|slot| *slot < 0)
+fn call_or_function(
+    state: &mut State,
+    callee: Callee,
+    mut args: Vec<Value>,
+    function: bool,
+) -> Option<Stmt> {
+    if let Some(slot) = args
+        .last()
+        .and_then(|value| value.slot)
+        .filter(|slot| *slot < 0 && (function || state.depth() > 0))
     {
         args.pop();
-        let value = Expr::Call(callee, expressions(args));
-        state.bindings.insert(slot, (value, None));
-        None
+        result_of(state, slot, Expr::Call(callee, expressions(args)))
     } else {
         Some(Stmt::Call(callee, expressions(args)))
+    }
+}
+
+/// Gives the call `call`, whose result goes to the local at `slot`: bound
+/// to the local inside an expression, and else an assignment to it.
+fn result_of(state: &mut State, slot: i16, call: Expr) -> Option<Stmt> {
+    if state.depth() > 0 {
+        state.bindings.insert(slot, (call, None));
+        None
+    } else {
+        Some(Stmt::Assign {
+            target: Expr::frame(slot),
+            value: call,
+        })
     }
 }
 
@@ -2411,7 +2455,8 @@ fn run(
                 ));
                 let callee =
                     Callee::Member(Box::new(Expr::Implicit), callees.procedure(method.index));
-                call_or_function(&mut state, callee, args)
+                let function = callees.is_function(method.index);
+                call_or_function(&mut state, callee, args, function)
             }
             Family::ImportCall { result } => {
                 let index = word16(0)?;
@@ -2435,15 +2480,32 @@ fn run(
                     && let Some(slot) = result_slot
                 {
                     values.remove(0);
-                    let call = Expr::Call(callee, expressions(values));
-                    if state.depth() > 0 {
-                        state.bindings.insert(slot, (call, None));
-                        None
-                    } else {
-                        Some(Stmt::Assign {
-                            target: Expr::frame(slot),
-                            value: call,
-                        })
+                    result_of(&mut state, slot, Expr::Call(callee, expressions(values)))
+                } else if !result && callees.function_stubs.contains(&index) {
+                    match callees.project_call(index) {
+                        Some(ProjectCall::Module(module, name)) => {
+                            let callee = Callee::Module(module.clone(), name.clone());
+                            match result_slot {
+                                Some(slot) => {
+                                    values.remove(0);
+                                    result_of(
+                                        &mut state,
+                                        slot,
+                                        Expr::Call(callee, expressions(values)),
+                                    )
+                                }
+                                None => Some(Stmt::Call(callee, expressions(values))),
+                            }
+                        }
+                        Some(ProjectCall::Object(name)) => {
+                            if values.is_empty() {
+                                return Err(LiftFault::CallArguments(at));
+                            }
+                            let object = values.remove(0).expr;
+                            let callee = Callee::Member(Box::new(object), name.clone());
+                            call_or_function(&mut state, callee, values, true)
+                        }
+                        None => Some(Stmt::Call(callee, expressions(values))),
                     }
                 } else {
                     let mut args = expressions(values);
@@ -3822,6 +3884,59 @@ dispid = 67
         );
         let fewer = Callees::default().with_method(0x6F8, 5, 8);
         assert_eq!(lines_with(&body, &fewer), Err(LiftFault::StackLeft(6)));
+        // The same call of a Function assigns its result to local_88.
+        let function = Callees::default()
+            .with_method(0x6F8, 5, 12)
+            .with_function(5);
+        assert_eq!(
+            lines_with(&body, &function).unwrap(),
+            ["       local_88 = method_5(arg_C)", "       Exit Sub"]
+        );
+    }
+
+    #[test]
+    fn a_call_of_a_function_of_another_module_or_object_assigns_its_result() {
+        // Push the address of local_88, then arg_C, then call stub 1.
+        let body = [
+            0x15, 0x78, 0xFF, 0x03, 0x0C, 0x00, 0x12, 0x01, 0x00, 0x08, 0x00, 0x0C,
+        ];
+        let module = ProjectCall::Module("Module1".to_owned(), "Draw".to_owned());
+        let sub = Callees::default().with_project_call(1, module.clone());
+        assert_eq!(
+            lines_with(&body, &sub).unwrap()[0],
+            "       Call Module1.Draw(arg_C, local_88)"
+        );
+        // A Function of a module takes the result first: here arg_C, which
+        // is not a local, so the call stays a call.
+        let function = Callees::default()
+            .with_project_call(1, module)
+            .with_function_stub(1);
+        assert_eq!(
+            lines_with(&body, &function).unwrap()[0],
+            "       Call Module1.Draw(arg_C, local_88)"
+        );
+        // A Function of an object takes the object first and the result last.
+        let object = Callees::default()
+            .with_project_call(1, ProjectCall::Object("Save".to_owned()))
+            .with_function_stub(1);
+        assert_eq!(
+            lines_with(&body, &object).unwrap()[0],
+            "       local_88 = arg_C.Save()"
+        );
+        // Push arg_C, then the address of local_88: the result is first.
+        let first = [
+            0x03, 0x0C, 0x00, 0x15, 0x78, 0xFF, 0x12, 0x01, 0x00, 0x08, 0x00, 0x0C,
+        ];
+        let module = Callees::default()
+            .with_project_call(
+                1,
+                ProjectCall::Module("Module1".to_owned(), "Draw".to_owned()),
+            )
+            .with_function_stub(1);
+        assert_eq!(
+            lines_with(&first, &module).unwrap()[0],
+            "       local_88 = Module1.Draw(arg_C)"
+        );
     }
 
     #[test]

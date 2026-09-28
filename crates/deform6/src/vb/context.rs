@@ -39,7 +39,7 @@ use std::collections::BTreeMap;
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::lift::{
     CONTROL_ARRAY, Callees, ProjectCall, class_indexes, global_indexes, import_indexes,
-    interface_indexes, method_calls, name_indexes, string_indexes,
+    interface_indexes, method_calls, name_indexes, result_bytes, string_indexes,
 };
 use crate::vb::links::read_method_links;
 use crate::vb::object::Object;
@@ -289,6 +289,11 @@ pub fn callees_of_project_named(
             for (index, name) in names.get(at).map(Vec::as_slice).unwrap_or_default() {
                 profile = profile.with_procedure(*index, name);
             }
+            for (index, listing) in listings(pe, object, table) {
+                if result_bytes(&listing, table).is_some() {
+                    profile = profile.with_function(index);
+                }
+            }
             profile
         })
         .collect();
@@ -327,10 +332,17 @@ pub fn callees_of_project_named(
                 {
                     callees = callees.with_declare(index, &name);
                 }
-                if let Some(call) = constant_procedure(pe, object.lp_object_info, index)
-                    .and_then(|stub| project_call(stub, &owners, objects, &profiles))
+                if let Some(stub) = constant_procedure(pe, object.lp_object_info, index)
+                    && let Some(call) = project_call(stub, &owners, objects, &profiles)
                 {
                     callees = callees.with_project_call(index, call);
+                    if let Some((owner, method)) = owners.get(&stub.descriptor.get())
+                        && profiles
+                            .get(*owner)
+                            .is_some_and(|profile| profile.is_function(*method))
+                    {
+                        callees = callees.with_function_stub(index);
+                    }
                 }
                 if let Some(import) = constant_runtime_ordinal(pe, object.lp_object_info, index)
                     .and_then(|ordinal| types?.import(ordinal))
