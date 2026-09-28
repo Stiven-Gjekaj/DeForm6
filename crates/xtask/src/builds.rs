@@ -535,7 +535,9 @@ pub(crate) fn batch_head(rems: &[&str]) -> Vec<String> {
 /// comes first on its line, so that a digit before `>` is not read as a
 /// handle number. Before each build, the routine deletes the log, the exit
 /// code and each `.log` file beside the project, so that a second run of
-/// the file leaves no old result.
+/// the file leaves no old result. It also deletes each executable in
+/// `out_dir`: an export with another list of programs uses the same short
+/// names, and its executable must not stay beside the new one.
 pub(crate) fn batch_tail(out_dir: &str, before_build: &[String]) -> Vec<String> {
     let mut lines: Vec<String> = [
         "popd",
@@ -556,6 +558,9 @@ pub(crate) fn batch_tail(out_dir: &str, before_build: &[String]) -> Vec<String> 
     .map(|line| (*line).to_owned())
     .collect();
     lines.extend(before_build.iter().cloned());
+    lines.push(format!(
+        r#"if exist "{out_dir}\*.exe" del /q "{out_dir}\*.exe""#
+    ));
     lines.push(format!(r#"if not exist "{out_dir}" mkdir "{out_dir}""#));
     lines.push(format!(
         r#"start "" /wait "%VB6%" /make "%BASE%\%~3" /outdir "{out_dir}" /out "%BASE%\logs\%1-%2.txt""#
@@ -1118,6 +1123,9 @@ mod tests {
                 r#"call :build p02 extracted "extracted\p02\B B.vbp""#,
             ]
         );
+        assert!(text.contains(
+            r#"if exist "%SystemDrive%\deform6-out\%1\%2\*.exe" del /q "%SystemDrive%\deform6-out\%1\%2\*.exe""#
+        ));
         assert!(
             text.contains(r#"/outdir "%SystemDrive%\deform6-out\%1\%2""#),
             "{text}"
