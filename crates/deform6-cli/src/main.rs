@@ -183,6 +183,17 @@ enum Command {
         /// does not ship them.
         #[arg(long)]
         vb_types: Option<PathBuf>,
+
+        /// The P-code table, which `cargo run -p xtask -- derive-pcode-table`
+        /// writes. `--lift` needs it.
+        #[arg(long)]
+        pcode_table: Option<PathBuf>,
+
+        /// Writes the lift of each procedure of a P-code program into its
+        /// body. The statements name variables by their offsets, and they
+        /// are not the source.
+        #[arg(long, requires = "pcode_table")]
+        lift: bool,
     },
 }
 
@@ -264,14 +275,36 @@ fn run(cli: &Cli) -> Exit {
             force,
             salvage,
             vb_types,
+            pcode_table,
+            lift,
         } => run_extract(
             input,
             output,
             report.as_deref(),
             *force,
             vb_types.as_deref(),
+            pcode_table.as_deref().filter(|_| *lift),
             mode_for(*salvage),
         ),
+    }
+}
+
+/// Reads the P-code table at `path`.
+///
+/// # Errors
+///
+/// Gives [`Exit::Internal`], after it prints the reason, when the file
+/// cannot be read or is not a P-code table.
+fn load_pcode_table(path: &Path) -> Result<PcodeTable, Exit> {
+    match std::fs::read(path) {
+        Ok(bytes) => PcodeTable::parse(&bytes).map_err(|err| {
+            eprintln!("{}: {err}", path.display());
+            Exit::Internal
+        }),
+        Err(err) => {
+            eprintln!("could not read {}: {err}", path.display());
+            Err(Exit::Internal)
+        }
     }
 }
 
@@ -368,18 +401,9 @@ fn load_opcode_table(opcode_table_path: Option<&Path>) -> Result<(OpcodeTable, S
 /// no P-code: the command says so and exits with 0. A table that cannot be
 /// read is [`Exit::Internal`], as a bad `--opcode-table` is.
 fn run_disasm(path: &Path, table_path: &Path, lift: bool, types_path: Option<&Path>) -> Exit {
-    let table = match std::fs::read(table_path) {
-        Ok(bytes) => match PcodeTable::parse(&bytes) {
-            Ok(table) => table,
-            Err(err) => {
-                eprintln!("{}: {err}", table_path.display());
-                return Exit::Internal;
-            }
-        },
-        Err(err) => {
-            eprintln!("could not read {}: {err}", table_path.display());
-            return Exit::Internal;
-        }
+    let table = match load_pcode_table(table_path) {
+        Ok(table) => table,
+        Err(exit) => return exit,
     };
     let types = match load_vb_types(types_path) {
         Ok(types) => types,
@@ -600,10 +624,15 @@ fn run_extract(
     report_path: Option<&Path>,
     force: bool,
     types_path: Option<&Path>,
+    lift_table: Option<&Path>,
     mode: deform6::journal::Mode,
 ) -> Exit {
     let types = match load_vb_types(types_path) {
         Ok(types) => types,
+        Err(exit) => return exit,
+    };
+    let pcode_table = match lift_table.map(load_pcode_table).transpose() {
+        Ok(table) => table,
         Err(exit) => return exit,
     };
     // Kept alive for the whole call: `deform6::write::project` re-reads a
@@ -619,13 +648,26 @@ fn run_extract(
     };
 
     let table = OpcodeTable::builtin();
-    let inspected = match deform6::inspect_with_types(&data, &table, types.as_ref(), mode) {
+    let mut inspected = match deform6::inspect_with_types(&data, &table, types.as_ref(), mode) {
         Ok(inspected) => inspected,
         Err(refusal) => {
             eprintln!("{refusal}");
             return exit_for(refusal);
         }
     };
+    if let Some(pcode_table) = &pcode_table {
+        match deform6::vb::bodies::lift_objects(&data, &inspected, pcode_table, types.as_ref()) {
+            Ok(lifted) => {
+                for (object, lifted) in inspected.objects.iter_mut().zip(lifted) {
+                    object.lifted = lifted;
+                }
+            }
+            Err(refusal) => {
+                eprintln!("{refusal}");
+                return exit_for(refusal);
+            }
+        }
+    }
 
     // The whole project is built in memory here, before `output` is
     // touched at all. A refusal from this call leaves the file system

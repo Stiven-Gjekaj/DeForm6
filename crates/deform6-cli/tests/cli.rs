@@ -1723,3 +1723,39 @@ fn inspect_names_a_bound_event_from_the_types_file() {
     assert!(stderr.contains("could not read"), "{stderr}");
     assert!(!output.exists(), "a refused run writes no directory");
 }
+
+/// `extract --lift` needs `--pcode-table`, and with it writes a body into
+/// each procedure of a P-code program. With a table that decodes almost no
+/// opcode, each body says that the lift stopped.
+#[test]
+fn extract_writes_a_lifted_body_with_the_pcode_table() {
+    let path = fast_flames_pcode_path();
+    let output = std::env::temp_dir().join(format!("deform6-lift-{}", std::process::id()));
+    let (code, _, stderr) = run(&[
+        OsStr::new("extract"),
+        path.as_os_str(),
+        OsStr::new("-o"),
+        output.as_os_str(),
+        OsStr::new("--lift"),
+    ]);
+    assert_eq!(code, 5, "{stderr}");
+    assert!(stderr.contains("--pcode-table"), "{stderr}");
+
+    let table = write_pcode_table("lift");
+    let (code, _, stderr) = run(&[
+        OsStr::new("extract"),
+        path.as_os_str(),
+        OsStr::new("-o"),
+        output.as_os_str(),
+        OsStr::new("--pcode-table"),
+        table.as_os_str(),
+        OsStr::new("--lift"),
+        OsStr::new("--force"),
+    ]);
+    fs::remove_file(&table).unwrap();
+    assert_eq!(code, 0, "{stderr}");
+    let form = fs::read(output.join("frmFire.frm")).unwrap();
+    fs::remove_dir_all(&output).unwrap();
+    let text = String::from_utf8_lossy(&form);
+    assert!(text.contains("' The lift stopped"), "{text}");
+}
