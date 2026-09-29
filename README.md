@@ -274,7 +274,11 @@ With `--lift`, `extract` writes the lift of each procedure into its body,
 with a `Dim` or a declaration for each variable that the lift names.
 `cargo run -p xtask -- export-lift-builds <dir>` writes each P-code program
 of the corpus this way, for a build with the Visual Basic 6 IDE on a
-Windows host.
+Windows host. On the author's Windows XP host, VB6 builds 42 of the 42
+lifted projects. Of the 41 rebuilt programs that `runs.bat` starts, 16 show
+the same first screen as the original, pixel for pixel. Most of the others
+differ because a rebuilt form has few of its properties.
+`scripts/vm/README.md` gives the steps of such a run.
 `check-pcode-table` holds the statements against the source: 3106 of the 4093 string
 literals and names after a `.` of the source are in the lift. Most of the
 others are the fields of a user-defined type, which the lift names by their
