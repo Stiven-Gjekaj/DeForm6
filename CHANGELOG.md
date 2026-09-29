@@ -191,6 +191,11 @@ heading its version and its date.
   Image Filter"`, and the rebuilt program showed `""Antique""` in its
   title. DeForm6 now writes the quote as it is. `tests/builds.toml` holds
   the new files of `Sepia.exe`, which still build on the Windows host.
+- `derive-vb-types` names an ordinal of the runtime that more functions
+  share by the export of `MSVBVM60.DLL`. `VarPtr`, `ObjPtr` and `StrPtr`
+  share one ordinal, and the lift wrote `VBA.ObjPtr(...)` where the source
+  has `VarPtr`. VB6 refused two lifted projects with a type mismatch, and
+  now builds both.
 - A fault of 2.0.0: `build.bat` left the executables of an earlier export
   in its output folders. It now deletes them before each build.
 - A fault of 2.0.0: `extract` wrote an argument by value without `ByVal`.
