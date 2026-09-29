@@ -59,7 +59,7 @@ use crate::vb::header::{VbHeader, header_region};
 use crate::vb::lift::{lift_method, render, result_bytes};
 use crate::vb::object::ObjectTable;
 use crate::vb::pcode::{PcodeListing, PcodeTable, disassemble};
-use crate::vb::procdesc::{MethodEntry, read_method_table};
+use crate::vb::procdesc::{FixedArray, MethodEntry, read_method_table};
 use crate::vb::project::{Declaration, DeclareTable, ExportName, ObjectTableHead, ProjectInfo};
 use crate::vb::types::VbTypes;
 use crate::vb::{ObjectProcedures, ProcedureEntry, Report};
@@ -826,25 +826,60 @@ fn typed_locals(lines: &[String], typed: &TypedArrays) -> BTreeMap<String, &'sta
     out
 }
 
-/// Puts a `Dim` before `lines` for each local that `lines` index, and for
-/// each local of `typed`, which a call passes as an array of that type.
+/// Puts a `Dim` before `lines` for each local that `lines` index, for each
+/// local of `typed`, which a call passes as an array of that type, and for
+/// each fixed-size array of `fixed`, with its bounds.
 /// Basic reads an index of a name that is not declared as a call.
-fn declare_arrays(lines: &mut Vec<String>, typed: &BTreeMap<String, &'static str>) {
-    let mut arrays: BTreeMap<String, &'static str> = indexed_words(lines, "local_")
+fn declare_arrays(
+    lines: &mut Vec<String>,
+    typed: &BTreeMap<String, &'static str>,
+    fixed: &BTreeMap<String, String>,
+) {
+    let mut arrays: BTreeMap<String, String> = indexed_words(lines, "local_")
         .into_iter()
-        .map(|array| (array, "Variant"))
+        .map(|array| (array, "() As Variant".to_owned()))
         .collect();
     arrays.extend(
         typed
             .iter()
-            .map(|(local, element)| (local.clone(), *element)),
+            .map(|(local, element)| (local.clone(), format!("() As {element}"))),
+    );
+    arrays.extend(
+        fixed
+            .iter()
+            .map(|(local, shape)| (local.clone(), shape.clone())),
     );
     lines.splice(
         0..0,
         arrays
             .iter()
-            .map(|(array, element)| format!("       Dim {array}() As {element}")),
+            .map(|(array, shape)| format!("       Dim {array}{shape}")),
     );
+}
+
+/// Gives the declaration of each fixed-size local array of `arrays` after
+/// its name, such as `(0 To 255) As Long` for `local_B0`.
+fn fixed_shapes(arrays: &[FixedArray]) -> BTreeMap<String, String> {
+    arrays
+        .iter()
+        .map(|array| {
+            let ranges: Vec<String> = array
+                .bounds
+                .iter()
+                .map(|(count, lower)| {
+                    let upper = i64::from(*lower)
+                        .saturating_add(i64::from(*count))
+                        .saturating_sub(1);
+                    format!("{lower} To {upper}")
+                })
+                .collect();
+            let element = redim_element(array.vartype).unwrap_or("Variant");
+            (
+                format!("local_{:X}", array.slot),
+                format!("({}) As {element}", ranges.join(", ")),
+            )
+        })
+        .collect()
 }
 
 /// Gives each word of `lines` that starts with `prefix` and goes on with
@@ -1305,7 +1340,11 @@ pub fn lift_objects(
                     object_arrays.entry(array).or_insert(element);
                 }
             }
-            declare_arrays(&mut lines, &locals);
+            declare_arrays(
+                &mut lines,
+                &locals,
+                &fixed_shapes(&descriptor.fixed_arrays(&pe)),
+            );
             lifted.procedures.push(LiftedProcedure {
                 index: *index,
                 declaration,
@@ -1358,10 +1397,11 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
     use super::{
-        TypedArrays, apply_frame_structs, built_parameters, call_arguments, call_arity, declare,
-        declare_arrays, declare_statements, declared_bytes, field_declarations, frame_structs,
-        indexed_words, pointer_fields, procedure_name, redim_arrays, replace_word, slot_uses,
-        struct_pointers, typed_arrays, typed_locals, variable_declaration, words_with,
+        FixedArray, TypedArrays, apply_frame_structs, built_parameters, call_arguments, call_arity,
+        declare, declare_arrays, declare_statements, declared_bytes, field_declarations,
+        fixed_shapes, frame_structs, indexed_words, pointer_fields, procedure_name, redim_arrays,
+        replace_word, slot_uses, struct_pointers, typed_arrays, typed_locals, variable_declaration,
+        words_with,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::lift::result_bytes;
@@ -1584,7 +1624,7 @@ mod tests {
             "       local_B0(local_88) = local_C4".to_owned(),
             "       Exit Sub".to_owned(),
         ];
-        declare_arrays(&mut lines, &BTreeMap::new());
+        declare_arrays(&mut lines, &BTreeMap::new(), &BTreeMap::new());
         assert_eq!(
             lines,
             [
@@ -1725,6 +1765,24 @@ names = ["ExitProcCb"]
     }
 
     #[test]
+    fn a_fixed_array_is_declared_with_its_bounds_and_its_type() {
+        let shapes = fixed_shapes(&[
+            FixedArray::new(0xB0, 3, vec![(256, 0)]),
+            FixedArray::new(0x2C, 0x11, vec![(256, 0), (16, -8)]),
+        ]);
+        let mut lines = vec!["       local_B0(1) = local_2C(2, 3)".to_owned()];
+        declare_arrays(&mut lines, &BTreeMap::new(), &shapes);
+        assert_eq!(
+            lines,
+            [
+                "       Dim local_2C(0 To 255, -8 To 7) As Byte",
+                "       Dim local_B0(0 To 255) As Long",
+                "       local_B0(1) = local_2C(2, 3)"
+            ]
+        );
+    }
+
+    #[test]
     fn a_redim_gives_the_type_of_the_elements_of_its_array() {
         let table = PcodeTable::parse(b"[primary.3B]\nwidth = 8\nnames = [\"Redim\"]\n").unwrap();
         // Redim of 2 dimensions of VARTYPE 0x11, 1 byte each, flags 0x80;
@@ -1795,7 +1853,7 @@ names = ["ExitProcCb"]
         let locals = typed_locals(&calls, &typed);
         assert_eq!(locals.get("local_EC"), Some(&"Byte"));
         let mut lines = calls.clone();
-        declare_arrays(&mut lines, &locals);
+        declare_arrays(&mut lines, &locals, &BTreeMap::new());
         assert_eq!(
             lines.get(..2),
             Some(

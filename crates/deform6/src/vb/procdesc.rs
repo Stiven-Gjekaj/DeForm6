@@ -138,6 +138,18 @@ pub struct FixedArray {
     pub bounds: Vec<(u32, i32)>,
 }
 
+impl FixedArray {
+    /// Builds a fixed array from its slot, its `VARTYPE` and its bounds.
+    #[must_use]
+    pub const fn new(slot: u16, vartype: u16, bounds: Vec<(u32, i32)>) -> Self {
+        Self {
+            slot,
+            vartype,
+            bounds,
+        }
+    }
+}
+
 /// The `SAFEARRAY` feature that marks a fixed-size array: `FADF_FIXEDSIZE`.
 const FADF_FIXEDSIZE: u16 = 0x10;
 
