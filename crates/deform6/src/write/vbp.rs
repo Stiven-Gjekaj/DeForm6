@@ -12,7 +12,6 @@ use crate::vb::classify::ObjectKind;
 use crate::vb::project::Component;
 
 use super::model::{CodeKind, CodeModel, FormModel, LineWriter, ProjectModel, Startup};
-use super::values::escape_inline_string;
 
 // ---------------------------------------------------------------------
 // Plan 04-03, Task 1: the component lines, in recovered order.
@@ -361,7 +360,9 @@ fn write_quoted_setting(
             evidence: Vec::new(),
         });
     } else {
-        writer.push_line(&format!("{key}={}", escape_inline_string(value)));
+        // VB6 writes a quote inside the value as it is, with no doubling:
+        // it reads the value up to the last quote of the line.
+        writer.push_line(&format!("{key}=\"{value}\""));
     }
 }
 
@@ -826,6 +827,15 @@ mod tests {
         assert!(lines(&bytes).contains(&"Title=\"FlameTest\"".to_owned()));
         assert!(lines(&bytes).contains(&"ExeName32=\"Fast_Flames.exe\"".to_owned()));
         assert!(lines(&bytes).contains(&"HelpFile=\"help.hlp\"".to_owned()));
+    }
+
+    #[test]
+    fn a_quote_inside_the_title_is_written_as_it_is() {
+        let mut report = minimal_report(Vec::new(), Vec::new(), Vec::new());
+        report.title = "Sepia / \"Antique\" Image Filter".to_owned();
+        let (model, _items) = from_report(&report, &[]);
+        let (bytes, _items) = write_vbp(&report, &model);
+        assert!(lines(&bytes).contains(&"Title=\"Sepia / \"Antique\" Image Filter\"".to_owned()));
     }
 
     // --- Task 3: the three edge shapes a project file has to survive -------

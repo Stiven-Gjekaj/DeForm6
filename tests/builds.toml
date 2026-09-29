@@ -242,7 +242,7 @@ original = "built"
 extracted = "built"
 
 [program."vb6-code/Sepia-effect/Sepia.exe"]
-files = "sha256:bbd0ce5364105ec98dc56c84a1ce29917d763953a73b067c8f163aa59d70acd4"
+files = "sha256:48657cb9b9f37e49c87689cbd84235f270047618264acdbb1bd40a20a8490dd6"
 original = "built"
 extracted = "built"
 
