@@ -56,7 +56,7 @@ use crate::read::pe::PeImage;
 use crate::vb::context::callees_of_project_named;
 use crate::vb::functyp::{Prototype, TypeEntry, VbType};
 use crate::vb::header::{VbHeader, header_region};
-use crate::vb::lift::{lift_method, render, result_bytes};
+use crate::vb::lift::{Callees, lift_method, render, result_bytes};
 use crate::vb::object::ObjectTable;
 use crate::vb::pcode::{PcodeListing, PcodeTable, disassemble};
 use crate::vb::procdesc::{FixedArray, MethodEntry, read_method_table};
@@ -857,6 +857,78 @@ fn declare_arrays(
     );
 }
 
+/// Gives the class of each local of the body `listing` that `Dim ... As New`
+/// declares, by the name of the local. Basic creates such an object at its
+/// first use: `FLdRf` gives the address of the local, and `NewIfNullPr`
+/// creates the object of its class when the local is empty. A local with no
+/// `New` in its declaration stays `Nothing`, and a call on it fails with
+/// error 424. `callees` gives the name of each class of the project. A
+/// class of a form is left out: the lift names such an object by the name
+/// of the form.
+fn new_locals(
+    listing: &PcodeListing,
+    table: &PcodeTable,
+    callees: &Callees,
+) -> BTreeMap<String, String> {
+    let names = |at: usize| {
+        listing
+            .instructions
+            .get(at)
+            .and_then(|instruction| table.slot(instruction.lead, instruction.opcode))
+            .map(|slot| slot.names.as_slice())
+            .unwrap_or_default()
+    };
+    let word = |at: usize| {
+        listing
+            .instructions
+            .get(at)
+            .and_then(|instruction| instruction.arguments.get(..2))
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+    };
+    let mut out = BTreeMap::new();
+    for at in 1..listing.instructions.len() {
+        let Some(before) = at.checked_sub(1) else {
+            continue;
+        };
+        if !names(at).iter().any(|name| name == "NewIfNullPr")
+            || !names(before).iter().any(|name| name == "FLdRf")
+        {
+            continue;
+        }
+        let (Some(slot), Some(index)) = (word(before), word(at)) else {
+            continue;
+        };
+        let offset = i16::from_le_bytes(slot.to_le_bytes());
+        let Some(class) = callees.class(index) else {
+            continue;
+        };
+        if offset >= 0 || class.form_name().is_some() {
+            continue;
+        }
+        if let Some(name) = class.object_name() {
+            out.insert(
+                format!("local_{:X}", offset.unsigned_abs()),
+                name.to_owned(),
+            );
+        }
+    }
+    out
+}
+
+/// Puts a `Dim ... As New` before `lines` for each local of `locals` that
+/// `lines` use.
+fn declare_new_locals(lines: &mut Vec<String>, locals: &BTreeMap<String, String>) {
+    let used = words_with(lines, "local_");
+    lines.splice(
+        0..0,
+        locals
+            .iter()
+            .filter(|(local, _)| used.contains(*local))
+            .map(|(local, class)| format!("       Dim {local} As New {class}")),
+    );
+}
+
 /// Gives the declaration of each fixed-size local array of `arrays` after
 /// its name, such as `(0 To 255) As Long` for `local_B0`.
 fn fixed_shapes(arrays: &[FixedArray]) -> BTreeMap<String, String> {
@@ -1345,6 +1417,7 @@ pub fn lift_objects(
                 &locals,
                 &fixed_shapes(&descriptor.fixed_arrays(&pe)),
             );
+            declare_new_locals(&mut lines, &new_locals(&listing, table, callees));
             lifted.procedures.push(LiftedProcedure {
                 index: *index,
                 declaration,
@@ -1398,10 +1471,10 @@ mod tests {
 
     use super::{
         FixedArray, TypedArrays, apply_frame_structs, built_parameters, call_arguments, call_arity,
-        declare, declare_arrays, declare_statements, declared_bytes, field_declarations,
-        fixed_shapes, frame_structs, indexed_words, pointer_fields, procedure_name, redim_arrays,
-        replace_word, slot_uses, struct_pointers, typed_arrays, typed_locals, variable_declaration,
-        words_with,
+        declare, declare_arrays, declare_new_locals, declare_statements, declared_bytes,
+        field_declarations, fixed_shapes, frame_structs, indexed_words, new_locals, pointer_fields,
+        procedure_name, redim_arrays, replace_word, slot_uses, struct_pointers, typed_arrays,
+        typed_locals, variable_declaration, words_with,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::lift::result_bytes;
@@ -1780,6 +1853,49 @@ names = ["ExitProcCb"]
                 "       local_B0(1) = local_2C(2, 3)"
             ]
         );
+    }
+
+    #[test]
+    fn a_local_that_new_if_null_creates_is_declared_as_new() {
+        use crate::vb::lift::Callees;
+        let table = PcodeTable::parse(
+            b"[primary.04]\nwidth = 2\nnames = [\"FLdRf\"]\n\
+              [primary.24]\nwidth = 2\nnames = [\"NewIfNullPr\"]\n",
+        )
+        .unwrap();
+        // FLdRf -0xA0, NewIfNullPr 0x18; FLdRf -0x98, NewIfNullPr 0x1C;
+        // FLdRf +0x0C, NewIfNullPr 0x18.
+        let body = [
+            0x04, 0x60, 0xFF, 0x24, 0x18, 0, 0x04, 0x68, 0xFF, 0x24, 0x1C, 0, 0x04, 0x0C, 0, 0x24,
+            0x18, 0,
+        ];
+        let listing = disassemble(&Region::new(&body, Off::new(0)), &table);
+        let callees = Callees::default()
+            .with_class(0x18, Callees::default().with_object_name("FastDrawing"))
+            .with_class(
+                0x1C,
+                Callees::default()
+                    .with_object_name("Form2")
+                    .with_form_name("Form2"),
+            );
+        let locals = new_locals(&listing, &table, &callees);
+        assert_eq!(
+            locals.into_iter().collect::<Vec<_>>(),
+            vec![("local_A0".to_owned(), "FastDrawing".to_owned())]
+        );
+        let mut lines = vec!["       local_A4 = local_A0.GetImageWidth(arg_C)".to_owned()];
+        declare_new_locals(
+            &mut lines,
+            &BTreeMap::from([
+                ("local_A0".to_owned(), "FastDrawing".to_owned()),
+                ("local_B0".to_owned(), "FastDrawing".to_owned()),
+            ]),
+        );
+        assert_eq!(
+            lines.first().map(String::as_str),
+            Some("       Dim local_A0 As New FastDrawing")
+        );
+        assert_eq!(lines.len(), 2);
     }
 
     #[test]
