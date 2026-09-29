@@ -570,15 +570,180 @@ fn declare_frame_structs(
     apply_frame_structs(lines, &structs, &pointers, tag)
 }
 
-/// Puts a `Dim` before `lines` for each local that `lines` index. Basic
-/// reads an index of a name that is not declared as a call.
-fn declare_arrays(lines: &mut Vec<String>) {
-    let arrays = indexed_words(lines, "local_");
+/// The arrays of the prototypes of the project that keep their type, by the
+/// name of the procedure: the position of each argument and the Basic type
+/// of its elements.
+type TypedArrays = BTreeMap<String, Vec<(usize, &'static str)>>;
+
+/// The Basic type of the elements of an array argument that a lifted caller
+/// can declare: a type that is not an object.
+const fn element_type(vb_type: &VbType) -> Option<&'static str> {
+    match vb_type {
+        VbType::Boolean => Some("Boolean"),
+        VbType::Byte => Some("Byte"),
+        VbType::Integer => Some("Integer"),
+        VbType::Long => Some("Long"),
+        VbType::Single => Some("Single"),
+        VbType::Double => Some("Double"),
+        VbType::Date => Some("Date"),
+        VbType::Currency => Some("Currency"),
+        VbType::Variant => Some("Variant"),
+        VbType::Str => Some("String"),
+        _ => None,
+    }
+}
+
+/// Gives the text of each argument of each call of `name` in `lines`, apart
+/// by the commas that are outside a string and outside inner parentheses.
+fn call_arguments(lines: &[String], name: &str) -> Vec<Vec<String>> {
+    let open = format!("{name}(");
+    let mut out = Vec::new();
+    for line in lines {
+        let characters: Vec<char> = line.chars().collect();
+        for at in 0..characters.len() {
+            let tail: String = characters.get(at..).unwrap_or_default().iter().collect();
+            let before = at
+                .checked_sub(1)
+                .and_then(|before| characters.get(before))
+                .copied();
+            if !tail.starts_with(&open) || before.is_some_and(is_name) {
+                continue;
+            }
+            let mut depth = 0_usize;
+            let mut quoted = false;
+            let mut current = String::new();
+            let mut arguments = Vec::new();
+            for character in tail.chars().skip(open.len()) {
+                match character {
+                    '"' => quoted = !quoted,
+                    _ if quoted => {}
+                    '(' => depth = depth.saturating_add(1),
+                    ')' if depth == 0 => {
+                        arguments.push(current.trim().to_owned());
+                        break;
+                    }
+                    ')' => depth = depth.saturating_sub(1),
+                    ',' if depth == 0 => {
+                        arguments.push(std::mem::take(&mut current).trim().to_owned());
+                        continue;
+                    }
+                    _ => {}
+                }
+                current.push(character);
+            }
+            if arguments.len() == 1 && arguments.first().is_some_and(String::is_empty) {
+                arguments.clear();
+            }
+            out.push(arguments);
+        }
+    }
+    out
+}
+
+/// Tells whether `text` is a whole `local_` word.
+fn is_local(text: &str) -> bool {
+    text.strip_prefix("local_")
+        .is_some_and(|digits| !digits.is_empty() && digits.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// Gives the array arguments of the prototypes of `procedures` that keep
+/// their type: an array of a type that is not an object, which each call of
+/// the procedure in `lines` fills with a local. A procedure name that two
+/// prototypes give with other array types keeps no type.
+fn typed_arrays<'a>(
+    procedures: impl Iterator<Item = &'a ObjectProcedures>,
+    lines: &[String],
+) -> TypedArrays {
+    let mut found: BTreeMap<String, Option<Vec<(usize, &'static str)>>> = BTreeMap::new();
+    for own in procedures {
+        let ObjectProcedures::Slots(slots) = own else {
+            continue;
+        };
+        for slot in slots {
+            let ProcedureEntry::Public {
+                name,
+                prototype: Some(prototype),
+            } = slot
+            else {
+                continue;
+            };
+            let arrays: Vec<(usize, &'static str)> = prototype
+                .arguments
+                .iter()
+                .enumerate()
+                .filter(|(_, argument)| argument.entry.array)
+                .filter_map(|(at, argument)| element_type(&argument.entry.vb_type).map(|t| (at, t)))
+                .collect();
+            if arrays.is_empty() {
+                continue;
+            }
+            let entry = found
+                .entry(name.clone())
+                .or_insert_with(|| Some(arrays.clone()));
+            if entry.as_ref() != Some(&arrays) {
+                *entry = None;
+            }
+        }
+    }
+    let mut out = TypedArrays::new();
+    for (name, arrays) in found {
+        let Some(arrays) = arrays else {
+            continue;
+        };
+        let calls = call_arguments(lines, &name);
+        let kept: Vec<(usize, &'static str)> = arrays
+            .into_iter()
+            .filter(|(at, _)| {
+                calls.iter().all(|arguments| {
+                    arguments
+                        .get(*at)
+                        .is_some_and(|argument| is_local(argument))
+                })
+            })
+            .collect();
+        if !kept.is_empty() {
+            out.insert(name, kept);
+        }
+    }
+    out
+}
+
+/// Gives the element type of each local of `lines` that a call passes as a
+/// typed array of `typed`.
+fn typed_locals(lines: &[String], typed: &TypedArrays) -> BTreeMap<String, &'static str> {
+    let mut out = BTreeMap::new();
+    for (name, arrays) in typed {
+        for arguments in call_arguments(lines, name) {
+            for (at, element) in arrays {
+                if let Some(argument) = arguments.get(*at)
+                    && is_local(argument)
+                {
+                    out.entry(argument.clone()).or_insert(*element);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Puts a `Dim` before `lines` for each local that `lines` index, and for
+/// each local of `typed`, which a call passes as an array of that type.
+/// Basic reads an index of a name that is not declared as a call.
+fn declare_arrays(lines: &mut Vec<String>, typed: &BTreeMap<String, &'static str>) {
+    let mut arrays: BTreeMap<String, &'static str> = indexed_words(lines, "local_")
+        .into_iter()
+        .map(|array| (array, "Variant"))
+        .collect();
+    arrays.extend(
+        typed
+            .iter()
+            .map(|(local, element)| (local.clone(), *element)),
+    );
     lines.splice(
         0..0,
         arrays
             .iter()
-            .map(|array| format!("       Dim {array}() As Variant")),
+            .map(|(array, element)| format!("       Dim {array}() As {element}")),
     );
 }
 
@@ -709,6 +874,7 @@ fn declare(
     arg_size: u16,
     result: Option<u16>,
     sizes: Option<&[u8]>,
+    typed: &TypedArrays,
     lines: &mut Vec<String>,
 ) -> (String, &'static str) {
     let name = procedure_name(procedures, index);
@@ -734,7 +900,10 @@ fn declare(
             let signature = crate::write::code::format_signature(
                 "Public",
                 &name,
-                Some(&by_reference_variants(prototype)),
+                Some(&by_reference_variants(
+                    prototype,
+                    typed.get(&name).map_or(&[], Vec::as_slice),
+                )),
             );
             rename_prototype(prototype, lines, &rename);
             (signature.declaration, signature.closing)
@@ -790,10 +959,15 @@ fn declare(
 /// Gives `prototype` with each argument by reference, and each array, as a
 /// `Variant` by reference. A lifted caller passes a `Variant` local, which
 /// Basic refuses for an argument by reference of another type. A `Variant`
-/// by reference still passes the variable, and it can hold an array.
-fn by_reference_variants(prototype: &Prototype) -> Prototype {
+/// by reference still passes the variable, and it can hold an array. An
+/// array at a position of `typed` keeps its type: each caller declares the
+/// local that it passes there as an array of that type.
+fn by_reference_variants(prototype: &Prototype, typed: &[(usize, &'static str)]) -> Prototype {
     let mut out = prototype.clone();
-    for argument in &mut out.arguments {
+    for (position, argument) in out.arguments.iter_mut().enumerate() {
+        if argument.entry.array && typed.iter().any(|(at, _)| *at == position) {
+            continue;
+        }
         if argument.entry.by_ref || argument.entry.array {
             argument.entry.vb_type = VbType::Variant;
             argument.entry.array = false;
@@ -952,6 +1126,22 @@ pub fn lift_objects(
             _ => None,
         })
         .collect();
+    let mut raw: Vec<String> = Vec::new();
+    for (object, callees) in objects.iter().zip(&callees) {
+        let Ok(methods) = read_method_table(&pe, object.lp_object_info) else {
+            continue;
+        };
+        for entry in &methods.entries {
+            if let MethodEntry::Descriptor { index, descriptor } = entry
+                && let Some(body) = descriptor.body(&pe)
+                && let Ok(stmts) =
+                    lift_method(&disassemble(&body, table), table, callees, types, *index)
+            {
+                raw.extend(render(&stmts));
+            }
+        }
+    }
+    let typed = typed_arrays(report.objects.iter().map(|own| &own.procedures), &raw);
     let mut out: Vec<Option<LiftedObject>> = Vec::new();
     let mut variables: Vec<BTreeSet<String>> = Vec::new();
     for own in &report.objects {
@@ -997,12 +1187,14 @@ pub fn lift_objects(
                 descriptor.arg_size,
                 result,
                 callees.argument_sizes(*index),
+                &typed,
                 &mut lines,
             );
             frame_types.extend(declare_frame_structs(
                 &listing, table, &mut lines, &calls, result, *index,
             ));
-            declare_arrays(&mut lines);
+            let locals = typed_locals(&lines, &typed);
+            declare_arrays(&mut lines, &locals);
             lifted.procedures.push(LiftedProcedure {
                 index: *index,
                 declaration,
@@ -1048,12 +1240,13 @@ pub fn lift_objects(
     reason = "a test builds the state it needs and must fail loudly when that state is wrong"
 )]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
 
     use super::{
-        apply_frame_structs, built_parameters, call_arity, declare, declare_arrays,
-        declare_statements, declared_bytes, field_declarations, frame_structs, indexed_words,
-        pointer_fields, procedure_name, replace_word, slot_uses, struct_pointers, words_with,
+        TypedArrays, apply_frame_structs, built_parameters, call_arguments, call_arity, declare,
+        declare_arrays, declare_statements, declared_bytes, field_declarations, frame_structs,
+        indexed_words, pointer_fields, procedure_name, replace_word, slot_uses, struct_pointers,
+        typed_arrays, typed_locals, words_with,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::lift::result_bytes;
@@ -1276,7 +1469,7 @@ mod tests {
             "       local_B0(local_88) = local_C4".to_owned(),
             "       Exit Sub".to_owned(),
         ];
-        declare_arrays(&mut lines);
+        declare_arrays(&mut lines, &BTreeMap::new());
         assert_eq!(
             lines,
             [
@@ -1399,13 +1592,94 @@ names = ["ExitProcCb"]
             prototype: Some(prototype),
         }]);
         let mut lines = vec!["local_88 = arg_C + arg_10 + arg_14".to_owned()];
-        let (declaration, closing) = declare(&slots, 0, 20, Some(4), None, &mut lines);
+        let (declaration, closing) = declare(
+            &slots,
+            0,
+            20,
+            Some(4),
+            None,
+            &TypedArrays::new(),
+            &mut lines,
+        );
         assert_eq!(
             declaration,
             "Public Function Draw(ByRef Box As Variant, ByRef Pixels As Variant, ByVal Size As Long) As Long"
         );
         assert_eq!(closing, "End Function");
         assert_eq!(lines, ["Draw = Box + Pixels + Size"]);
+    }
+
+    #[test]
+    fn an_array_that_each_call_fills_with_a_local_keeps_its_type() {
+        use crate::vb::functyp::{
+            Argument, OptionalDefaultsOutcome, PropertyKind, Prototype, TypeEntry, VbType,
+        };
+        let entry = |vb_type, array| TypeEntry {
+            vb_type,
+            optional: false,
+            array,
+            by_ref: true,
+        };
+        let prototype = Prototype {
+            member_id: 0,
+            v_off: 0,
+            const_ffff: 0xFFFF,
+            nul1: 0,
+            property_kind: PropertyKind::None,
+            is_function: false,
+            arguments: vec![
+                Argument {
+                    name: "Box".to_owned(),
+                    entry: entry(VbType::Object, false),
+                    default: None,
+                },
+                Argument {
+                    name: "Pixels".to_owned(),
+                    entry: entry(VbType::Byte, true),
+                    default: None,
+                },
+            ],
+            return_type: None,
+            optional_defaults: OptionalDefaultsOutcome::NoOptionalVals,
+        };
+        let slots = ObjectProcedures::Slots(vec![ProcedureEntry::Public {
+            name: "Fill".to_owned(),
+            prototype: Some(prototype),
+        }]);
+        let calls = vec![
+            "       Call local_E8.Fill(Me.pic, local_EC)".to_owned(),
+            "       Call Fill(arg_C, local_88)".to_owned(),
+        ];
+        let typed = typed_arrays(std::iter::once(&slots), &calls);
+        assert_eq!(typed.get("Fill"), Some(&vec![(1, "Byte")]));
+        let locals = typed_locals(&calls, &typed);
+        assert_eq!(locals.get("local_EC"), Some(&"Byte"));
+        let mut lines = calls.clone();
+        declare_arrays(&mut lines, &locals);
+        assert_eq!(
+            lines.get(..2),
+            Some(
+                &[
+                    "       Dim local_88() As Byte".to_owned(),
+                    "       Dim local_EC() As Byte".to_owned()
+                ][..]
+            )
+        );
+        let (declaration, _) = declare(&slots, 0, 12, None, None, &typed, &mut Vec::new());
+        assert_eq!(
+            declaration,
+            "Public Sub Fill(ByRef Box As Variant, ByRef Pixels() As Byte)"
+        );
+        // One call that passes no bare local keeps the array a Variant.
+        let mixed = vec![
+            "       Call Fill(arg_C, local_88)".to_owned(),
+            "       Call Fill(arg_C, field_34)".to_owned(),
+        ];
+        assert!(typed_arrays(std::iter::once(&slots), &mixed).is_empty());
+        assert_eq!(
+            call_arguments(&mixed, "Fill"),
+            [vec!["arg_C", "local_88"], vec!["arg_C", "field_34"]]
+        );
     }
 
     #[test]
@@ -1434,7 +1708,15 @@ names = ["ExitProcCb"]
         ]);
         let mut lines = vec!["local_88 = arg_C".to_owned()];
         assert_eq!(
-            declare(&slots, 0, 12, Some(4), None, &mut lines),
+            declare(
+                &slots,
+                0,
+                12,
+                Some(4),
+                None,
+                &TypedArrays::new(),
+                &mut lines
+            ),
             (
                 "Private Function UnnamedProcedure0(arg_C As Variant) As Variant".to_owned(),
                 "End Function"
@@ -1443,15 +1725,24 @@ names = ["ExitProcCb"]
         assert_eq!(lines, ["UnnamedProcedure0 = arg_C"]);
         // The calls give a Double, then the address of the result.
         assert_eq!(
-            declare(&slots, 0, 16, Some(4), Some(&[8, 4]), &mut Vec::new()).0,
+            declare(
+                &slots,
+                0,
+                16,
+                Some(4),
+                Some(&[8, 4]),
+                &TypedArrays::new(),
+                &mut Vec::new()
+            )
+            .0,
             "Private Function UnnamedProcedure0(ByVal arg_C As Variant) As Variant"
         );
         let mut byte = vec!["local_86 = 1".to_owned(), "local_85 = 2".to_owned()];
-        let _ = declare(&slots, 0, 8, Some(1), None, &mut byte);
+        let _ = declare(&slots, 0, 8, Some(1), None, &TypedArrays::new(), &mut byte);
         assert_eq!(byte, ["UnnamedProcedure0 = 1", "local_85 = 2"]);
         let mut handler = vec!["local_88 = arg_C".to_owned()];
         assert_eq!(
-            declare(&slots, 1, 8, None, None, &mut handler),
+            declare(&slots, 1, 8, None, None, &TypedArrays::new(), &mut handler),
             (
                 "Private Sub Form_KeyPress(KeyAscii As Integer)".to_owned(),
                 "End Sub"
@@ -1461,7 +1752,7 @@ names = ["ExitProcCb"]
         let module = ObjectProcedures::NoNameArray { proc_count: 1 };
         let mut body = vec!["local_94 = arg_10".to_owned()];
         assert_eq!(
-            declare(&module, 0, 16, Some(16), None, &mut body),
+            declare(&module, 0, 16, Some(16), None, &TypedArrays::new(), &mut body),
             (
                 "Public Function UnnamedProcedure0(arg_10 As Variant, arg_14 As Variant) As Variant"
                     .to_owned(),
@@ -1471,12 +1762,21 @@ names = ["ExitProcCb"]
         assert_eq!(body, ["UnnamedProcedure0 = arg_10"]);
         let mut sub = Vec::new();
         assert_eq!(
-            declare(&module, 0, 12, None, None, &mut sub).0,
+            declare(&module, 0, 12, None, None, &TypedArrays::new(), &mut sub).0,
             "Public Sub UnnamedProcedure0(arg_C As Variant, arg_10 As Variant)"
         );
         // In a module the address of the result comes first.
         assert_eq!(
-            declare(&module, 0, 16, Some(4), Some(&[4, 8]), &mut Vec::new()).0,
+            declare(
+                &module,
+                0,
+                16,
+                Some(4),
+                Some(&[4, 8]),
+                &TypedArrays::new(),
+                &mut Vec::new()
+            )
+            .0,
             "Public Function UnnamedProcedure0(ByVal arg_10 As Variant) As Variant"
         );
     }
