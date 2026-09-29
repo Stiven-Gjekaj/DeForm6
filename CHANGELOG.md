@@ -158,7 +158,23 @@ heading its version and its date.
   the type of its elements, and each fixed-size local array takes its
   bounds and its type from the descriptor of its procedure, such as
   `Dim local_B0(0 To 255) As Long`. An element of an array is no longer a
-  field of itself.
+  field of itself. A local that `NewIfNullPr` creates is `Dim ... As New`,
+  such as `Dim local_A0 As New FastDrawing`: 44 in the 42 programs, the
+  count of their source.
+- The last run of the start check: VB6 builds 42 of the 42 lifted projects
+  and 42 of the 42 sources. `runs.bat` starts 41 pairs, because it does
+  not start `LockWorkStation.exe`. In 16 of the 41 pairs, the first screen
+  of the rebuilt program is the same as that of the original, pixel for
+  pixel. The first run gave 13. The other 25 differ. The differences that
+  were read come from the forms: a rebuilt form has few of its properties,
+  because 138 of the 831 property records reach the `.frm`. In
+  `Custom_Filters.exe`, `picBack` has no `AutoRedraw`, so it has no image,
+  and the rebuilt program stops with error 9 where the original stops with
+  error 53 for its missing `sample.jpg`.
+- `scripts/vm/vm.py` drives the Windows XP build host from the Mac: it
+  types into the machine, puts a CD image into its drive, reads its serial
+  port, takes a picture at each marker of `runs.bat`, and compares the
+  pictures of each pair. `scripts/vm/README.md` gives the steps.
 - `ProcDescriptor::fixed_arrays` reads the fixed-size local arrays of a
   P-code procedure. In each of the 42 P-code programs, they equal the
   fixed-size `Dim` arrays of the procedures of the source: 24 in all.
@@ -170,6 +186,11 @@ heading its version and its date.
   forms, 708 of 708 controls, and 831 property records of which 138 lines
   reach the `.frm`. The P-code corpus gives 408 handler addresses, 20 more,
   one for each handler of the source of `Main`.
+- A fault of 2.0.0: DeForm6 doubled a quote inside a value of the `.vbp`
+  file. VB6 writes the quote as it is, such as `Title="Sepia / "Antique"
+  Image Filter"`, and the rebuilt program showed `""Antique""` in its
+  title. DeForm6 now writes the quote as it is. `tests/builds.toml` holds
+  the new files of `Sepia.exe`, which still build on the Windows host.
 - A fault of 2.0.0: `build.bat` left the executables of an earlier export
   in its output folders. It now deletes them before each build.
 - A fault of 2.0.0: `extract` wrote an argument by value without `ByVal`.
@@ -188,10 +209,16 @@ heading its version and its date.
 
 - Two corpus programs have no P-code build, because their source does not
   build: `Edge_Detection` and `HMM`.
-- A lifted project that VB6 builds is not yet a check of behaviour. No run
-  compares a rebuilt program with the original.
-- Each local and each field of the lift is a `Variant`. A local that a
-  call gives by reference to a `Declare` goes as `Any`.
+- The start check compares the first screen only. It does not click or
+  type into a program, so it does not check the code of an event after the
+  load of the first form.
+- A rebuilt form has few of its properties: 138 of the 831 property
+  records of the corpus reach the `.frm`. Most of the 25 pairs that differ
+  wait on this.
+- Most locals and fields of the lift are a `Variant`. A struct, an array
+  that a call fills, an array that a `ReDim` sizes, a fixed-size array and
+  a local that is `As New` take their types. A local that a call gives by
+  reference to a `Declare` goes as `Any`.
 
 ### What this does not do
 

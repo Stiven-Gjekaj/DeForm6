@@ -2839,6 +2839,16 @@ an array of more than one dimension, and `MemLdUI1` or `MemStUI1` at the
 field offset 0 reads or writes it. The lift writes the element, such as
 `local_88(x, y)`, and not a field of it.
 
+**A local that `Dim ... As New` declares.** Basic creates the object of
+such a local at its first use. Before each use, `FLdRf` gives the address of
+the local, and `NewIfNullPr` creates the object of the class at its index of
+the constant table when the local is empty. `Dim fDraw As New FastDrawing`
+of `Custom_Filters.exe` is `04 60 FF 24 18 00` before each call on
+`fDraw`. `extract --lift` declares such a local as `Dim local_A0 As New
+FastDrawing`. The 42 lifted programs hold 44 of these, and the source of
+each program holds the same count. Without `New`, the local stays
+`Nothing`, and the first call on it stops with error 424.
+
 **The length of a control block.** See section 8.3: `Length` holds only
 its low 16 bits.
 

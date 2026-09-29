@@ -850,10 +850,21 @@ last one was not in the lift: DeForm6 refused the control tree of
 `Map-Editor`, because VB6 writes only the low 16 bits of the length of a
 control block.
 
-**Next.** The lift gives names of offsets, not of variables, each variable
-is a `Variant`, and each statement stays in the form of `GoTo` and labels.
-The next step runs each rebuilt program against the original, to check
-behaviour and not only the build.
+**The start check, 2026-09-29.** `runs.bat` starts each rebuilt program
+and its original on the Windows host, and `scripts/vm/vm.py` takes a
+picture of the first screen of each one. Each run found faults, and each
+fault got a fix with its own test: labels at the end of a procedure, the
+structs that a call of a DLL fills, the types of arrays, `VarPtr` in place
+of `ObjPtr`, a local that is `As New`, and a quote in the project file. In
+the last run, VB6 builds 42 of 42 lifted projects, and 16 of the 41 pairs
+that start give the same screen, pixel for pixel. The first run gave 13.
+The differences that were read come from the forms: 138 of the 831
+property records of the corpus reach the `.frm`.
+
+**Next.** The form properties (FRM-03) come first, because most of the 25
+pairs that differ wait on them. Then the lift gives names of offsets, not
+of variables, most variables are a `Variant`, and each statement stays in
+the form of `GoTo` and labels. The start check sees the first screen only.
 
 **The gate.** The recovered code compiles, which Phase 8 already measures, and
 the rebuilt program behaves the same as the original.
@@ -892,7 +903,7 @@ Phase 8  (exit met on the author's XP host; --verify-build waits)
           |
           +-- Phase 10 (exit met: names and widths, 680 of 680 bodies decode)
                  |
-                 +-- Phase 11 (part 1 done: the listing)
+                 +-- Phase 11 (part 2: 42 of 42 lifted projects build)
 
 Phase 12 runs beside 10 and 11.
 Phase 13 closes the milestone.
