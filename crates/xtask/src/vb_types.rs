@@ -150,6 +150,11 @@ pub(crate) struct Interface {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub(crate) struct Import {
     name: String,
+    /// Each name of the type library for the ordinal, first one first. Two
+    /// or more functions can share one entry of the DLL: `VarPtr`, `ObjPtr`
+    /// and `StrPtr` are ordinal 644 of `MSVBVM60.DLL`.
+    #[serde(skip)]
+    names: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     result_interface: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -285,10 +290,15 @@ pub(crate) fn derive(infos: &[TypeInfo]) -> Result<Types, String> {
             let (Some(ordinal), Some(name)) = (function.ordinal, &function.name) else {
                 continue;
             };
+            if let Some(known) = types.imports.get_mut(&ordinal.to_string()) {
+                known.names.push(name.clone());
+                continue;
+            }
             types.imports.insert(
                 ordinal.to_string(),
                 Import {
                     name: name.clone(),
+                    names: vec![name.clone()],
                     result_interface: function
                         .result_type
                         .and_then(|index| interface_name(infos, index)),
@@ -448,17 +458,54 @@ pub(crate) fn run(args: &[String]) -> i32 {
     }
 }
 
+/// Gives the name of each export of the DLL `bytes` that has one, by its
+/// ordinal. A file that is not a 32-bit PE file gives none.
+fn export_names(bytes: &[u8]) -> BTreeMap<u32, String> {
+    let Ok(file) = object::read::pe::PeFile32::parse(bytes) else {
+        return BTreeMap::new();
+    };
+    let Ok(Some(table)) = file.export_table() else {
+        return BTreeMap::new();
+    };
+    table
+        .exports()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|export| {
+            let name = String::from_utf8(export.name?.to_vec()).ok()?;
+            Some((u32::from(export.ordinal.0), name))
+        })
+        .collect()
+}
+
+/// Gives each import of `types` that more than one function of the type
+/// library shares the name that the DLL exports it by, in `exports`, when
+/// one of the functions has that name. Else the first name stays.
+fn prefer_export_names(types: &mut Types, exports: &BTreeMap<u32, String>) {
+    for (ordinal, import) in &mut types.imports {
+        let Some(exported) = ordinal.parse::<u32>().ok().and_then(|at| exports.get(&at)) else {
+            continue;
+        };
+        if import.names.contains(exported) {
+            import.name.clone_from(exported);
+        }
+    }
+}
+
 /// Reads the libraries, derives the types and writes them to `out`.
 fn derive_file(inputs: &[String], out: &str) -> Result<String, String> {
     let mut types = Types::default();
+    let mut exports = BTreeMap::new();
     for input in inputs {
         let bytes = std::fs::read(input).map_err(|err| format!("reading {input}: {err}"))?;
+        exports.extend(export_names(&bytes));
         for library in libraries(&bytes).map_err(|err| format!("{input}: {err}"))? {
             types.merge(derive(
                 &parse(library).map_err(|err| format!("{input}: {err}"))?,
             )?);
         }
     }
+    prefer_export_names(&mut types, &exports);
     if let Some(parent) = std::path::Path::new(out).parent() {
         std::fs::create_dir_all(parent)
             .map_err(|err| format!("creating {}: {err}", parent.display()))?;
@@ -483,7 +530,7 @@ fn derive_file(inputs: &[String], out: &str) -> Result<String, String> {
     reason = "a test builds the state it needs and must fail loudly when that state is wrong"
 )]
 mod tests {
-    use super::{declaration, derive, libraries, render};
+    use super::{declaration, derive, libraries, prefer_export_names, render};
     use crate::msft::tests::library;
     use crate::msft::{Function, Kind, Parameter, TypeInfo, parse};
 
@@ -633,6 +680,7 @@ mod tests {
             "685".to_owned(),
             super::Import {
                 name: "Err".to_owned(),
+                names: vec!["Err".to_owned()],
                 result_interface: None,
                 variant_result: false,
             },
@@ -690,6 +738,33 @@ mod tests {
         let types = derive(&[left]).unwrap();
         assert!(types.imports["617"].variant_result);
         assert!(render(&types).unwrap().contains("variant_result = true"));
+    }
+
+    #[test]
+    fn an_ordinal_that_functions_share_takes_the_name_of_its_export() {
+        let mut module = interface(vec![
+            Function {
+                ordinal: Some(644),
+                ..function("ObjPtr", 1, 3)
+            },
+            Function {
+                ordinal: Some(644),
+                ..function("VarPtr", 1, 3)
+            },
+        ]);
+        module.kind = Kind::Module;
+        let mut types = derive(&[module]).unwrap();
+        assert_eq!(types.imports["644"].name, "ObjPtr");
+        prefer_export_names(&mut types, &[(644, "VarPtr".to_owned())].into());
+        assert_eq!(types.imports["644"].name, "VarPtr");
+        assert!(render(&types).unwrap().contains("name = \"VarPtr\""));
+        // An export name that no function of the library has changes nothing.
+        prefer_export_names(&mut types, &[(644, "rtcVarPtr".to_owned())].into());
+        assert_eq!(types.imports["644"].name, "VarPtr");
+        let text = render(&types).unwrap();
+        let block = text.split("[imports.644]").nth(1).unwrap();
+        let block = block.split("\n[").next().unwrap();
+        assert!(!block.contains("names"), "{block}");
     }
 
     #[test]
