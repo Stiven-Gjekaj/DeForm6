@@ -72,12 +72,12 @@ lifted = 6
 ["vb6-code/Artificial-life/Artificial Life.exe"]
 matched = 107
 source = 183
-lifted = 302
+lifted = 238
 
 ["vb6-code/Blacklight-effect/Blacklight.exe"]
 matched = 52
 source = 84
-lifted = 105
+lifted = 99
 
 ["vb6-code/Brightness-effect/Part 1 - Pure VB6/vbBrightness.exe"]
 matched = 11
@@ -92,42 +92,42 @@ lifted = 13
 ["vb6-code/Brightness-effect/Part 4 - Even faster DIBs/Realtime_Brightness.exe"]
 matched = 54
 source = 157
-lifted = 62
+lifted = 54
 
 ["vb6-code/Color-shift-effect/ColorShift.exe"]
 matched = 49
 source = 81
-lifted = 105
+lifted = 96
 
 ["vb6-code/Colorize-effect/Colorize.exe"]
 matched = 67
 source = 99
-lifted = 120
+lifted = 114
 
 ["vb6-code/Contrast-effect/Contrast.exe"]
 matched = 52
 source = 84
-lifted = 105
+lifted = 99
 
 ["vb6-code/Curves-effect/Curves.exe"]
 matched = 78
 source = 110
-lifted = 131
+lifted = 125
 
 ["vb6-code/Custom-image-filters/Custom_Filters.exe"]
 matched = 74
 source = 106
-lifted = 236
+lifted = 224
 
 ["vb6-code/Diffuse-effect/Diffuse.exe"]
 matched = 73
 source = 105
-lifted = 132
+lifted = 120
 
 ["vb6-code/Emboss-engrave-effect/Emboss_Engrave.exe"]
 matched = 77
 source = 110
-lifted = 180
+lifted = 129
 
 ["vb6-code/Fill-image-region/Filling.exe"]
 matched = 4
@@ -137,12 +137,12 @@ lifted = 4
 ["vb6-code/Fire-effect/Fast_Flames.exe"]
 matched = 23
 source = 35
-lifted = 57
+lifted = 48
 
 ["vb6-code/Game-physics-basic/Physics_Demo.exe"]
 matched = 63
 source = 94
-lifted = 100
+lifted = 93
 
 ["vb6-code/Gradient-2D/Gradient.exe"]
 matched = 37
@@ -152,42 +152,42 @@ lifted = 42
 ["vb6-code/Grayscale-effect/Grayscale.exe"]
 matched = 129
 source = 161
-lifted = 220
+lifted = 178
 
 ["vb6-code/Histograms-advanced/Advanced Histogram Viewer.exe"]
 matched = 129
 source = 161
-lifted = 228
+lifted = 178
 
 ["vb6-code/Histograms-basic/Basic Histogram Viewer.exe"]
 matched = 96
 source = 128
-lifted = 168
+lifted = 145
 
 ["vb6-code/Levels-effect/Image Levels.exe"]
 matched = 149
 source = 181
-lifted = 227
+lifted = 198
 
 ["vb6-code/Mandelbrot/Mandelbrot.exe"]
 matched = 39
 source = 39
-lifted = 70
+lifted = 67
 
 ["vb6-code/Map-editor-2D/Map Editor.exe"]
 matched = 158
 source = 179
-lifted = 226
+lifted = 217
 
 ["vb6-code/Nature-effects/Nature_Filters.exe"]
 matched = 103
 source = 135
-lifted = 202
+lifted = 150
 
 ["vb6-code/Randomize-effects/RandomizationFX.exe"]
 matched = 99
 source = 228
-lifted = 153
+lifted = 133
 
 ["vb6-code/Scanner-TWAIN/VB_Scanner_Support.exe"]
 matched = 42
@@ -202,14 +202,14 @@ lifted = 4
 ["vb6-code/Sepia-effect/Sepia.exe"]
 matched = 49
 source = 81
-lifted = 102
+lifted = 96
 
 ["vb6-code/Threshold-effect/Threshold.exe"]
 matched = 55
 source = 87
-lifted = 111
+lifted = 102
 
 ["vb6-code/Transparency-2D/Transparency.exe"]
 matched = 24
 source = 36
-lifted = 53
+lifted = 40

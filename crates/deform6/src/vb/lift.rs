@@ -764,6 +764,9 @@ impl Expr {
             Self::Arg(8) => "Me".to_owned(),
             Self::Arg(offset) => format!("arg_{offset:X}"),
             Self::Field(object, offset) if **object == Self::Arg(8) => format!("field_{offset:X}"),
+            // The field at 0 of an element of an array, which `AryLdPr`
+            // gives the address of, is the element itself.
+            Self::Field(object, 0) if matches!(**object, Self::Index(..)) => object.text(),
             Self::Field(object, offset) => format!("{}.field_{offset:X}", object.text()),
             Self::Global(index) => format!("global_{index:X}"),
             Self::Variable(address) => format!("g_{address:X}"),
@@ -4370,6 +4373,26 @@ dispid = 67
         // A branch into a statement, where none starts, is a fault: a label
         // there would move the branch.
         assert_eq!(lines(&body(0x0E, &bos)), Err(LiftFault::BranchTarget(0x0E)));
+    }
+
+    #[test]
+    fn the_field_at_zero_of_an_array_element_is_the_element() {
+        let element = Expr::Index(
+            Box::new(Expr::Local(0x88)),
+            vec![Expr::Const(1), Expr::Const(2)],
+        );
+        assert_eq!(
+            Expr::Field(Box::new(element.clone()), 0).text(),
+            "local_88(1, 2)"
+        );
+        assert_eq!(
+            Expr::Field(Box::new(element), 4).text(),
+            "local_88(1, 2).field_4"
+        );
+        assert_eq!(
+            Expr::Field(Box::new(Expr::Local(0x88)), 0).text(),
+            "local_88.field_0"
+        );
     }
 
     #[test]
