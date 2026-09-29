@@ -2518,9 +2518,9 @@ Double` and one of `ByVal ... As Variant`.
 `each_pcode_descriptor_gives_the_argument_size_of_its_source_procedure` in
 `tests/pcode_recovery.rs` keeps this true.
 
-**What the measurement did not settle.** The bytes after `+0x0A`. The
-descriptor is longer than 10 bytes: the gap to the next body is 48 bytes or
-more, and it is not the same in each descriptor.
+**What the measurement did not settle.** Most of the bytes after `+0x0A`.
+Section 23d gives the length at `+0x0A` and the fixed-array entries of the
+table after `+0x0C`; the other entries of that table are not settled.
 
 ---
 
@@ -2738,6 +2738,109 @@ pins the counts of each program.
 **What the measurement did not settle.** The layout of the external
 component entry of an OCX other than `MSWINSCK.OCX`: the corpus holds no
 other. `Print #` of more than one item: the corpus holds none.
+
+---
+
+## 23d. The frame of a P-code procedure, measured on the P-code corpus, 2026-09-28
+
+These rules let `extract --lift` write each lifted body as a procedure that
+the Visual Basic 6 IDE builds. They come from the 680 bodies of the P-code
+corpus and from builds on the Windows XP host.
+
+**The arguments.** The first argument is at the frame offset `0x0C`, which
+the lift names `arg_C`. A procedure of an object counts 4 bytes for `Me`
+before it, and a procedure of a standard module counts the same 4 bytes. An
+argument by reference takes 4 bytes. An argument by value takes the bytes
+of its value: 8 for a `Double`, a `Currency` or a `Date`, and 16 for a
+`Variant`.
+
+**The result of a `Function`.** An exit opcode whose name starts with
+`ExitProcCb` ends a `Function`, and `ExitProcHresult` ends a `Sub`: the
+source agrees in 680 of 680 bodies. The caller passes the address of the
+result as an argument. A procedure of an object takes it last, and a
+procedure of a standard module takes it first, at `arg_C`, so that its
+other arguments start at `arg_10`. The body keeps the value in the frame
+slot `0x84` plus its bytes, and 2 for a value of 1 byte, such as
+`local_88` for a `Long`. The second word of `ExitProcCbHresult` gives the
+bytes; `ExitProcCb` gives none, and the lift takes a `Variant`.
+
+**The sizes of the arguments of a private procedure.** A private procedure
+has no prototype. When each call of it passes the same bytes for each
+argument, the declaration takes one parameter for each argument; the
+address of the result is not a parameter. `Calculate` of `Mandelbrot.exe`
+takes four values of 8 bytes and one of 4, which is its source:
+`ByVal origX As Double` to `ByVal counter As Long`.
+
+**The start of a statement.** A branch names the first opcode of a
+statement that does something. `Bos`, which starts a line of the source,
+and the `FFree` opcodes, which free the temporary slots of the statement
+before, come before that opcode and do nothing. In `ColorShift.exe`,
+`BranchF 004C` of `Form_Load` names the `FLdRf` after an `FFreeStr` at
+`0045`. A lift that starts the next statement at `0045` has no statement at
+`004C`, and its label goes to the wrong place: the rebuilt program jumped
+past `LoadImageAutosized`. The corpus has 37 such branches. DeForm6 records
+the offsets of these opcodes with the statement after them, so that each
+branch has its label, and it refuses a body with a branch that names no
+start of a statement.
+
+**A struct of the frame.** A local of a user-defined type is a range of
+frame slots. `GetObject srcPictureBox.Image, Len(bm), bm` of
+`FastDrawing.cls` compiles to `FLdRf 0xFF60`, the address of `bm` at
+`-0xA0`, as an argument of the `Declare`. `bm.bmWidth` is then `FLdI4
+0xFF64`, the slot at `-0x9C`, 4 bytes after it. A `With` block on a struct
+stores its address in a slot of its own: `FLdRf 0xFB24`, then `FStI4
+0xFB20`. Each field of the block is an `FMemStI4`, `FMemStI2` or
+`FMemLdI4` of that slot, with the offset of the field in the struct:
+`.bmPlanes = 1` is `FMemStI2 0xFB20 0x000C`. `extract --lift` declares the
+struct as a `Private Type` of the fields that the body uses, at their
+offsets, with `Byte` arrays between them. The struct ends at the next slot
+that the body uses as something other than a number, or at the slot of the
+result.
+
+**An array argument.** The `Redim` of `ReDim dstPixelData(0 To imgStride,
+0 To bm.bmHeight - 1) As Byte` holds `0x11`, the `VARTYPE` of `Byte`, in
+its arguments. A `Variant` that a `ReDim` sizes holds an array of `Variant`, and a
+`Declare` such as `GetDIBits` that fills it with bytes writes over the
+`Variant` values. So an array argument of a prototype keeps its type when
+each call passes a bare local, and the caller declares that local with the
+same type. The corpus has 46 such arguments, each of them `Byte()`.
+
+**The arguments of `Redim`.** `Redim` and `RedimPreserve` hold four words:
+the number of dimensions, the `VARTYPE` of the elements, the bytes of an
+element, and the features of the `SAFEARRAY`. The P-code corpus holds 34
+`Redim` opcodes with the `VARTYPE` `0x11` and the feature `0x80`,
+`FADF_HAVEVARTYPE`, and its sources hold 34 `ReDim ... As Byte`. This
+document matched the counts, not each pair. An array of objects, such as `As Organism`, holds the
+features `0x440` and no valid `VARTYPE`. `extract --lift` declares each
+local, field and module variable that a `ReDim` sizes as an array of that
+type.
+
+**A fixed-size local array.** The word at `+0x0A` of a `ProcDscInfo` is its
+length. After `+0x0C` the descriptor holds a table of frame slots. The
+entry of an array is the slot as a negative 16-bit offset, then a kind
+whose low byte is 5; the corpus holds `0x0005` and `0x2005`. Sixteen bytes
+after the start of the entry is a `SAFEARRAY` template: the number of
+dimensions, the features (`0x92` in the corpus: `FADF_STATIC`,
+`FADF_FIXEDSIZE` and `FADF_HAVEVARTYPE`), the bytes of an element, the locks
+and the data, both 0, and the number of elements and the lower bound of
+each dimension. The `VARTYPE` of the elements follows the template.
+`Dim bTable(0 To 255) As Long` of `vbBrightness.exe` is the entry
+`50 FF 05 00` at `+0x28`, the template at `+0x38` with 256 elements of 4
+bytes from 0, and `03 00`. The other entries of the table have more than
+one length, so DeForm6 does not read the table as a list: it takes each
+entry of kind 5 whose template has this shape. In each of the 42 P-code
+programs, these entries equal the fixed-size `Dim` arrays of the procedures
+of the source, 24 in all. `extract --lift` declares each one with its
+bounds, such as `Dim local_B0(0 To 255) As Long`. Before, it declared an
+empty dynamic array, and the first store into it stopped with error 9.
+
+**An element of an array.** `AryLdPr` gives the address of an element of
+an array of more than one dimension, and `MemLdUI1` or `MemStUI1` at the
+field offset 0 reads or writes it. The lift writes the element, such as
+`local_88(x, y)`, and not a field of it.
+
+**The length of a control block.** See section 8.3: `Length` holds only
+its low 16 bits.
 
 ---
 

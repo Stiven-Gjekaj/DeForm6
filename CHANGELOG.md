@@ -146,6 +146,22 @@ heading its version and its date.
   that the corpus shows; an argument by reference of a prototype is a
   `Variant`; and a private procedure takes the argument sizes that each of
   its calls gives.
+- The start of each program, which `runs.bat` gives, found more faults,
+  and each one has a fix. A branch of the lift names the first opcode of a
+  statement that does something, after a `Bos` or an `FFree`; the lift put
+  37 labels of the corpus at the end of the procedure, and now puts each on
+  its statement, or refuses the body. A struct that a call of a DLL fills,
+  such as `bm As GDI_Bitmap`, is a `Private Type` with its fields at their
+  offsets, and a `With` block on a struct writes its fields. An array
+  argument of a prototype keeps its type when each call passes a local,
+  such as `dstPixelData() As Byte`. Each array that a `ReDim` sizes takes
+  the type of its elements, and each fixed-size local array takes its
+  bounds and its type from the descriptor of its procedure, such as
+  `Dim local_B0(0 To 255) As Long`. An element of an array is no longer a
+  field of itself.
+- `ProcDescriptor::fixed_arrays` reads the fixed-size local arrays of a
+  P-code procedure. In each of the 42 P-code programs, they equal the
+  fixed-size `Dim` arrays of the procedures of the source: 24 in all.
 - A fault of 2.0.0: the control tree of the form `Main` of
   `Map Editor.exe` refused. VB6 writes only the low 16 bits of the `Length`
   of a control block, and `PicTilesBuffer` holds a picture of more than 64
@@ -180,9 +196,11 @@ heading its version and its date.
 ### What this does not do
 
 - It does not change the version in `Cargo.toml`, and it has no tag.
-- It adds `StubShape`, the field `StubHandler::shape`, and the modules
-  `vb::procdesc`, `vb::pcode`, `vb::lift`, `vb::links` and `vb::types` to the
-  library, and the field `ControlInfo::w_index`. It removes no public
+- It adds `StubShape`, the field `StubHandler::shape`, the function
+  `inspect_with_types`, and the modules `vb::bodies`, `vb::constants`,
+  `vb::context`, `vb::lift`, `vb::links`, `vb::pcode`, `vb::procdesc` and
+  `vb::types` to the library, and the field `ControlInfo::w_index`. Each new
+  public enum is `non_exhaustive`, so a later release can add a variant. It removes no public
   item. It changes some: `write::code::write_code_region`, `write_cls` and
   `write_bas` take a new last parameter, the lifted object, and
   `ObjectReport`, `FormModel` and `ProcedureModel` have a new public field.
