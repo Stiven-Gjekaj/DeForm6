@@ -663,6 +663,7 @@ pub enum EventSlot {
 
 /// The shape of a decoded stub.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum StubShape {
     /// The native stub, 13 bytes: `sub dword ptr [esp+4], imm32`, then `jmp
     /// rel32`.
