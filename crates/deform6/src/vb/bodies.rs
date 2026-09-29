@@ -161,20 +161,120 @@ fn indexed_words(lines: &[String], prefix: &str) -> BTreeSet<String> {
 /// Gives the declaration of each field: `Public` for a field that has an
 /// accessor of a public variable in `public`, which another object can
 /// use, and `Private` for each other field in `used`.
-fn field_declarations(used: &BTreeSet<String>, public: &BTreeSet<u32>) -> Vec<String> {
+fn field_declarations(
+    used: &BTreeSet<String>,
+    public: &BTreeSet<u32>,
+    arrays: &BTreeMap<String, &'static str>,
+) -> Vec<String> {
     let public: BTreeSet<String> = public
         .iter()
         .map(|field| format!("field_{field:X}"))
         .collect();
     let mut out: Vec<String> = public
         .iter()
-        .map(|field| format!("Public {field} As Variant"))
+        .map(|field| variable_declaration("Public", field, arrays))
         .collect();
     out.extend(
         used.iter()
             .filter(|field| !public.contains(*field))
-            .map(|field| format!("Private {field} As Variant")),
+            .map(|field| variable_declaration("Private", field, arrays)),
     );
+    out
+}
+
+/// Gives the declaration of the variable `name` with the scope `scope`: an
+/// array of the type that `arrays` gives it, or else a `Variant`.
+fn variable_declaration(
+    scope: &str,
+    name: &str,
+    arrays: &BTreeMap<String, &'static str>,
+) -> String {
+    match arrays.get(name) {
+        Some(element) => format!("{scope} {name}() As {element}"),
+        None => format!("{scope} {name} As Variant"),
+    }
+}
+
+/// The Basic type of the elements of an array that `Redim` sizes, by the
+/// `VARTYPE` of its arguments.
+const fn redim_element(vartype: u16) -> Option<&'static str> {
+    match vartype {
+        2 => Some("Integer"),
+        3 => Some("Long"),
+        4 => Some("Single"),
+        5 => Some("Double"),
+        6 => Some("Currency"),
+        7 => Some("Date"),
+        8 => Some("String"),
+        11 => Some("Boolean"),
+        12 => Some("Variant"),
+        17 => Some("Byte"),
+        _ => None,
+    }
+}
+
+/// The flag of the `SAFEARRAY` flags of a `Redim` that tells that its
+/// `VARTYPE` is valid: `FADF_HAVEVARTYPE`.
+const HAVE_VARTYPE: u16 = 0x80;
+
+/// Gives the element type of each array that a `ReDim` of `lines` sizes.
+/// The arguments of each `Redim` or `RedimPreserve` of `listing` are the
+/// number of dimensions, the `VARTYPE` of the elements, their bytes, and the
+/// flags of the `SAFEARRAY`. The opcodes and the `ReDim` lines have the same
+/// order; when their counts differ, this gives nothing.
+fn redim_arrays(
+    listing: &PcodeListing,
+    table: &PcodeTable,
+    lines: &[String],
+) -> BTreeMap<String, &'static str> {
+    let elements: Vec<Option<&'static str>> = listing
+        .instructions
+        .iter()
+        .filter(|instruction| {
+            table
+                .slot(instruction.lead, instruction.opcode)
+                .is_some_and(|slot| {
+                    slot.names
+                        .iter()
+                        .any(|name| name == "Redim" || name == "RedimPreserve")
+                })
+        })
+        .map(|instruction| {
+            let word = |at: usize| {
+                instruction
+                    .arguments
+                    .get(at..at.checked_add(2)?)
+                    .and_then(|bytes| bytes.try_into().ok())
+                    .map(u16::from_le_bytes)
+            };
+            let flags = word(6)?;
+            (flags & HAVE_VARTYPE != 0)
+                .then_some(())
+                .and_then(|()| redim_element(word(2)?))
+        })
+        .collect();
+    let targets: Vec<String> = lines
+        .iter()
+        .filter_map(|line| {
+            let text = line.trim_start();
+            let text = match text.split_once(": ") {
+                Some((label, rest)) if label.starts_with('L') && label.len() == 5 => rest,
+                _ => text,
+            };
+            let rest = text
+                .strip_prefix("ReDim Preserve ")
+                .or_else(|| text.strip_prefix("ReDim "))?;
+            rest.split_once('(').map(|(name, _)| name.to_owned())
+        })
+        .collect();
+    let mut out = BTreeMap::new();
+    if targets.len() == elements.len() {
+        for (target, element) in targets.into_iter().zip(elements) {
+            if let Some(element) = element {
+                out.entry(target).or_insert(element);
+            }
+        }
+    }
     out
 }
 
@@ -1142,6 +1242,7 @@ pub fn lift_objects(
         }
     }
     let typed = typed_arrays(report.objects.iter().map(|own| &own.procedures), &raw);
+    let mut arrays: BTreeMap<String, &'static str> = BTreeMap::new();
     let mut out: Vec<Option<LiftedObject>> = Vec::new();
     let mut variables: Vec<BTreeSet<String>> = Vec::new();
     for own in &report.objects {
@@ -1165,6 +1266,7 @@ pub fn lift_objects(
         let mut all_lines: Vec<String> = Vec::new();
         let mut fields = BTreeSet::new();
         let mut frame_types = Vec::new();
+        let mut object_arrays: BTreeMap<String, &'static str> = BTreeMap::new();
         for entry in &methods.entries {
             let MethodEntry::Descriptor { index, descriptor } = entry else {
                 continue;
@@ -1193,7 +1295,16 @@ pub fn lift_objects(
             frame_types.extend(declare_frame_structs(
                 &listing, table, &mut lines, &calls, result, *index,
             ));
-            let locals = typed_locals(&lines, &typed);
+            let mut locals = typed_locals(&lines, &typed);
+            for (array, element) in redim_arrays(&listing, table, &lines) {
+                if array.starts_with("local_") {
+                    locals.entry(array).or_insert(element);
+                } else if array.starts_with("g_") {
+                    arrays.entry(array).or_insert(element);
+                } else {
+                    object_arrays.entry(array).or_insert(element);
+                }
+            }
             declare_arrays(&mut lines, &locals);
             lifted.procedures.push(LiftedProcedure {
                 index: *index,
@@ -1206,9 +1317,11 @@ pub fn lift_objects(
         lifted
             .declarations
             .extend(declare_statements(&declarations, &all_lines));
-        lifted
-            .declarations
-            .extend(field_declarations(&fields, &callees.variable_fields()));
+        lifted.declarations.extend(field_declarations(
+            &fields,
+            &callees.variable_fields(),
+            &object_arrays,
+        ));
         out.push(Some(lifted));
         variables.push(globals);
     }
@@ -1222,13 +1335,15 @@ pub fn lift_objects(
             continue;
         };
         match home {
-            Some(home) if home == at => lifted
-                .declarations
-                .extend(all.iter().map(|name| format!("Public {name} As Variant"))),
+            Some(home) if home == at => lifted.declarations.extend(
+                all.iter()
+                    .map(|name| variable_declaration("Public", name, &arrays)),
+            ),
             Some(_) => {}
-            None => lifted
-                .declarations
-                .extend(own.iter().map(|name| format!("Private {name} As Variant"))),
+            None => lifted.declarations.extend(
+                own.iter()
+                    .map(|name| variable_declaration("Private", name, &arrays)),
+            ),
         }
     }
     Ok(out)
@@ -1245,8 +1360,8 @@ mod tests {
     use super::{
         TypedArrays, apply_frame_structs, built_parameters, call_arguments, call_arity, declare,
         declare_arrays, declare_statements, declared_bytes, field_declarations, frame_structs,
-        indexed_words, pointer_fields, procedure_name, replace_word, slot_uses, struct_pointers,
-        typed_arrays, typed_locals, words_with,
+        indexed_words, pointer_fields, procedure_name, redim_arrays, replace_word, slot_uses,
+        struct_pointers, typed_arrays, typed_locals, variable_declaration, words_with,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::lift::result_bytes;
@@ -1336,7 +1451,7 @@ mod tests {
         let used: BTreeSet<String> = ["field_34".to_owned(), "field_42".to_owned()].into();
         let public: BTreeSet<u32> = [0x42, 0x80].into();
         assert_eq!(
-            field_declarations(&used, &public),
+            field_declarations(&used, &public, &BTreeMap::new()),
             [
                 "Public field_42 As Variant",
                 "Public field_80 As Variant",
@@ -1607,6 +1722,31 @@ names = ["ExitProcCb"]
         );
         assert_eq!(closing, "End Function");
         assert_eq!(lines, ["Draw = Box + Pixels + Size"]);
+    }
+
+    #[test]
+    fn a_redim_gives_the_type_of_the_elements_of_its_array() {
+        let table = PcodeTable::parse(b"[primary.3B]\nwidth = 8\nnames = [\"Redim\"]\n").unwrap();
+        // Redim of 2 dimensions of VARTYPE 0x11, 1 byte each, flags 0x80;
+        // then one of VARTYPE 3 with no FADF_HAVEVARTYPE.
+        let body = [
+            0x3B, 2, 0, 0x11, 0, 1, 0, 0x80, 0, 0x3B, 1, 0, 3, 0, 4, 0, 0, 0,
+        ];
+        let listing = disassemble(&Region::new(&body, Off::new(0)), &table);
+        let lines = vec![
+            "       ReDim local_88(0 To 1, 0 To 2)".to_owned(),
+            "L0009: ReDim field_34(0 To 4)".to_owned(),
+        ];
+        let arrays = redim_arrays(&listing, &table, &lines);
+        assert_eq!(arrays.get("local_88"), Some(&"Byte"));
+        assert_eq!(arrays.get("field_34"), None);
+        // A count of ReDim lines that is not the count of opcodes gives
+        // nothing.
+        assert!(redim_arrays(&listing, &table, lines.get(..1).unwrap()).is_empty());
+        assert_eq!(
+            variable_declaration("Private", "local_88", &arrays),
+            "Private local_88() As Byte"
+        );
     }
 
     #[test]
