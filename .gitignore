@@ -27,3 +27,6 @@ derived/symbols/
 # STATE.md, and it goes stale as soon as either one changes.
 /.planning/state.json
 derived/vb-types.toml
+
+# The byte code that Python writes when it runs scripts/vm/vm.py.
+__pycache__/
