@@ -1219,8 +1219,10 @@ pub struct LiftedStmt {
     pub stmt: Stmt,
 }
 
-/// Why a body gives no statements, with the offset of the opcode.
+/// Why a body gives no statements, with the offset of the opcode. A later
+/// release can add a fault.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum LiftFault {
     /// The listing did not decode to its end.
     NotDecoded(PcodeEnd),
