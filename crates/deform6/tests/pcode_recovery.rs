@@ -1800,3 +1800,135 @@ fn each_public_variable_of_a_form_gives_a_public_field() {
     assert!(expected > 0);
     assert_eq!(form.variable_fields().len(), expected);
 }
+
+/// Counts the fixed-size arrays that the procedures of the source file at
+/// `path` declare with `Dim`: each name of a `Dim` line in a procedure with
+/// bounds between its parentheses, such as `bTable(0 To 255)`.
+fn source_fixed_arrays(path: &Path) -> usize {
+    let text = String::from_utf8_lossy(&read(path)).into_owned();
+    let mut inside = false;
+    let mut count = 0;
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        let words: Vec<&str> = trimmed.split_whitespace().collect();
+        let starts = |word: &str| {
+            words.iter().take(3).any(|w| *w == word)
+                && !trimmed.starts_with("End ")
+                && !trimmed.starts_with("Exit ")
+                && !trimmed.starts_with("Declare ")
+                && !trimmed.contains(" Declare ")
+        };
+        if starts("Sub") || starts("Function") || starts("Property") {
+            inside = true;
+        }
+        if trimmed.starts_with("End Sub")
+            || trimmed.starts_with("End Function")
+            || trimmed.starts_with("End Property")
+        {
+            inside = false;
+        }
+        if !inside || !trimmed.starts_with("Dim ") {
+            continue;
+        }
+        let mut rest = trimmed;
+        while let Some(open) = rest.find('(') {
+            let after = &rest[open + 1..];
+            let Some(close) = after.find(')') else {
+                break;
+            };
+            if !after[..close].trim().is_empty() {
+                count += 1;
+            }
+            rest = &after[close + 1..];
+        }
+    }
+    count
+}
+
+/// Each fixed-size local array of the source is a fixed-array entry of the
+/// descriptor of its procedure, and no other entry is one.
+#[test]
+fn each_fixed_array_of_a_source_procedure_is_an_entry_of_its_descriptor() {
+    let root = build_record::corpus_root();
+    let projects = vbp::project_files();
+    let mut failures = Vec::new();
+    let mut total = 0;
+    for (key, exe) in pcode_programs() {
+        let project = vbp::select_project_file(&root.join(&key), &projects)
+            .unwrap_or_else(|err| panic!("{key}: {err}"));
+        let expected: usize = vbp::Project::read(&project)
+            .declared_objects()
+            .iter()
+            .filter(|object| object.source_file.exists())
+            .map(|object| source_fixed_arrays(&object.source_file))
+            .sum();
+        let bytes = read(&exe);
+        let pe = PeImage::parse(&bytes).unwrap();
+        let header = VbHeader::read(&header_region(&pe).unwrap()).unwrap();
+        let info = ProjectInfo::read(&pe, header.lp_project_data).unwrap();
+        let head = ObjectTableHead::read(&pe, info.lp_object_table).unwrap();
+        let objects = ObjectTable::walk(&pe, info.lp_object_table, &head)
+            .unwrap()
+            .objects;
+        let found: usize = objects
+            .iter()
+            .filter_map(|object| read_method_table(&pe, object.lp_object_info).ok())
+            .flat_map(|table| table.entries)
+            .map(|entry| match entry {
+                MethodEntry::Descriptor { descriptor, .. } => descriptor.fixed_arrays(&pe).len(),
+                _ => 0,
+            })
+            .sum();
+        total += found;
+        if found != expected {
+            failures.push(format!("{key}: {found} found, {expected} in the source"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(total, EXPECTED_FIXED_ARRAYS);
+}
+
+/// The fixed-size local arrays of the P-code corpus.
+const EXPECTED_FIXED_ARRAYS: usize = 24;
+
+/// A fixed array as its slot, its `VARTYPE` and its bounds.
+type FixedArrayFacts = (u16, u16, Vec<(u32, i32)>);
+
+/// Gives the fixed arrays of the descriptor at `va` of the P-code program
+/// `key`, as the slot, the `VARTYPE` and the bounds.
+fn fixed_arrays_at(key: &str, va: u32) -> Vec<FixedArrayFacts> {
+    let bytes = read(&pcode_root().join(key));
+    let pe = PeImage::parse(&bytes).unwrap();
+    let descriptor = deform6::vb::procdesc::ProcDescriptor::read(&pe, Va::new(va)).unwrap();
+    descriptor
+        .fixed_arrays(&pe)
+        .into_iter()
+        .map(|array| (array.slot, array.vartype, array.bounds))
+        .collect()
+}
+
+/// `Dim bTable(0 To 255) As Long` of `DrawVBBrightness` is at `-0xB0`, and
+/// `Dim rData(0 To 255) As Long, gData(0 To 255) As Long, bData(0 To 255)
+/// As Long` of the advanced histogram are at `-0x100`, `-0xE4` and `-0xC8`.
+/// `VARTYPE` 3 is `Long`.
+#[test]
+fn a_fixed_array_gives_its_slot_its_type_and_its_bounds() {
+    assert_eq!(
+        fixed_arrays_at(
+            "vb6-code/Brightness-effect/Part 1 - Pure VB6/vbBrightness.exe",
+            0x0040_d61c
+        ),
+        [(0xB0, 3, vec![(256, 0)])]
+    );
+    assert_eq!(
+        fixed_arrays_at(
+            "vb6-code/Histograms-advanced/Advanced Histogram Viewer.exe",
+            0x0040_7440
+        ),
+        [
+            (0x100, 3, vec![(256, 0)]),
+            (0xE4, 3, vec![(256, 0)]),
+            (0xC8, 3, vec![(256, 0)])
+        ]
+    );
+}

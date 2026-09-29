@@ -123,6 +123,110 @@ impl ProcDescriptor {
     }
 }
 
+/// A fixed-size local array of a procedure, which its descriptor holds:
+/// `Dim bTable(0 To 255) As Long`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct FixedArray {
+    /// The offset of the frame slot of the array below the frame, such as
+    /// `0xB0` for `-0xB0`.
+    pub slot: u16,
+    /// The `VARTYPE` of the elements, such as 3 for `Long`.
+    pub vartype: u16,
+    /// The number of elements and the lower bound of each dimension, first
+    /// dimension first.
+    pub bounds: Vec<(u32, i32)>,
+}
+
+/// The `SAFEARRAY` feature that marks a fixed-size array: `FADF_FIXEDSIZE`.
+const FADF_FIXEDSIZE: u16 = 0x10;
+
+/// The low byte of the kind of an entry of the frame table of a descriptor
+/// that names an array. The high byte holds flags: the corpus holds 0x0005
+/// and 0x2005 for a fixed-size array. The template decides.
+const ARRAY_KIND: u16 = 5;
+
+/// The bytes between a fixed-array entry and its `SAFEARRAY` template.
+const TEMPLATE_GAP: u32 = 16;
+
+/// The most dimensions that the reader takes for one template.
+const MAX_DIMENSIONS: u16 = 8;
+
+impl ProcDescriptor {
+    /// Gives the fixed-size local arrays of the procedure.
+    ///
+    /// The word at `+0x0A` is the length of the descriptor. After `+0x0C`,
+    /// the descriptor holds a table of frame slots. An entry of an array is
+    /// the slot as a negative 16-bit offset, then a kind whose low byte is 5.
+    /// Sixteen bytes after its start, a `SAFEARRAY` template follows: the number of
+    /// dimensions, the features, the bytes of an element, the locks and the
+    /// data, both 0, and the number of elements and the lower bound of each
+    /// dimension. The `VARTYPE` of the elements follows the template.
+    /// `STRUCTURES.md` section 23d gives the measure. An entry whose template
+    /// does not have this shape, or does not fit in the descriptor, gives
+    /// nothing.
+    #[must_use]
+    pub fn fixed_arrays(&self, pe: &PeImage<'_>) -> Vec<FixedArray> {
+        let Some(head) = pe.region_at_va(self.va) else {
+            return Vec::new();
+        };
+        let Some(length) = head.u16_le(Off::new(PROC_DESC_READ_LEN)) else {
+            return Vec::new();
+        };
+        let Some(descriptor) = head.subregion(Off::new(0), u32::from(length)) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        let mut at = PROC_DESC_READ_LEN.saturating_add(2);
+        while at < u32::from(length) {
+            if let Some(array) = fixed_array_at(&descriptor, at) {
+                out.push(array);
+            }
+            at = at.saturating_add(2);
+        }
+        out
+    }
+}
+
+/// Reads a fixed-array entry and its template at `at` in `descriptor`.
+fn fixed_array_at(descriptor: &Region<'_>, at: u32) -> Option<FixedArray> {
+    let slot = i16::from_le_bytes(descriptor.u16_le(Off::new(at))?.to_le_bytes());
+    if slot >= 0 || descriptor.u16_le(Off::new(at.checked_add(2)?))? & 0xFF != ARRAY_KIND {
+        return None;
+    }
+    let template = at.checked_add(TEMPLATE_GAP)?;
+    let word = |offset: u32| descriptor.u16_le(Off::new(template.checked_add(offset)?));
+    let long = |offset: u32| descriptor.u32_le(Off::new(template.checked_add(offset)?));
+    let dimensions = word(0)?;
+    let features = word(2)?;
+    let element = long(4)?;
+    if !(1..=MAX_DIMENSIONS).contains(&dimensions)
+        || features & FADF_FIXEDSIZE == 0
+        || !matches!(element, 1 | 2 | 4 | 8 | 16)
+        || long(8)? != 0
+        || long(12)? != 0
+    {
+        return None;
+    }
+    let mut bounds = Vec::new();
+    for dimension in 0..u32::from(dimensions) {
+        let base = dimension.checked_mul(8)?.checked_add(16)?;
+        let count = long(base)?;
+        let lower = descriptor.i32_le(Off::new(template.checked_add(base)?.checked_add(4)?))?;
+        if count == 0 {
+            return None;
+        }
+        bounds.push((count, lower));
+    }
+    let end = u32::from(dimensions).checked_mul(8)?.checked_add(16)?;
+    let vartype = word(end)?;
+    Some(FixedArray {
+        slot: slot.unsigned_abs(),
+        vartype,
+        bounds,
+    })
+}
+
 /// One entry of a method table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MethodEntry {
@@ -294,10 +398,42 @@ pub fn read_method_table(pe: &PeImage<'_>, lp_object_info: Va) -> Result<MethodT
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{MethodEntry, ProcDescriptor, read_method_table};
+    use super::{MethodEntry, ProcDescriptor, fixed_array_at, read_method_table};
     use crate::error::{Defect, DefectKind, Site};
     use crate::read::pe::PeImage;
-    use crate::read::region::{Off, Va};
+    use crate::read::region::{Off, Region, Va};
+
+    /// A fixed-array entry for the slot `-0xB0` with the kind `kind`, and its
+    /// template of 256 elements of 4 bytes from 0, with the features
+    /// `features` and the `VARTYPE` 3.
+    fn array_entry(kind: u16, features: u16) -> Vec<u8> {
+        let mut bytes = vec![0x50, 0xFF];
+        bytes.extend_from_slice(&kind.to_le_bytes());
+        bytes.extend_from_slice(&[0; 12]);
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&features.to_le_bytes());
+        bytes.extend_from_slice(&4_u32.to_le_bytes());
+        bytes.extend_from_slice(&[0; 8]);
+        bytes.extend_from_slice(&256_u32.to_le_bytes());
+        bytes.extend_from_slice(&0_i32.to_le_bytes());
+        bytes.extend_from_slice(&3_u16.to_le_bytes());
+        bytes
+    }
+
+    #[test]
+    fn a_fixed_array_entry_needs_its_kind_and_a_fixed_size_template() {
+        let read = |bytes: &[u8]| fixed_array_at(&Region::new(bytes, Off::new(0)), 0);
+        let array = read(&array_entry(0x2005, 0x92)).unwrap();
+        assert_eq!((array.slot, array.vartype), (0xB0, 3));
+        assert_eq!(array.bounds, [(256, 0)]);
+        // No FADF_FIXEDSIZE: a dynamic array.
+        assert!(read(&array_entry(5, 0x82)).is_none());
+        // Another kind.
+        assert!(read(&array_entry(3, 0x92)).is_none());
+        // A template cut by the end of the descriptor.
+        let entry = array_entry(5, 0x92);
+        assert!(read(entry.get(..entry.len() - 2).unwrap()).is_none());
+    }
 
     /// A one-section image: the section starts at RVA `0x1000` and file
     /// offset `0x400`, and holds `extra`. A local copy of the helper in
