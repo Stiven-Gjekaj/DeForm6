@@ -31,6 +31,10 @@ A version number follows the rule that `CHANGELOG.md` applies: a release that
 breaks code written against the release before it takes the next major
 number. The shell breaks code written against 1.0.0, so it is 2.0.0 and not
 1.1. The logic takes the number that the same rule gives when it ships.
+The next release, 3.0.0, holds the first part of it: `extract --lift`
+writes the P-code of each procedure as statements, and VB6 builds each
+lifted project of the corpus. It changes public functions and structs of
+2.0.0, so it is 3.0.0.
 
 ## A note on the numbers below
 
