@@ -8,9 +8,9 @@ does not do. A change that no release holds yet goes under one
 `## [Unreleased]` heading above the newest release. A release gives that
 heading its version and its date.
 
-## [Unreleased]
+## [3.0.0] - 2026-09-29
 
-### What this delivers
+### What this release delivers
 
 - The P-code corpus: `corpus-pcode/` holds a P-code build of 42 of the 44
   corpus programs. The Visual Basic 6 IDE built each one on the author's
@@ -225,21 +225,33 @@ heading its version and its date.
   a local that is `As New` take their types. A local that a call gives by
   reference to a `Declare` goes as `Any`.
 
-### What this does not do
+### What changes for a caller
 
-- It does not change the version in `Cargo.toml`, and it has no tag.
-- It adds `StubShape`, the field `StubHandler::shape`, the function
-  `inspect_with_types`, and the modules `vb::bodies`, `vb::constants`,
-  `vb::context`, `vb::lift`, `vb::links`, `vb::pcode`, `vb::procdesc` and
-  `vb::types` to the library, and the field `ControlInfo::w_index`. Each new
-  public enum is `non_exhaustive`, so a later release can add a variant. It removes no public
-  item. It changes some: `write::code::write_code_region`, `write_cls` and
-  `write_bas` take a new last parameter, the lifted object, and
-  `ObjectReport`, `FormModel` and `ProcedureModel` have a new public field.
-  A caller that builds one of these structs with a struct literal must add
-  the field. For a P-code
+These changes break code that was written against 2.0.0. This release is
+therefore 3.0.0, not 2.1.0.
+
+- This release adds `StubShape`, the field `StubHandler::shape`, the
+  function `inspect_with_types`, and the modules `vb::bodies`,
+  `vb::constants`, `vb::context`, `vb::lift`, `vb::links`, `vb::pcode`,
+  `vb::procdesc` and `vb::types` to the library, and the field
+  `ControlInfo::w_index`. Each new public enum is `non_exhaustive`, so a
+  later release can add a variant. It removes no public item. It changes
+  some: `write::code::write_code_region`, `write_cls` and `write_bas` take a
+  new last parameter, the lifted object, and `ObjectReport`, `FormModel` and
+  `ProcedureModel` have a new public field. A caller that builds one of
+  these structs with a struct literal must add the field. For a P-code
   program, a report now gives a handler address where it gave none, and the
   text of an `UnknownStubShape` defect names both shapes.
+
+### What this release does not do
+
+- DeForm6 does not recover the source of a procedure. `extract --lift`
+  writes the P-code of each procedure as statements that name variables by
+  their offsets, and they are not the source. Without `--lift`, the code
+  inside a procedure does not come back.
+- The lift reads P-code only. A native program gets no statements.
+- No test starts VB6. The author's Windows XP host built the lifted
+  projects and started them, and this changelog gives the result.
 
 ## [2.0.0] - 2026-09-26
 
