@@ -547,6 +547,7 @@ fn format_end(end: PcodeEnd) -> String {
         PcodeEnd::PastEnd(at) => {
             format!("stops at {at:04X}: the opcode runs past the end of the body")
         }
+        _ => "stops: the decode ended in a way that this version does not name".to_owned(),
     }
 }
 

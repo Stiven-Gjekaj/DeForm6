@@ -241,6 +241,7 @@ fn fixed_array_at(descriptor: &Region<'_>, at: u32) -> Option<FixedArray> {
 
 /// One entry of a method table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MethodEntry {
     /// The value is an address, and it names a descriptor whose body fits
     /// before it.

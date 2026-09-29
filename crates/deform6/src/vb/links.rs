@@ -62,6 +62,7 @@ const STUB_TAIL_LEN: u32 = 13;
 
 /// One slot of the link table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum LinkSlot {
     /// The slot names a P-code stub, and the stub names this descriptor.
     Method(Va),

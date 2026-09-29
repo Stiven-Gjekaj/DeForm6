@@ -913,7 +913,7 @@ fn each_link_table_of_a_pcode_program_gives_the_procedures_of_its_source() {
                 .iter()
                 .filter_map(|slot| match slot {
                     LinkSlot::Method(va) => Some(va.get()),
-                    LinkSlot::Variable { .. } | LinkSlot::Other => None,
+                    _ => None,
                 })
                 .collect();
             let fields: Vec<u32> = links
@@ -921,7 +921,7 @@ fn each_link_table_of_a_pcode_program_gives_the_procedures_of_its_source() {
                 .iter()
                 .filter_map(|slot| match slot {
                     LinkSlot::Variable { field } => Some(*field),
-                    LinkSlot::Method(_) | LinkSlot::Other => None,
+                    _ => None,
                 })
                 .collect();
             let others = links.slots.len() - found.len();
@@ -1316,7 +1316,7 @@ fn a_public_method_gives_the_interface_of_its_control_argument() {
         .iter()
         .filter_map(|entry| match entry {
             MethodEntry::Descriptor { index, .. } => Some(*index),
-            MethodEntry::NotAnAddress { .. } | MethodEntry::Unreadable { .. } => None,
+            _ => None,
         })
         .collect();
     assert_eq!(indexes.len(), declared.len());

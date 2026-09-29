@@ -208,6 +208,7 @@ use crate::vb::types::{TypeFunction, VbTypes};
 
 /// A binary operator.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum BinaryOp {
     /// `<`
     Lt,
@@ -275,6 +276,7 @@ impl BinaryOp {
 
 /// An expression.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Expr {
     /// A constant.
     Const(i64),
@@ -328,6 +330,7 @@ pub enum Expr {
 
 /// The procedure that a call names.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Callee {
     /// A procedure, by its index in the constant table of the object.
     Import(u16),
@@ -389,6 +392,7 @@ pub struct Callees {
 
 /// A procedure of the project that an `ImpAdCall` goes to.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ProjectCall {
     /// A procedure of a module: the name of the module and of the
     /// procedure.
@@ -920,6 +924,7 @@ fn arguments_text(args: &[Expr]) -> String {
 
 /// A statement of Basic with a form of its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Keyword {
     /// `ReDim` or `ReDim Preserve`: the array, then the lower and the upper
     /// bound of each dimension.
@@ -1034,6 +1039,7 @@ impl Keyword {
 
 /// A statement.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Stmt {
     /// A store.
     Assign {

@@ -41,6 +41,7 @@ const PADDING: usize = 4;
 
 /// The argument width of one slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PcodeWidth {
     /// This many bytes of arguments.
     Fixed(u16),
@@ -192,6 +193,7 @@ pub struct PcodeInstruction {
 
 /// How a decode ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PcodeEnd {
     /// The last opcode ends at the end of the body.
     Complete,
