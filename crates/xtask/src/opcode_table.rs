@@ -196,10 +196,18 @@ const POSITION_REST: &[&str] = &["Top", "Width", "Height"];
 /// The rows that the form stream holds with no member in `VB6.OLB`, by the
 /// `cType` of their control. A `Timer` holds its place on the form, `Left`
 /// and `Top`, as opcodes 7 and 8 with four bytes each; `_Timer` has no such
-/// members. The corpus measured it on each of its six timers.
+/// members. The corpus measured it on each of its six timers. A `Form` and
+/// an `MDIForm` hold `LockControls` and `NegotiateMenus` as opcodes 61 and
+/// 62, one byte each with `0xFF` for `True`: `STRUCTURES.md` section 8.5.1
+/// gives both from Semi VB Decompiler, and the corpus measured
+/// `LockControls` on each of its forms that set it.
 const EXTRA_ROWS: &[(u8, u8, PayloadType, &str)] = &[
     (11, 7, PayloadType::Long, "Left"),
     (11, 8, PayloadType::Long, "Top"),
+    (13, 61, PayloadType::Boolean, "LockControls"),
+    (13, 62, PayloadType::Boolean, "NegotiateMenus"),
+    (20, 61, PayloadType::Boolean, "LockControls"),
+    (20, 62, PayloadType::Boolean, "NegotiateMenus"),
 ];
 
 /// Gives the payload of the property `name` of the type `vt` of the control
@@ -495,6 +503,19 @@ mod tests {
         assert_eq!(row(&rows, 11, 7), Some(PayloadType::Long));
         assert_eq!(row(&rows, 11, 8), Some(PayloadType::Long));
         assert_eq!(rows.len(), 3);
+    }
+
+    #[test]
+    fn a_form_gives_lock_controls_and_negotiate_menus_as_boolean_rows() {
+        let rows = table_rows(&[
+            interface("_Form", Vec::new()),
+            interface("_MDIForm", Vec::new()),
+        ]);
+        for control_type in [13, 20] {
+            assert_eq!(row(&rows, control_type, 61), Some(PayloadType::Boolean));
+            assert_eq!(row(&rows, control_type, 62), Some(PayloadType::Boolean));
+        }
+        assert_eq!(rows.len(), 4);
     }
 
     #[test]
