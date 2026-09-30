@@ -580,24 +580,54 @@ const SCALE_MODE_OPCODE: u8 = 25;
 /// no output" on Form and MDIForm.
 const NO_OUTPUT_OPCODES: [u8; 3] = [0, 98, 99];
 
-/// Handles a Form/MDIForm special opcode before the generic typed path is
-/// tried. Covers only the four safe-provenance control types this plan's
-/// own opcode table subset names (Form, MDIForm, CommandButton, Label,
-/// ListBox); of those, only Form and MDIForm carry a special case at all.
+/// The opcode of the client area of a Form and an MDIForm: `ClientLeft`,
+/// `ClientTop`, `ClientWidth` and `ClientHeight`, four `i32` in that order.
+/// `VB6.OLB` has no member for it. `STRUCTURES.md` section 8.5.3.
+const CLIENT_OPCODE: u8 = 53;
+
+/// The names of the four values of [`CLIENT_OPCODE`], in stream order.
+const CLIENT_NAMES: [&str; 4] = ["ClientLeft", "ClientTop", "ClientWidth", "ClientHeight"];
+
+/// The `cType` of `PictureBox`.
+const CT_PICTURE_BOX: u8 = 0;
+
+/// The opcode of the flags of a `PictureBox`: a `u16`. `VB6.OLB` has no
+/// member for it. `STRUCTURES.md` section 8.5.3.
+const PICTURE_FLAGS_OPCODE: u8 = 0;
+
+/// The bit of the flags of a `PictureBox` that is `AutoRedraw`. The corpus
+/// measured it on each of its 78 picture boxes.
+const AUTO_REDRAW: u16 = 0x20;
+
+/// Handles a special opcode before the generic typed path is tried: an
+/// opcode that no member of `VB6.OLB` names, or whose payload fits no
+/// [`PayloadType`]. Form and MDIForm have the opcodes of `STRUCTURES.md`
+/// section 8.5.1 and the client block; a PictureBox has its flags.
 ///
 /// `None` means `opcode` is not a special case for `control_type`, and the
 /// caller falls through to the generic [`OpcodeTable::lookup`] path.
-/// `Some(Ok(new_cursor))` means the special case consumed bytes up to
-/// `new_cursor` and produced no property, per `STRUCTURES.md` section
-/// 8.5.1's own words for these opcodes. `Some(Err(_))` means the special
-/// case would run past the block's own end.
+/// `Some(Ok((new_cursor, values)))` means the special case consumed bytes
+/// up to `new_cursor` and gave the properties `values`, which can be none.
+/// `Some(Err(_))` means the special case would run past the block's own
+/// end.
 fn read_special_opcode(
     control_type: u8,
     opcode: u8,
     block: &Region<'_>,
     payload_start: u32,
     block_end: u32,
-) -> Option<Result<u32, Defect>> {
+) -> Option<Result<(u32, Vec<PropertyValue>), Defect>> {
+    if control_type == CT_PICTURE_BOX && opcode == PICTURE_FLAGS_OPCODE {
+        let Some(end) = ends_within(payload_start, 2, block_end) else {
+            return Some(Err(overrun_defect(block, payload_start, 2, block_end)));
+        };
+        let flags = block.u16_le(Off::new(payload_start)).unwrap_or(0);
+        let auto_redraw = PropertyValue::Boolean {
+            name: "AutoRedraw".to_owned(),
+            value: if flags & AUTO_REDRAW == 0 { 0 } else { -1 },
+        };
+        return Some(Ok((end, vec![auto_redraw])));
+    }
     if control_type != CT_FORM && control_type != CT_MDIFORM {
         return None;
     }
@@ -605,10 +635,27 @@ fn read_special_opcode(
         // The opcode byte itself is already consumed by the caller before
         // `payload_start`; this opcode carries no payload the format
         // exposes, so producing nothing here is correct, not a gap.
-        return Some(Ok(payload_start));
+        return Some(Ok((payload_start, Vec::new())));
     }
     if opcode == SCALE_MODE_OPCODE {
-        return Some(read_scale_mode(block, payload_start, block_end));
+        return Some(read_scale_mode(block, payload_start, block_end).map(|end| (end, Vec::new())));
+    }
+    if opcode == CLIENT_OPCODE {
+        let Some(end) = ends_within(payload_start, 16, block_end) else {
+            return Some(Err(overrun_defect(block, payload_start, 16, block_end)));
+        };
+        let values = CLIENT_NAMES
+            .iter()
+            .zip((0_u32..).step_by(4))
+            .map(|(name, at)| PropertyValue::Long {
+                name: (*name).to_owned(),
+                value: payload_start
+                    .checked_add(at)
+                    .and_then(|at| block.i32_le(Off::new(at)))
+                    .unwrap_or(0),
+            })
+            .collect();
+        return Some(Ok((end, values)));
     }
     None
 }
@@ -709,7 +756,8 @@ pub fn walk_properties(
             read_special_opcode(header.c_type, opcode, block, payload_start, block_end)
         {
             match special {
-                Ok(new_cursor) => {
+                Ok((new_cursor, values)) => {
+                    properties.extend(values);
                     cursor = new_cursor;
                     continue;
                 }
@@ -1249,6 +1297,64 @@ mod tests {
             &stream.properties[0],
             PropertyValue::Boolean { value: 0, .. }
         ));
+    }
+
+    #[test]
+    fn a_form_client_block_gives_four_longs_and_the_walk_goes_on_after_it() {
+        let text = b"[13]\n70 = { name = \"StartUpPosition\", payload = \"Byte\" }\n";
+        let table = OpcodeTable::parse(text).unwrap();
+        let mut body = vec![53];
+        for value in [45_i32, 615, 5880, 1680] {
+            body.extend_from_slice(&value.to_le_bytes());
+        }
+        body.extend_from_slice(&[70, 2]);
+        let bytes = control_block("Frm", 13, &body);
+        let region = Region::new(&bytes, Off::new(0));
+        let (header, _) = read_control_header(&region);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
+        assert!(defects.is_empty(), "{defects:?}");
+        let longs: Vec<(&str, i32)> = stream
+            .properties
+            .iter()
+            .filter_map(|property| match property {
+                PropertyValue::Long { name, value } => Some((name.as_str(), *value)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            longs,
+            [
+                ("ClientLeft", 45),
+                ("ClientTop", 615),
+                ("ClientWidth", 5880),
+                ("ClientHeight", 1680)
+            ]
+        );
+        assert!(matches!(
+            stream.properties.last(),
+            Some(PropertyValue::Byte { value: 2, .. })
+        ));
+    }
+
+    #[test]
+    fn the_flags_of_a_picture_box_give_auto_redraw_from_bit_0x20() {
+        let table = OpcodeTable::parse(b"").unwrap();
+        for (flags, expected) in [(0x63_u8, -1_i16), (0x43, 0)] {
+            let bytes = control_block("Pic", 0, &[0, flags, 0]);
+            let region = Region::new(&bytes, Off::new(0));
+            let (header, _) = read_control_header(&region);
+            let (stream, defects) =
+                walk_properties(&region, &header, &table, &mut BlobCursor::new());
+            assert!(defects.is_empty(), "{defects:?}");
+            assert!(
+                matches!(
+                    stream.properties.as_slice(),
+                    [PropertyValue::Boolean { name, value }] if name == "AutoRedraw" && *value == expected
+                ),
+                "{:?}",
+                stream.properties
+            );
+        }
     }
 
     #[test]
