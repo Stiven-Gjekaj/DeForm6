@@ -3044,8 +3044,16 @@ fn run(
                 } else {
                     reference.class
                 };
+                // A global of the class of a form holds the instance of the
+                // form, as for `NewIfNullPr`.
+                let expr = match (&reference.expr, callees.class(index)) {
+                    (Expr::Global(_) | Expr::Variable(_), Some(profile)) => profile
+                        .form_name()
+                        .map_or(reference.expr, |form| Expr::Name(form.to_owned())),
+                    _ => reference.expr,
+                };
                 state.stack.push(Value {
-                    expr: reference.expr,
+                    expr,
                     bytes: 4,
                     slot: None,
                     class,
@@ -3233,7 +3241,7 @@ fn run(
 }
 
 /// Gives the index of each class of the constant table that `listing`
-/// names with `NewIfNullPr` or `New`. A caller gives [`Callees`] the profile of each
+/// names with `NewIfNullPr`, `NewIfNullAd` or `New`. A caller gives [`Callees`] the profile of each
 /// one that is an object of the project.
 #[must_use]
 pub fn class_indexes(listing: &PcodeListing, table: &PcodeTable) -> Vec<u16> {
@@ -3243,7 +3251,9 @@ pub fn class_indexes(listing: &PcodeListing, table: &PcodeTable) -> Vec<u16> {
             .slot(instruction.lead, instruction.opcode)
             .map(|slot| slot.names.as_slice())
             .unwrap_or_default();
-        if matches!(family(names), Some(Family::NewIfNull | Family::NewObject))
+        let creates = matches!(family(names), Some(Family::NewIfNull | Family::NewObject))
+            || names.iter().any(|name| name == "NewIfNullAd");
+        if creates
             && let Some(index) = u16_at(&instruction.arguments, 0)
             && !out.contains(&index)
         {
@@ -4754,6 +4764,22 @@ dispid = 67
                 "       Call frmMain.method_2(frmMain.field_34)",
                 "       Exit Sub"
             ]
+        );
+        // `NewIfNullAd` pushes the global of the class of a form as the
+        // form, as `NewIfNullPr` sets the object register to it.
+        let pushed = PcodeTable::parse(
+            b"[primary.01]\nwidth = 2\nnames = [\"ImpAdLdRf\"]\n\
+              [primary.02]\nwidth = 2\nnames = [\"NewIfNullAd\"]\n\
+              [primary.03]\nwidth = 2\nnames = [\"ImpAdStAdFunc\"]\n\
+              [primary.04]\nwidth = 0\nnames = [\"ExitProcHresult\"]\n",
+        )
+        .unwrap();
+        let body = [0x01, 0x03, 0x00, 0x02, 0x09, 0x00, 0x03, 0x03, 0x00, 0x04];
+        let pushed_listing = disassemble(&Region::new(&body, Off::new(0)), &pushed);
+        assert_eq!(class_indexes(&pushed_listing, &pushed), [9]);
+        assert_eq!(
+            render(&lift(&pushed_listing, &pushed, &form, None).unwrap()),
+            ["       Set global_3 = frmMain", "       Exit Sub"]
         );
         let owned = Callees::default().with_class(
             9,
