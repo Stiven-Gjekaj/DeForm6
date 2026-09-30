@@ -8,9 +8,9 @@
 //! builds each side. The logs tell which lifted project compiles, and the
 //! first error of each one that does not.
 //!
-//! The P-code table and the types file are not in the repository. The
-//! command reads them from `derived/`, or from `--pcode-table` and
-//! `--vb-types`.
+//! The P-code table, the types file and the property opcode table are not
+//! in the repository. The command reads them from `derived/`, or from
+//! `--pcode-table`, `--vb-types` and `--opcode-table`.
 
 use std::path::Path;
 
@@ -31,19 +31,23 @@ use crate::ratios::differential::support::vbp;
 struct Options {
     table: String,
     types: String,
+    opcodes: String,
     dir: String,
 }
 
-/// Reads `[--pcode-table <file>] [--vb-types <file>] <dir>`.
+/// Reads `[--pcode-table <file>] [--vb-types <file>] [--opcode-table
+/// <file>] <dir>`.
 fn options(args: &[String]) -> Option<Options> {
     let mut table = crate::pcode_table::DEFAULT_OUTPUT_PATH.to_owned();
     let mut types = crate::vb_types::DEFAULT_OUTPUT_PATH.to_owned();
+    let mut opcodes = crate::opcode_table::DEFAULT_OUTPUT_PATH.to_owned();
     let mut dir = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
             "--pcode-table" => table.clone_from(rest.next()?),
             "--vb-types" => types.clone_from(rest.next()?),
+            "--opcode-table" => opcodes.clone_from(rest.next()?),
             flag if flag.starts_with('-') => return None,
             path if dir.is_none() => dir = Some(path.to_owned()),
             _ => return None,
@@ -52,6 +56,7 @@ fn options(args: &[String]) -> Option<Options> {
     Some(Options {
         table,
         types,
+        opcodes,
         dir: dir?,
     })
 }
@@ -62,10 +67,10 @@ fn lifted_files(
     bytes: &[u8],
     table: &PcodeTable,
     types: &VbTypes,
+    opcodes: &OpcodeTable,
 ) -> Result<Vec<(String, Vec<u8>)>, String> {
-    let mut report =
-        deform6::inspect_with_types(bytes, &OpcodeTable::builtin(), Some(types), Mode::Strict)
-            .map_err(|err| format!("inspect: {err}"))?;
+    let mut report = deform6::inspect_with_types(bytes, opcodes, Some(types), Mode::Strict)
+        .map_err(|err| format!("inspect: {err}"))?;
     let lifted = deform6::vb::bodies::lift_objects(bytes, &report, table, Some(types))
         .map_err(|err| format!("lift: {err}"))?;
     for (object, lifted) in report.objects.iter_mut().zip(lifted) {
@@ -89,6 +94,8 @@ fn export(options: &Options) -> Result<usize, String> {
         .map_err(|err| format!("{}: {err}", options.table))?;
     let types = VbTypes::parse(&read(&options.types)?)
         .map_err(|err| format!("{}: {err}", options.types))?;
+    let opcodes = OpcodeTable::parse(&read(&options.opcodes)?)
+        .map_err(|err| format!("{}: {err}", options.opcodes))?;
     let dir = Path::new(&options.dir);
     prepare(dir)?;
     let root = pcode_root();
@@ -100,7 +107,8 @@ fn export(options: &Options) -> Result<usize, String> {
         let key = program_key(exe, &root)?;
         let bytes =
             std::fs::read(exe).map_err(|err| format!("reading {}: {err}", exe.display()))?;
-        let files = lifted_files(&bytes, &table, &types).map_err(|err| format!("{key}: {err}"))?;
+        let files = lifted_files(&bytes, &table, &types, &opcodes)
+            .map_err(|err| format!("{key}: {err}"))?;
         write_files(&dir.join("extracted").join(&short), &files)
             .map_err(|err| format!("{key}: {err}"))?;
         let extracted_vbp = files
@@ -234,7 +242,7 @@ pub(crate) fn run(args: &[String]) -> i32 {
     let Some(options) = options(args) else {
         eprintln!(
             "usage: cargo run -p xtask -- export-lift-builds [--pcode-table <file>] \
-             [--vb-types <file>] <dir>"
+             [--vb-types <file>] [--opcode-table <file>] <dir>"
         );
         return 1;
     };
@@ -306,15 +314,24 @@ mod tests {
     }
 
     #[test]
-    fn the_options_take_two_files_and_one_directory() {
+    fn the_options_take_three_files_and_one_directory() {
         let args = |text: &str| -> Vec<String> { text.split(' ').map(str::to_owned).collect() };
-        let read = options(&args("--pcode-table t.toml --vb-types v.toml out")).unwrap();
+        let read = options(&args(
+            "--pcode-table t.toml --vb-types v.toml --opcode-table o.toml out",
+        ))
+        .unwrap();
         assert_eq!(
-            (read.table.as_str(), read.types.as_str(), read.dir.as_str()),
-            ("t.toml", "v.toml", "out")
+            (
+                read.table.as_str(),
+                read.types.as_str(),
+                read.opcodes.as_str(),
+                read.dir.as_str()
+            ),
+            ("t.toml", "v.toml", "o.toml", "out")
         );
         let default = options(&args("out")).unwrap();
         assert_eq!(default.table, "derived/pcode-table.toml");
+        assert_eq!(default.opcodes, "derived/opcode-table.toml");
         assert!(options(&args("out other")).is_none());
         assert!(options(&args("--lift")).is_none());
         assert!(options(&args("--vb-types")).is_none());
