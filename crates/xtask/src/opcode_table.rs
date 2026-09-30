@@ -193,6 +193,15 @@ const PICTURE_PROPERTIES: &[&str] = &[
 /// The properties that the position block of a control holds after `Left`.
 const POSITION_REST: &[&str] = &["Top", "Width", "Height"];
 
+/// The rows that the form stream holds with no member in `VB6.OLB`, by the
+/// `cType` of their control. A `Timer` holds its place on the form, `Left`
+/// and `Top`, as opcodes 7 and 8 with four bytes each; `_Timer` has no such
+/// members. The corpus measured it on each of its six timers.
+const EXTRA_ROWS: &[(u8, u8, PayloadType, &str)] = &[
+    (11, 7, PayloadType::Long, "Left"),
+    (11, 8, PayloadType::Long, "Top"),
+];
+
 /// Gives the payload of the property `name` of the type `vt` of the control
 /// `control_type`, or `None` when the form stream does not hold the
 /// property as its own opcode, or when its width is not known.
@@ -279,6 +288,11 @@ fn table_rows(infos: &[TypeInfo]) -> Vec<(u8, u8, PayloadType, String)> {
                 rows.push((control_type, opcode, payload, name.clone()));
             }
         }
+        rows.extend(EXTRA_ROWS.iter().filter(|row| row.0 == control_type).map(
+            |&(control_type, opcode, payload, name)| {
+                (control_type, opcode, payload, name.to_owned())
+            },
+        ));
     }
     rows
 }
@@ -442,6 +456,16 @@ mod tests {
         assert_eq!(row(&rows, 13, 20), Some(PayloadType::Single));
         assert_eq!(row(&rows, 9, 7), Some(PayloadType::Integer));
         assert_eq!(row(&rows, 5, 7), Some(PayloadType::Byte));
+    }
+
+    #[test]
+    fn a_timer_gives_its_place_as_two_long_rows_that_vb6_olb_does_not_name() {
+        assert_eq!(table_rows(&[]).len(), 0);
+        let rows = table_rows(&[interface("_Timer", vec![get("Interval", 3, 3)])]);
+        assert_eq!(row(&rows, 11, 3), Some(PayloadType::Long));
+        assert_eq!(row(&rows, 11, 7), Some(PayloadType::Long));
+        assert_eq!(row(&rows, 11, 8), Some(PayloadType::Long));
+        assert_eq!(rows.len(), 3);
     }
 
     #[test]
