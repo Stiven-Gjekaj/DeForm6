@@ -194,7 +194,24 @@ enum Command {
         /// are not the source.
         #[arg(long, requires = "pcode_table")]
         lift: bool,
+
+        /// A property opcode table that `cargo run -p xtask --
+        /// derive-opcode-table` writes from `VB6.OLB`. With it, the forms
+        /// get the properties that the table names. Absent this flag,
+        /// DeForm6 uses the small table built into the binary.
+        #[arg(long)]
+        opcode_table: Option<PathBuf>,
     },
+}
+
+/// The tables that `extract` reads, each from its own flag.
+struct ExtractTables<'a> {
+    /// `--vb-types`.
+    types: Option<&'a Path>,
+    /// `--pcode-table`, when `--lift` is given.
+    lift: Option<&'a Path>,
+    /// `--opcode-table`.
+    opcodes: Option<&'a Path>,
 }
 
 /// The exit code a run of this program gives back to its caller.
@@ -277,13 +294,17 @@ fn run(cli: &Cli) -> Exit {
             vb_types,
             pcode_table,
             lift,
+            opcode_table,
         } => run_extract(
             input,
             output,
             report.as_deref(),
             *force,
-            vb_types.as_deref(),
-            pcode_table.as_deref().filter(|_| *lift),
+            &ExtractTables {
+                types: vb_types.as_deref(),
+                lift: pcode_table.as_deref().filter(|_| *lift),
+                opcodes: opcode_table.as_deref(),
+            },
             mode_for(*salvage),
         ),
     }
@@ -624,15 +645,18 @@ fn run_extract(
     output: &Path,
     report_path: Option<&Path>,
     force: bool,
-    types_path: Option<&Path>,
-    lift_table: Option<&Path>,
+    tables: &ExtractTables<'_>,
     mode: deform6::journal::Mode,
 ) -> Exit {
-    let types = match load_vb_types(types_path) {
+    let (table, _) = match load_opcode_table(tables.opcodes) {
+        Ok(loaded) => loaded,
+        Err(exit) => return exit,
+    };
+    let types = match load_vb_types(tables.types) {
         Ok(types) => types,
         Err(exit) => return exit,
     };
-    let pcode_table = match lift_table.map(load_pcode_table).transpose() {
+    let pcode_table = match tables.lift.map(load_pcode_table).transpose() {
         Ok(table) => table,
         Err(exit) => return exit,
     };
@@ -648,7 +672,6 @@ fn run_extract(
         }
     };
 
-    let table = OpcodeTable::builtin();
     let mut inspected = match deform6::inspect_with_types(&data, &table, types.as_ref(), mode) {
         Ok(inspected) => inspected,
         Err(refusal) => {

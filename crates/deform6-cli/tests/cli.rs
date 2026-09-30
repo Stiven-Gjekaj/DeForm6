@@ -1760,6 +1760,50 @@ fn extract_writes_a_lifted_body_with_the_pcode_table() {
     assert!(text.contains("' The lift stopped"), "{text}");
 }
 
+/// `extract --opcode-table` reads the properties that the table names.
+/// The table is a temporary file that this test writes: the caption of a
+/// command button is opcode 1, a string. The built-in table does not name
+/// it, so without the flag the caption is not in the form.
+#[test]
+fn extract_with_an_opcode_table_writes_the_properties_that_it_names() {
+    let path = gradient_sample_path();
+    let output = std::env::temp_dir().join(format!("deform6-opcodes-{}", std::process::id()));
+    let (code, _, stderr) = run(&[
+        OsStr::new("extract"),
+        path.as_os_str(),
+        OsStr::new("-o"),
+        output.as_os_str(),
+    ]);
+    assert_eq!(code, 0, "{stderr}");
+    let form = fs::read(output.join("Form1.frm")).unwrap();
+    assert!(!String::from_utf8_lossy(&form).contains("\"&Draw\""));
+
+    let table = std::env::temp_dir().join(format!(
+        "deform6-cli-test-an-opcode-table-{}.toml",
+        std::process::id()
+    ));
+    fs::write(
+        &table,
+        "[4]\n1 = { name = \"Caption\", payload = \"Text\" }\n",
+    )
+    .unwrap();
+    let (code, _, stderr) = run(&[
+        OsStr::new("extract"),
+        path.as_os_str(),
+        OsStr::new("-o"),
+        output.as_os_str(),
+        OsStr::new("--opcode-table"),
+        table.as_os_str(),
+        OsStr::new("--force"),
+    ]);
+    fs::remove_file(&table).unwrap();
+    assert_eq!(code, 0, "{stderr}");
+    let form = fs::read(output.join("Form1.frm")).unwrap();
+    fs::remove_dir_all(&output).unwrap();
+    let text = String::from_utf8_lossy(&form);
+    assert!(text.contains("Caption         =   \"&Draw\""), "{text}");
+}
+
 /// Each command names its own work in its help, and no other.
 #[test]
 fn each_command_help_names_its_own_work() {
