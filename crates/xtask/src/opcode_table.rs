@@ -258,6 +258,17 @@ fn property_type(function: &Function) -> u16 {
         })
 }
 
+/// Tells whether the property get `function` takes an argument besides its
+/// result, such as the index of `List(Index)`. The form stream holds such a
+/// property as an array, and its declared type is the type of one item, so
+/// it gives no row.
+fn takes_an_index(function: &Function) -> bool {
+    function
+        .parameters
+        .iter()
+        .any(|parameter| parameter.flags & PARAMFLAG_FRETVAL == 0)
+}
+
 /// Gives a row `(control_type, opcode, payload, name)` for each property of
 /// each control interface of `infos` that [`payload`] gives a payload for.
 fn table_rows(infos: &[TypeInfo]) -> Vec<(u8, u8, PayloadType, String)> {
@@ -271,7 +282,7 @@ fn table_rows(infos: &[TypeInfo]) -> Vec<(u8, u8, PayloadType, String)> {
             continue;
         };
         for function in &info.functions {
-            if function.invoke_kind != PROPERTY_GET {
+            if function.invoke_kind != PROPERTY_GET || takes_an_index(function) {
                 continue;
             }
             let Some(opcode) = function
@@ -441,6 +452,24 @@ mod tests {
             8,
             "a property let and an unknown interface give no row"
         );
+    }
+
+    #[test]
+    fn a_property_that_takes_an_index_gives_no_row() {
+        let mut list = get("List", 22, 8);
+        list.parameters.insert(
+            0,
+            Parameter {
+                name: Some("Index".to_owned()),
+                vt: 2,
+                pointee: None,
+                flags: 1,
+                user_type: None,
+            },
+        );
+        let rows = table_rows(&[interface("_ComboBox", vec![get("Text", 12, 8), list])]);
+        assert_eq!(row(&rows, 7, 12), Some(PayloadType::Text));
+        assert_eq!(row(&rows, 7, 22), None);
     }
 
     #[test]
