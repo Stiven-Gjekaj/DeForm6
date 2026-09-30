@@ -11,10 +11,9 @@
 //! project, or the probe, for a build as P-code on the same host, and
 //! `import-pcode [--capture <file>] <dir>` reads that build into
 //! `corpus-pcode/` and `tests/pcode.toml`; see `pcode.rs`.
-//! `cargo run -p xtask -- derive-opcode-table` writes the opcode table
-//! `deform6::vb::opcodes::OpcodeTable::parse` reads, from a type library on
-//! a Windows host; see `opcode_table.rs`'s own doc comment for why this
-//! command reads no file anywhere else. Any other argument, or none, prints
+//! `cargo run -p xtask -- derive-opcode-table <olb>` writes the opcode table
+//! `deform6::vb::opcodes::OpcodeTable::parse` reads, from a copy of
+//! `VB6.OLB` that the user owns; see `opcode_table.rs`. Any other argument, or none, prints
 //! the usage line and exits non-zero: a mistyped subcommand is a loud
 //! failure, not a silent success.
 //!
@@ -159,7 +158,7 @@ fn run(args: Vec<String>) -> i32 {
     }
 }
 
-const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | update-fidelity | export-builds [--probe] <dir> | import-builds [--capture <file>] <dir> | export-pcode [--probe] <dir> | import-pcode [--capture <file>] <dir> | derive-opcode-table | fetch-pcode-symbols <dll> [--out <dir>] | derive-pcode-table <dll> <pdb> [--out <path>] | check-pcode-table [<table>] [--vb-types <types>] | derive-vb-types <olb> [--out <path>] | fetch-corpus | pin-corpus <name> <url> | fuzz-pr | fuzz-cron | licences";
+const USAGE: &str = "usage: cargo run -p xtask -- update-ratios | update-fidelity | export-builds [--probe] <dir> | import-builds [--capture <file>] <dir> | export-pcode [--probe] <dir> | import-pcode [--capture <file>] <dir> | derive-opcode-table <olb> [--out <path>] | fetch-pcode-symbols <dll> [--out <dir>] | derive-pcode-table <dll> <pdb> [--out <path>] | check-pcode-table [<table>] [--vb-types <types>] | derive-vb-types <olb> [--out <path>] | fetch-corpus | pin-corpus <name> <url> | fuzz-pr | fuzz-cron | licences";
 
 /// The number of corpus programs `update-ratios` refuses to write fewer
 /// than. Matches `EXPECTED_PROGRAM_COUNT` in `crates/deform6/tests/ratios.rs`
