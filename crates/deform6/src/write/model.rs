@@ -985,6 +985,7 @@ mod tests {
             title: String::new(),
             exe_name: String::new(),
             help_file: String::new(),
+            file_version: None,
             native: true,
             object_count: u16::try_from(objects.len()).unwrap_or(0),
             objects,

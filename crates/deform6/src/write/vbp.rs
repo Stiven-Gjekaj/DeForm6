@@ -413,9 +413,13 @@ fn write_settings(
     write_quoted_setting(writer, items, "Name", model.name.as_str());
     writer.push_line("HelpContextID=\"0\"");
     writer.push_line("CompatibleMode=\"0\"");
-    writer.push_line("MajorVer=1");
-    writer.push_line("MinorVer=0");
-    writer.push_line("RevisionVer=0");
+    // Visual Basic writes the version of the project into the version
+    // resource as `MajorVer.MinorVer.0.RevisionVer`. With no resource, the
+    // defaults of a new project are written.
+    let [major, minor, _, revision] = report.file_version.unwrap_or([1, 0, 0, 0]);
+    writer.push_line(&format!("MajorVer={major}"));
+    writer.push_line(&format!("MinorVer={minor}"));
+    writer.push_line(&format!("RevisionVer={revision}"));
     writer.push_line("AutoIncrementVer=0");
     writer.push_line("ServerSupportFiles=0");
 
@@ -480,6 +484,7 @@ mod tests {
             title: "Test Title".to_owned(),
             exe_name: "TestExe".to_owned(),
             help_file: String::new(),
+            file_version: None,
             native: true,
             object_count: u16::try_from(objects.len()).unwrap_or(0),
             objects,
@@ -827,6 +832,28 @@ mod tests {
         assert!(lines(&bytes).contains(&"Title=\"FlameTest\"".to_owned()));
         assert!(lines(&bytes).contains(&"ExeName32=\"Fast_Flames.exe\"".to_owned()));
         assert!(lines(&bytes).contains(&"HelpFile=\"help.hlp\"".to_owned()));
+    }
+
+    #[test]
+    fn the_version_of_the_file_is_the_version_of_the_project() {
+        let mut report = minimal_report(Vec::new(), Vec::new(), Vec::new());
+        let (model, _items) = from_report(&report, &[]);
+        let (bytes, _items) = write_vbp(&report, &model);
+        let all = lines(&bytes);
+        for line in ["MajorVer=1", "MinorVer=0", "RevisionVer=0"] {
+            assert!(all.contains(&line.to_owned()), "{line}");
+        }
+        report.file_version = Some([2, 3, 0, 76]);
+        let (bytes, _items) = write_vbp(&report, &model);
+        let all = lines(&bytes);
+        for line in [
+            "MajorVer=2",
+            "MinorVer=3",
+            "RevisionVer=76",
+            "AutoIncrementVer=0",
+        ] {
+            assert!(all.contains(&line.to_owned()), "{line}");
+        }
     }
 
     #[test]

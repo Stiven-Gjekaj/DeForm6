@@ -298,6 +298,9 @@ pub struct Report {
     pub exe_name: String,
     /// The help file name, which is the `.vbp` `HelpFile` value.
     pub help_file: String,
+    /// The file version of the version resource, `MajorVer.MinorVer.0.RevisionVer`
+    /// of the project, or `None` when the file has no version resource.
+    pub file_version: Option<[u16; 4]>,
     /// True when the project was compiled to native code.
     ///
     /// Read the doc comment on [`project::CompileMode`] before trusting a
@@ -498,6 +501,7 @@ pub fn inspect_with_types(
         title: header.title,
         exe_name: header.exe_name,
         help_file: header.help_file,
+        file_version: pe.file_version(),
         native: info.mode() == project::CompileMode::Native,
         object_count,
         objects,

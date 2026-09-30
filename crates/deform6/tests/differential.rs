@@ -238,6 +238,54 @@ fn declared_is_a_subset_of_recovered(
     declared.is_subset(recovered)
 }
 
+/// The corpus executables that hold a version resource.
+const EXPECTED_VERSIONED_COUNT: usize = 44;
+
+/// The version of each executable is the version of its source project:
+/// Visual Basic writes `MajorVer.MinorVer.0.RevisionVer` into the version
+/// resource. A project with `AutoIncrementVer=1` raised its `RevisionVer`
+/// by one after the build, so the executable holds one less.
+#[test]
+fn the_version_of_each_executable_is_the_version_of_its_source_project() {
+    let projects = vbp::project_files();
+    let mut versioned = 0usize;
+    let mut failures = Vec::new();
+    for exe in &executables() {
+        let data =
+            std::fs::read(exe).unwrap_or_else(|err| panic!("reading {}: {err}", exe.display()));
+        let image = PeImage::parse(&data)
+            .unwrap_or_else(|err| panic!("{}: PeImage::parse: {err:?}", exe.display()));
+        let Some(version) = image.file_version() else {
+            continue;
+        };
+        versioned += 1;
+        let project_path = vbp::select_project_file(exe, &projects)
+            .unwrap_or_else(|err| panic!("{}: {err}", exe.display()));
+        let project = vbp::Project::read(&project_path);
+        let number = |key: &str| -> u16 {
+            project
+                .values(key)
+                .first()
+                .and_then(|value| value.trim().parse().ok())
+                .unwrap_or(0)
+        };
+        let expected = [
+            number("MajorVer"),
+            number("MinorVer"),
+            0,
+            number("RevisionVer").saturating_sub(number("AutoIncrementVer")),
+        ];
+        if version != expected {
+            failures.push(format!(
+                "{}: the file holds {version:?}, the project gives {expected:?}",
+                exe.display()
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(versioned, EXPECTED_VERSIONED_COUNT);
+}
+
 #[test]
 fn every_declared_object_is_recovered_and_every_recovered_object_is_declared_across_the_corpus() {
     let exes = executables();

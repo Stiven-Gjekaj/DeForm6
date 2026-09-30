@@ -474,7 +474,65 @@ impl<'a> PeImage<'a> {
             .data_directory(object::pe::IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR)
             .is_some()
     }
+
+    /// Gives the file version of the version resource: the four numbers of
+    /// `dwFileVersionMS` and `dwFileVersionLS` of its `VS_FIXEDFILEINFO`.
+    /// Visual Basic 6 writes `MajorVer.MinorVer.0.RevisionVer` of the
+    /// project there.
+    ///
+    /// Gives `None` when the file has no version resource, when a directory
+    /// of the resource tree is outside the file, or when the fixed file info
+    /// does not have its signature at its place.
+    #[must_use]
+    pub fn file_version(&self) -> Option<[u16; 4]> {
+        let sections = self.file.section_table();
+        let directory = self
+            .file
+            .data_directories()
+            .resource_directory(self.data, &sections)
+            .ok()??;
+        let root = directory.root().ok()?;
+        let first_below = |table: object::read::pe::ResourceDirectoryTable<'_>| {
+            table.entries.first()?.data(directory).ok()
+        };
+        let versions = root
+            .entries
+            .iter()
+            .find(|entry| entry.name_or_id().id() == Some(RT_VERSION))?
+            .data(directory)
+            .ok()?
+            .table()?;
+        let languages = first_below(versions)?.table()?;
+        let entry = first_below(languages)?.data()?;
+        if entry.size.get(LE) < FIXED_INFO_END {
+            return None;
+        }
+        let region = self.region_at(Rva::new(entry.offset_to_data.get(LE)))?;
+        if region.u32_le(Off::new(FIXED_INFO_AT))? != FIXED_INFO_SIGNATURE {
+            return None;
+        }
+        let most = region.u32_le(Off::new(FIXED_INFO_AT.checked_add(8)?))?;
+        let least = region.u32_le(Off::new(FIXED_INFO_AT.checked_add(12)?))?;
+        let high = |word: u32| u16::try_from(word >> 16).ok();
+        let low = |word: u32| u16::try_from(word & 0xFFFF).ok();
+        Some([high(most)?, low(most)?, high(least)?, low(least)?])
+    }
 }
+
+/// The resource type of a version resource, `RT_VERSION`.
+const RT_VERSION: u16 = 16;
+
+/// The offset of `VS_FIXEDFILEINFO` in a version resource: after the
+/// length, the value length and the type, three `u16`, and the key
+/// `VS_VERSION_INFO` and its null, 16 UTF-16 units, padded to four bytes.
+const FIXED_INFO_AT: u32 = 40;
+
+/// The bytes of a version resource up to the end of the file version of
+/// its fixed file info.
+const FIXED_INFO_END: u32 = 56;
+
+/// The signature of `VS_FIXEDFILEINFO`.
+const FIXED_INFO_SIGNATURE: u32 = 0xFEEF_04BD;
 
 /// Gives the file offset of the first section header.
 ///

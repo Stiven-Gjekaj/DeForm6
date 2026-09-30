@@ -188,7 +188,10 @@ fn mask_offsets(bytes: &[u8]) -> Vec<u8> {
 
 /// Gives the lines of a file, sorted, so that their order does not count.
 fn sorted_lines(bytes: &[u8]) -> Vec<&[u8]> {
-    let mut lines: Vec<&[u8]> = bytes.split(|byte| *byte == b'\n').collect();
+    let mut lines: Vec<&[u8]> = bytes
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.starts_with(b"RevisionVer="))
+        .collect();
     lines.sort_unstable();
     lines
 }
@@ -219,7 +222,9 @@ fn only_the_byte_offset_of_a_report_comment_is_masked() {
 /// native binary of the same source, when the byte offsets of the report
 /// comments are masked. The files pair by name, and the lines of the
 /// project file are compared in any order, because `Grayscale.exe` in
-/// `corpus/` holds its objects in another order than its source. The test
+/// `corpus/` holds its objects in another order than its source. The
+/// `RevisionVer` line is left out: each build holds its own revision, and
+/// a project with `AutoIncrementVer=1` raised it after each build. The test
 /// above holds the P-code order to the source.
 #[test]
 fn each_pcode_program_writes_the_project_of_its_native_build() {
