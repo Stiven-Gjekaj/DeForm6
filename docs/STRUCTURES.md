@@ -1227,17 +1227,18 @@ return type** from the same type library. This is why SVBD needs VB6 installed,
 and why hardcoded property tables in other tools are incomplete. **[C]**
 (SVBD `ProccessControls`, `ReturnGuiOpcode`, `ReturnDataType`.)
 
-**DeForm6 cannot use that technique** (no VB6, no `VB6.OLB` redistribution
-right), so it must ship its own opcode-to-property table, built once from a
-type-library dump and committed as derived data. The table needs, per control
-type, a map from opcode to `(property name, payload type)`.
+**DeForm6 does not use COM, and it does not ship the table.** `VB6.OLB` may
+not be redistributed. `cargo run -p xtask -- derive-opcode-table <VB6.OLB>`
+reads a copy that the user owns, with the reader of `xtask`, on any host,
+and writes the table to `derived/opcode-table.toml`. Section 8.5.3 gives the
+rules and the measurement.
 
 Payload widths by declared type: **[L]**
 
 | Declared type | Bytes consumed | Notes |
 |---|---|---|
 | `Byte` | 1 | |
-| `Boolean` | 2 | Emitted as `-1` / `0` in the `.frm` |
+| `Boolean` | 1 | `0xFF` for `True`. Emitted as `-1` / `0` in the `.frm`. The corpus measured one byte, section 8.5.3; SVBD gave two |
 | `Integer` | 2 | |
 | `Long` | 4 | |
 | `Single` | 4 | |
@@ -1256,13 +1257,13 @@ control type before the generic path is tried. SVBD does exactly this.
 |---|---|---|
 | 10 | `WindowState` | 1 byte |
 | 11 | `MousePointer` | 1 byte |
-| 25 | `ScaleMode` + flags | 1 byte scale mode; **if scale mode is 0 (User) skip 16 more bytes**; then a flags byte where `0x20` = `AutoRedraw`, `0x02` = `FontTransparent`; then one more byte |
+| 25 | `ScaleMode` | 1 byte scale mode; **if scale mode is 0 (User) skip 16 more bytes**. SVBD read a flags byte and one more byte after it; the corpus shows them to be opcode 0 and its flags word, section 8.5.3 |
 | 27 | `DrawStyle` | 1 byte |
 | 29 | `FillStyle` | 1 byte |
 | 31 | `DrawMode` | 1 byte |
 | 34 | `BorderStyle` | 1 byte |
 | 37 | `LinkMode` | 1 byte |
-| 53 | `ClientLeft/Top/Width/Height` | 16 bytes, four `(i16 value, i16 pad)` pairs |
+| 53 | `ClientLeft/Top/Width/Height` | 16 bytes, four `i32` in that order (section 8.5.3) |
 | 61 | `LockControls` | 1 byte, `0xFF` ⇒ `-1` |
 | 62 | `NegotiateMenus` | 1 byte, `0xFF` ⇒ `-1` |
 | 64 | `Font` | font block |
@@ -1270,7 +1271,8 @@ control type before the generic path is tried. SVBD does exactly this.
 | 70 | `StartUpPosition` | 1 byte |
 | 71 | `OLEDropMode` | 1 byte |
 | 73 | `PaletteMode` | 1 byte |
-| 0, 98, 99 | consume 1 byte, no output | |
+| 98, 99 | consume 1 byte, no output | |
+| 0 | the flags word, a `u16` | SVBD read one byte with no output; section 8.5.3 |
 
 **CommandButton (`cType` 4)**: 4 = position block (8 bytes), 10 = `MousePointer`,
 22 = `DragMode`, 29 = `Font`, 31 = `Appearance`, 38 = `OLEDropMode`,
@@ -1311,6 +1313,75 @@ geometry.
 ```
 
 It renders as `BeginProperty Font ... EndProperty`.
+
+#### 8.5.3 The opcode table from `VB6.OLB`, measured on the corpus, 2026-09-30 **[C]**
+
+`cargo run -p xtask -- derive-opcode-table <VB6.OLB>` reads the type
+library with the reader of `xtask`, on any host. For each property get of
+the interface of an intrinsic control, such as `_CommandButton`, the opcode
+is the member id less `0x10000`. This agrees with each opcode of section
+8.5.1: `Left` is `0x10004` on `_CommandButton` and `0x10005` on `_Label`,
+and `StartUpPosition` is `0x10046` on `_Form`.
+
+The payload comes from the declared type of the property:
+
+| Declared type | Payload | Bytes |
+|---|---|---|
+| `String` | `Text` | `2 + n + 1` |
+| `Long`, `OLE_COLOR` | `Long` | 4 |
+| `Single` | `Single`, and `Long` on `Line` | 4 |
+| `Boolean` | `Boolean`, `0xFF` for `True` | **1** |
+| `Integer` | see below | 1 or 2 |
+| `Font` | `Font` | section 8.5.2 |
+| a picture | `Picture` | section 8.8 |
+
+The width of a `Boolean` is one byte, not two. With two, the opcode of the
+next property is read into the value, and each property after it moves.
+
+`VB6.OLB` declares an enumeration, such as `MousePointer`, and a number,
+such as `TabIndex`, both as a `short`. The raw type description of both is
+`0x80020002`, so the library cannot tell them apart. The form stream holds
+an enumeration in one byte and a number in two. The tool names the width of
+each such property that the corpus measured, and of each that section 8.5.1
+gives. It gives no row for another `Integer` property, and the walk stops
+at its opcode.
+
+`Line` holds `X1`, `Y1`, `X2` and `Y2` as whole twips in four bytes,
+although `VB6.OLB` declares each as a `Single`.
+
+A property get that takes an argument besides its result, such as
+`List(Index)` or `ItemData(Index)`, gives no row. Its declared type is the
+type of one item, and the stream holds the whole array: `List` of a combo
+box of `PassGen.exe` is `16 07 00 04 00`, then the items.
+
+Some opcodes have no member in `VB6.OLB`:
+
+| Control | Opcode | Payload |
+|---|---|---|
+| `Form`, `MDIForm` | 53 | `ClientLeft`, `ClientTop`, `ClientWidth` and `ClientHeight`, four `i32` in that order |
+| `PictureBox`, `Form`, `MDIForm` | 0 | a `u16` of flags; `0x20` is `AutoRedraw` on each of the 78 picture boxes and 52 forms with a source |
+| `ComboBox` | 12 | `Text`, a string; no payload when `Style` is 2, a drop-down list, on each of the four such combo boxes |
+| `Timer` | 7, 8 | `Left` and `Top`, an `i32` each |
+| `Form`, `MDIForm` | 61, 62 | `LockControls` and `NegotiateMenus`, one byte each, `0xFF` for `True` (section 8.5.1) |
+| `Menu` | 6, 7 | one byte, `0xFF` in each corpus case; no line of the `.frm` |
+| `Menu` | 8 | `Shortcut`, a `u16` key code, such as 5 for `^E` |
+
+The byte `0xFF` ends the property list of a control, before its scope
+separator: `46 02 ff 01` is `StartUpPosition = 2`, then the end.
+
+On a form, opcode 25 holds the scale mode alone, and opcode 0 and its flags
+word follow it: `19 01 00 63 00` is `ScaleMode = 1`, then flags `0x63`.
+
+The walk gives no `ScaleWidth` and no `ScaleHeight`: 254 lines of the
+source files. No member of `VB6.OLB` gives their opcode, and their place in
+the stream is not settled. `Shortcut` of a menu needs the key text, such as
+`^E`, which the writer does not give yet: 19 lines.
+
+With the table, each of the 86 corpus programs reads in strict mode, and
+`extract` gives 4769 of the 5113 property lines of the source `.frm` files
+of the 44 native corpus programs. The built-in table gives 193. Of the 22
+lines that differ, 18 name the `.frx` file after the form, and 4 are in
+`Blacklight.exe`, whose source changed after its build.
 
 ### 8.6 Linking a control to its event handlers
 
