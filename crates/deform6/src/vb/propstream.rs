@@ -576,9 +576,10 @@ const CT_MDIFORM: u8 = 20;
 /// MDIForm, with its own conditional skip.
 const SCALE_MODE_OPCODE: u8 = 25;
 
-/// The three opcodes `STRUCTURES.md` section 8.5.1 marks "consume 1 byte,
-/// no output" on Form and MDIForm.
-const NO_OUTPUT_OPCODES: [u8; 3] = [0, 98, 99];
+/// The two opcodes `STRUCTURES.md` section 8.5.1 marks "consume 1 byte,
+/// no output" on Form and MDIForm. Section 8.5.1 also gave opcode 0, which
+/// is the flags word of section 8.5.3.
+const NO_OUTPUT_OPCODES: [u8; 2] = [98, 99];
 
 /// The opcode of the client area of a Form and an MDIForm: `ClientLeft`,
 /// `ClientTop`, `ClientWidth` and `ClientHeight`, four `i32` in that order.
@@ -591,12 +592,12 @@ const CLIENT_NAMES: [&str; 4] = ["ClientLeft", "ClientTop", "ClientWidth", "Clie
 /// The `cType` of `PictureBox`.
 const CT_PICTURE_BOX: u8 = 0;
 
-/// The opcode of the flags of a `PictureBox`: a `u16`. `VB6.OLB` has no
-/// member for it. `STRUCTURES.md` section 8.5.3.
-const PICTURE_FLAGS_OPCODE: u8 = 0;
+/// The opcode of the flags of a `PictureBox`, a `Form` and an `MDIForm`: a
+/// `u16`. `VB6.OLB` has no member for it. `STRUCTURES.md` section 8.5.3.
+const FLAGS_OPCODE: u8 = 0;
 
-/// The bit of the flags of a `PictureBox` that is `AutoRedraw`. The corpus
-/// measured it on each of its 78 picture boxes.
+/// The bit of the flags that is `AutoRedraw`. The corpus measured it on
+/// each of its 78 picture boxes and 52 forms with a source.
 const AUTO_REDRAW: u16 = 0x20;
 
 /// Handles a special opcode before the generic typed path is tried: an
@@ -617,7 +618,8 @@ fn read_special_opcode(
     payload_start: u32,
     block_end: u32,
 ) -> Option<Result<(u32, Vec<PropertyValue>), Defect>> {
-    if control_type == CT_PICTURE_BOX && opcode == PICTURE_FLAGS_OPCODE {
+    let form = control_type == CT_FORM || control_type == CT_MDIFORM;
+    if (control_type == CT_PICTURE_BOX || form) && opcode == FLAGS_OPCODE {
         let Some(end) = ends_within(payload_start, 2, block_end) else {
             return Some(Err(overrun_defect(block, payload_start, 2, block_end)));
         };
@@ -628,7 +630,7 @@ fn read_special_opcode(
         };
         return Some(Ok((end, vec![auto_redraw])));
     }
-    if control_type != CT_FORM && control_type != CT_MDIFORM {
+    if !form {
         return None;
     }
     if NO_OUTPUT_OPCODES.contains(&opcode) {
@@ -638,7 +640,13 @@ fn read_special_opcode(
         return Some(Ok((payload_start, Vec::new())));
     }
     if opcode == SCALE_MODE_OPCODE {
-        return Some(read_scale_mode(block, payload_start, block_end).map(|end| (end, Vec::new())));
+        return Some(read_scale_mode(block, payload_start, block_end).map(|end| {
+            let mode = PropertyValue::Byte {
+                name: "ScaleMode".to_owned(),
+                value: block.u8(Off::new(payload_start)).unwrap_or(0),
+            };
+            (end, vec![mode])
+        }));
     }
     if opcode == CLIENT_OPCODE {
         let Some(end) = ends_within(payload_start, 16, block_end) else {
@@ -661,43 +669,21 @@ fn read_special_opcode(
 }
 
 /// Reads the Form `ScaleMode` special opcode: one byte for the scale mode,
-/// then, only when that byte is `0`, 16 more skipped bytes, then one flags
-/// byte (`0x20` = `AutoRedraw`, `0x02` = `FontTransparent`), then one more
-/// byte. Gives the cursor position after all of that; produces no property,
-/// per `STRUCTURES.md` section 8.5.1.
+/// then, only when that byte is `0`, 16 more skipped bytes. Gives the
+/// cursor position after all of that.
+///
+/// `STRUCTURES.md` section 8.5.1 gave a flags byte and one more byte after
+/// the mode. The corpus shows those three bytes to be opcode 0 and its
+/// flags word, such as `19 01 00 63 00`, which [`FLAGS_OPCODE`] reads.
 fn read_scale_mode(block: &Region<'_>, payload_start: u32, block_end: u32) -> Result<u32, Defect> {
-    // The count of bytes from the payload start to the end of `width` bytes
-    // at `from`. Each `from` is a position that this reader already found
-    // inside the block, so neither step saturates.
-    let needs = |from: u32, width: u32| from.saturating_sub(payload_start).saturating_add(width);
-
     let Some(after_mode) = ends_within(payload_start, 1, block_end) else {
         return Err(overrun_defect(block, payload_start, 1, block_end));
     };
-    let scale_mode = block.u8(Off::new(payload_start)).unwrap_or(0);
-
-    let after_skip = if scale_mode == 0 {
-        let Some(skipped) = ends_within(after_mode, 16, block_end) else {
-            let len = needs(after_mode, 16);
-            return Err(overrun_defect(block, payload_start, len, block_end));
-        };
-        skipped
-    } else {
-        after_mode
-    };
-
-    let Some(after_flags) = ends_within(after_skip, 1, block_end) else {
-        let len = needs(after_skip, 1);
-        return Err(overrun_defect(block, payload_start, len, block_end));
-    };
-
-    // One more byte after the flags byte, per STRUCTURES.md section 8.5.1.
-    let Some(final_end) = ends_within(after_flags, 1, block_end) else {
-        let len = needs(after_flags, 1);
-        return Err(overrun_defect(block, payload_start, len, block_end));
-    };
-
-    Ok(final_end)
+    if block.u8(Off::new(payload_start)).unwrap_or(0) != 0 {
+        return Ok(after_mode);
+    }
+    ends_within(after_mode, 16, block_end)
+        .ok_or_else(|| overrun_defect(block, payload_start, 17, block_end))
 }
 
 /// Walks one control block's own property stream.
@@ -1151,7 +1137,7 @@ mod tests {
     fn an_opcode_with_no_table_entry_gives_undecoded_and_stops_the_loop_naming_offset_and_bytes_not_read()
      {
         // 200 is deliberately outside both FORM_ROWS and the special
-        // no-output/ScaleMode opcodes (0, 25, 98, 99), so this exercises a
+        // special opcodes (0, 25, 53, 98, 99), so this exercises a
         // genuine lookup miss, not a special case.
         let bytes = control_block("Frm1", 13, &[200, 1, 2, 3, 4, 5]);
         let region = Region::new(&bytes, Off::new(0));
@@ -1683,23 +1669,28 @@ mod tests {
     }
 
     #[test]
-    fn a_form_scale_mode_byte_of_0_consumes_sixteen_more_bytes_before_the_flags_byte() {
+    fn a_form_scale_mode_byte_of_0_consumes_sixteen_more_bytes_before_the_flags_word() {
         let table = OpcodeTable::builtin();
         let mut body = vec![25u8, 0]; // opcode 25 = ScaleMode, mode = 0
         body.extend(std::iter::repeat_n(0xAA_u8, 16)); // the 16 skipped bytes
-        body.push(0x20); // flags byte
-        body.push(0x00); // one more byte
+        body.extend_from_slice(&[0, 0x63, 0x00]); // opcode 0, the flags word
         body.push(10); // opcode 10 = WindowState, right after
         body.push(3);
         let bytes = control_block("Frm1", 13, &body);
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
         let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
-        assert_eq!(stream.properties.len(), 1, "{:?}", stream.properties);
         assert!(
-            matches!(&stream.properties[0], PropertyValue::Byte { value: 3, .. }),
+            matches!(
+                stream.properties.as_slice(),
+                [
+                    PropertyValue::Byte { value: 0, .. },
+                    PropertyValue::Boolean { value: -1, .. },
+                    PropertyValue::Byte { value: 3, .. }
+                ]
+            ),
             "{:?}",
-            stream.properties[0]
+            stream.properties
         );
         assert!(defects.is_empty(), "{defects:?}");
     }
@@ -1708,26 +1699,32 @@ mod tests {
     fn a_non_zero_form_scale_mode_does_not_skip_sixteen_bytes() {
         let table = OpcodeTable::builtin();
         let mut body = vec![25u8, 3]; // opcode 25 = ScaleMode, mode = 3
-        body.push(0x20); // flags byte, right after the mode (no skip)
-        body.push(0x00); // one more byte
+        body.extend_from_slice(&[0, 0x43, 0x00]); // opcode 0, no AutoRedraw
         body.push(10); // opcode 10 = WindowState, right after
         body.push(7);
         let bytes = control_block("Frm1", 13, &body);
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
         let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
-        assert_eq!(stream.properties.len(), 1, "{:?}", stream.properties);
-        assert!(matches!(
-            &stream.properties[0],
-            PropertyValue::Byte { value: 7, .. }
-        ));
+        assert!(
+            matches!(
+                stream.properties.as_slice(),
+                [
+                    PropertyValue::Byte { value: 3, .. },
+                    PropertyValue::Boolean { value: 0, .. },
+                    PropertyValue::Byte { value: 7, .. }
+                ]
+            ),
+            "{:?}",
+            stream.properties
+        );
         assert!(defects.is_empty(), "{defects:?}");
     }
 
     #[test]
-    fn the_no_output_opcodes_zero_ninety_eight_and_ninety_nine_consume_only_their_own_byte() {
+    fn the_no_output_opcodes_ninety_eight_and_ninety_nine_consume_only_their_own_byte() {
         let table = OpcodeTable::builtin();
-        for opcode in [0u8, 98, 99] {
+        for opcode in [98u8, 99] {
             let body = vec![opcode, 10, 4]; // the special opcode, then WindowState = 4
             let bytes = control_block("Frm1", 13, &body);
             let region = Region::new(&bytes, Off::new(0));

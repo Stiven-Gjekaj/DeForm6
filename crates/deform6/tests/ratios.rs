@@ -119,10 +119,13 @@ const EXPECTED_TOTAL_CONTROL_RECOVERED: u32 = 708;
 /// total FRM-03's own re-measured count states, across six distinct
 /// property names), of which 136 property lines were actually written. The
 /// form `Main` of `Map Editor.exe` adds 24 records and 2 lines: 831 and
-/// 138. This is a coverage number for this tool's own writer, not a
-/// recovery number against source; see `tests/ratios.toml`'s own header.
-const EXPECTED_TOTAL_PROPERTY_DECLARED: u32 = 831;
-const EXPECTED_TOTAL_PROPERTY_WRITTEN: u32 = 138;
+/// 138. The flags word of a form, opcode 0, and its scale mode, opcode 25,
+/// now give `AutoRedraw` and `ScaleMode` with the built-in table, and the
+/// walk goes on to the rows after them: 935 and 242. This is a coverage
+/// number for this tool's own writer, not a recovery number against
+/// source; see `tests/ratios.toml`'s own header.
+const EXPECTED_TOTAL_PROPERTY_DECLARED: u32 = 935;
+const EXPECTED_TOTAL_PROPERTY_WRITTEN: u32 = 242;
 
 /// Editing a pinned number **up** means the pin now claims more procedures
 /// than the tool recovers: something the pin expects went missing. This
