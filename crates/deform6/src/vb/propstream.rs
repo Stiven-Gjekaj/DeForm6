@@ -596,6 +596,18 @@ const CT_PICTURE_BOX: u8 = 0;
 /// `u16`. `VB6.OLB` has no member for it. `STRUCTURES.md` section 8.5.3.
 const FLAGS_OPCODE: u8 = 0;
 
+/// The `cType` of `ComboBox`.
+const CT_COMBO_BOX: u8 = 7;
+
+/// The opcode of `Text` of a `ComboBox`.
+const COMBO_TEXT_OPCODE: u8 = 12;
+
+/// The `Style` of a `ComboBox` that is a drop-down list. Such a combo box
+/// has no text of its own: its opcode 12 holds no payload. The corpus
+/// measured it on each of its four such combo boxes, and a combo box of
+/// another style holds a string there.
+const DROPDOWN_LIST: u8 = 2;
+
 /// The bit of the flags that is `AutoRedraw`. The corpus measured it on
 /// each of its 78 picture boxes and 52 forms with a source.
 const AUTO_REDRAW: u16 = 0x20;
@@ -617,7 +629,16 @@ fn read_special_opcode(
     block: &Region<'_>,
     payload_start: u32,
     block_end: u32,
+    before: &[PropertyValue],
 ) -> Option<Result<(u32, Vec<PropertyValue>), Defect>> {
+    if control_type == CT_COMBO_BOX
+        && opcode == COMBO_TEXT_OPCODE
+        && before.iter().any(|property| {
+            matches!(property, PropertyValue::Byte { name, value } if name == "Style" && *value == DROPDOWN_LIST)
+        })
+    {
+        return Some(Ok((payload_start, Vec::new())));
+    }
     let form = control_type == CT_FORM || control_type == CT_MDIFORM;
     if (control_type == CT_PICTURE_BOX || form) && opcode == FLAGS_OPCODE {
         let Some(end) = ends_within(payload_start, 2, block_end) else {
@@ -738,9 +759,14 @@ pub fn walk_properties(
             break;
         };
 
-        if let Some(special) =
-            read_special_opcode(header.c_type, opcode, block, payload_start, block_end)
-        {
+        if let Some(special) = read_special_opcode(
+            header.c_type,
+            opcode,
+            block,
+            payload_start,
+            block_end,
+            &properties,
+        ) {
             match special {
                 Ok((new_cursor, values)) => {
                     properties.extend(values);
@@ -1320,6 +1346,45 @@ mod tests {
             stream.properties.last(),
             Some(PropertyValue::Byte { value: 2, .. })
         ));
+    }
+
+    #[test]
+    fn the_text_of_a_drop_down_list_combo_box_holds_no_payload() {
+        let text = b"[7]\n1 = { name = \"Style\", payload = \"Byte\" }\n\
+                     12 = { name = \"Text\", payload = \"Text\" }\n\
+                     19 = { name = \"TabIndex\", payload = \"Integer\" }\n";
+        let table = OpcodeTable::parse(text).unwrap();
+        let walk = |body: &[u8]| {
+            let bytes = control_block("Cmb", 7, body);
+            let region = Region::new(&bytes, Off::new(0));
+            let (header, _) = read_control_header(&region);
+            walk_properties(&region, &header, &table, &mut BlobCursor::new())
+        };
+        let (stream, defects) = walk(&[1, 2, 12, 19, 7, 0]);
+        assert!(defects.is_empty(), "{defects:?}");
+        assert!(
+            matches!(
+                stream.properties.as_slice(),
+                [
+                    PropertyValue::Byte { value: 2, .. },
+                    PropertyValue::Integer { value: 7, .. }
+                ]
+            ),
+            "{:?}",
+            stream.properties
+        );
+        let (stream, _) = walk(&[12, 2, 0, b'H', b'i', 0, 19, 7, 0]);
+        assert!(
+            matches!(
+                stream.properties.as_slice(),
+                [
+                    PropertyValue::Text { .. },
+                    PropertyValue::Integer { value: 7, .. }
+                ]
+            ),
+            "{:?}",
+            stream.properties
+        );
     }
 
     #[test]
