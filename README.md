@@ -218,6 +218,17 @@ cargo run -p xtask -- derive-vb-types <path-to-VB6.OLB> [<path-to-OCX>...]
 deform6 extract <path-to-exe> -o <output-directory> --vb-types derived/vb-types.toml
 ```
 
+The properties of a form need a property opcode table. The table built into
+DeForm6 names few properties. `derive-opcode-table` writes a table from the
+same copy of `VB6.OLB`. With it, `extract` gives 4769 of the 5113 property
+lines of the source `.frm` files of the corpus. The built-in table gives
+193.
+
+```
+cargo run -p xtask -- derive-opcode-table <path-to-VB6.OLB>
+deform6 extract <path-to-exe> -o <output-directory> --opcode-table derived/opcode-table.toml
+```
+
 Print the P-code of each procedure of a P-code program. The opcode table is
 not in this repository. Fetch the symbols of a copy of `MSVBVM60.DLL` that you
 own, derive the table from the two files, and check it against the P-code
@@ -275,9 +286,10 @@ with a `Dim` or a declaration for each variable that the lift names.
 `cargo run -p xtask -- export-lift-builds <dir>` writes each P-code program
 of the corpus this way, for a build with the Visual Basic 6 IDE on a
 Windows host. On the author's Windows XP host, VB6 builds 42 of the 42
-lifted projects. Of the 41 rebuilt programs that `runs.bat` starts, 16 show
-the same first screen as the original, pixel for pixel. Most of the others
-differ because a rebuilt form has few of its properties.
+lifted projects. With a table from `derive-opcode-table`, 28 of the 41
+rebuilt programs that `runs.bat` starts show the same first screen as the
+original, pixel for pixel. Of the others, most stop with a run-time error
+of the lift, and two open at another place, which Windows chooses.
 `scripts/vm/README.md` gives the steps of such a run.
 `check-pcode-table` holds the statements against the source: 3106 of the 4093 string
 literals and names after a `.` of the source are in the lift. Most of the
@@ -365,7 +377,7 @@ single derived figure calculated from a part.
 | 185 procedure signatures recovered | 904 declared | `cargo test -p deform6 --test ratios` |
 | 53 forms recovered | 53 declared | `cargo test -p deform6 --test ratios` |
 | 708 controls recovered | 708 declared | `cargo test -p deform6 --test ratios` |
-| 831 property records recovered, of which 138 written lines reach the `.frm` | | `cargo test -p deform6 --test ratios` |
+| 935 property records recovered with the built-in opcode table, of which 242 written lines reach the `.frm` | | `cargo test -p deform6 --test ratios` |
 
 When a form refuses, the refusal names the byte offset and the byte the
 code expected to find there. A refusal is the correct result, because the

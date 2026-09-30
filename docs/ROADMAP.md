@@ -865,10 +865,21 @@ that start give the same screen, pixel for pixel. The first run gave 13.
 The differences that were read come from the forms: 138 of the 831
 property records of the corpus reach the `.frm`.
 
-**Next.** The form properties (FRM-03) come first, because most of the 25
-pairs that differ wait on them. Then the lift gives names of offsets, not
-of variables, most variables are a `Variant`, and each statement stays in
-the form of `GoTo` and labels. The start check sees the first screen only.
+**The form properties, 2026-09-30.** `derive-opcode-table` now reads
+`VB6.OLB` on any host, and `export-lift-builds` gives its table to the
+lifted projects. With it, `extract` gives 4769 of the 5113 property lines of
+the source `.frm` files. The start check found more faults, and each got a
+fix with its own test: a `Boolean` of one byte, the flags word of a form,
+the text of a drop-down list, the version of the project, the global of a
+form that `NewIfNullAd` creates, and a long caption in the `.frx`. 28 of the
+41 pairs that start now give the same screen, pixel for pixel.
+
+**Next.** The run-time errors of the lift come first: a fixed-size array of
+a user type in a module, and the faults of `Transparency.exe` and the MCI
+sample. Then `List` and `ItemData` of a list, which the form stream holds as
+arrays. After that, the lift still gives names of offsets, not of
+variables, most variables are a `Variant`, and each statement stays in the
+form of `GoTo` and labels. The start check sees the first screen only.
 
 **The gate.** The recovered code compiles, which Phase 8 already measures, and
 the rebuilt program behaves the same as the original.
@@ -907,7 +918,7 @@ Phase 8  (exit met on the author's XP host; --verify-build waits)
           |
           +-- Phase 10 (exit met: names and widths, 680 of 680 bodies decode)
                  |
-                 +-- Phase 11 (part 2: 42 of 42 lifted projects build)
+                 +-- Phase 11 (part 2: 42 of 42 build, 28 of 41 start the same)
 
 Phase 12 runs beside 10 and 11.
 Phase 13 closes the milestone.

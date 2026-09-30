@@ -5,8 +5,85 @@ the one it uses. Every release gets one level two heading in the form
 `## [X.Y.Z] - YYYY-MM-DD`. The newest release comes first. Each section
 states what the release delivers, what stays open, and what the release
 does not do. A change that no release holds yet goes under one
-`## [Unreleased]` heading above the newest release. A release gives that
-heading its version and its date.
+`## [Unreleased]
+
+### What this delivers
+
+- `cargo run -p xtask -- derive-opcode-table <VB6.OLB>` writes the property
+  opcode table from a copy of `VB6.OLB` that the user owns, on any host. It
+  needed a COM walk on Windows before, which was never written. The opcode
+  of a property is its member id less `0x10000`, and its payload comes from
+  its declared type. `VB6.OLB` declares an enumeration and a number both as
+  a `short`, so the tool names the width of each such property that the
+  corpus measured, and gives no row for the others. A property that takes
+  an index, such as `List(Index)`, gives no row. A timer's `Left` and `Top`
+  and a form's `LockControls` and `NegotiateMenus` have no member in
+  `VB6.OLB`, and the tool gives their rows.
+- `extract --opcode-table <table>` reads the forms with the table. With the
+  table, `extract` gives 4769 of the 5113 property lines of the source
+  `.frm` files of the 44 native corpus programs, and each of the 86 corpus
+  programs reads in strict mode. The built-in table gives 193.
+  `export-lift-builds` reads the table from `derived/opcode-table.toml`, or
+  from `--opcode-table`.
+- The walk of the form stream reads the client block of a form (opcode 53:
+  `ClientLeft`, `ClientTop`, `ClientWidth`, `ClientHeight`), the flags
+  word of a form and a picture box (opcode 0: `AutoRedraw`), and the scale
+  mode of a form.
+- `extract` writes the version of the executable into the project:
+  `MajorVer`, `MinorVer` and `RevisionVer` from its version resource. Each
+  of the 44 corpus executables agrees with its source project.
+- The lift names the form where a call passes the global of a form, which
+  `NewIfNullAd` creates. It passed a global that nothing sets, and the
+  rebuilt `Gradient.exe` stopped with error 424.
+- A string too long to write inline goes into the `.frx` as a long string
+  record. The `.frx` that DeForm6 writes for `Gradient.exe` equals the
+  `Gradient.frx` of its source, byte for byte.
+- `vm.py` parks the mouse over the task bar while it takes pictures. The
+  pointer drifted over the windows, and 9 of 41 pairs of one run differed
+  in its box only.
+- The start check with all of this, on the author's Windows XP host: VB6
+  builds 42 of the 42 lifted projects, and 28 of the 41 pairs that
+  `runs.bat` starts show the same first screen, pixel for pixel. The
+  release 3.0.0 gave 16. The run was before the long string record.
+
+### Faults of 3.0.0
+
+- A `Boolean` property is one byte in the form stream, `0xFF` for `True`.
+  DeForm6 read two, so a table with a `Boolean` row moved each property
+  after it.
+- Opcode 25 of a form is the scale mode alone. DeForm6 read a flags byte and
+  one more byte after it, and opcode 0 as one byte with no output. The
+  bytes are opcode 0 and its flags word. The byte count is the same, so no
+  value moved, but `AutoRedraw` and `ScaleMode` of a form were lost. With
+  the built-in table, the corpus now gives 935 property records and 242
+  lines of the `.frm` files, where it gave 831 and 138.
+- The text of a combo box that is a drop-down list holds no payload.
+  DeForm6 read the next property as the length of a string.
+- Each project had the version 1.0.0, and a rebuilt program showed it in
+  its title, such as "Hex Color Scroller 1.0.0" for 1.0.4.
+- VB6 builds each of the 44 written projects after these changes, and
+  `tests/builds.toml` holds the new files.
+
+### What stays open
+
+- `ScaleWidth` and `ScaleHeight` (254 lines of the source files), `List`
+  and `ItemData` of a list, and `Shortcut` of a menu (19 lines) do not come
+  back. A drop-down list combo box with no `List` refuses its text at run
+  time, as in `PassGen.exe`.
+- A fixed-size array of a user type in a module, such as
+  `StarArray(0 To 500) As Star`, is a `Variant` in the lift, and the rebuilt
+  `Physics_Demo.exe` stops with error 13. The rebuilt `Transparency.exe`
+  stops with error 9, and the rebuilt MCI sample shows no window; neither
+  cause is found yet.
+- A form with `StartUpPosition = 3`, "Windows Default", opens at a place
+  that Windows chooses at each start, so its pair of pictures differs.
+
+### What this does not do
+
+- It does not change the version in `Cargo.toml`, and it has no tag.
+- `Report` has the new public field `file_version`. A caller that builds a
+  `Report` with a struct literal must add it, so the next release is a new
+  major version. `PayloadType::Boolean` now reads one byte.
 
 ## [3.0.0] - 2026-09-29
 
