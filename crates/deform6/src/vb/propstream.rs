@@ -52,8 +52,8 @@ pub enum PropertyValue {
         /// The raw byte.
         value: u8,
     },
-    /// A `Boolean` payload, 2 bytes, read as a signed 16 bit value so the
-    /// two values a `.frm` file writes, `-1` and `0`, come through exactly.
+    /// A `Boolean` payload, 1 byte: `0xFF` is `True` and `0` is `False`.
+    /// The value is `-1` or `0`, the form that a `.frm` file writes.
     Boolean {
         /// The property this opcode names.
         name: String,
@@ -307,7 +307,11 @@ fn read_fixed(
         },
         PayloadType::Boolean => PropertyValue::Boolean {
             name,
-            value: block.i16_le(Off::new(payload_start)).unwrap_or(0),
+            value: if block.u8(Off::new(payload_start)).unwrap_or(0) == 0 {
+                0
+            } else {
+                -1
+            },
         },
         PayloadType::Integer => PropertyValue::Integer {
             name,
@@ -1217,11 +1221,14 @@ mod tests {
     }
 
     #[test]
-    fn a_boolean_payload_of_0xffff_reports_as_minus_one_and_0x0000_reports_as_zero() {
-        let text = b"[4]\n1 = { name = \"Flag\", payload = \"Boolean\" }\n";
+    fn a_boolean_payload_of_one_byte_0xff_reports_as_minus_one_and_0x00_reports_as_zero() {
+        let text = b"[4]\n1 = { name = \"Flag\", payload = \"Boolean\" }\n\
+                     2 = { name = \"Next\", payload = \"Byte\" }\n";
         let table = OpcodeTable::parse(text).unwrap();
 
-        let bytes = control_block("Cmd", 4, &[1, 0xFF, 0xFF]);
+        // A Boolean of one byte, then the next property: a read of two
+        // bytes would take the opcode of `Next` into the value.
+        let bytes = control_block("Cmd", 4, &[1, 0xFF, 2, 7]);
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
         let (stream, _) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
@@ -1229,8 +1236,12 @@ mod tests {
             &stream.properties[0],
             PropertyValue::Boolean { value: -1, .. }
         ));
+        assert!(matches!(
+            &stream.properties[1],
+            PropertyValue::Byte { value: 7, .. }
+        ));
 
-        let bytes = control_block("Cmd", 4, &[1, 0x00, 0x00]);
+        let bytes = control_block("Cmd", 4, &[1, 0x00]);
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);
         let (stream, _) = walk_properties(&region, &header, &table, &mut BlobCursor::new());

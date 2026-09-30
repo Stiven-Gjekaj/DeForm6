@@ -58,7 +58,7 @@ use std::collections::{BTreeMap, HashMap};
 pub enum PayloadType {
     /// One byte.
     Byte,
-    /// Two bytes, emitted as `-1` or `0` in the `.frm`.
+    /// One byte, `0xFF` for `True`, emitted as `-1` or `0` in the `.frm`.
     Boolean,
     /// Two bytes.
     Integer,
@@ -89,8 +89,8 @@ impl PayloadType {
     #[must_use]
     pub const fn fixed_width(self) -> Option<u32> {
         match self {
-            Self::Byte => Some(1),
-            Self::Boolean | Self::Integer => Some(2),
+            Self::Byte | Self::Boolean => Some(1),
+            Self::Integer => Some(2),
             Self::Long | Self::Single => Some(4),
             Self::Text | Self::Picture | Self::Font | Self::Position => None,
         }
@@ -551,7 +551,7 @@ mod tests {
     #[test]
     fn payload_type_fixed_width_gives_the_declared_byte_count_for_the_fixed_width_kinds() {
         assert_eq!(PayloadType::Byte.fixed_width(), Some(1));
-        assert_eq!(PayloadType::Boolean.fixed_width(), Some(2));
+        assert_eq!(PayloadType::Boolean.fixed_width(), Some(1));
         assert_eq!(PayloadType::Integer.fixed_width(), Some(2));
         assert_eq!(PayloadType::Long.fixed_width(), Some(4));
         assert_eq!(PayloadType::Single.fixed_width(), Some(4));
