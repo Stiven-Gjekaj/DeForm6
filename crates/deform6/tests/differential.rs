@@ -238,6 +238,30 @@ fn declared_is_a_subset_of_recovered(
     declared.is_subset(recovered)
 }
 
+/// A caption too long to write inline goes into the `.frx` as a long string
+/// record. `Gradient.exe` holds one, the explanation label, and the `.frx`
+/// that DeForm6 writes for it equals the `Gradient.frx` of the source, byte
+/// for byte. The table of the test names the caption of a label only.
+#[test]
+fn the_long_caption_of_gradient_gives_the_frx_of_its_source() {
+    let root = corpus_root();
+    let dir = root.join("vb6-code/Gradient-2D");
+    let data = std::fs::read(dir.join("Gradient.exe")).expect("reading Gradient.exe");
+    let table = OpcodeTable::parse(b"[1]\n1 = { name = \"Caption\", payload = \"Text\" }\n")
+        .expect("the table of the test parses");
+    let report = deform6::inspect(&data, &table, deform6::journal::Mode::Strict)
+        .expect("Gradient.exe reads");
+    let written = deform6::write::project(&report, &data, deform6::journal::Mode::Strict)
+        .expect("Gradient.exe writes");
+    let frx = written
+        .files
+        .iter()
+        .find(|file| file.name.ends_with(".frx"))
+        .expect("a .frx is written");
+    let source = std::fs::read(dir.join("Gradient.frx")).expect("reading Gradient.frx");
+    assert_eq!(frx.bytes, source);
+}
+
 /// The corpus executables that hold a version resource.
 const EXPECTED_VERSIONED_COUNT: usize = 44;
 

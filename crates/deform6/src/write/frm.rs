@@ -161,6 +161,10 @@ enum PendingLine {
         /// The blob's own declared length.
         declared_len: u32,
     },
+    /// A string too long to write inline: its Windows-1252 bytes, which go
+    /// into the `.frx` as a long string record, `docs/FILE-FORMATS.md`
+    /// section 4.4.
+    PendingText(Vec<u8>),
 }
 
 /// One property line, ready to write: every [`PendingLine::PendingBlob`]
@@ -309,14 +313,20 @@ fn collect_pending_lines(
                         },
                     ));
                 }
+                PropertyValue::Text { name, value, .. }
+                    if !value.contains('\r') && !value.contains('\n') =>
+                {
+                    let (bytes, _substituted) = super::model::encode_windows_1252(value);
+                    out.push((name.clone(), PendingLine::PendingText(bytes)));
+                }
                 PropertyValue::Text { name, .. } => {
                     items.push(ReportItem {
                         path: control_report_path(form, control, index),
                         confidence: Confidence::Unrecoverable,
                         basis: format!(
-                            "{name} is too long, or holds a line break, to write inline, \
-                             and this repository carries no byte range to move it into the \
-                             .frx; the property is omitted"
+                            "{name} holds a line break, so it cannot be written inline, \
+                             and the writer gives no .frx record for such a string; the \
+                             property is omitted"
                         ),
                         evidence: Vec::new(),
                     });
@@ -603,6 +613,25 @@ fn write_model_control_block(
         let resolved_line = match line {
             PendingLine::Plain(value) => ResolvedLine::Plain(value),
             PendingLine::PropertyBlock(lines) => ResolvedLine::PropertyBlock(lines),
+            PendingLine::PendingText(bytes) => {
+                let Ok(len) = u32::try_from(bytes.len()) else {
+                    continue;
+                };
+                let record = frx::Blob {
+                    header: [0u8; 8],
+                    image: Vec::new(),
+                    declared_len: len,
+                    offset: 0,
+                };
+                let frx_offset = blob_cursor.take(&record)?;
+                frx.extend_from_slice(&len.to_le_bytes());
+                frx.extend_from_slice(&bytes);
+                ResolvedLine::Plain(values::format_resource_reference(
+                    frx_file_name,
+                    frx_offset,
+                    true,
+                ))
+            }
             PendingLine::PendingBlob {
                 offset,
                 declared_len,
@@ -1139,6 +1168,51 @@ mod tests {
         };
         let (files, _items) = write_form(&form, &[], &[]).expect("write_form must succeed");
         assert!(files.frx.is_none());
+    }
+
+    #[test]
+    fn a_long_string_goes_into_the_frx_as_a_long_string_record() {
+        let (name, _faults) = SafeName::new("frmLong", NameKind::Form);
+        let long = "x".repeat(153);
+        let control = ControlModel {
+            name: name.clone(),
+            kind: ControlKind::Form,
+            array_index: None,
+            parent: None,
+            depth: 0,
+            is_menu: false,
+            is_external: false,
+            external_class: None,
+            properties: vec![
+                PropertyValue::Text {
+                    name: "Caption".to_owned(),
+                    value: long.clone(),
+                },
+                PropertyValue::Text {
+                    name: "Tag".to_owned(),
+                    value: "a\r\nb".to_owned(),
+                },
+            ],
+        };
+        let form = FormModel {
+            name,
+            tree_refused: false,
+            controls: vec![control],
+            procedures: Vec::new(),
+            blobs: Vec::new(),
+            lifted: None,
+        };
+        let (files, items) = write_form(&form, &[], &[]).expect("write_form must succeed");
+        let text = frm_text(&files);
+        assert!(
+            text.contains("Caption         =   $\"frmLong.frx\":0000"),
+            "{text}"
+        );
+        assert!(!text.contains("   Tag "), "{text}");
+        assert_eq!(items.len(), 1, "{items:?}");
+        let mut expected = 153_u32.to_le_bytes().to_vec();
+        expected.extend_from_slice(long.as_bytes());
+        assert_eq!(files.frx, Some(expected));
     }
 
     #[test]
