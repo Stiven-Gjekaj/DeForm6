@@ -46,6 +46,10 @@ SERIAL_LABEL = "term0"
 # The rows at the bottom of the screen that the task bar and its clock take.
 TASKBAR_ROWS = 30
 
+# A move of the mouse that is larger than the screen: the pointer stops at
+# the corner.
+PARK_DISTANCE = 4000
+
 SHIFTED = {
     "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7",
     "*": "8", "(": "9", ")": "0", "_": "minus", "+": "equal",
@@ -170,6 +174,22 @@ def nudge(qmp):
         )
 
 
+def park(qmp):
+    """Moves the mouse to the lower right corner, over the task bar.
+
+    `compare` leaves out the rows of the task bar, so the pointer is not in
+    the part of a picture that it compares. A pointer over a window drifts
+    between pictures, and each picture then differs in its box.
+    """
+    qmp.command(
+        "input-send-event",
+        events=[
+            {"type": "rel", "data": {"axis": "x", "value": PARK_DISTANCE}},
+            {"type": "rel", "data": {"axis": "y", "value": PARK_DISTANCE}},
+        ],
+    )
+
+
 def serial_path(qmp):
     for device in qmp.command("query-chardev"):
         if device.get("label") == SERIAL_LABEL:
@@ -202,7 +222,8 @@ def watch_shots(capture, folder, ends):
     """Takes a picture at each ===SHOT pNN side=== marker of CAPTURE.
 
     Stops after ENDS ===END=== markers. Moves the mouse once a minute, so
-    that the screen saver does not start during the run. QEMU serves one QMP
+    that the screen saver does not start during the run, and parks it over
+    the task bar each time. QEMU serves one QMP
     client at a time, so the watcher connects only for each picture and each
     move, and `type` can connect between them.
     """
@@ -212,6 +233,7 @@ def watch_shots(capture, folder, ends):
         if time.time() - last_nudge > 60:
             qmp = Qmp()
             nudge(qmp)
+            park(qmp)
             qmp.close()
             last_nudge = time.time()
         try:
