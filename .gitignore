@@ -30,3 +30,8 @@ derived/vb-types.toml
 
 # The byte code that Python writes when it runs scripts/vm/vm.py.
 __pycache__/
+
+# The Microsoft files that the derive commands read: VB6.OLB, MSVBVM60.DLL
+# and the OCX files of a Visual Basic 6 install that the user owns. They
+# may not be redistributed, so they never enter the repository.
+derived/inputs/
