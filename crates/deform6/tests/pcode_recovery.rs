@@ -2017,6 +2017,22 @@ fn a_module_array_of_records_gives_its_offset_its_bounds_and_its_record_bytes() 
     assert!(module_fixed_arrays(&pe, objects["frmMain"].lp_public_bytes).is_empty());
 }
 
+/// `Dim hData(0 To 3, 0 To 255) As Single` of the basic histogram viewer
+/// is at 0x38 of the data of its form. The template holds the last
+/// dimension first.
+#[test]
+fn a_module_array_template_holds_the_last_dimension_first() {
+    let bytes = read(&pcode_root().join("vb6-code/Histograms-basic/Basic Histogram Viewer.exe"));
+    let pe = PeImage::parse(&bytes).unwrap();
+    let objects = objects_by_name(&pe);
+    let found: Vec<ModuleArrayFacts> =
+        module_fixed_arrays(&pe, objects["frmHistogram"].lp_public_bytes)
+            .into_iter()
+            .map(|array| (array.slot, array.vartype, array.bounds, array.element_bytes))
+            .collect();
+    assert_eq!(found.first(), Some(&(0x38, 4, vec![(256, 0), (4, 0)], 4)));
+}
+
 /// A fixed array as its slot, its `VARTYPE` and its bounds.
 type FixedArrayFacts = (u16, u16, Vec<(u32, i32)>);
 

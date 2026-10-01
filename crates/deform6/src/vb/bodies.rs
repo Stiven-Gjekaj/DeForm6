@@ -954,11 +954,13 @@ fn declare_new_locals(lines: &mut Vec<String>, locals: &BTreeMap<String, String>
 }
 
 /// Gives the bounds of `array` as Basic writes them, such as
-/// `0 To 255, -8 To 7`.
+/// `-8 To 7, 0 To 255`. The template holds the last dimension first, so
+/// this reverses the order.
 fn array_ranges(array: &FixedArray) -> String {
     let ranges: Vec<String> = array
         .bounds
         .iter()
+        .rev()
         .map(|(count, lower)| {
             let upper = i64::from(*lower)
                 .saturating_add(i64::from(*count))
@@ -2201,7 +2203,7 @@ names = ["ExitProcCb"]
         assert_eq!(
             lines,
             [
-                "       Dim local_2C(0 To 255, -8 To 7) As Byte",
+                "       Dim local_2C(-8 To 7, 0 To 255) As Byte",
                 "       Dim local_B0(0 To 255) As Long",
                 "       local_B0(1) = local_2C(2, 3)"
             ]

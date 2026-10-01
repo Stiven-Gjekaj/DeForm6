@@ -133,8 +133,9 @@ pub struct FixedArray {
     pub slot: u16,
     /// The `VARTYPE` of the elements, such as 3 for `Long`.
     pub vartype: u16,
-    /// The number of elements and the lower bound of each dimension, first
-    /// dimension first.
+    /// The number of elements and the lower bound of each dimension, in the
+    /// order of the template: the last dimension first. `Dim hData(0 To 3,
+    /// 0 To 255)` gives `[(256, 0), (4, 0)]`.
     pub bounds: Vec<(u32, i32)>,
     /// The bytes of one element, `cbElements` of the template.
     pub element_bytes: u32,
