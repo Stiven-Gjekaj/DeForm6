@@ -321,6 +321,10 @@ pub enum Expr {
     Late(Box<Expr>, u32),
     /// An element of an array.
     Index(Box<Expr>, Vec<Expr>),
+    /// A value that a call of a `Declare` takes `ByVal`. Each argument of a
+    /// `Declare` is `ByRef As Any`, so a value that is not the address of a
+    /// variable needs `ByVal` at the call.
+    ByVal(Box<Expr>),
     /// The value that a store put into a frame slot, with the number of
     /// the store and the slot. The end of the lift replaces it: with the
     /// slot when the statement of the store stays, and with the value when
@@ -790,6 +794,7 @@ impl Expr {
             Self::Late(object, 0) => object.text(),
             Self::Late(object, dispid) => format!("{}.[DISPID {dispid:#X}]", object.text()),
             Self::Index(array, indexes) => format!("{}({})", array.text(), arguments_text(indexes)),
+            Self::ByVal(value) => format!("ByVal {}", value.text()),
             Self::Bound(_, _, value) => value.text(),
         }
     }
@@ -816,6 +821,7 @@ impl Expr {
             Self::Index(array, indexes) => {
                 Self::Index(Box::new(array.resolve(kept)), each(indexes))
             }
+            Self::ByVal(value) => Self::ByVal(Box::new(value.resolve(kept))),
             other => other,
         }
     }
@@ -1437,6 +1443,26 @@ fn conversion(name: &str) -> Option<&'static str> {
     })
 }
 
+/// Tells whether the opcode with the handler names `names` pushes the
+/// address of a variable: `FLdRfVar`, `MemLdRf`, `FMemLdRf` and
+/// `ImpAdLdRf`. One handler serves `ILdRf` and `FLdI4`: it pushes the four
+/// bytes of a slot, so it is not a reference here.
+fn is_reference(names: &[String]) -> bool {
+    !names.is_empty()
+        && names
+            .iter()
+            .all(|name| name.ends_with("Rf") || name.ends_with("RfVar") || name.ends_with("RfDarg"))
+}
+
+/// Tells whether the load of the frame slot at `offset` by the handler
+/// names `names` pushes an address. The four bytes of an argument slot are
+/// the address of the variable of the caller when the argument is `ByRef`,
+/// and the lift does not know which arguments are, so an `ILdRf` of an
+/// argument stays an address.
+fn is_frame_reference(names: &[String], offset: i16) -> bool {
+    is_reference(names) || (offset > 8 && names.iter().any(|name| name == "ILdRf"))
+}
+
 /// Gives the family of one name.
 fn family_of(name: &str) -> Option<Family> {
     let typed = |prefix: &str| name.strip_prefix(prefix).is_some_and(is_type);
@@ -1809,6 +1835,9 @@ struct Value {
     /// The interface of the object, when the value is an object whose class
     /// the lift knows.
     class: Option<String>,
+    /// The value is the address of a variable, such as the push of
+    /// `FLdRfVar`. A `Declare` takes each other value `ByVal`.
+    address: bool,
 }
 
 impl Value {
@@ -1827,6 +1856,7 @@ impl Value {
             bytes,
             slot: None,
             class: None,
+            address: false,
         }
     }
 
@@ -1837,6 +1867,7 @@ impl Value {
             bytes: if word { 4 } else { 0 },
             slot: None,
             class: None,
+            address: false,
         }
     }
 }
@@ -1971,6 +2002,7 @@ impl State {
             bytes: if word { 4 } else { 0 },
             slot: Some(offset),
             class,
+            address: false,
         }
     }
 }
@@ -2147,6 +2179,7 @@ fn project_call(
             bytes: 4,
             slot: None,
             class: interface.map(str::to_owned),
+            address: false,
         });
         return Ok(None);
     }
@@ -2408,6 +2441,7 @@ fn run(
                 let value = state.load(offset16()?, is_word(names));
                 state.stack.push(Value {
                     bytes: load_bytes(names),
+                    address: is_frame_reference(names, offset16()?),
                     ..value
                 });
                 None
@@ -2514,6 +2548,7 @@ fn run(
                         bytes: 4,
                         slot: Some(slot),
                         class: None,
+                        address: false,
                     });
                     None
                 } else {
@@ -2643,6 +2678,14 @@ fn run(
                     },
                 };
                 let mut values = call_arguments(&mut state.stack, word16(2)?, at)?;
+                if matches!(callee, Callee::Declare(_)) {
+                    for value in &mut values {
+                        if !value.address {
+                            let expr = std::mem::replace(&mut value.expr, Expr::Implicit);
+                            value.expr = Expr::ByVal(Box::new(expr));
+                        }
+                    }
+                }
                 let result_slot = values
                     .first()
                     .and_then(|value| value.slot)
@@ -2755,10 +2798,10 @@ fn run(
                 object_call(&mut state, callees, types, word16(0)?, pushes, at, calls)?
             }
             Family::GlobalLoad => {
-                state.stack.push(Value::sized(
-                    global_at(callees, word16(0)?),
-                    load_bytes(names),
-                ));
+                state.stack.push(Value {
+                    address: is_reference(names),
+                    ..Value::sized(global_at(callees, word16(0)?), load_bytes(names))
+                });
                 None
             }
             Family::GlobalObjectRegister => {
@@ -2769,7 +2812,10 @@ fn run(
                 let (base, _) = state.object.clone().ok_or(LiftFault::NoObject(at))?;
                 let field = Expr::Field(Box::new(base), word16(0)?);
                 if family == Family::FieldLoad {
-                    state.stack.push(Value::sized(field, load_bytes(names)));
+                    state.stack.push(Value {
+                        address: is_reference(names),
+                        ..Value::sized(field, load_bytes(names))
+                    });
                 } else {
                     state.object = Some((field, None));
                 }
@@ -2779,7 +2825,10 @@ fn run(
                 let base = state.load(offset16()?, true).expr;
                 let field = Expr::Field(Box::new(base), word16(2)?);
                 if family == Family::FrameFieldLoad {
-                    state.stack.push(Value::sized(field, load_bytes(names)));
+                    state.stack.push(Value {
+                        address: is_reference(names),
+                        ..Value::sized(field, load_bytes(names))
+                    });
                 } else {
                     state.object = Some((field, None));
                 }
@@ -2825,6 +2874,7 @@ fn run(
                 state.stack.push(Value {
                     bytes: 4,
                     slot: Some(offset16()?),
+                    address: true,
                     ..value
                 });
                 None
@@ -2862,6 +2912,7 @@ fn run(
                     bytes: 4,
                     slot: Some(slot),
                     class: None,
+                    address: false,
                 });
                 None
             }
@@ -3006,9 +3057,10 @@ fn run(
                     indexes.push(pop(&mut state)?);
                 }
                 indexes.reverse();
-                state
-                    .stack
-                    .push(Value::plain(Expr::Index(Box::new(array), indexes), true));
+                state.stack.push(Value {
+                    address: true,
+                    ..Value::plain(Expr::Index(Box::new(array), indexes), true)
+                });
                 None
             }
             Family::LitSingle => {
@@ -3057,6 +3109,7 @@ fn run(
                     bytes: 4,
                     slot: None,
                     class,
+                    address: false,
                 });
                 None
             }
@@ -3078,6 +3131,7 @@ fn run(
                     bytes: 4,
                     slot: Some(slot),
                     class: None,
+                    address: false,
                 });
                 None
             }
@@ -3967,6 +4021,63 @@ dispid = 67
             [
                 "       Call Beep()",
                 "       local_88 = local_64",
+                "       Exit Sub"
+            ]
+        );
+    }
+
+    /// A `Declare` takes each argument `ByRef As Any`, so a value that is
+    /// not the address of a variable needs `ByVal` at the call. `FLdRfVar`
+    /// pushes an address. The handler of `FLdI4` and `ILdRf` pushes the four
+    /// bytes of a slot: a value for a local, and the address of the variable
+    /// of the caller for an argument that is `ByRef`.
+    #[test]
+    fn a_declare_takes_each_value_that_is_not_an_address_by_value() {
+        let table = PcodeTable::parse(TABLE.as_bytes()).unwrap();
+        let body = [
+            0x0F, 0x0C, 0x00, // the argument at 0x0C
+            0x0F, 0x9C, 0xFF, // local_64
+            0x15, 0x78, 0xFF, // the address of local_88
+            0x01, 0x05, 0x00, 0x00, 0x00, // 5
+            0x12, 0x01, 0x00, 0x10, 0x00, // the import 1, 16 bytes
+            0x0C,
+        ];
+        let listing = disassemble(&Region::new(&body, Off::new(0)), &table);
+        let declared = Callees::default().with_declare(1, "SetPixelV");
+        assert_eq!(
+            render(&lift(&listing, &table, &declared, None).unwrap()),
+            [
+                "       Call SetPixelV(ByVal 5, local_88, ByVal local_64, arg_C)",
+                "       Exit Sub"
+            ]
+        );
+        // The address of a temporary, of a global and of an element.
+        let with_element = format!("{TABLE}[primary.E0]\nwidth = 0\nnames = [\"Ary1LdRf\"]\n");
+        let element_table = PcodeTable::parse(with_element.as_bytes()).unwrap();
+        let addresses = [
+            0x01, 0x07, 0x00, 0x00, 0x00, // 7
+            0x26, 0x70, 0xFF, // into a temporary, and its address
+            0x1D, 0x03, 0x00, // the address of the global 3
+            0x01, 0x00, 0x00, 0x00, 0x00, // 0
+            0x0F, 0x90, 0xFF, // local_70
+            0xE0, // the address of local_70(0)
+            0x12, 0x01, 0x00, 0x0C, 0x00, // the import 1, 12 bytes
+            0x0C,
+        ];
+        let listing_addresses = disassemble(&Region::new(&addresses, Off::new(0)), &element_table);
+        assert_eq!(
+            render(&lift(&listing_addresses, &element_table, &declared, None).unwrap()),
+            [
+                "       Call SetPixelV(local_70(0), global_3, 7)",
+                "       Exit Sub"
+            ]
+        );
+        // A procedure of the runtime takes its arguments as they are.
+        let imported = Callees::default().with_import(1, "Mid", None);
+        assert_eq!(
+            render(&lift(&listing, &table, &imported, None).unwrap()),
+            [
+                "       Call VBA.Mid(5, local_88, local_64, arg_C)",
                 "       Exit Sub"
             ]
         );
