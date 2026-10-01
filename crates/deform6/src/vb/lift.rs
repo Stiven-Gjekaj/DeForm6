@@ -1464,6 +1464,22 @@ fn conversion(name: &str) -> Option<&'static str> {
     })
 }
 
+/// Gives the argument `expr` of a `Declare` that the call passes `ByVal`,
+/// with `bytes` bytes on the stack. The lift declares a variable that it
+/// cannot type as a `Variant`, and a `Variant` that a call passes `ByVal As
+/// Any` is not the value that the original pushed. So a value of four bytes
+/// gets `CLng`, and a string that `CStr2Ansi` copied (`string`) gets `CStr`.
+/// A string constant and a value that is already a `Long` stay as they are.
+fn by_value(expr: Expr, bytes: u8, string: bool) -> Expr {
+    let typed = match &expr {
+        Expr::Str(_) | Expr::Convert("CLng" | "CStr", _) => expr,
+        _ if string => Expr::Convert("CStr", Box::new(expr)),
+        _ if bytes == 4 => Expr::Convert("CLng", Box::new(expr)),
+        _ => expr,
+    };
+    Expr::ByVal(Box::new(typed))
+}
+
 /// Tells whether the opcode with the handler names `names` pushes the
 /// address of a variable: `FLdRfVar`, `MemLdRf`, `FMemLdRf` and
 /// `ImpAdLdRf`. One handler serves `ILdRf` and `FLdI4`: it pushes the four
@@ -1969,6 +1985,8 @@ struct State {
     /// The argument slots that hold a value, and not the address of a
     /// variable of the caller.
     values: BTreeSet<i16>,
+    /// The slots that a `CStr2Ansi` filled: each holds a string.
+    strings: BTreeSet<i16>,
 }
 
 /// Reads the frame slots that an `FFree` opcode frees: one slot, or a 16-bit
@@ -2723,8 +2741,13 @@ fn run(
                 if matches!(callee, Callee::Declare(_)) {
                     for value in &mut values {
                         if !value.address {
-                            let expr = std::mem::replace(&mut value.expr, Expr::Implicit);
-                            value.expr = Expr::ByVal(Box::new(expr));
+                            let string =
+                                value.slot.is_some_and(|slot| state.strings.contains(&slot));
+                            value.expr = by_value(
+                                std::mem::replace(&mut value.expr, Expr::Implicit),
+                                value.bytes,
+                                string,
+                            );
                         }
                     }
                 }
@@ -3243,6 +3266,7 @@ fn run(
                 let value = state.stack.pop().ok_or(LiftFault::StackShort(at))?;
                 let slot = target.slot.ok_or(LiftFault::NoResultSlot(at))?;
                 state.bindings.insert(slot, (value.expr, None));
+                state.strings.insert(slot);
                 None
             }
             Family::For { step } => {
@@ -4069,7 +4093,9 @@ dispid = 67
     }
 
     /// A `Declare` takes each argument `ByRef As Any`, so a value that is
-    /// not the address of a variable needs `ByVal` at the call. `FLdRfVar`
+    /// not the address of a variable needs `ByVal` at the call, with the
+    /// type that the original pushed: `CLng` for four bytes, and `CStr` for
+    /// a string that `CStr2Ansi` copied. `FLdRfVar`
     /// pushes an address. The handler of `FLdI4` and `ILdRf` pushes the four
     /// bytes of a slot: a value for a local, and the address of the variable
     /// of the caller for an argument that is `ByRef`.
@@ -4089,7 +4115,7 @@ dispid = 67
         assert_eq!(
             render(&lift(&listing, &table, &declared, None).unwrap()),
             [
-                "       Call SetPixelV(ByVal 5, local_88, ByVal local_64, arg_C)",
+                "       Call SetPixelV(ByVal CLng(5), local_88, ByVal CLng(local_64), arg_C)",
                 "       Exit Sub"
             ]
         );
@@ -4119,7 +4145,24 @@ dispid = 67
         assert_eq!(
             render(&lift_method(&listing, &table, &by_value, None, 3).unwrap()),
             [
-                "       Call SetPixelV(ByVal 5, local_88, ByVal local_64, ByVal arg_C)",
+                "       Call SetPixelV(ByVal CLng(5), local_88, ByVal CLng(local_64), ByVal CLng(arg_C))",
+                "       Exit Sub"
+            ]
+        );
+        // A string that `CStr2Ansi` copies into a temporary.
+        let string = [
+            0x0F, 0x9C, 0xFF, // local_64
+            0x15, 0x70, 0xFF, // the address of the temporary
+            0x2F, // the copy
+            0x0F, 0x70, 0xFF, // the temporary
+            0x12, 0x01, 0x00, 0x04, 0x00, // the import 1, 4 bytes
+            0x0C,
+        ];
+        let listing_string = disassemble(&Region::new(&string, Off::new(0)), &table);
+        assert_eq!(
+            render(&lift(&listing_string, &table, &declared, None).unwrap()),
+            [
+                "       Call SetPixelV(ByVal CStr(local_64))",
                 "       Exit Sub"
             ]
         );
