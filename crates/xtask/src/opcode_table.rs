@@ -200,7 +200,9 @@ const POSITION_REST: &[&str] = &["Top", "Width", "Height"];
 /// an `MDIForm` hold `LockControls` and `NegotiateMenus` as opcodes 61 and
 /// 62, one byte each with `0xFF` for `True`: `STRUCTURES.md` section 8.5.1
 /// gives both from Semi VB Decompiler, and the corpus measured
-/// `LockControls` on each of its forms that set it.
+/// `LockControls` on each of its forms that set it. A `Menu` holds its
+/// `Shortcut` as opcode 8, a `u16` key code such as 5 for `^E`: the corpus
+/// measured it on each of its 19 menus with a shortcut.
 const EXTRA_ROWS: &[(u8, u8, PayloadType, &str)] = &[
     (11, 7, PayloadType::Long, "Left"),
     (11, 8, PayloadType::Long, "Top"),
@@ -208,6 +210,7 @@ const EXTRA_ROWS: &[(u8, u8, PayloadType, &str)] = &[
     (13, 62, PayloadType::Boolean, "NegotiateMenus"),
     (20, 61, PayloadType::Boolean, "LockControls"),
     (20, 62, PayloadType::Boolean, "NegotiateMenus"),
+    (19, 8, PayloadType::Integer, "Shortcut"),
 ];
 
 /// Gives the payload of the property `name` of the type `vt` of the control
@@ -516,6 +519,13 @@ mod tests {
             assert_eq!(row(&rows, control_type, 62), Some(PayloadType::Boolean));
         }
         assert_eq!(rows.len(), 4);
+    }
+
+    #[test]
+    fn a_menu_gives_its_shortcut_as_an_integer_row() {
+        let rows = table_rows(&[interface("_Menu", Vec::new())]);
+        assert_eq!(row(&rows, 19, 8), Some(PayloadType::Integer));
+        assert_eq!(rows.len(), 1);
     }
 
     #[test]

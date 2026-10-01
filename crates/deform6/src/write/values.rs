@@ -296,6 +296,21 @@ fn font_lines(value: &FontBlock) -> [(&'static str, String); 7] {
     ]
 }
 
+/// Gives the text that a `.frm` file writes for the `Shortcut` key code
+/// `code` of a menu: `^A` for 1 up to `^Z` for 26. The corpus measured 19
+/// such shortcuts, from `^E` for 5 to `^Z` for 26. Another code gives
+/// `None`: its text is not known.
+#[must_use]
+pub fn shortcut_text(code: i16) -> Option<String> {
+    let letter = u8::try_from(code)
+        .ok()
+        .filter(|code| (1..=26).contains(code))?;
+    Some(format!(
+        "^{}",
+        char::from(b'A'.checked_add(letter)?.checked_sub(1)?)
+    ))
+}
+
 /// What one call to [`format_value`] decided for a single property.
 ///
 /// Never a placeholder: a property either becomes a real value
@@ -347,6 +362,22 @@ pub fn format_value(
         PropertyValue::Boolean { value, .. } => {
             (FormattedValue::Line(format_boolean(*value != 0)), None)
         }
+        PropertyValue::Integer { name, value } if name == "Shortcut" => shortcut_text(*value)
+            .map_or_else(
+                || {
+                    let item = ReportItem {
+                        path: String::new(),
+                        confidence: Confidence::Unrecoverable,
+                        basis: format!(
+                            "the Shortcut key code {value} is not one that the corpus \
+                             measured; the property is omitted"
+                        ),
+                        evidence: Vec::new(),
+                    };
+                    (FormattedValue::Omit, Some(item))
+                },
+                |text| (FormattedValue::Line(text), None),
+            ),
         PropertyValue::Integer { name, value } => (
             FormattedValue::Line(format_number_with_enum_comment(name, i64::from(*value))),
             None,
@@ -592,6 +623,31 @@ mod tests {
             FormattedValue::Multi(lines) => assert_eq!(lines.len(), 7),
             other => panic!("expected a Multi, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_shortcut_code_from_1_to_26_is_a_control_key_and_another_is_omitted() {
+        assert_eq!(super::shortcut_text(5).as_deref(), Some("^E"));
+        assert_eq!(super::shortcut_text(1).as_deref(), Some("^A"));
+        assert_eq!(super::shortcut_text(26).as_deref(), Some("^Z"));
+        assert_eq!(super::shortcut_text(0), None);
+        assert_eq!(super::shortcut_text(27), None);
+        assert_eq!(super::shortcut_text(-1), None);
+        let value = PropertyValue::Integer {
+            name: "Shortcut".to_owned(),
+            value: 12,
+        };
+        assert_eq!(
+            format_value(&value, false).0,
+            FormattedValue::Line("^L".to_owned())
+        );
+        let other = PropertyValue::Integer {
+            name: "Shortcut".to_owned(),
+            value: 112,
+        };
+        let (formatted, item) = format_value(&other, false);
+        assert_eq!(formatted, FormattedValue::Omit);
+        assert!(item.is_some());
     }
 
     #[test]
