@@ -172,6 +172,126 @@ fn name_module_fields(lines: &mut [String], base: u32) {
     }
 }
 
+/// How one opcode reads or writes a variable, by the names of its handler.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Access {
+    /// `I2`: two bytes of an `Integer` or a `Boolean`.
+    Integer,
+    /// `UI1`: one byte.
+    Byte,
+    /// `FPR4`: a `Single` on the floating point unit.
+    Single,
+    /// `FPR8`: a `Double` on the floating point unit.
+    Double,
+    /// The four bytes that one handler copies for `I4` and `R4`.
+    Four,
+    /// The eight bytes that one handler copies for `Cy` and `R8`.
+    Eight,
+    /// The address of the variable, which any type gives.
+    Reference,
+    /// Each other access, such as a `String`, an object or a `Variant`.
+    Other,
+}
+
+/// Gives the access of an opcode with the handler names `names`.
+fn access_of(names: &[String]) -> Access {
+    let all = |suffixes: &[&str]| {
+        names
+            .iter()
+            .all(|name| suffixes.iter().any(|suffix| name.ends_with(suffix)))
+    };
+    if all(&["Rf", "RfVar"]) {
+        Access::Reference
+    } else if all(&["FPR4"]) {
+        Access::Single
+    } else if all(&["FPR8"]) {
+        Access::Double
+    } else if all(&["UI1"]) {
+        Access::Byte
+    } else if all(&["I2"]) {
+        Access::Integer
+    } else if all(&["Ad", "I4", "R4", "Str"]) && names.iter().any(|name| name.ends_with("I4")) {
+        Access::Four
+    } else if all(&["Cy", "R8"]) {
+        Access::Eight
+    } else {
+        Access::Other
+    }
+}
+
+/// The accesses of each variable, by its name in the lift.
+type Accesses = BTreeMap<String, BTreeSet<Access>>;
+
+/// Adds the accesses of the variables of a module and of the fields of
+/// `Me` that `ops` read and write: `ImpAdLd` and `ImpAdSt` name a variable
+/// of a module at an index of the constant table, whose address `global`
+/// gives, and `FMemLd` and `FMemSt` with `Me` at 8 name a field. A field
+/// of a module, whose variables start at `module_base`, takes the name of
+/// its address, as [`name_module_fields`] gives it.
+fn add_accesses(
+    ops: &[Op<'_>],
+    global: &dyn Fn(u16) -> Option<u32>,
+    module_base: u32,
+    globals: &mut Accesses,
+    fields: &mut Accesses,
+) {
+    let word = |bytes: &[u8], at: usize| {
+        bytes
+            .get(at..at.checked_add(2)?)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+    };
+    for (names, arguments) in ops {
+        let starts = |prefixes: &[&str]| {
+            names
+                .iter()
+                .any(|name| prefixes.iter().any(|prefix| name.starts_with(prefix)))
+        };
+        let (map, name) = if starts(&["ImpAdLd", "ImpAdSt"]) {
+            let Some(address) = word(arguments, 0).and_then(global) else {
+                continue;
+            };
+            (&mut *globals, format!("g_{address:X}"))
+        } else if starts(&["FMemLd", "FMemSt"]) && word(arguments, 0) == Some(8) {
+            let Some(offset) = word(arguments, 2) else {
+                continue;
+            };
+            match module_base.checked_add(u32::from(offset)) {
+                Some(address) if module_base != 0 => (&mut *globals, format!("g_{address:X}")),
+                _ => (&mut *fields, format!("field_{offset:X}")),
+            }
+        } else {
+            continue;
+        };
+        map.entry(name).or_default().insert(access_of(names));
+    }
+}
+
+/// Gives the Basic type of a variable whose opcodes give `accesses`, when
+/// they agree: each access of an `Integer` is `I2`, and a `Single` is `FPR4`
+/// or the four bytes of its copy. Gives nothing for each other variable,
+/// which stays a `Variant`. The four bytes alone can be a `Long`, a
+/// `Single`, a `String` or an object, so they give no type.
+fn scalar_type(accesses: &BTreeSet<Access>) -> Option<&'static str> {
+    let core: BTreeSet<Access> = accesses
+        .iter()
+        .copied()
+        .filter(|access| *access != Access::Reference)
+        .collect();
+    let only = |kinds: &[Access]| core.iter().all(|access| kinds.contains(access));
+    if core.contains(&Access::Integer) && only(&[Access::Integer]) {
+        Some("Integer")
+    } else if core.contains(&Access::Byte) && only(&[Access::Byte]) {
+        Some("Byte")
+    } else if core.contains(&Access::Single) && only(&[Access::Single, Access::Four]) {
+        Some("Single")
+    } else if core.contains(&Access::Double) && only(&[Access::Double, Access::Eight]) {
+        Some("Double")
+    } else {
+        None
+    }
+}
+
 /// Gives each word of [`words_with`] that an index follows: the arrays of
 /// `lines`.
 fn indexed_words(lines: &[String], prefix: &str) -> BTreeSet<String> {
@@ -181,16 +301,21 @@ fn indexed_words(lines: &[String], prefix: &str) -> BTreeSet<String> {
 /// Gives the declaration of each field: `Public` for a field that has an
 /// accessor of a public variable in `public`, which another object can
 /// use, and `Private` for each other field in `used`. A field in `fixed` is
-/// a fixed-size array with that shape after its name.
+/// a fixed-size array with that shape after its name, and a field in
+/// `scalars` that is not an array has that type.
 fn field_declarations(
     used: &BTreeSet<String>,
     public: &BTreeSet<u32>,
     arrays: &BTreeMap<String, &'static str>,
     fixed: &BTreeMap<String, String>,
+    scalars: &BTreeMap<String, &'static str>,
 ) -> Vec<String> {
-    let declaration = |scope: &str, field: &str| match fixed.get(field) {
-        Some(shape) => format!("{scope} {field}{shape}"),
-        None => variable_declaration(scope, field, arrays),
+    let declaration = |scope: &str, field: &str| match (fixed.get(field), scalars.get(field)) {
+        (Some(shape), _) => format!("{scope} {field}{shape}"),
+        (None, Some(basic)) if !arrays.contains_key(field) => {
+            format!("{scope} {field} As {basic}")
+        }
+        _ => variable_declaration(scope, field, arrays),
     };
     let public: BTreeSet<String> = public
         .iter()
@@ -1551,20 +1676,48 @@ pub fn lift_objects(
         })
         .collect();
     let mut raw: Vec<String> = Vec::new();
+    let mut global_accesses = Accesses::new();
+    let mut field_accesses: Vec<Accesses> = Vec::new();
     for (object, callees) in objects.iter().zip(&callees) {
-        let Ok(methods) = read_method_table(&pe, object.lp_object_info) else {
-            continue;
-        };
-        for entry in &methods.entries {
-            if let MethodEntry::Descriptor { index, descriptor } = entry
-                && let Some(body) = descriptor.body(&pe)
-                && let Ok(stmts) =
-                    lift_method(&disassemble(&body, table), table, callees, types, *index)
-            {
-                raw.extend(render(&stmts));
+        let mut fields = Accesses::new();
+        if let Ok(methods) = read_method_table(&pe, object.lp_object_info) {
+            for entry in &methods.entries {
+                let MethodEntry::Descriptor { index, descriptor } = entry else {
+                    continue;
+                };
+                let Some(body) = descriptor.body(&pe) else {
+                    continue;
+                };
+                let listing = disassemble(&body, table);
+                let ops: Vec<Op<'_>> = listing
+                    .instructions
+                    .iter()
+                    .map(|instruction| {
+                        let names = table
+                            .slot(instruction.lead, instruction.opcode)
+                            .map(|slot| slot.names.as_slice())
+                            .unwrap_or_default();
+                        (names, instruction.arguments.as_slice())
+                    })
+                    .collect();
+                add_accesses(
+                    &ops,
+                    &|index| callees.global(index),
+                    object.lp_module_public.get(),
+                    &mut global_accesses,
+                    &mut fields,
+                );
+                if let Ok(stmts) = lift_method(&listing, table, callees, types, *index) {
+                    raw.extend(render(&stmts));
+                }
             }
         }
+        field_accesses.push(fields);
     }
+    let global_types: BTreeMap<String, &'static str> = global_accesses
+        .iter()
+        .filter_map(|(name, accesses)| scalar_type(accesses).map(|basic| (name.clone(), basic)))
+        .collect();
     let typed = typed_arrays(report.objects.iter().map(|own| &own.procedures), &raw);
     let mut arrays: BTreeMap<String, &'static str> = BTreeMap::new();
     let mut global_shapes: BTreeMap<String, String> = BTreeMap::new();
@@ -1720,9 +1873,19 @@ pub fn lift_objects(
         lifted
             .declarations
             .extend(declare_statements(&declarations, &all_lines));
-        lifted
-            .declarations
-            .extend(field_declarations(&fields, &public, &object_arrays, &fixed));
+        let scalars: BTreeMap<String, &'static str> = field_accesses
+            .get(at)
+            .into_iter()
+            .flatten()
+            .filter_map(|(name, accesses)| scalar_type(accesses).map(|basic| (name.clone(), basic)))
+            .collect();
+        lifted.declarations.extend(field_declarations(
+            &fields,
+            &public,
+            &object_arrays,
+            &fixed,
+            &scalars,
+        ));
         out.push(Some(lifted));
         variables.push(globals);
     }
@@ -1735,10 +1898,14 @@ pub fn lift_objects(
         let Some(lifted) = lifted else {
             continue;
         };
-        let declaration = |scope: &str, name: &String| match global_shapes.get(name) {
-            Some(shape) => format!("{scope} {name}{shape}"),
-            None => variable_declaration(scope, name, &arrays),
-        };
+        let declaration =
+            |scope: &str, name: &String| match (global_shapes.get(name), global_types.get(name)) {
+                (Some(shape), _) => format!("{scope} {name}{shape}"),
+                (None, Some(basic)) if !arrays.contains_key(name) => {
+                    format!("{scope} {name} As {basic}")
+                }
+                _ => variable_declaration(scope, name, &arrays),
+            };
         match home {
             Some(home) if home == at => lifted
                 .declarations
@@ -1761,12 +1928,12 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
     use super::{
-        FixedArray, Op, TypedArrays, apply_frame_structs, built_parameters, call_arguments,
-        call_arity, declare, declare_arrays, declare_new_locals, declare_statements,
-        declared_bytes, field_declarations, fixed_shapes, frame_structs, indexed_words,
-        member_zero, name_module_fields, new_locals, pointer_fields, procedure_name, record_array,
-        record_fields, redim_arrays, replace_word, slot_uses, struct_pointers, typed_arrays,
-        typed_locals, variable_declaration, words_with,
+        Accesses, FixedArray, Op, TypedArrays, add_accesses, apply_frame_structs, built_parameters,
+        call_arguments, call_arity, declare, declare_arrays, declare_new_locals,
+        declare_statements, declared_bytes, field_declarations, fixed_shapes, frame_structs,
+        indexed_words, member_zero, name_module_fields, new_locals, pointer_fields, procedure_name,
+        record_array, record_fields, redim_arrays, replace_word, scalar_type, slot_uses,
+        struct_pointers, typed_arrays, typed_locals, variable_declaration, words_with,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::lift::result_bytes;
@@ -1856,7 +2023,13 @@ mod tests {
         let used: BTreeSet<String> = ["field_34".to_owned(), "field_42".to_owned()].into();
         let public: BTreeSet<u32> = [0x42, 0x80].into();
         assert_eq!(
-            field_declarations(&used, &public, &BTreeMap::new(), &BTreeMap::new()),
+            field_declarations(
+                &used,
+                &public,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new()
+            ),
             [
                 "Public field_42 As Variant",
                 "Public field_80 As Variant",
@@ -2215,6 +2388,76 @@ names = ["ExitProcCb"]
         assert!(record_array(&array, &[(0, 4, "Long"), (2, 2, "Integer")], false).is_none());
         assert!(record_array(&array, &[(0x0E, 4, "Long")], false).is_none());
         assert!(record_array(&array, &[], false).is_none());
+    }
+
+    /// `SizeX As Integer` of the map editor is `ImpAdLdI2` and `ImpAdStI2`
+    /// in its forms, `sVelVert As Single` of `Physics_Demo.exe` is `FPR4`
+    /// and the copy of four bytes in its module, and a `Long` is the copy of
+    /// four bytes alone, which a `String` and an object share.
+    #[test]
+    fn a_variable_takes_the_type_that_each_access_agrees_on() {
+        let names =
+            |list: &[&str]| -> Vec<String> { list.iter().map(|n| (*n).to_owned()).collect() };
+        let load_i2 = names(&["ImpAdLdI2"]);
+        let store_i2 = names(&["ImpAdStI2"]);
+        let reference = names(&["ImpAdLdRf", "ImpAdLdRfVar"]);
+        let load_fpr4 = names(&["FMemLdFPR4"]);
+        let load_four = names(&["FMemLdAd", "FMemLdI4", "FMemLdR4", "FMemLdStr"]);
+        let store_four = names(&["FMemStI4", "FMemStR4"]);
+        let store_string = names(&["FMemStStr"]);
+        let store_global_four = names(&["ImpAdStI4", "ImpAdStR4"]);
+        let ops: Vec<Op<'_>> = vec![
+            (&load_i2, &[1, 0]),
+            (&store_i2, &[1, 0]),
+            (&reference, &[1, 0]),
+            (&load_i2, &[2, 0]),
+            (&store_global_four, &[2, 0]),
+            (&load_fpr4, &[8, 0, 0x18, 0]),
+            (&load_four, &[8, 0, 0x18, 0]),
+            (&store_four, &[8, 0, 0x24, 0]),
+            (&store_string, &[8, 0, 0x28, 0]),
+            (&load_four, &[8, 0, 0x28, 0]),
+            // A field of another object.
+            (&load_fpr4, &[0x70, 0xFF, 0x30, 0]),
+        ];
+        let global = |index: u16| match index {
+            1 => Some(0x0043_6038),
+            2 => Some(0x0043_6040),
+            _ => None,
+        };
+        let mut globals = Accesses::new();
+        let mut fields = Accesses::new();
+        add_accesses(&ops, &global, 0, &mut globals, &mut fields);
+        let types = |accesses: &Accesses| -> Vec<(String, Option<&'static str>)> {
+            accesses
+                .iter()
+                .map(|(name, kinds)| (name.clone(), scalar_type(kinds)))
+                .collect()
+        };
+        assert_eq!(
+            types(&globals),
+            [
+                ("g_436038".to_owned(), Some("Integer")),
+                ("g_436040".to_owned(), None)
+            ]
+        );
+        assert_eq!(
+            types(&fields),
+            [
+                ("field_18".to_owned(), Some("Single")),
+                ("field_24".to_owned(), None),
+                ("field_28".to_owned(), None)
+            ]
+        );
+        // In a module, a field is a variable at its address.
+        let mut globals = Accesses::new();
+        let mut fields = Accesses::new();
+        add_accesses(&ops, &global, 0x0041_301C, &mut globals, &mut fields);
+        assert!(fields.is_empty());
+        assert_eq!(
+            globals.get("g_413034").and_then(scalar_type),
+            Some("Single")
+        );
     }
 
     /// `GameActive` of `Physics_Demo.exe` is `field_60` in its module, whose

@@ -504,6 +504,16 @@ impl Callees {
         self
     }
 
+    /// Gives the address of the variable of a module at `index` of the
+    /// constant table, when [`Callees::with_global`] added it.
+    #[must_use]
+    pub fn global(&self, index: u16) -> Option<u32> {
+        self.globals
+            .iter()
+            .find(|(at, _)| *at == index)
+            .map(|(_, address)| *address)
+    }
+
     /// Sets the name of the form whose vtable the profile gives. A global of
     /// the class of a form holds the instance of the form, which Basic
     /// names by the name of the form.
