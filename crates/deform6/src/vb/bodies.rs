@@ -59,7 +59,7 @@ use crate::vb::header::{VbHeader, header_region};
 use crate::vb::lift::{Callees, lift_method, render, result_bytes};
 use crate::vb::object::ObjectTable;
 use crate::vb::pcode::{PcodeListing, PcodeTable, disassemble};
-use crate::vb::procdesc::{FixedArray, MethodEntry, read_method_table};
+use crate::vb::procdesc::{FixedArray, MethodEntry, module_fixed_arrays, read_method_table};
 use crate::vb::project::{Declaration, DeclareTable, ExportName, ObjectTableHead, ProjectInfo};
 use crate::vb::types::VbTypes;
 use crate::vb::{ObjectProcedures, ProcedureEntry, Report};
@@ -160,24 +160,30 @@ fn indexed_words(lines: &[String], prefix: &str) -> BTreeSet<String> {
 
 /// Gives the declaration of each field: `Public` for a field that has an
 /// accessor of a public variable in `public`, which another object can
-/// use, and `Private` for each other field in `used`.
+/// use, and `Private` for each other field in `used`. A field in `fixed` is
+/// a fixed-size array with that shape after its name.
 fn field_declarations(
     used: &BTreeSet<String>,
     public: &BTreeSet<u32>,
     arrays: &BTreeMap<String, &'static str>,
+    fixed: &BTreeMap<String, String>,
 ) -> Vec<String> {
+    let declaration = |scope: &str, field: &str| match fixed.get(field) {
+        Some(shape) => format!("{scope} {field}{shape}"),
+        None => variable_declaration(scope, field, arrays),
+    };
     let public: BTreeSet<String> = public
         .iter()
         .map(|field| format!("field_{field:X}"))
         .collect();
     let mut out: Vec<String> = public
         .iter()
-        .map(|field| variable_declaration("Public", field, arrays))
+        .map(|field| declaration("Public", field))
         .collect();
     out.extend(
         used.iter()
             .filter(|field| !public.contains(*field))
-            .map(|field| variable_declaration("Private", field, arrays)),
+            .map(|field| declaration("Private", field)),
     );
     out
 }
@@ -333,6 +339,24 @@ const NUMBER_ACCESS: &[(&str, u8, &str)] = &[
     ("FMemStFPR4", 4, "Single"),
     ("FMemLdFPR8", 8, "Double"),
     ("FMemStFPR8", 8, "Double"),
+    ("MemLdAd", 4, "Long"),
+    ("MemLdI4", 4, "Long"),
+    ("MemLdR4", 4, "Long"),
+    ("MemLdStr", 4, "Long"),
+    ("MemStI4", 4, "Long"),
+    ("MemStR4", 4, "Long"),
+    ("MemLdI2", 2, "Integer"),
+    ("MemStI2", 2, "Integer"),
+    ("MemLdUI1", 1, "Byte"),
+    ("MemStUI1", 1, "Byte"),
+    ("MemLdCy", 8, "Double"),
+    ("MemLdR8", 8, "Double"),
+    ("MemStCy", 8, "Double"),
+    ("MemStR8", 8, "Double"),
+    ("MemLdFPR4", 4, "Single"),
+    ("MemStFPR4", 4, "Single"),
+    ("MemLdFPR8", 8, "Double"),
+    ("MemStFPR8", 8, "Double"),
 ];
 
 /// The prefixes of the names of the opcodes whose first argument is a frame
@@ -929,29 +953,200 @@ fn declare_new_locals(lines: &mut Vec<String>, locals: &BTreeMap<String, String>
     );
 }
 
+/// Gives the bounds of `array` as Basic writes them, such as
+/// `0 To 255, -8 To 7`.
+fn array_ranges(array: &FixedArray) -> String {
+    let ranges: Vec<String> = array
+        .bounds
+        .iter()
+        .map(|(count, lower)| {
+            let upper = i64::from(*lower)
+                .saturating_add(i64::from(*count))
+                .saturating_sub(1);
+            format!("{lower} To {upper}")
+        })
+        .collect();
+    ranges.join(", ")
+}
+
 /// Gives the declaration of each fixed-size local array of `arrays` after
 /// its name, such as `(0 To 255) As Long` for `local_B0`.
 fn fixed_shapes(arrays: &[FixedArray]) -> BTreeMap<String, String> {
     arrays
         .iter()
         .map(|array| {
-            let ranges: Vec<String> = array
-                .bounds
-                .iter()
-                .map(|(count, lower)| {
-                    let upper = i64::from(*lower)
-                        .saturating_add(i64::from(*count))
-                        .saturating_sub(1);
-                    format!("{lower} To {upper}")
-                })
-                .collect();
             let element = redim_element(array.vartype).unwrap_or("Variant");
             (
                 format!("local_{:X}", array.slot),
-                format!("({}) As {element}", ranges.join(", ")),
+                format!("({}) As {element}", array_ranges(array)),
             )
         })
         .collect()
+}
+
+/// The fields of the records of each fixed-size array of an object, by the
+/// offset of the array in the data of the object: the offset of each field
+/// in the record, its bytes and its Basic type.
+type RecordFields = BTreeMap<u16, Vec<(u16, u8, &'static str)>>;
+
+/// Gives the fields that `ops` read and write in an element of an array of
+/// the object whose offset is in `records`. Basic reads a field of
+/// `StarArray(X).Y` as the address of the array in `Me` (`FMemLdRf` with
+/// `Me` at 8), the address of the element (`Ary1LdPr` or `AryLdPr`), and a
+/// load or a store at the offset of the field (`MemLdFPR4 4`). A record with
+/// a field access that is not a number is in the second set.
+fn record_fields(ops: &[Op<'_>], records: &BTreeSet<u16>) -> (RecordFields, BTreeSet<u16>) {
+    let mut fields: RecordFields = BTreeMap::new();
+    let mut bad = BTreeSet::new();
+    for window in ops.windows(3) {
+        let [(array, at), (element, _), (access, offset)] = window else {
+            continue;
+        };
+        let word = |bytes: &[u8], at: usize| {
+            bytes
+                .get(at..at.checked_add(2)?)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u16::from_le_bytes)
+        };
+        if !array.iter().any(|name| name == "FMemLdRf") || word(at, 0) != Some(8) {
+            continue;
+        }
+        let Some(slot) = word(at, 2).filter(|slot| records.contains(slot)) else {
+            continue;
+        };
+        if !element
+            .iter()
+            .any(|name| name == "Ary1LdPr" || name == "AryLdPr")
+        {
+            continue;
+        }
+        if !access
+            .iter()
+            .any(|name| name.starts_with("MemLd") || name.starts_with("MemSt"))
+        {
+            continue;
+        }
+        match (number_access(access), word(offset, 0)) {
+            (Some((width, basic)), Some(offset)) => {
+                fields.entry(slot).or_default().push((offset, width, basic));
+            }
+            _ => {
+                bad.insert(slot);
+            }
+        }
+    }
+    (fields, bad)
+}
+
+/// A fixed-size array of records of an object, as its declarations give it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RecordArray {
+    /// The `Type` statement of its record, line by line.
+    record: Vec<String>,
+    /// Its shape after its name, such as `(0 To 500) As TField48`.
+    shape: String,
+}
+
+/// Gives the type of the records of `array`, whose elements are
+/// `array.element_bytes` long, from the fields `fields` that the bodies use.
+/// Each field is the member `field_<offset>`, which is the text that the
+/// lift writes, and a `Byte` array fills each gap. `public` gives a
+/// `Public Type`, which a `Public` variable of a standard module needs.
+/// Gives nothing when two fields overlap or a field passes the end.
+fn record_array(
+    array: &FixedArray,
+    fields: &[(u16, u8, &'static str)],
+    public: bool,
+) -> Option<RecordArray> {
+    let mut fields = fields.to_vec();
+    fields.sort_unstable_by_key(|(offset, width, _)| (*offset, *width));
+    fields.dedup();
+    let size = array.element_bytes;
+    let name = format!("TField{:X}", array.slot);
+    let scope = if public { "Public" } else { "Private" };
+    let mut record = vec![format!("{scope} Type {name}")];
+    let mut at = 0_u32;
+    let mut pad = 0_u32;
+    for (offset, width, basic) in &fields {
+        let offset = u32::from(*offset);
+        if offset < at {
+            return None;
+        }
+        if offset > at {
+            record.push(format!(
+                "    pad{pad}(0 To {}) As Byte",
+                offset.saturating_sub(at).saturating_sub(1)
+            ));
+            pad = pad.saturating_add(1);
+        }
+        record.push(format!("    field_{offset:X} As {basic}"));
+        at = offset.checked_add(u32::from(*width))?;
+    }
+    if fields.is_empty() || at > size {
+        return None;
+    }
+    if size > at {
+        record.push(format!(
+            "    pad{pad}(0 To {}) As Byte",
+            size.saturating_sub(at).saturating_sub(1)
+        ));
+    }
+    record.push("End Type".to_owned());
+    Some(RecordArray {
+        record,
+        shape: format!("({}) As {name}", array_ranges(array)),
+    })
+}
+
+/// Gives `line` with `.field_0` after each element of the array `name`
+/// that no member follows. The lift writes the field at 0 of an element as
+/// the element, which is correct for an array of numbers and not for an
+/// array of records.
+fn member_zero(line: &str, name: &str) -> String {
+    let open = format!("{name}(");
+    let characters: Vec<char> = line.chars().collect();
+    let mut out = String::new();
+    let mut at = 0_usize;
+    while let Some(&character) = characters.get(at) {
+        let tail: String = characters.get(at..).unwrap_or_default().iter().collect();
+        let before = at
+            .checked_sub(1)
+            .and_then(|before| characters.get(before))
+            .copied();
+        if !tail.starts_with(&open) || before.is_some_and(|c| is_name(c) || c == '.') {
+            out.push(character);
+            at = at.saturating_add(1);
+            continue;
+        }
+        let mut depth = 0_usize;
+        let mut quoted = false;
+        let mut end = None;
+        for (step, inner) in tail.chars().enumerate().skip(open.len()) {
+            match inner {
+                '"' => quoted = !quoted,
+                _ if quoted => {}
+                '(' => depth = depth.saturating_add(1),
+                ')' if depth == 0 => {
+                    end = Some(step);
+                    break;
+                }
+                ')' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+        let Some(end) = end else {
+            out.push(character);
+            at = at.saturating_add(1);
+            continue;
+        };
+        let element: String = tail.chars().take(end.saturating_add(1)).collect();
+        out.push_str(&element);
+        at = at.saturating_add(end).saturating_add(1);
+        if characters.get(at) != Some(&'.') {
+            out.push_str(".field_0");
+        }
+    }
+    out
 }
 
 /// Gives each word of `lines` that starts with `prefix` and goes on with
@@ -1374,6 +1569,14 @@ pub fn lift_objects(
         let mut fields = BTreeSet::new();
         let mut frame_types = Vec::new();
         let mut object_arrays: BTreeMap<String, &'static str> = BTreeMap::new();
+        let module_arrays = module_fixed_arrays(&pe, object.lp_public_bytes);
+        let records: BTreeSet<u16> = module_arrays
+            .iter()
+            .filter(|array| array.vartype == 0)
+            .map(|array| array.slot)
+            .collect();
+        let mut members: RecordFields = BTreeMap::new();
+        let mut bad_records = BTreeSet::new();
         for entry in &methods.entries {
             let MethodEntry::Descriptor { index, descriptor } = entry else {
                 continue;
@@ -1382,6 +1585,22 @@ pub fn lift_objects(
                 continue;
             };
             let listing = disassemble(&body, table);
+            let ops: Vec<Op<'_>> = listing
+                .instructions
+                .iter()
+                .map(|instruction| {
+                    let names = table
+                        .slot(instruction.lead, instruction.opcode)
+                        .map(|slot| slot.names.as_slice())
+                        .unwrap_or_default();
+                    (names, instruction.arguments.as_slice())
+                })
+                .collect();
+            let (found, bad) = record_fields(&ops, &records);
+            for (slot, fields) in found {
+                members.entry(slot).or_default().extend(fields);
+            }
+            bad_records.extend(bad);
             let mut lines = match lift_method(&listing, table, callees, types, *index) {
                 Ok(stmts) => render(&stmts),
                 Err(fault) => vec![format!("    ' The lift stopped: {fault:?}")],
@@ -1425,15 +1644,44 @@ pub fn lift_objects(
                 closing,
             });
         }
+        let public = callees.variable_fields();
+        let mut fixed: BTreeMap<String, String> = BTreeMap::new();
+        for array in &module_arrays {
+            let name = format!("field_{:X}", array.slot);
+            if array.vartype != 0 {
+                if let Some(element) = redim_element(array.vartype) {
+                    fixed.insert(name, format!("({}) As {element}", array_ranges(array)));
+                }
+                continue;
+            }
+            if bad_records.contains(&array.slot) {
+                continue;
+            }
+            let found = members
+                .get(&array.slot)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            let Some(record) = record_array(array, found, public.contains(&u32::from(array.slot)))
+            else {
+                continue;
+            };
+            if found.iter().any(|(offset, _, _)| *offset == 0) {
+                for procedure in &mut lifted.procedures {
+                    for line in &mut procedure.lines {
+                        *line = member_zero(line, &name);
+                    }
+                }
+            }
+            frame_types.extend(record.record);
+            fixed.insert(name, record.shape);
+        }
         lifted.declarations = frame_types;
         lifted
             .declarations
             .extend(declare_statements(&declarations, &all_lines));
-        lifted.declarations.extend(field_declarations(
-            &fields,
-            &callees.variable_fields(),
-            &object_arrays,
-        ));
+        lifted
+            .declarations
+            .extend(field_declarations(&fields, &public, &object_arrays, &fixed));
         out.push(Some(lifted));
         variables.push(globals);
     }
@@ -1470,11 +1718,12 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
     use super::{
-        FixedArray, TypedArrays, apply_frame_structs, built_parameters, call_arguments, call_arity,
-        declare, declare_arrays, declare_new_locals, declare_statements, declared_bytes,
-        field_declarations, fixed_shapes, frame_structs, indexed_words, new_locals, pointer_fields,
-        procedure_name, redim_arrays, replace_word, slot_uses, struct_pointers, typed_arrays,
-        typed_locals, variable_declaration, words_with,
+        FixedArray, Op, TypedArrays, apply_frame_structs, built_parameters, call_arguments,
+        call_arity, declare, declare_arrays, declare_new_locals, declare_statements,
+        declared_bytes, field_declarations, fixed_shapes, frame_structs, indexed_words,
+        member_zero, new_locals, pointer_fields, procedure_name, record_array, record_fields,
+        redim_arrays, replace_word, slot_uses, struct_pointers, typed_arrays, typed_locals,
+        variable_declaration, words_with,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::lift::result_bytes;
@@ -1564,7 +1813,7 @@ mod tests {
         let used: BTreeSet<String> = ["field_34".to_owned(), "field_42".to_owned()].into();
         let public: BTreeSet<u32> = [0x42, 0x80].into();
         assert_eq!(
-            field_declarations(&used, &public, &BTreeMap::new()),
+            field_declarations(&used, &public, &BTreeMap::new(), &BTreeMap::new()),
             [
                 "Public field_42 As Variant",
                 "Public field_80 As Variant",
@@ -1835,6 +2084,110 @@ names = ["ExitProcCb"]
         );
         assert_eq!(closing, "End Function");
         assert_eq!(lines, ["Draw = Box + Pixels + Size"]);
+    }
+
+    /// The opcodes of `StarArray(X).Y = StarArray(X).Y + StarArray(X).Speed`
+    /// of `Physics_Demo.exe`, with the array at 0x48 of `Me`.
+    #[test]
+    fn a_record_field_is_the_access_after_the_element_of_an_array_of_me() {
+        let names =
+            |list: &[&str]| -> Vec<String> { list.iter().map(|n| (*n).to_owned()).collect() };
+        let array = names(&["FMemLdRf", "FMemLdRfVar"]);
+        let element = names(&["Ary1LdPr"]);
+        let single = names(&["MemLdFPR4"]);
+        let byte = names(&["MemStUI1"]);
+        let add = names(&["AddR4", "AddR8"]);
+        let me_48 = [8, 0, 0x48, 0];
+        let ops: Vec<Op<'_>> = vec![
+            (&array, &me_48),
+            (&element, &[]),
+            (&single, &[4, 0]),
+            (&array, &me_48),
+            (&element, &[]),
+            (&single, &[0x0C, 0]),
+            (&add, &[]),
+            (&array, &me_48),
+            (&element, &[]),
+            (&byte, &[8, 0]),
+            // An array at another offset, and an array of a local.
+            (&array, &[8, 0, 0x2C, 0]),
+            (&element, &[]),
+            (&single, &[0, 0]),
+            (&array, &[0x70, 0xFF, 0x48, 0]),
+            (&element, &[]),
+            (&single, &[0, 0]),
+        ];
+        let (fields, bad) = record_fields(&ops, &BTreeSet::from([0x48]));
+        assert_eq!(
+            fields,
+            BTreeMap::from([(
+                0x48,
+                vec![(4, 4, "Single"), (0x0C, 4, "Single"), (8, 1, "Byte")]
+            )])
+        );
+        assert!(bad.is_empty());
+        let other = names(&["MemLdVar"]);
+        let ops: Vec<Op<'_>> = vec![(&array, &me_48), (&element, &[]), (&other, &[0, 0])];
+        assert_eq!(
+            record_fields(&ops, &BTreeSet::from([0x48])).1,
+            BTreeSet::from([0x48])
+        );
+    }
+
+    #[test]
+    fn a_record_array_gives_its_type_with_a_pad_in_each_gap() {
+        let array = FixedArray::new(0x48, 0, vec![(501, 0)]).with_element_bytes(16);
+        let fields = [
+            (0x0C, 4, "Single"),
+            (4, 4, "Single"),
+            (8, 1, "Byte"),
+            (4, 4, "Single"),
+        ];
+        let record = record_array(&array, &fields, false).unwrap();
+        assert_eq!(
+            record.record,
+            [
+                "Private Type TField48",
+                "    pad0(0 To 3) As Byte",
+                "    field_4 As Single",
+                "    field_8 As Byte",
+                "    pad1(0 To 2) As Byte",
+                "    field_C As Single",
+                "End Type"
+            ]
+        );
+        assert_eq!(record.shape, "(0 To 500) As TField48");
+        let small = FixedArray::new(0x2C, 0, vec![(76, 0)]).with_element_bytes(16);
+        let record = record_array(&small, &[(0, 4, "Long")], true).unwrap();
+        assert_eq!(
+            record.record,
+            [
+                "Public Type TField2C",
+                "    field_0 As Long",
+                "    pad0(0 To 11) As Byte",
+                "End Type"
+            ]
+        );
+        // Two fields that overlap, a field past the end, and no field.
+        assert!(record_array(&array, &[(0, 4, "Long"), (2, 2, "Integer")], false).is_none());
+        assert!(record_array(&array, &[(0x0E, 4, "Long")], false).is_none());
+        assert!(record_array(&array, &[], false).is_none());
+    }
+
+    #[test]
+    fn the_field_at_zero_of_a_record_element_gets_its_member() {
+        assert_eq!(
+            member_zero(
+                "Call F(field_48(g(1, 2)), field_48(i).field_4, xfield_48(1))",
+                "field_48"
+            ),
+            "Call F(field_48(g(1, 2)).field_0, field_48(i).field_4, xfield_48(1))"
+        );
+        assert_eq!(
+            member_zero("x = field_48(\")\")", "field_48"),
+            "x = field_48(\")\").field_0"
+        );
+        assert_eq!(member_zero("x = field_48(1", "field_48"), "x = field_48(1");
     }
 
     #[test]
