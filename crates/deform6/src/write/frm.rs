@@ -255,6 +255,7 @@ fn property_name(property: &PropertyValue) -> String {
         | PropertyValue::Position { name, .. }
         | PropertyValue::Font { name, .. }
         | PropertyValue::Blob { name, .. }
+        | PropertyValue::List { name, .. }
         | PropertyValue::BlobUnreadable { name, .. } => name.clone(),
         PropertyValue::Undecoded { opcode, .. } => format!("opcode{opcode}"),
     }
@@ -310,6 +311,21 @@ fn collect_pending_lines(
                         PendingLine::PendingBlob {
                             offset: *offset,
                             declared_len: *declared_len,
+                        },
+                    ));
+                }
+                PropertyValue::List {
+                    name, offset, len, ..
+                } => {
+                    // The `.frx` record of a list holds the bytes of the
+                    // stream. `PendingBlob` copies `4 + declared_len` bytes,
+                    // and the first four are the count and the `u16` after
+                    // it.
+                    out.push((
+                        name.clone(),
+                        PendingLine::PendingBlob {
+                            offset: *offset,
+                            declared_len: len.saturating_sub(4),
                         },
                     ));
                 }

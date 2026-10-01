@@ -262,6 +262,43 @@ fn the_long_caption_of_gradient_gives_the_frx_of_its_source() {
     assert_eq!(frx.bytes, source);
 }
 
+/// The `List` and the `ItemData` of a combo box go into the `.frx` as the
+/// bytes of the form stream. `cmbPIM` of `PassGen.exe` holds both, and the
+/// `.frx` that DeForm6 writes for its form equals the `frmPassGen.frx` of
+/// the source, byte for byte, from the native and from the P-code build.
+/// The table of the test names the properties of a combo box up to them.
+#[test]
+fn the_lists_of_passgen_give_the_frx_of_its_source() {
+    let root = corpus_root();
+    let source = std::fs::read(root.join("public-domain/PassGen/frmPassGen.frx"))
+        .expect("reading frmPassGen.frx");
+    let table = OpcodeTable::parse(
+        b"[7]\n\
+          1 = { name = \"Style\", payload = \"Byte\" }\n\
+          5 = { name = \"Left\", payload = \"Position\" }\n\
+          19 = { name = \"TabIndex\", payload = \"Integer\" }\n\
+          22 = { name = \"List\", payload = \"List\" }\n\
+          33 = { name = \"ItemData\", payload = \"List\" }\n",
+    )
+    .expect("the table of the test parses");
+    for exe in [
+        root.join("public-domain/PassGen/PassGen.exe"),
+        root.join("../corpus-pcode/public-domain/PassGen/PassGen.exe"),
+    ] {
+        let data = std::fs::read(&exe).expect("reading PassGen.exe");
+        let report = deform6::inspect(&data, &table, deform6::journal::Mode::Strict)
+            .expect("PassGen.exe reads");
+        let written = deform6::write::project(&report, &data, deform6::journal::Mode::Strict)
+            .expect("PassGen.exe writes");
+        let frx = written
+            .files
+            .iter()
+            .find(|file| file.name.ends_with(".frx"))
+            .expect("a .frx is written");
+        assert_eq!(frx.bytes, source, "{}", exe.display());
+    }
+}
+
 /// The corpus executables that hold a version resource.
 const EXPECTED_VERSIONED_COUNT: usize = 44;
 
