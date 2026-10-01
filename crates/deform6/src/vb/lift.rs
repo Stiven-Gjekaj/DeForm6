@@ -1464,6 +1464,22 @@ fn conversion(name: &str) -> Option<&'static str> {
     })
 }
 
+/// Gives `value` as `vbNullString` when it is the constant 0 and the
+/// conversion `names` takes a `String`, such as `CVarStr`: Basic pushes a
+/// null string as 0. `LoadPicture(vbNullString)` of the map editor became
+/// `LoadPicture(CVar(0))`, which looks for a file named "0" and fails with
+/// error 53.
+fn null_string(value: Expr, names: &[String]) -> Expr {
+    let from_string = names
+        .iter()
+        .any(|name| name.ends_with("Str") && conversion(name).is_some());
+    if from_string && value == Expr::Const(0) {
+        Expr::Word("vbNullString")
+    } else {
+        value
+    }
+}
+
 /// The procedures of the runtime whose last argument is an optional
 /// `String` that a call leaves out with a null string, the constant 0:
 /// `ServerName` of `CreateObject`. Basic writes such a call with no last
@@ -2554,7 +2570,7 @@ fn run(
                 None
             }
             Family::Convert(function) => {
-                let value = pop(&mut state)?;
+                let value = null_string(pop(&mut state)?, names);
                 state.stack.push(match function {
                     Some(function) => Value::plain(
                         Expr::Convert(function, Box::new(value)),
@@ -5370,6 +5386,14 @@ dispid = 67
         assert_eq!(
             lines(&variant).unwrap()[0],
             "       Call import_2(CVar(local_64))"
+        );
+        // A null string is 0 on the stack.
+        let null = [
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x42, 0x90, 0xFF, 0x12, 0x02, 0x00, 0x04, 0x00, 0x0C,
+        ];
+        assert_eq!(
+            lines(&null).unwrap()[0],
+            "       Call import_2(CVar(vbNullString))"
         );
         // import_2(local_64): FLdVar pushes the 16 bytes of the Variant.
         let copy = [0x43, 0x9C, 0xFF, 0x12, 0x02, 0x00, 0x10, 0x00, 0x0C];
