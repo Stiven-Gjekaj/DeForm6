@@ -1464,6 +1464,35 @@ fn conversion(name: &str) -> Option<&'static str> {
     })
 }
 
+/// The procedures of the runtime whose last argument is an optional
+/// `String` that a call leaves out with a null string, the constant 0:
+/// `ServerName` of `CreateObject`. Basic writes such a call with no last
+/// argument. With a `0`, the server name is "0", and `CreateObject` fails
+/// with error 462. Each of the 14 calls of the P-code corpus leaves it out
+/// in the source.
+const NULL_STRING_LAST: &[&str] = &["CreateObject"];
+
+/// Makes the last argument of `values` a `Missing` argument when `callee`
+/// is a procedure of [`NULL_STRING_LAST`] and the argument is the constant
+/// 0. A call that a `Variant` result goes to holds the slot of the result
+/// first, so the last argument is the same.
+fn omit_null_string(callee: &Callee, values: &mut [Value]) {
+    let Callee::Member(object, name) = callee else {
+        return;
+    };
+    if **object != Expr::Word("VBA")
+        || !NULL_STRING_LAST.contains(&name.as_str())
+        || values.len() < 2
+    {
+        return;
+    }
+    if let Some(last) = values.last_mut()
+        && last.expr == Expr::Const(0)
+    {
+        last.expr = Expr::Word("Missing");
+    }
+}
+
 /// Gives the argument `expr` of a `Declare` that the call passes `ByVal`,
 /// with `bytes` bytes on the stack. The lift declares a variable that it
 /// cannot type as a `Variant`, and a `Variant` that a call passes `ByVal As
@@ -2738,6 +2767,7 @@ fn run(
                     },
                 };
                 let mut values = call_arguments(&mut state.stack, word16(2)?, at)?;
+                omit_null_string(&callee, &mut values);
                 if matches!(callee, Callee::Declare(_)) {
                     for value in &mut values {
                         if !value.address {
@@ -4172,6 +4202,41 @@ dispid = 67
             render(&lift(&listing, &table, &imported, None).unwrap()),
             [
                 "       Call VBA.Mid(5, local_88, local_64, arg_C)",
+                "       Exit Sub"
+            ]
+        );
+    }
+
+    /// `CreateObject` takes its server name as an optional `String`, and a
+    /// call that leaves it out pushes a null string, the constant 0.
+    #[test]
+    fn a_null_server_name_of_create_object_is_left_out() {
+        let table = PcodeTable::parse(TABLE.as_bytes()).unwrap();
+        let body = [
+            0x01, 0x00, 0x00, 0x00, 0x00, // 0
+            0x21, 0x02, 0x00, // "WScript.Shell"
+            0x12, 0x01, 0x00, 0x08, 0x00, // the import 1, 8 bytes
+            0x0C,
+        ];
+        let listing = disassemble(&Region::new(&body, Off::new(0)), &table);
+        let lines = |name: &str| {
+            let callees = Callees::default()
+                .with_string(2, "WScript.Shell")
+                .with_import(1, name, None);
+            render(&lift(&listing, &table, &callees, None).unwrap())
+        };
+        assert_eq!(
+            lines("CreateObject"),
+            [
+                "       Call VBA.CreateObject(\"WScript.Shell\")",
+                "       Exit Sub"
+            ]
+        );
+        // Another procedure keeps its 0.
+        assert_eq!(
+            lines("Shell"),
+            [
+                "       Call VBA.Shell(\"WScript.Shell\", 0)",
                 "       Exit Sub"
             ]
         );
