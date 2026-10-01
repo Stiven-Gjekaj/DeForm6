@@ -2034,6 +2034,40 @@ fn a_module_array_of_records_gives_its_offset_its_bounds_and_its_record_bytes() 
     assert!(module_fixed_arrays(&pe, objects["frmMain"].lp_public_bytes).is_empty());
 }
 
+/// A standard module holds its variables once, at `lpModulePublic` in
+/// `.data`. A form and a class hold them in each instance, and give 0.
+/// `Physics_Demo.exe` names `GameActive`, at 0x60 of its module, as the
+/// address 0x41307C in its form, so the variables of its module start at
+/// 0x41301C.
+#[test]
+fn only_a_standard_module_gives_the_address_of_its_variables() {
+    let mut failures = Vec::new();
+    let mut modules = 0;
+    for (key, exe) in pcode_programs() {
+        let bytes = read(&exe);
+        let pe = PeImage::parse(&bytes).unwrap();
+        for (name, object) in objects_by_name(&pe) {
+            let module =
+                deform6::vb::classify::classify(object.f_object_type) == RecoveredKind::Module;
+            modules += usize::from(module);
+            if module == (object.lp_module_public.get() == 0) {
+                failures.push(format!(
+                    "{key} {name}: module {module}, lpModulePublic {:#x}",
+                    object.lp_module_public.get()
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(modules, 8);
+    let bytes = read(&pcode_root().join("vb6-code/Game-physics-basic/Physics_Demo.exe"));
+    let pe = PeImage::parse(&bytes).unwrap();
+    assert_eq!(
+        objects_by_name(&pe)["Logic_Module"].lp_module_public,
+        Va::new(0x0041_301C)
+    );
+}
+
 /// `Dim hData(0 To 3, 0 To 255) As Single` of the basic histogram viewer
 /// is at 0x38 of the data of its form. The template holds the last
 /// dimension first.

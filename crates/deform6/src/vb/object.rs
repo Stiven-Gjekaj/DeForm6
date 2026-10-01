@@ -91,6 +91,12 @@ pub struct Object {
     /// their `SAFEARRAY` templates, as [`crate::vb::procdesc::module_fixed_arrays`]
     /// reads them.
     pub lp_public_bytes: Va,
+    /// `lpModulePublic`: the address of the variables of a standard module
+    /// in `.data`. A body of the module names its variable at the offset
+    /// `X` as a field of `Me`, and another object names it by the address
+    /// `lpModulePublic + X`. 0 for an object whose variables each instance
+    /// holds, such as a form.
+    pub lp_module_public: Va,
     /// The address the object's name was read from.
     ///
     /// Carried as well as the resolved [`Object::name`], because the address
@@ -197,6 +203,11 @@ impl ObjectTable {
                 0x08,
                 "an Object holds no address for its public variables",
             )?;
+            let lp_module_public = va_at(
+                &element,
+                0x10,
+                "an Object holds no address for the variables of its module",
+            )?;
             let lpsz_object_name =
                 va_at(&element, 0x18, "an Object holds no address for its name")?;
             let raw_proc_count = u32_at(&element, 0x1C, "an Object holds no procedure count")?;
@@ -226,6 +237,7 @@ impl ObjectTable {
                 rva: element.rva(Off::new(0)),
                 lp_object_info,
                 lp_public_bytes,
+                lp_module_public,
                 lpsz_object_name,
                 name,
                 proc_count,
@@ -799,6 +811,7 @@ mod tests {
                 rva: Some(Rva::new(0x29b0)),
                 lp_object_info: Va::new(0x0040_1ff0),
                 lp_public_bytes: Va::new(0x0040_2e30),
+                lp_module_public: Va::new(0),
                 lpsz_object_name: Va::new(0x0040_2ae0),
                 name: "frmGrayscale".to_owned(),
                 proc_count: 20,
@@ -810,6 +823,7 @@ mod tests {
                 rva: Some(Rva::new(0x29e0)),
                 lp_object_info: Va::new(0x0040_1b98),
                 lp_public_bytes: Va::new(0x0040_32d0),
+                lp_module_public: Va::new(0),
                 lpsz_object_name: Va::new(0x0040_2b0c),
                 name: "pdOpenSaveDialog".to_owned(),
                 proc_count: 6,
@@ -821,6 +835,7 @@ mod tests {
                 rva: Some(Rva::new(0x2a10)),
                 lp_object_info: Va::new(0x0040_1c98),
                 lp_public_bytes: Va::new(0x0040_32d0),
+                lp_module_public: Va::new(0),
                 lpsz_object_name: Va::new(0x0040_2b00),
                 name: "FastDrawing".to_owned(),
                 proc_count: 8,
