@@ -136,6 +136,8 @@ pub struct FixedArray {
     /// The number of elements and the lower bound of each dimension, first
     /// dimension first.
     pub bounds: Vec<(u32, i32)>,
+    /// The bytes of one element, `cbElements` of the template.
+    pub element_bytes: u32,
 }
 
 impl FixedArray {
@@ -146,8 +148,79 @@ impl FixedArray {
             slot,
             vartype,
             bounds,
+            element_bytes: 0,
         }
     }
+
+    /// Gives the array with `bytes` as the bytes of one element.
+    #[must_use]
+    pub fn with_element_bytes(mut self, bytes: u32) -> Self {
+        self.element_bytes = bytes;
+        self
+    }
+}
+
+/// The place of a table of fixed-size arrays.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Place {
+    /// The frame of a procedure: an entry names a slot below the frame, as a
+    /// negative offset, and the elements have a `VARTYPE`.
+    Frame,
+    /// The public variables of an object: an entry names the offset of the
+    /// variable in the data of the object, and the elements can be records
+    /// of a user type, which have no `VARTYPE`.
+    Module,
+}
+
+/// The `SAFEARRAY` feature that marks a valid `VARTYPE` after the template:
+/// `FADF_HAVEVARTYPE`.
+const FADF_HAVEVARTYPE: u16 = 0x80;
+
+/// The largest number of bytes of the table of the public variables of an
+/// object that [`module_fixed_arrays`] reads. The first word of the table
+/// gives its bytes: `0x5C` for the two entries of the module of
+/// `Physics_Demo.exe`, and `0x0C`, the header alone, for its form.
+const MODULE_TABLE_MAX: u32 = 0x400;
+
+/// The offset of the first entry of the table of the public variables of an
+/// object, after its header of twelve bytes.
+const MODULE_TABLE_ENTRIES: u32 = 0x0C;
+
+/// The largest element of a record that [`module_fixed_arrays`] accepts.
+const MAX_RECORD_BYTES: u32 = 0x1_0000;
+
+/// Reads the fixed-size arrays of the table of the public variables of an
+/// object at `va`, its `lpPublicBytes`. Each entry is the offset of the
+/// variable and the kind 5, and a `SAFEARRAY` template follows 16 bytes
+/// after it, as in the frame of a procedure. The elements of
+/// `StarArray(0 To 500) As Star` of `Physics_Demo.exe` are records of 16
+/// bytes, so the template has no `VARTYPE`, and the array gives 0 there.
+/// The scan stops at the bytes that the first word of the table gives. An
+/// address with no table gives nothing.
+#[must_use]
+pub fn module_fixed_arrays(pe: &PeImage<'_>, va: Va) -> Vec<FixedArray> {
+    if va.get() == 0 {
+        return Vec::new();
+    }
+    let Some(head) = pe.region_at_va(va) else {
+        return Vec::new();
+    };
+    let Some(stated) = head.u16_le(Off::new(0)) else {
+        return Vec::new();
+    };
+    let length = head.len().min(MODULE_TABLE_MAX).min(u32::from(stated));
+    let Some(table) = head.subregion(Off::new(0), length) else {
+        return Vec::new();
+    };
+    let mut out: Vec<FixedArray> = Vec::new();
+    let mut at = MODULE_TABLE_ENTRIES;
+    while at < length {
+        if let Some(array) = fixed_array_at(&table, at, Place::Module) {
+            out.push(array);
+        }
+        at = at.saturating_add(2);
+    }
+    out
 }
 
 /// The `SAFEARRAY` feature that marks a fixed-size array: `FADF_FIXEDSIZE`.
@@ -191,7 +264,7 @@ impl ProcDescriptor {
         let mut out = Vec::new();
         let mut at = PROC_DESC_READ_LEN.saturating_add(2);
         while at < u32::from(length) {
-            if let Some(array) = fixed_array_at(&descriptor, at) {
+            if let Some(array) = fixed_array_at(&descriptor, at, Place::Frame) {
                 out.push(array);
             }
             at = at.saturating_add(2);
@@ -201,9 +274,13 @@ impl ProcDescriptor {
 }
 
 /// Reads a fixed-array entry and its template at `at` in `descriptor`.
-fn fixed_array_at(descriptor: &Region<'_>, at: u32) -> Option<FixedArray> {
+fn fixed_array_at(descriptor: &Region<'_>, at: u32, place: Place) -> Option<FixedArray> {
     let slot = i16::from_le_bytes(descriptor.u16_le(Off::new(at))?.to_le_bytes());
-    if slot >= 0 || descriptor.u16_le(Off::new(at.checked_add(2)?))? & 0xFF != ARRAY_KIND {
+    let named = match place {
+        Place::Frame => slot < 0,
+        Place::Module => slot > 0,
+    };
+    if !named || descriptor.u16_le(Off::new(at.checked_add(2)?))? & 0xFF != ARRAY_KIND {
         return None;
     }
     let template = at.checked_add(TEMPLATE_GAP)?;
@@ -212,9 +289,15 @@ fn fixed_array_at(descriptor: &Region<'_>, at: u32) -> Option<FixedArray> {
     let dimensions = word(0)?;
     let features = word(2)?;
     let element = long(4)?;
+    let record = place == Place::Module && features & FADF_HAVEVARTYPE == 0;
+    let element_fits = if record {
+        (1..=MAX_RECORD_BYTES).contains(&element)
+    } else {
+        matches!(element, 1 | 2 | 4 | 8 | 16)
+    };
     if !(1..=MAX_DIMENSIONS).contains(&dimensions)
         || features & FADF_FIXEDSIZE == 0
-        || !matches!(element, 1 | 2 | 4 | 8 | 16)
+        || !element_fits
         || long(8)? != 0
         || long(12)? != 0
     {
@@ -231,11 +314,12 @@ fn fixed_array_at(descriptor: &Region<'_>, at: u32) -> Option<FixedArray> {
         bounds.push((count, lower));
     }
     let end = u32::from(dimensions).checked_mul(8)?.checked_add(16)?;
-    let vartype = word(end)?;
+    let vartype = if record { 0 } else { word(end)? };
     Some(FixedArray {
         slot: slot.unsigned_abs(),
         vartype,
         bounds,
+        element_bytes: element,
     })
 }
 
@@ -411,7 +495,7 @@ pub fn read_method_table(pe: &PeImage<'_>, lp_object_info: Va) -> Result<MethodT
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{MethodEntry, ProcDescriptor, fixed_array_at, read_method_table};
+    use super::{MethodEntry, Place, ProcDescriptor, fixed_array_at, read_method_table};
     use crate::error::{Defect, DefectKind, Site};
     use crate::read::pe::PeImage;
     use crate::read::region::{Off, Region, Va};
@@ -435,7 +519,7 @@ mod tests {
 
     #[test]
     fn a_fixed_array_entry_needs_its_kind_and_a_fixed_size_template() {
-        let read = |bytes: &[u8]| fixed_array_at(&Region::new(bytes, Off::new(0)), 0);
+        let read = |bytes: &[u8]| fixed_array_at(&Region::new(bytes, Off::new(0)), 0, Place::Frame);
         let array = read(&array_entry(0x2005, 0x92)).unwrap();
         assert_eq!((array.slot, array.vartype), (0xB0, 3));
         assert_eq!(array.bounds, [(256, 0)]);
@@ -446,6 +530,41 @@ mod tests {
         // A template cut by the end of the descriptor.
         let entry = array_entry(5, 0x92);
         assert!(read(entry.get(..entry.len() - 2).unwrap()).is_none());
+    }
+
+    /// The entry of `StarArray(0 To 500) As Star` in the table of the public
+    /// variables of the module of `Physics_Demo.exe`: the offset 0x48, the
+    /// kind 5, and a template of 501 records of 16 bytes with the features
+    /// 0x12, so no `VARTYPE`.
+    fn module_entry(slot: u16, features: u16) -> Vec<u8> {
+        let mut bytes = slot.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&5_u16.to_le_bytes());
+        bytes.extend_from_slice(&[0xFF; 12]);
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&features.to_le_bytes());
+        bytes.extend_from_slice(&16_u32.to_le_bytes());
+        bytes.extend_from_slice(&[0; 8]);
+        bytes.extend_from_slice(&501_u32.to_le_bytes());
+        bytes.extend_from_slice(&0_i32.to_le_bytes());
+        bytes
+    }
+
+    #[test]
+    fn a_module_entry_names_a_positive_offset_and_can_hold_records() {
+        let read = |bytes: &[u8], place| fixed_array_at(&Region::new(bytes, Off::new(0)), 0, place);
+        let array = read(&module_entry(0x48, 0x12), Place::Module).unwrap();
+        assert_eq!(
+            (array.slot, array.vartype, array.element_bytes),
+            (0x48, 0, 16)
+        );
+        assert_eq!(array.bounds, [(501, 0)]);
+        // The frame of a procedure names a negative slot.
+        assert!(read(&module_entry(0x48, 0x12), Place::Frame).is_none());
+        // A module names a positive offset.
+        assert!(read(&module_entry(0xFFB8, 0x12), Place::Module).is_none());
+        // With FADF_HAVEVARTYPE, an element of 16 bytes is a Variant, and the
+        // VARTYPE must follow the bounds.
+        assert!(read(&module_entry(0x48, 0x92), Place::Module).is_none());
     }
 
     /// A one-section image: the section starts at RVA `0x1000` and file

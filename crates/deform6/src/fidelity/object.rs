@@ -94,6 +94,7 @@ mod tests {
             file_offset: Off::new(0),
             rva: None,
             lp_object_info: Va::new(0x0040_5000),
+            lp_public_bytes: Va::new(0),
             lpsz_object_name: Va::new(0x0040_7000),
             name: "Form1".to_owned(),
             proc_count: 7,

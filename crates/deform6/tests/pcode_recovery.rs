@@ -65,7 +65,7 @@ use deform6::vb::links::{LinkSlot, read_method_links};
 use deform6::vb::object::{Object, ObjectTable};
 use deform6::vb::opcodes::OpcodeTable;
 use deform6::vb::pcode::PcodeTable;
-use deform6::vb::procdesc::{MethodEntry, read_method_table};
+use deform6::vb::procdesc::{MethodEntry, module_fixed_arrays, read_method_table};
 use deform6::vb::project::{DeclareTable, ObjectTableHead, ProjectInfo};
 use deform6::vb::types::{VbTypes, guid_text};
 use object::LittleEndian as LE;
@@ -1895,6 +1895,127 @@ fn each_fixed_array_of_a_source_procedure_is_an_entry_of_its_descriptor() {
 
 /// The fixed-size local arrays of the P-code corpus.
 const EXPECTED_FIXED_ARRAYS: usize = 24;
+
+/// Counts the fixed-size arrays that the declarations section of the source
+/// file at `path` declares: each name with bounds between its parentheses
+/// on a `Dim`, `Private`, `Public` or `Global` line before the first
+/// procedure, and outside a `Type` block.
+fn source_module_arrays(path: &Path) -> usize {
+    let text = String::from_utf8_lossy(&read(path)).into_owned();
+    let mut in_type = false;
+    let mut count = 0;
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        let code = trimmed.split('\'').next().unwrap_or_default();
+        let words: Vec<&str> = code.split_whitespace().collect();
+        if words
+            .iter()
+            .take(3)
+            .any(|w| matches!(*w, "Sub" | "Function" | "Property"))
+            && !words.contains(&"Declare")
+        {
+            break;
+        }
+        if words.first() == Some(&"End") && words.get(1) == Some(&"Type") {
+            in_type = false;
+            continue;
+        }
+        if words.iter().take(2).any(|w| *w == "Type") {
+            in_type = true;
+            continue;
+        }
+        let declares = matches!(
+            words.first(),
+            Some(&("Dim" | "Private" | "Public" | "Global"))
+        ) && !words
+            .iter()
+            .take(2)
+            .any(|w| matches!(*w, "Declare" | "Const" | "Enum" | "Event"));
+        if in_type || !declares {
+            continue;
+        }
+        let mut rest = code;
+        while let Some(open) = rest.find('(') {
+            let after = &rest[open + 1..];
+            let Some(close) = after.find(')') else {
+                break;
+            };
+            if !after[..close].trim().is_empty() {
+                count += 1;
+            }
+            rest = &after[close + 1..];
+        }
+    }
+    count
+}
+
+/// Each fixed-size array of the declarations section of a source file is an
+/// entry of the table of the public variables of its object, and no other
+/// entry is one.
+#[test]
+fn each_fixed_array_of_a_source_module_is_an_entry_of_its_object() {
+    let root = build_record::corpus_root();
+    let projects = vbp::project_files();
+    let mut failures = Vec::new();
+    let mut total = 0;
+    for (key, exe) in pcode_programs() {
+        let project = vbp::select_project_file(&root.join(&key), &projects)
+            .unwrap_or_else(|err| panic!("{key}: {err}"));
+        let expected: usize = vbp::Project::read(&project)
+            .declared_objects()
+            .iter()
+            .filter(|object| object.source_file.exists())
+            .map(|object| source_module_arrays(&object.source_file))
+            .sum();
+        let bytes = read(&exe);
+        let pe = PeImage::parse(&bytes).unwrap();
+        let header = VbHeader::read(&header_region(&pe).unwrap()).unwrap();
+        let info = ProjectInfo::read(&pe, header.lp_project_data).unwrap();
+        let head = ObjectTableHead::read(&pe, info.lp_object_table).unwrap();
+        let objects = ObjectTable::walk(&pe, info.lp_object_table, &head)
+            .unwrap()
+            .objects;
+        let found: usize = objects
+            .iter()
+            .map(|object| module_fixed_arrays(&pe, object.lp_public_bytes).len())
+            .sum();
+        total += found;
+        if found != expected {
+            failures.push(format!("{key}: {found} found, {expected} in the source"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(total, EXPECTED_MODULE_ARRAYS);
+}
+
+/// The fixed-size arrays of the declarations sections of the P-code corpus.
+const EXPECTED_MODULE_ARRAYS: usize = 10;
+
+/// A fixed array of a module as its offset, its `VARTYPE`, its bounds and
+/// the bytes of one element.
+type ModuleArrayFacts = (u16, u16, Vec<(u32, i32)>, u32);
+
+/// `Public Bullets(0 To NumOfBullets) As Bullet` and `Public StarArray(0 To
+/// NumOfStars) As Star` of `Physics_Logic.bas` are at 0x2C and 0x48 of the
+/// data of the module. `NumOfBullets` is 75 and `NumOfStars` is 500. Each
+/// record is 16 bytes: `Star` holds three `Single` and a `Byte`, and `Bullet`
+/// holds three `Long` and a `Boolean`. A record has no `VARTYPE`.
+#[test]
+fn a_module_array_of_records_gives_its_offset_its_bounds_and_its_record_bytes() {
+    let bytes = read(&pcode_root().join("vb6-code/Game-physics-basic/Physics_Demo.exe"));
+    let pe = PeImage::parse(&bytes).unwrap();
+    let objects = objects_by_name(&pe);
+    let found: Vec<ModuleArrayFacts> =
+        module_fixed_arrays(&pe, objects["Logic_Module"].lp_public_bytes)
+            .into_iter()
+            .map(|array| (array.slot, array.vartype, array.bounds, array.element_bytes))
+            .collect();
+    assert_eq!(
+        found,
+        [(0x2C, 0, vec![(76, 0)], 16), (0x48, 0, vec![(501, 0)], 16)]
+    );
+    assert!(module_fixed_arrays(&pe, objects["frmMain"].lp_public_bytes).is_empty());
+}
 
 /// A fixed array as its slot, its `VARTYPE` and its bounds.
 type FixedArrayFacts = (u16, u16, Vec<(u32, i32)>);
