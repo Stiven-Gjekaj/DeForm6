@@ -1490,6 +1490,18 @@ fn null_string(value: Expr, names: &[String]) -> Expr {
     }
 }
 
+/// The procedures of the runtime whose `Variant` result holds an object.
+/// Basic stores such a result with `Set`: a plain assignment reads the
+/// default member of the object, and `WScript.Shell` has none, so the
+/// rebuilt `PassGen.exe` stopped with error 438.
+const OBJECT_RESULTS: &[&str] = &["CreateObject", "GetObject"];
+
+/// Tells whether `callee` is a procedure of [`OBJECT_RESULTS`].
+fn gives_an_object(callee: &Callee) -> bool {
+    matches!(callee, Callee::Member(object, name)
+        if **object == Expr::Word("VBA") && OBJECT_RESULTS.contains(&name.as_str()))
+}
+
 /// The procedures of the runtime whose last argument is an optional
 /// `String` that a call leaves out with a null string, the constant 0:
 /// `ServerName` of `CreateObject`. Basic writes such a call with no last
@@ -2817,7 +2829,14 @@ fn run(
                     && let Some(slot) = result_slot
                 {
                     values.remove(0);
-                    result_of(&mut state, slot, Expr::Call(callee, expressions(values)))
+                    let object = gives_an_object(&callee);
+                    let stmt = result_of(&mut state, slot, Expr::Call(callee, expressions(values)));
+                    match stmt {
+                        Some(Stmt::Assign { target, value }) if object => {
+                            Some(Stmt::Set { target, value })
+                        }
+                        other => other,
+                    }
                 } else if !result && callees.function_stubs.contains(&index) {
                     match callees.project_call(index) {
                         Some(ProjectCall::Module(module, name)) => {
@@ -4256,6 +4275,36 @@ dispid = 67
             lines("CreateObject"),
             [
                 "       Call VBA.CreateObject(\"WScript.Shell\")",
+                "       Exit Sub"
+            ]
+        );
+        // A Variant result of CreateObject goes to its slot with Set.
+        let stored = [
+            0x01, 0x00, 0x00, 0x00, 0x00, // 0
+            0x21, 0x02, 0x00, // "WScript.Shell"
+            0x15, 0x54, 0xFF, // the address of the result, local_AC
+            0x12, 0x01, 0x00, 0x0C, 0x00, // the import 1, 12 bytes
+            0x0C,
+        ];
+        let listing_stored = disassemble(&Region::new(&stored, Off::new(0)), &table);
+        let result = |name: &str| {
+            let callees = Callees::default()
+                .with_string(2, "WScript.Shell")
+                .with_import(1, name, None)
+                .with_variant_result(1);
+            render(&lift(&listing_stored, &table, &callees, None).unwrap())
+        };
+        assert_eq!(
+            result("CreateObject"),
+            [
+                "       Set local_AC = VBA.CreateObject(\"WScript.Shell\")",
+                "       Exit Sub"
+            ]
+        );
+        assert_eq!(
+            result("Environ"),
+            [
+                "       local_AC = VBA.Environ(\"WScript.Shell\", 0)",
                 "       Exit Sub"
             ]
         );
