@@ -152,6 +152,26 @@ fn words_with(lines: &[String], prefix: &str) -> BTreeSet<String> {
     words_before(lines, prefix, |next| !next.is_some_and(is_name))
 }
 
+/// Names each variable of a standard module in `lines`, a body of the
+/// module, by its address, as each other object names it: `field_60` of a
+/// module whose variables start at `base` 0x41301C is `g_41307C`. A member
+/// of a record, such as `.field_4`, keeps its name.
+fn name_module_fields(lines: &mut [String], base: u32) {
+    for field in words_with(lines, "field_") {
+        let Some(address) = field
+            .strip_prefix("field_")
+            .and_then(|digits| u32::from_str_radix(digits, 16).ok())
+            .and_then(|offset| base.checked_add(offset))
+        else {
+            continue;
+        };
+        let global = format!("g_{address:X}");
+        for line in lines.iter_mut() {
+            *line = replace_word(line, &field, &global);
+        }
+    }
+}
+
 /// Gives each word of [`words_with`] that an index follows: the arrays of
 /// `lines`.
 fn indexed_words(lines: &[String], prefix: &str) -> BTreeSet<String> {
@@ -1547,6 +1567,7 @@ pub fn lift_objects(
     }
     let typed = typed_arrays(report.objects.iter().map(|own| &own.procedures), &raw);
     let mut arrays: BTreeMap<String, &'static str> = BTreeMap::new();
+    let mut global_shapes: BTreeMap<String, String> = BTreeMap::new();
     let mut out: Vec<Option<LiftedObject>> = Vec::new();
     let mut variables: Vec<BTreeSet<String>> = Vec::new();
     for own in &report.objects {
@@ -1572,6 +1593,7 @@ pub fn lift_objects(
         let mut frame_types = Vec::new();
         let mut object_arrays: BTreeMap<String, &'static str> = BTreeMap::new();
         let module_arrays = module_fixed_arrays(&pe, object.lp_public_bytes);
+        let module_base = object.lp_module_public.get();
         let records: BTreeSet<u16> = module_arrays
             .iter()
             .filter(|array| array.vartype == 0)
@@ -1607,6 +1629,9 @@ pub fn lift_objects(
                 Ok(stmts) => render(&stmts),
                 Err(fault) => vec![format!("    ' The lift stopped: {fault:?}")],
             };
+            if module_base != 0 {
+                name_module_fields(&mut lines, module_base);
+            }
             fields.extend(words_with(&lines, "field_"));
             all_lines.extend(lines.iter().cloned());
             globals.extend(words_with(&lines, "g_"));
@@ -1649,10 +1674,21 @@ pub fn lift_objects(
         let public = callees.variable_fields();
         let mut fixed: BTreeMap<String, String> = BTreeMap::new();
         for array in &module_arrays {
-            let name = format!("field_{:X}", array.slot);
+            let global = (module_base != 0)
+                .then(|| module_base.checked_add(u32::from(array.slot)))
+                .flatten();
+            let name = global.map_or_else(
+                || format!("field_{:X}", array.slot),
+                |address| format!("g_{address:X}"),
+            );
+            let shapes = if global.is_some() {
+                &mut global_shapes
+            } else {
+                &mut fixed
+            };
             if array.vartype != 0 {
                 if let Some(element) = redim_element(array.vartype) {
-                    fixed.insert(name, format!("({}) As {element}", array_ranges(array)));
+                    shapes.insert(name, format!("({}) As {element}", array_ranges(array)));
                 }
                 continue;
             }
@@ -1663,8 +1699,11 @@ pub fn lift_objects(
                 .get(&array.slot)
                 .map(Vec::as_slice)
                 .unwrap_or_default();
-            let Some(record) = record_array(array, found, public.contains(&u32::from(array.slot)))
-            else {
+            let Some(record) = record_array(
+                array,
+                found,
+                global.is_some() || public.contains(&u32::from(array.slot)),
+            ) else {
                 continue;
             };
             if found.iter().any(|(offset, _, _)| *offset == 0) {
@@ -1675,7 +1714,7 @@ pub fn lift_objects(
                 }
             }
             frame_types.extend(record.record);
-            fixed.insert(name, record.shape);
+            shapes.insert(name, record.shape);
         }
         lifted.declarations = frame_types;
         lifted
@@ -1696,16 +1735,18 @@ pub fn lift_objects(
         let Some(lifted) = lifted else {
             continue;
         };
+        let declaration = |scope: &str, name: &String| match global_shapes.get(name) {
+            Some(shape) => format!("{scope} {name}{shape}"),
+            None => variable_declaration(scope, name, &arrays),
+        };
         match home {
-            Some(home) if home == at => lifted.declarations.extend(
-                all.iter()
-                    .map(|name| variable_declaration("Public", name, &arrays)),
-            ),
+            Some(home) if home == at => lifted
+                .declarations
+                .extend(all.iter().map(|name| declaration("Public", name))),
             Some(_) => {}
-            None => lifted.declarations.extend(
-                own.iter()
-                    .map(|name| variable_declaration("Private", name, &arrays)),
-            ),
+            None => lifted
+                .declarations
+                .extend(own.iter().map(|name| declaration("Private", name))),
         }
     }
     Ok(out)
@@ -1723,9 +1764,9 @@ mod tests {
         FixedArray, Op, TypedArrays, apply_frame_structs, built_parameters, call_arguments,
         call_arity, declare, declare_arrays, declare_new_locals, declare_statements,
         declared_bytes, field_declarations, fixed_shapes, frame_structs, indexed_words,
-        member_zero, new_locals, pointer_fields, procedure_name, record_array, record_fields,
-        redim_arrays, replace_word, slot_uses, struct_pointers, typed_arrays, typed_locals,
-        variable_declaration, words_with,
+        member_zero, name_module_fields, new_locals, pointer_fields, procedure_name, record_array,
+        record_fields, redim_arrays, replace_word, slot_uses, struct_pointers, typed_arrays,
+        typed_locals, variable_declaration, words_with,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::lift::result_bytes;
@@ -2174,6 +2215,24 @@ names = ["ExitProcCb"]
         assert!(record_array(&array, &[(0, 4, "Long"), (2, 2, "Integer")], false).is_none());
         assert!(record_array(&array, &[(0x0E, 4, "Long")], false).is_none());
         assert!(record_array(&array, &[], false).is_none());
+    }
+
+    /// `GameActive` of `Physics_Demo.exe` is `field_60` in its module, whose
+    /// variables start at 0x41301C, and `g_41307C` in its form.
+    #[test]
+    fn a_variable_of_a_module_takes_the_name_of_its_address() {
+        let mut lines = vec![
+            "If Not field_60 Then GoTo L0010".to_owned(),
+            "field_64(field_6C).field_4 = Me.field_60".to_owned(),
+        ];
+        name_module_fields(&mut lines, 0x0041_301C);
+        assert_eq!(
+            lines,
+            [
+                "If Not g_41307C Then GoTo L0010",
+                "g_413080(g_413088).field_4 = Me.field_60"
+            ]
+        );
     }
 
     #[test]
