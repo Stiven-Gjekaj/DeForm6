@@ -1806,6 +1806,23 @@ fn each_public_variable_of_a_form_gives_a_public_field() {
     assert_eq!(form.variable_fields().len(), expected);
 }
 
+/// `GetImageData2D` of `FastDrawing` takes `fixOrientation` `ByVal` at
+/// 0x14, and `SetImageData2D` takes `imgWidth`, `imgHeight` and
+/// `fixOrientation` `ByVal` at 0x10, 0x14 and 0x1C. Each other argument of
+/// the class is `ByRef`.
+#[test]
+fn each_by_value_argument_of_a_public_method_gives_its_slot() {
+    let class = profiles(&pcode_root().join("vb6-code/Transparency-2D/Transparency.exe"))
+        .into_iter()
+        .find(|profile| profile.object_name() == Some("FastDrawing"))
+        .unwrap();
+    let found: Vec<Vec<i16>> = (0..8)
+        .map(|method| class.value_arguments_of(method))
+        .filter(|slots| !slots.is_empty())
+        .collect();
+    assert_eq!(found, [vec![0x14], vec![0x10, 0x14, 0x1C]]);
+}
+
 /// Counts the fixed-size arrays that the procedures of the source file at
 /// `path` declare with `Dim`: each name of a `Dim` line in a procedure with
 /// bounds between its parentheses, such as `bTable(0 To 255)`.

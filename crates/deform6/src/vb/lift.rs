@@ -385,6 +385,7 @@ pub struct Callees {
     function_stubs: Vec<u16>,
     stubs: Vec<(u16, ProjectCall)>,
     arguments: Vec<(u16, i16, String)>,
+    value_arguments: Vec<(u16, i16)>,
     argument_sizes: Vec<(u16, Vec<u8>)>,
     procedures: Vec<(u16, String)>,
     form_name: Option<String>,
@@ -579,6 +580,26 @@ impl Callees {
             .iter()
             .find(|(at, _)| *at == method)
             .map(|(_, sizes)| sizes.as_slice())
+    }
+
+    /// Adds the argument at the frame offset `slot` of the method `method`
+    /// that the method takes `ByVal`: its slot holds the value, and not the
+    /// address of a variable of the caller.
+    #[must_use]
+    pub fn with_value_argument(mut self, method: u16, slot: i16) -> Self {
+        self.value_arguments.push((method, slot));
+        self
+    }
+
+    /// Gives the frame offset of each argument of the method `method` that
+    /// [`Callees::with_value_argument`] adds.
+    #[must_use]
+    pub fn value_arguments_of(&self, method: u16) -> Vec<i16> {
+        self.value_arguments
+            .iter()
+            .filter(|(at, _)| *at == method)
+            .map(|(_, slot)| *slot)
+            .collect()
     }
 
     /// Gives the frame offset and the interface of each argument of the
@@ -1456,11 +1477,12 @@ fn is_reference(names: &[String]) -> bool {
 
 /// Tells whether the load of the frame slot at `offset` by the handler
 /// names `names` pushes an address. The four bytes of an argument slot are
-/// the address of the variable of the caller when the argument is `ByRef`,
-/// and the lift does not know which arguments are, so an `ILdRf` of an
-/// argument stays an address.
-fn is_frame_reference(names: &[String], offset: i16) -> bool {
-    is_reference(names) || (offset > 8 && names.iter().any(|name| name == "ILdRf"))
+/// the address of the variable of the caller when the argument is `ByRef`.
+/// An `ILdRf` of an argument stays an address unless `values` holds its
+/// slot.
+fn is_frame_reference(names: &[String], offset: i16, values: &BTreeSet<i16>) -> bool {
+    is_reference(names)
+        || (offset > 8 && !values.contains(&offset) && names.iter().any(|name| name == "ILdRf"))
 }
 
 /// Gives the family of one name.
@@ -1944,6 +1966,9 @@ struct State {
     floats: Vec<u32>,
     /// The offset of the opcode after the last of those calls.
     resume: Option<u32>,
+    /// The argument slots that hold a value, and not the address of a
+    /// variable of the caller.
+    values: BTreeSet<i16>,
 }
 
 /// Reads the frame slots that an `FFree` opcode frees: one slot, or a 16-bit
@@ -2333,7 +2358,7 @@ pub fn lift(
     callees: &Callees,
     types: Option<&VbTypes>,
 ) -> Result<Vec<LiftedStmt>, LiftFault> {
-    run(listing, table, callees, types, &[], &mut Vec::new())
+    run(listing, table, callees, types, &[], &[], &mut Vec::new())
 }
 
 /// Lifts the listing of the method `method` of the object, as [`lift`]
@@ -2351,7 +2376,16 @@ pub fn lift_method(
     method: u16,
 ) -> Result<Vec<LiftedStmt>, LiftFault> {
     let arguments = callees.arguments_of(method);
-    run(listing, table, callees, types, &arguments, &mut Vec::new())
+    let values = callees.value_arguments_of(method);
+    run(
+        listing,
+        table,
+        callees,
+        types,
+        &arguments,
+        &values,
+        &mut Vec::new(),
+    )
 }
 
 /// Gives the calls of methods of `Me` that the lift of the listing of the
@@ -2366,25 +2400,33 @@ pub fn method_calls(
     method: u16,
 ) -> Vec<MethodCall> {
     let arguments = callees.arguments_of(method);
+    let values = callees.value_arguments_of(method);
     let mut calls = Vec::new();
-    let _ = run(listing, table, callees, types, &arguments, &mut calls);
+    let _ = run(
+        listing, table, callees, types, &arguments, &values, &mut calls,
+    );
     calls
 }
 
-/// The lift of [`lift`], with the interfaces of some argument slots, and
-/// each call of a method of `Me` recorded in `calls`.
+/// The lift of [`lift`], with the interfaces of some argument slots, the
+/// argument slots `values` that hold a value, and each call of a method of
+/// `Me` recorded in `calls`.
 fn run(
     listing: &PcodeListing,
     table: &PcodeTable,
     callees: &Callees,
     types: Option<&VbTypes>,
     arguments: &[(i16, String)],
+    values: &[i16],
     calls: &mut Vec<MethodCall>,
 ) -> Result<Vec<LiftedStmt>, LiftFault> {
     if !listing.end.is_complete() {
         return Err(LiftFault::NotDecoded(listing.end));
     }
-    let mut state = State::default();
+    let mut state = State {
+        values: values.iter().copied().collect(),
+        ..State::default()
+    };
     for (slot, interface) in arguments {
         state
             .bindings
@@ -2441,7 +2483,7 @@ fn run(
                 let value = state.load(offset16()?, is_word(names));
                 state.stack.push(Value {
                     bytes: load_bytes(names),
-                    address: is_frame_reference(names, offset16()?),
+                    address: is_frame_reference(names, offset16()?, &state.values),
                     ..value
                 });
                 None
@@ -4069,6 +4111,15 @@ dispid = 67
             render(&lift(&listing_addresses, &element_table, &declared, None).unwrap()),
             [
                 "       Call SetPixelV(local_70(0), global_3, 7)",
+                "       Exit Sub"
+            ]
+        );
+        // An argument that the method takes ByVal holds a value.
+        let by_value = declared.clone().with_value_argument(3, 0x0C);
+        assert_eq!(
+            render(&lift_method(&listing, &table, &by_value, None, 3).unwrap()),
+            [
+                "       Call SetPixelV(ByVal 5, local_88, ByVal local_64, ByVal arg_C)",
                 "       Exit Sub"
             ]
         );

@@ -99,6 +99,39 @@ fn argument_interface<'t>(pe: &PeImage<'_>, types: &'t VbTypes, side: Va) -> Opt
     types.interface_of_iid(&guid)
 }
 
+/// Adds to `callees` each argument that a public method of `object` takes
+/// `ByVal`, as its `FuncTypDesc` record names it, by its frame offset.
+fn with_value_arguments(callees: Callees, pe: &PeImage<'_>, object: &Object) -> Callees {
+    let Ok(private) = ObjectInfo::read(pe, object.lp_object_info)
+        .and_then(|info| PrivateObj::read(pe, info.lp_private_object))
+    else {
+        return callees;
+    };
+    let PrototypeList::Slots(slots) = FuncTypeWalk::read(pe, object, &private).signatures else {
+        return callees;
+    };
+    let mut callees = callees;
+    for slot in slots {
+        let ProcedureSignature::Prototype(prototype) = slot else {
+            continue;
+        };
+        let Some(method) = callees
+            .method(prototype.v_off & !1)
+            .map(|method| method.index)
+        else {
+            continue;
+        };
+        let mut frame = FIRST_ARGUMENT;
+        for argument in &prototype.arguments {
+            if !argument.entry.by_ref && !argument.entry.array {
+                callees = callees.with_value_argument(method, frame);
+            }
+            frame = frame.saturating_add(argument_bytes(&argument.entry));
+        }
+    }
+    callees
+}
+
 /// Adds to `callees` the interface of each argument of an external class of
 /// each public method of `object` that its `FuncTypDesc` record names.
 fn with_declared_arguments(
@@ -310,6 +343,7 @@ pub fn callees_of_project_named(
             Some(types) => with_declared_arguments(own.clone(), pe, object, types),
             None => own.clone(),
         };
+        callees = with_value_arguments(callees, pe, object);
         let listings = listings(pe, object, table);
         for (_, listing) in &listings {
             for index in string_indexes(listing, table) {
