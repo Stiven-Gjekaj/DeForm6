@@ -874,12 +874,20 @@ the text of a drop-down list, the version of the project, the global of a
 form that `NewIfNullAd` creates, and a long caption in the `.frx`. 28 of the
 41 pairs that start now give the same screen, pixel for pixel.
 
-**Next.** The run-time errors of the lift come first: a fixed-size array of
-a user type in a module, and the faults of `Transparency.exe` and the MCI
-sample. Then `List` and `ItemData` of a list, which the form stream holds as
-arrays. After that, the lift still gives names of offsets, not of
-variables, most variables are a `Variant`, and each statement stays in the
-form of `GoTo` and labels. The start check sees the first screen only.
+**The run-time errors, 2026-10-01.** Five more start checks found the
+faults that stopped the rebuilt programs, and each got a fix with its own
+test: the fixed-size arrays of a module and their records, the order of the
+bounds, `ByVal` and its type at a call of a `Declare`, the two names of a
+variable of a module, the type of a variable from its opcodes, a null
+string, a `Set` of an object, and `List` and `ItemData` of a list. 33 of the
+41 pairs now give the same screen, pixel for pixel, and no rebuilt program
+of the 8 others stops with an error. Four of them open at a place that
+Windows chooses, and two draw random values.
+
+**Next.** The lift still gives names of offsets, not of variables, most
+variables are a `Variant`, and each statement stays in the form of `GoTo`
+and labels. The icon of a form does not come back. The start check sees the
+first screen only.
 
 **The gate.** The recovered code compiles, which Phase 8 already measures, and
 the rebuilt program behaves the same as the original.
@@ -918,7 +926,7 @@ Phase 8  (exit met on the author's XP host; --verify-build waits)
           |
           +-- Phase 10 (exit met: names and widths, 680 of 680 bodies decode)
                  |
-                 +-- Phase 11 (part 2: 42 of 42 build, 28 of 41 start the same)
+                 +-- Phase 11 (part 2: 42 of 42 build, 33 of 41 start the same)
 
 Phase 12 runs beside 10 and 11.
 Phase 13 closes the milestone.

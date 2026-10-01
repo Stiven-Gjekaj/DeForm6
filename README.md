@@ -220,7 +220,7 @@ deform6 extract <path-to-exe> -o <output-directory> --vb-types derived/vb-types.
 
 The properties of a form need a property opcode table. The table built into
 DeForm6 names few properties. `derive-opcode-table` writes a table from the
-same copy of `VB6.OLB`. With it, `extract` gives 4769 of the 5113 property
+same copy of `VB6.OLB`. With it, `extract` gives 4788 of the 5113 property
 lines of the source `.frm` files of the corpus. The built-in table gives
 193.
 
@@ -286,10 +286,11 @@ with a `Dim` or a declaration for each variable that the lift names.
 `cargo run -p xtask -- export-lift-builds <dir>` writes each P-code program
 of the corpus this way, for a build with the Visual Basic 6 IDE on a
 Windows host. On the author's Windows XP host, VB6 builds 42 of the 42
-lifted projects. With a table from `derive-opcode-table`, 28 of the 41
+lifted projects. With a table from `derive-opcode-table`, 33 of the 41
 rebuilt programs that `runs.bat` starts show the same first screen as the
-original, pixel for pixel. Of the others, most stop with a run-time error
-of the lift, and two open at another place, which Windows chooses.
+original, pixel for pixel. Of the others, four open at another place, which
+Windows chooses, two draw random values, and two differ in an icon or in a
+detail of a control. None of them stops with a run-time error.
 `scripts/vm/README.md` gives the steps of such a run.
 `check-pcode-table` holds the statements against the source: 3106 of the 4093 string
 literals and names after a `.` of the source are in the lift. Most of the
@@ -497,7 +498,7 @@ list.
 | F-02 | Whether a second, healthy multi line `TextBox` sample would confirm the reconstructed `u8` count, or point to a different width. | The tool writes the `$` form with a `u32` count, proved exactly by one corpus file, for every string that must go to the `.frx`. |
 | F-03 | Whether the loader tolerates a missing `Attribute` line. No corpus file omits one, and no document states a requirement. | The tool writes all five `Attribute` lines, always. |
 | F-04 | Whether `.vbp` key order matters. Not documented, and the one independent parser the survey checked does not care. | The tool matches the order the IDE itself writes. |
-| F-05 | The `List` record layout for `ComboBox` and `ListBox`. No `ComboBox` or `ListBox` in the corpus stores its `List` property in a `.frx`, so the record layout one prior tool documents is unverified. | The tool reports a `List` property as present and not decoded, the same generic fallback it uses for any property with no proven table entry, rather than writing the unverified layout. |
+| F-05 | The `List` record layout for `ListBox`. One `ComboBox` of the corpus stores its `List` and `ItemData` in a `.frx`, and its record holds the same bytes as the form stream. No `ListBox` of the corpus stores a list. | The tool copies the bytes of the form stream into the `.frx` for both controls. The `.frx` of `PassGen.exe` equals its source, byte for byte. |
 | F-06 | A second record shape one prior tool documents for small to medium text, including an off by one bug that tool warns about. Unverified against this corpus. | The tool never writes this record shape. Every string routed to the `.frx` uses the one shape the corpus proves, the `$` form with a `u32` count. |
 | F-07 | How DeForm6 should choose a code page for a Japanese or Cyrillic Visual Basic 6 project. Every corpus file is Western. | The tool assumes a Western code page on every run, and replaces every character above U+00FF with a question mark, reporting that it did so, rather than guessing a different code page. |
 | F-08 | The `.ctx` record layout, assumed identical to `.frx` and not checked. This matters only when ActiveX control projects come into scope. | The tool does not read or write `.ctl` or `.ctx` files. ActiveX control projects are out of scope for this milestone, per `PROJECT.md`. |

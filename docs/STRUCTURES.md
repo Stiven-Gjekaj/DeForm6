@@ -448,9 +448,9 @@ GD `objArray` figure. All five agree field for field.)
 |---|---|---|---|---|
 | 0x00 | 4 | `lpObjectInfo` | VA of the ObjectInfo (§5.2). | **[C]** |
 | 0x04 | 4 | `dwReserved` | `-1` after compilation. | **[C]** |
-| 0x08 | 4 | `lpPublicBytes` | VA of an array of public-variable sizes. | **[C]** |
+| 0x08 | 4 | `lpPublicBytes` | VA of the table of the variables of the object, which names its fixed-size arrays (section 23d). | **[C]** |
 | 0x0C | 4 | `lpStaticBytes` | VA of an array of static-variable sizes. | **[C]** |
-| 0x10 | 4 | `lpModulePublic` | VA of the public variables in `.data`. | **[C]** |
+| 0x10 | 4 | `lpModulePublic` | VA of the variables of a standard module in `.data`; 0 for a form and a class (section 23d). | **[C]** |
 | 0x14 | 4 | `lpModuleStatic` | VA of the static variables in `.data`. | **[C]** |
 | 0x18 | 4 | `lpszObjectName` | **VA of the object name, NTS, ASCII.** This is the form / module / class name. | **[C]** |
 | 0x1C | 4 | `ProcCount` | Number of entries in `lpProcNamesArray` **and** in the parallel `FuncTypDesc` array (§6.3). Counts events, subs and functions together. | **[C]** |
@@ -1349,10 +1349,18 @@ at its opcode.
 `Line` holds `X1`, `Y1`, `X2` and `Y2` as whole twips in four bytes,
 although `VB6.OLB` declares each as a `Single`.
 
-A property get that takes an argument besides its result, such as
-`List(Index)` or `ItemData(Index)`, gives no row. Its declared type is the
-type of one item, and the stream holds the whole array: `List` of a combo
-box of `PassGen.exe` is `16 07 00 04 00`, then the items.
+A property get that takes an argument besides its result gives no row, with
+one exception. Its declared type is the type of one item, and the stream
+holds the whole array. `List` and `ItemData` of a `ComboBox` and a `ListBox`
+get the `List` payload: a `u16` count, a `u16`, and each item as a `u16`
+length and its text. `List` of the combo box `cmbPIM` of `PassGen.exe` is
+`16 07 00 04 00`, then the items, and `ItemData` holds each value as text.
+Their opcodes are the member ids less `0x10000`: 22 and 33 on a `ComboBox`,
+and 20 and 33 on a `ListBox`. The `.frx` record of each one holds the same
+bytes as the stream, so the `.frx` that `extract` writes for `PassGen.exe`
+equals `frmPassGen.frx` of the source, byte for byte, from the native and
+from the P-code build. The list boxes of drives, folders and files fill
+their lists at run time and get no row.
 
 Some opcodes have no member in `VB6.OLB`:
 
@@ -1373,15 +1381,23 @@ On a form, opcode 25 holds the scale mode alone, and opcode 0 and its flags
 word follow it: `19 01 00 63 00` is `ScaleMode = 1`, then flags `0x63`.
 
 The walk gives no `ScaleWidth` and no `ScaleHeight`: 254 lines of the
-source files. No member of `VB6.OLB` gives their opcode, and their place in
-the stream is not settled. `Shortcut` of a menu needs the key text, such as
-`^E`, which the writer does not give yet: 19 lines.
+source files. No member of `VB6.OLB` gives their opcode. A scale mode of 0,
+"User", holds four values after opcode 25, and each other scale mode holds
+none: Basic gives the scale of a form from its client area. Each of the 54
+corpus forms with a `ScaleWidth` line agrees: `ScaleWidth` and
+`ScaleHeight` are `ClientWidth` and `ClientHeight` for `ScaleMode` 1, and
+the same less a factor of 15 for `ScaleMode` 3, the pixels of the author's
+screen. `extract` does not write these lines, and Basic computes the same
+values when it loads the form. `Shortcut` of a menu is a key code that the
+writer gives as its text, such as `^E` for 5.
 
 With the table, each of the 86 corpus programs reads in strict mode, and
-`extract` gives 4769 of the 5113 property lines of the source `.frm` files
-of the 44 native corpus programs. The built-in table gives 193. Of the 22
-lines that differ, 18 name the `.frx` file after the form, and 4 are in
-`Blacklight.exe`, whose source changed after its build.
+`extract` gives 4788 of the 5113 property lines of the source `.frm` files
+of the 44 native corpus programs. The built-in table gives 193. Of the 24
+lines that differ, 19 name the `.frx` file after the form, 4 are in
+`Blacklight.exe`, whose source changed after its build, and one is a
+caption of 119 characters that the source holds inline and `extract` puts
+into the `.frx` (F-01 of the README).
 
 ### 8.6 Linking a control to its event handlers
 
@@ -2905,6 +2921,50 @@ of the source, 24 in all. `extract --lift` declares each one with its
 bounds, such as `Dim local_B0(0 To 255) As Long`. Before, it declared an
 empty dynamic array, and the first store into it stopped with error 9.
 
+**The order of the bounds.** A `SAFEARRAY` template holds the last
+dimension first. `Dim hData(0 To 3, 0 To 255) As Single` of the histogram
+viewers is the template with `(256, 0)` first and `(4, 0)` after it.
+`extract --lift` writes the bounds in the order of the source.
+
+**The variables of an object.** `Object.lpPublicBytes` (section 5.1) is the
+address of a table. Its first word gives the bytes of the table; the
+meaning of the second word is not settled. A header of 12 bytes comes first:
+`5c 00 78 00 02 00 02 00 00 00 00 00` in the module of `Physics_Demo.exe`,
+and `0c 00 88 00 ...` with no entry in its form. An entry is the offset of
+a variable and a kind whose low byte is 5, and a `SAFEARRAY` template
+follows 16 bytes after the start of the entry, as in the frame of a
+procedure. An element can be a record of a user type: its template has no
+`FADF_HAVEVARTYPE`, the features are `0x12`, and no `VARTYPE` follows the
+bounds. `Public StarArray(0 To 500) As Star` of `Physics_Demo.exe` is the
+entry at the offset `0x48`, with 501 records of 16 bytes from 0. In the 42
+P-code programs, these entries equal the fixed-size arrays of the
+declarations sections of the source, 10 in all.
+
+A body reads a field of an element as `FMemLdRf` of the array in `Me`,
+then `Ary1LdPr` or `AryLdPr`, then a load or a store at the offset of the
+field, such as `MemLdFPR4 04 00`. `extract --lift` gives a record a `Type`
+with a member `field_<offset>` for each field that the bodies use and a
+`Byte` array for each gap. The two types of `Physics_Demo.exe` hold the
+widths of `Star` and `Bullet` in the source.
+
+`Object.lpModulePublic` is the address of the variables of a standard
+module. A body of the module names its variable at the offset `X` as a
+field of `Me`, and another object names it by the address
+`lpModulePublic + X`. `GameActive` of `Physics_Demo.exe` is the field
+`0x60` in its module and the address `0x41307C` in its form, and
+`lpModulePublic` is `0x41301C`. Each of the 8 standard modules of the
+P-code corpus gives an address, and each form and class gives 0.
+`extract --lift` names a variable of a module by its address in the module
+too.
+
+**The type of a variable.** The opcodes that read and write a variable
+tell its width: `I2` is an `Integer` or a `Boolean`, `UI1` a `Byte`, `FPR4`
+a `Single`, and `FPR8` a `Double`. One handler copies the four bytes of
+`I4`, `R4`, `Ad` and `Str`, so a copy of four bytes alone gives no type.
+When each access of a variable of a module or a field agrees,
+`extract --lift` declares it with that type. In the 42 P-code programs, 11
+variables get a type, and each one has that width in the source.
+
 **An element of an array.** `AryLdPr` gives the address of an element of
 an array of more than one dimension, and `MemLdUI1` or `MemStUI1` at the
 field offset 0 reads or writes it. The lift writes the element, such as
@@ -2922,6 +2982,33 @@ each program holds the same count. Without `New`, the local stays
 
 **The length of a control block.** See section 8.3: `Length` holds only
 its low 16 bits.
+
+**A call of a `Declare`.** The lift declares each argument of a `Declare`
+`ByRef As Any`, because the file holds no type of an argument. A value
+that the original pushed then needs `ByVal` at the call. These opcodes
+push the address of a variable: `FLdRfVar`, `MemLdRf`, `FMemLdRf`,
+`ImpAdLdRf`, `Ary1LdRf`, `AryLdRf` and the `PopTmpLdAd` family. One handler
+serves `FLdI4` and `ILdRf`: it pushes the four bytes of a slot. On a local
+it is a value. On an argument it is the address of the variable of the
+caller when the argument is `ByRef`, and the value when the argument is
+`ByVal`, which the `FuncTypDesc` record of a public method gives. Each
+other value gets `ByVal`, with `CLng` for four bytes, and `CStr` for a
+string that `CStr2Ansi` copied into a temporary: a `Variant` that a call
+passes `ByVal As Any` is not the value that the original pushed. In the 42
+P-code programs, each of the 385 `Declare` calls passes each argument as
+the `Declare` of the source does.
+
+**A null string.** Basic pushes `vbNullString` as the constant 0. A 0 that
+a conversion from `String` takes, such as `CVarStr`, is `vbNullString`, and
+the server name of `CreateObject`, its optional last argument, is left out
+when it is 0. With a 0, `CreateObject` looks for a server named "0" and
+fails with error 462, and `LoadPicture` looks for a file named "0".
+
+**An object.** `FStAd` stores an object, as `FStAdFunc` does, and
+`CAdVar` takes the object out of a `Variant`. Both need `Set`, and so does
+the `Variant` result of `CreateObject` and `GetObject`. A plain assignment
+of an object reads its default member, and `WScript.Shell` has none, so
+it fails with error 438.
 
 ---
 

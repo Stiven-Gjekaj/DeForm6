@@ -16,11 +16,12 @@ does not do. A change that no release holds yet goes under one
   its declared type. `VB6.OLB` declares an enumeration and a number both as
   a `short`, so the tool names the width of each such property that the
   corpus measured, and gives no row for the others. A property that takes
-  an index, such as `List(Index)`, gives no row. A timer's `Left` and `Top`
-  and a form's `LockControls` and `NegotiateMenus` have no member in
-  `VB6.OLB`, and the tool gives their rows.
+  an index gives no row, apart from `List` and `ItemData` of a combo box and
+  a list box. A timer's `Left` and `Top`, a form's `LockControls` and
+  `NegotiateMenus`, and a menu's `Shortcut` have no member in `VB6.OLB`,
+  and the tool gives their rows.
 - `extract --opcode-table <table>` reads the forms with the table. With the
-  table, `extract` gives 4769 of the 5113 property lines of the source
+  table, `extract` gives 4788 of the 5113 property lines of the source
   `.frm` files of the 44 native corpus programs, and each of the 86 corpus
   programs reads in strict mode. The built-in table gives 193.
   `export-lift-builds` reads the table from `derived/opcode-table.toml`, or
@@ -38,13 +39,37 @@ does not do. A change that no release holds yet goes under one
 - A string too long to write inline goes into the `.frx` as a long string
   record. The `.frx` that DeForm6 writes for `Gradient.exe` equals the
   `Gradient.frx` of its source, byte for byte.
+- `List` and `ItemData` of a combo box and a list box come back. The form
+  stream holds the same bytes as the `.frx` record, and the `.frx` that
+  `extract` writes for `PassGen.exe` equals `frmPassGen.frx` of the source,
+  byte for byte, from the native and from the P-code build. `Shortcut` of a
+  menu comes back as its key text, such as `^E`.
+- The lift declares a fixed-size array of the variables of an object, which
+  `Object.lpPublicBytes` names, with its bounds. An array of records gets a
+  `Type` with a member for each field that the bodies use. In the 42 P-code
+  programs, these arrays equal the 10 of the source. The bounds of an array
+  of more than one dimension come in the order of the source.
+- The lift names a variable of a standard module by its address in the
+  module too, from `Object.lpModulePublic`. The module and the other objects
+  named the same variable apart, and `Physics_Demo.exe` drew no star.
+- The lift declares a variable of a module and a field with the type that
+  each of its opcodes gives: `Integer`, `Byte`, `Single` or `Double`. In the
+  42 P-code programs, 11 variables get a type, and each has that width in
+  the source.
+- A call of a `Declare` passes each value `ByVal`, with `CLng` or `CStr`,
+  and each address `ByRef`. In the 42 P-code programs, each of the 385
+  calls passes each argument as the `Declare` of the source does.
+- The lift writes `vbNullString` where Basic pushes a null string, leaves
+  out the null server name of `CreateObject`, and stores an object with
+  `Set`.
 - `vm.py` parks the mouse over the task bar while it takes pictures. The
   pointer drifted over the windows, and 9 of 41 pairs of one run differed
   in its box only.
 - The start check with all of this, on the author's Windows XP host: VB6
-  builds 42 of the 42 lifted projects, and 28 of the 41 pairs that
+  builds 42 of the 42 lifted projects, and 33 of the 41 pairs that
   `runs.bat` starts show the same first screen, pixel for pixel. The
-  release 3.0.0 gave 16. The run was before the long string record.
+  release 3.0.0 gave 16. Each rebuilt program of the 8 other pairs shows
+  its window with no run-time error.
 
 ### Faults of 3.0.0
 
@@ -66,17 +91,18 @@ does not do. A change that no release holds yet goes under one
 
 ### What stays open
 
-- `ScaleWidth` and `ScaleHeight` (254 lines of the source files), `List`
-  and `ItemData` of a list, and `Shortcut` of a menu (19 lines) do not come
-  back. A drop-down list combo box with no `List` refuses its text at run
-  time, as in `PassGen.exe`.
-- A fixed-size array of a user type in a module, such as
-  `StarArray(0 To 500) As Star`, is a `Variant` in the lift, and the rebuilt
-  `Physics_Demo.exe` stops with error 13. The rebuilt `Transparency.exe`
-  stops with error 9, and the rebuilt MCI sample shows no window; neither
-  cause is found yet.
-- A form with `StartUpPosition = 3`, "Windows Default", opens at a place
-  that Windows chooses at each start, so its pair of pictures differs.
+- `ScaleWidth` and `ScaleHeight` (254 lines of the source files) do not
+  come back. Basic computes them from the client area when it loads a form
+  with a scale mode other than 0, and each of the 54 corpus forms with the
+  lines agrees, so the program is the same.
+- The icon of a form does not come back. The form stream does not hold it,
+  so the rebuilt `Transparency.exe` shows the default icon.
+- Of the 8 pairs that differ, 4 are forms with `StartUpPosition = 3`,
+  "Windows Default", which open at a place that Windows chooses at each
+  start. Two programs draw random values: the stars of `Physics_Demo.exe`
+  and the identifier of `UUID2.exe`. The map editor differs in the size of
+  the box of a scroll bar and in one picture box, and `Transparency.exe` in
+  its icon.
 
 ### What this does not do
 
