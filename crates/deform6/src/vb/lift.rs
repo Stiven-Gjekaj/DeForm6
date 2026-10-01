@@ -1570,7 +1570,8 @@ fn family_of(name: &str) -> Option<Family> {
         "ImpAdCallAd" | "ImpAdCallI2" | "ImpAdCallI4" | "ImpAdCallStr" | "ImpAdCallUI1" => {
             Family::ImportCall { result: true }
         }
-        "FStAdFunc" => Family::ObjectStore,
+        "FStAdFunc" | "FStAd" => Family::ObjectStore,
+        "CAdVar" => Family::Convert(None),
         "ImpAdLdRf" | "ImpAdLdRfVar" => Family::GlobalLoad,
         "ImpAdLdPr" => Family::GlobalObjectRegister,
         "MemLdRf" | "MemLdRfVar" => Family::FieldLoad,
@@ -4255,6 +4256,31 @@ dispid = 67
                 "       Call VBA.Shell(\"WScript.Shell\", 0)",
                 "       Exit Sub"
             ]
+        );
+    }
+
+    /// `Set thisObject = CreateObject("WScript.Shell")` of `PassGen.exe`:
+    /// the `Variant` result is at `local_AC`, `CAdVar` takes the object out
+    /// of it, and `FStAd` stores the object. Without `Set`, Basic reads the
+    /// default member of the object, and the rebuilt program stopped with
+    /// error 438.
+    #[test]
+    fn a_store_of_an_object_from_a_variant_is_a_set() {
+        let with_object = format!(
+            "{TABLE}[primary.E1]\nwidth = 0\nnames = [\"CAdVar\"]\n\
+             [primary.E2]\nwidth = 2\nnames = [\"FStAd\"]\n"
+        );
+        let table = PcodeTable::parse(with_object.as_bytes()).unwrap();
+        let body = [
+            0x15, 0x54, 0xFF, // the address of local_AC
+            0xE1, // the object of the Variant
+            0xE2, 0x64, 0xFF, // into local_9C
+            0x0C,
+        ];
+        let listing = disassemble(&Region::new(&body, Off::new(0)), &table);
+        assert_eq!(
+            render(&lift(&listing, &table, &Callees::default(), None).unwrap()),
+            ["       Set local_9C = local_AC", "       Exit Sub"]
         );
     }
 
