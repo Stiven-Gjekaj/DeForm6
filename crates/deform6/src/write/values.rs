@@ -402,7 +402,7 @@ pub fn format_value(
             FormattedValue::Multi(font_lines(value).into_iter().collect()),
             None,
         ),
-        PropertyValue::Blob { .. } => (FormattedValue::Resource, None),
+        PropertyValue::Blob { .. } | PropertyValue::List { .. } => (FormattedValue::Resource, None),
         PropertyValue::BlobUnreadable { offset, .. } => {
             let item = ReportItem {
                 path: String::new(),

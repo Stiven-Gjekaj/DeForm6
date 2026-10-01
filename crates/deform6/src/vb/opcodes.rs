@@ -79,20 +79,25 @@ pub enum PayloadType {
     /// 8 bytes, or 16 bytes when the first `i16` is `-32768`. The payload's
     /// own first two bytes decide which.
     Position,
+    /// The items of `List` or `ItemData`: a `u16` count, a `u16`, and each
+    /// item as a `u16` length and its text. The `.frx` record of the
+    /// property holds the same bytes. The payload's own lengths decide how
+    /// far it runs.
+    List,
 }
 
 impl PayloadType {
     /// Gives the fixed byte width of this payload type, or `None` when the
     /// payload's own bytes decide the width, which is the case for
-    /// [`PayloadType::Text`], [`PayloadType::Picture`], [`PayloadType::Font`]
-    /// and [`PayloadType::Position`].
+    /// [`PayloadType::Text`], [`PayloadType::Picture`], [`PayloadType::Font`],
+    /// [`PayloadType::Position`] and [`PayloadType::List`].
     #[must_use]
     pub const fn fixed_width(self) -> Option<u32> {
         match self {
             Self::Byte | Self::Boolean => Some(1),
             Self::Integer => Some(2),
             Self::Long | Self::Single => Some(4),
-            Self::Text | Self::Picture | Self::Font | Self::Position => None,
+            Self::Text | Self::Picture | Self::Font | Self::Position | Self::List => None,
         }
     }
 }

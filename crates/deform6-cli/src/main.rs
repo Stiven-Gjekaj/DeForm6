@@ -1441,6 +1441,14 @@ fn print_property(indent: &str, property: &PropertyValue) {
                 "{indent}  {name}: resource blob at offset {offset:#x}: present and unreadable."
             );
         }
+        PropertyValue::List {
+            name,
+            offset,
+            len,
+            count,
+        } => {
+            println!("{indent}  {name}: {count} item(s), {len} byte(s) at offset {offset:#x}");
+        }
         PropertyValue::Undecoded {
             opcode,
             offset,

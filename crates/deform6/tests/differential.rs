@@ -963,6 +963,7 @@ fn recovered_property_name(value: &PropertyValue) -> Option<&str> {
         | PropertyValue::Position { name, .. }
         | PropertyValue::Font { name, .. }
         | PropertyValue::Blob { name, .. }
+        | PropertyValue::List { name, .. }
         | PropertyValue::BlobUnreadable { name, .. } => Some(name.as_str()),
         PropertyValue::Undecoded { .. } => None,
     }
@@ -1009,6 +1010,7 @@ fn recovered_property_text(value: &PropertyValue) -> Option<String> {
         PropertyValue::Position { .. }
         | PropertyValue::Font { .. }
         | PropertyValue::Blob { .. }
+        | PropertyValue::List { .. }
         | PropertyValue::BlobUnreadable { .. }
         | PropertyValue::Undecoded { .. } => None,
     }

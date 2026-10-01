@@ -84,6 +84,7 @@ const fn payload_word(payload: PayloadType) -> &'static str {
         PayloadType::Picture => "Picture",
         PayloadType::Font => "Font",
         PayloadType::Position => "Position",
+        PayloadType::List => "List",
     }
 }
 
@@ -140,6 +141,10 @@ const CT_VSCROLLBAR: u8 = 10;
 
 /// The `cType` of `CheckBox`.
 const CT_CHECKBOX: u8 = 5;
+
+/// The `cType` of `ComboBox` and `ListBox`.
+const CT_COMBOBOX: u8 = 7;
+const CT_LISTBOX: u8 = 8;
 
 /// The properties of the type `Integer` that the form stream holds in one
 /// byte: each is an enumeration. `VB6.OLB` declares each as a `short`, as it
@@ -280,6 +285,26 @@ fn takes_an_index(function: &Function) -> bool {
         .any(|parameter| parameter.flags & PARAMFLAG_FRETVAL == 0)
 }
 
+/// The controls whose `List` and `ItemData` the form stream holds: a
+/// `ComboBox` and a `ListBox`. The list boxes of drives, folders and files
+/// fill their lists at run time.
+const LIST_CONTROLS: &[u8] = &[CT_COMBOBOX, CT_LISTBOX];
+
+/// Gives the opcode of the property get `function` of the control
+/// `control_type` when the form stream holds its items: `List` and
+/// `ItemData` of a [`LIST_CONTROLS`] control. The corpus measured opcodes
+/// 22 and 33 on a `ComboBox`, which are its member ids less 0x10000.
+fn list_row(control_type: u8, function: &Function) -> Option<u8> {
+    let name = function.name.as_deref()?;
+    if !LIST_CONTROLS.contains(&control_type) || !matches!(name, "List" | "ItemData") {
+        return None;
+    }
+    function
+        .member_id
+        .checked_sub(FIRST_PROPERTY_ID)
+        .and_then(|opcode| u8::try_from(opcode).ok())
+}
+
 /// Gives a row `(control_type, opcode, payload, name)` for each property of
 /// each control interface of `infos` that [`payload`] gives a payload for.
 fn table_rows(infos: &[TypeInfo]) -> Vec<(u8, u8, PayloadType, String)> {
@@ -293,7 +318,14 @@ fn table_rows(infos: &[TypeInfo]) -> Vec<(u8, u8, PayloadType, String)> {
             continue;
         };
         for function in &info.functions {
-            if function.invoke_kind != PROPERTY_GET || takes_an_index(function) {
+            if function.invoke_kind != PROPERTY_GET {
+                continue;
+            }
+            if takes_an_index(function) {
+                if let (Some(row), Some(name)) = (list_row(control_type, function), &function.name)
+                {
+                    rows.push((control_type, row, PayloadType::List, name.clone()));
+                }
                 continue;
             }
             let Some(opcode) = function
@@ -466,21 +498,44 @@ mod tests {
     }
 
     #[test]
-    fn a_property_that_takes_an_index_gives_no_row() {
-        let mut list = get("List", 22, 8);
-        list.parameters.insert(
-            0,
-            Parameter {
-                name: Some("Index".to_owned()),
-                vt: 2,
-                pointee: None,
-                flags: 1,
-                user_type: None,
-            },
-        );
-        let rows = table_rows(&[interface("_ComboBox", vec![get("Text", 12, 8), list])]);
+    fn a_property_that_takes_an_index_gives_a_row_only_for_the_items_of_a_list() {
+        let indexed = |name: &str, opcode: u32, vt: u16| {
+            let mut function = get(name, opcode, vt);
+            function.parameters.insert(
+                0,
+                Parameter {
+                    name: Some("Index".to_owned()),
+                    vt: 2,
+                    pointee: None,
+                    flags: 1,
+                    user_type: None,
+                },
+            );
+            function
+        };
+        let rows = table_rows(&[
+            interface(
+                "_ComboBox",
+                vec![
+                    get("Text", 12, 8),
+                    indexed("List", 22, 8),
+                    indexed("ItemData", 33, 3),
+                ],
+            ),
+            interface(
+                "_ListBox",
+                vec![indexed("List", 20, 8), indexed("Selected", 30, 11)],
+            ),
+            interface("_DriveListBox", vec![indexed("List", 15, 8)]),
+        ]);
         assert_eq!(row(&rows, 7, 12), Some(PayloadType::Text));
-        assert_eq!(row(&rows, 7, 22), None);
+        assert_eq!(row(&rows, 7, 22), Some(PayloadType::List));
+        assert_eq!(row(&rows, 7, 33), Some(PayloadType::List));
+        assert_eq!(row(&rows, 8, 20), Some(PayloadType::List));
+        // `Selected` is no list of items, and a drive list box fills its
+        // list at run time.
+        assert_eq!(row(&rows, 8, 30), None);
+        assert_eq!(row(&rows, 16, 15), None);
     }
 
     #[test]
@@ -601,5 +656,6 @@ mod tests {
         assert_eq!(payload_word(PayloadType::Picture), "Picture");
         assert_eq!(payload_word(PayloadType::Font), "Font");
         assert_eq!(payload_word(PayloadType::Position), "Position");
+        assert_eq!(payload_word(PayloadType::List), "List");
     }
 }

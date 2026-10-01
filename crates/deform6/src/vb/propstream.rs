@@ -142,6 +142,21 @@ pub enum PropertyValue {
         /// phase 4 writer would place it in the generated `.frx` file.
         frx_offset: u32,
     },
+    /// The items of `List` or `ItemData` of a `ComboBox` or a `ListBox`.
+    /// The `.frx` record of the property holds the same bytes as the
+    /// stream, so this value names them in the file and does not copy them.
+    List {
+        /// The property this opcode names.
+        name: String,
+        /// The absolute file offset of the first byte of the payload: its
+        /// count of items.
+        offset: u32,
+        /// The bytes of the payload, from its count to the end of its last
+        /// item.
+        len: u32,
+        /// The count of items.
+        count: u16,
+    },
     /// A resource blob this repository could not read: present in the
     /// file, but its own bound check refused.
     ///
@@ -211,6 +226,7 @@ impl PropertyValue {
             | Self::Position { .. }
             | Self::Font { .. }
             | Self::Blob { .. }
+            | Self::List { .. }
             | Self::BlobUnreadable { .. } => None,
         }
     }
@@ -238,6 +254,31 @@ pub struct PropertyStream {
 fn ends_within(payload_start: u32, width: u32, block_end: u32) -> Option<u32> {
     let end = payload_start.checked_add(width)?;
     if end > block_end { None } else { Some(end) }
+}
+
+/// Reads the `List` payload at `payload_start`: a `u16` count, a `u16`, and
+/// each item as a `u16` length and its bytes. Gives the count and the bytes
+/// of the payload, or the defect of the first length that runs past
+/// `block_end`.
+fn read_list(block: &Region<'_>, payload_start: u32, block_end: u32) -> Result<(u16, u32), Defect> {
+    let Some(mut at) = ends_within(payload_start, 4, block_end) else {
+        return Err(overrun_defect(block, payload_start, 4, block_end));
+    };
+    let count = block
+        .u16_le(Off::new(payload_start))
+        .ok_or_else(|| overrun_defect(block, payload_start, 4, block_end))?;
+    for _ in 0..count {
+        let Some(text) = ends_within(at, 2, block_end) else {
+            return Err(overrun_defect(block, at, 2, block_end));
+        };
+        let len = block
+            .u16_le(Off::new(at))
+            .ok_or_else(|| overrun_defect(block, at, 2, block_end))?;
+        at = ends_within(text, u32::from(len), block_end).ok_or_else(|| {
+            overrun_defect(block, at, u32::from(len).saturating_add(2), block_end)
+        })?;
+    }
+    Ok((count, at.saturating_sub(payload_start)))
 }
 
 /// Builds the [`Defect`] for a payload that would end past the block's own
@@ -325,9 +366,10 @@ fn read_fixed(
         | PayloadType::Text
         | PayloadType::Picture
         | PayloadType::Font
-        | PayloadType::Position => {
+        | PayloadType::Position
+        | PayloadType::List => {
             // `Single` is the only remaining fixed-width shape; the other
-            // four are variable-width and never reach this function.
+            // five are variable-width and never reach this function.
             let raw = block.u32_le(Off::new(payload_start)).unwrap_or(0);
             PropertyValue::Single {
                 name,
@@ -922,6 +964,27 @@ pub fn walk_properties(
                         },
                     }
                 }
+                PayloadType::List => match read_list(block, payload_start, block_end) {
+                    Ok((count, len)) => {
+                        let Some(new_cursor) = payload_start.checked_add(len) else {
+                            break;
+                        };
+                        properties.push(PropertyValue::List {
+                            name: entry.name.clone(),
+                            offset: block
+                                .file_offset(Off::new(payload_start))
+                                .map_or(0, Off::get),
+                            len,
+                            count,
+                        });
+                        cursor = new_cursor;
+                    }
+                    Err(defect) => {
+                        defects.push(defect);
+                        cursor = block_end;
+                        break;
+                    }
+                },
                 PayloadType::Byte
                 | PayloadType::Boolean
                 | PayloadType::Integer
@@ -1481,6 +1544,54 @@ mod tests {
     }
 
     // --- Task 2: the position block and its escape at -32768 -------------
+
+    /// A list payload is a count, a `u16`, and each item as a length and its
+    /// text. The walk names its bytes in the file and goes on after them.
+    #[test]
+    fn a_list_payload_runs_to_the_end_of_its_last_item() {
+        let table = OpcodeTable::parse(
+            b"[7]\n22 = { name = \"List\", payload = \"List\" }\n\
+              19 = { name = \"TabIndex\", payload = \"Integer\" }\n",
+        )
+        .unwrap();
+        let list = [2, 0, 2, 0, 1, 0, b'a', 2, 0, b'b', b'c'];
+        let mut body = vec![22];
+        body.extend_from_slice(&list);
+        body.extend_from_slice(&[19, 3, 0]);
+        let bytes = control_block("Cmb", 7, &body);
+        let region = Region::new(&bytes, Off::new(0));
+        let (header, _) = read_control_header(&region);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
+        assert!(defects.is_empty(), "{defects:?}");
+        let start = bytes.len() - body.len() + 1;
+        assert_eq!(
+            stream.properties,
+            [
+                PropertyValue::List {
+                    name: "List".to_owned(),
+                    offset: u32::try_from(start).unwrap(),
+                    len: 11,
+                    count: 2,
+                },
+                PropertyValue::Integer {
+                    name: "TabIndex".to_owned(),
+                    value: 3,
+                },
+            ]
+        );
+        // A third item that the block does not hold.
+        let mut short = vec![22, 3, 0, 2, 0];
+        short.extend_from_slice(&list[4..]);
+        let bytes = control_block("Cmb", 7, &short);
+        let region = Region::new(&bytes, Off::new(0));
+        let (header, _) = read_control_header(&region);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
+        assert!(stream.properties.is_empty());
+        assert!(matches!(
+            defects.first().map(|defect| &defect.kind),
+            Some(DefectKind::RunsPastEnd { .. })
+        ));
+    }
 
     #[test]
     fn read_position_block_with_a_first_value_of_100_consumes_8_bytes() {
