@@ -165,6 +165,8 @@ enum PendingLine {
     /// into the `.frx` as a long string record, `docs/FILE-FORMATS.md`
     /// section 4.4.
     PendingText(Vec<u8>),
+    /// A picture set to none: [`EMPTY_PICTURE_RECORD`] in the `.frx`.
+    PendingEmptyPicture,
 }
 
 /// One property line, ready to write: every [`PendingLine::PendingBlob`]
@@ -315,6 +317,9 @@ fn collect_pending_lines(
                         },
                     ));
                 }
+                PropertyValue::PictureNone { name } => {
+                    out.push((name.clone(), PendingLine::PendingEmptyPicture));
+                }
                 PropertyValue::List {
                     name, offset, len, ..
                 } => {
@@ -358,22 +363,8 @@ fn collect_pending_lines(
 }
 
 /// Advances `blob_cursor` and appends [`EMPTY_PICTURE_RECORD`] to `frx`,
-/// for a picture property whose file marks it present but whose blob is
-/// absent.
-///
-/// `crate::vb::propstream::walk_properties` does not carry this case
-/// forward as a [`PropertyValue`] today: an absent blob (`0xFFFFFFFF`)
-/// produces no property at all, the same as a property never touched, per
-/// plan 03-15's own design. This function exists and is tested directly
-/// against the twelve corpus-measured bytes so the writer already knows
-/// the shape the day the read side is widened to carry the fact forward;
-/// it has no production call site yet.
-#[allow(
-    dead_code,
-    reason = "no PropertyValue this repository builds carries a present-but-absent blob yet; \
-              this function is tested directly against the corpus-measured bytes so the \
-              writer already knows the shape the day propstream.rs is widened to carry it"
-)]
+/// for a picture property set to none, which
+/// [`PropertyValue::PictureNone`] names.
 fn write_empty_picture_record(
     blob_cursor: &mut BlobCursor,
     frx: &mut Vec<u8>,
@@ -647,6 +638,14 @@ fn write_model_control_block(
                     frx_file_name,
                     frx_offset,
                     true,
+                ))
+            }
+            PendingLine::PendingEmptyPicture => {
+                let frx_offset = write_empty_picture_record(blob_cursor, frx)?;
+                ResolvedLine::Plain(values::format_resource_reference(
+                    frx_file_name,
+                    frx_offset,
+                    false,
                 ))
             }
             PendingLine::PendingBlob {

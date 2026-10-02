@@ -340,6 +340,39 @@ fn a_form_with_no_icon_opcode_gives_a_picture_set_to_none() {
     }
 }
 
+/// The `.frx` record of a picture set to none is an empty picture of 12
+/// bytes. `frmTransparency.frx` of the source begins with the one of its
+/// form `Icon`, and the `.frx` that DeForm6 writes begins with the same 12
+/// bytes. The table of the test names each opcode of the form.
+#[test]
+fn the_icon_set_to_none_of_transparency_gives_the_frx_of_its_source() {
+    let root = corpus_root();
+    let source = std::fs::read(root.join("vb6-code/Transparency-2D/frmTransparency.frx"))
+        .expect("reading frmTransparency.frx");
+    let data = std::fs::read(root.join("vb6-code/Transparency-2D/Transparency.exe"))
+        .expect("reading Transparency.exe");
+    let table = OpcodeTable::parse(
+        b"[13]\n\
+          1 = { name = \"Caption\", payload = \"Text\" }\n\
+          3 = { name = \"BackColor\", payload = \"Long\" }\n\
+          35 = { name = \"Icon\", payload = \"Picture\" }\n\
+          36 = { name = \"LinkTopic\", payload = \"Text\" }\n\
+          65 = { name = \"Appearance\", payload = \"Byte\" }\n\
+          70 = { name = \"StartUpPosition\", payload = \"Byte\" }\n",
+    )
+    .expect("the table of the test parses");
+    let report = deform6::inspect(&data, &table, deform6::journal::Mode::Strict)
+        .expect("Transparency.exe reads");
+    let written = deform6::write::project(&report, &data, deform6::journal::Mode::Strict)
+        .expect("Transparency.exe writes");
+    let frx = written
+        .files
+        .iter()
+        .find(|file| file.name.ends_with(".frx"))
+        .expect("a .frx is written");
+    assert_eq!(frx.bytes.get(..12), source.get(..12));
+}
+
 /// The corpus executables that hold a version resource.
 const EXPECTED_VERSIONED_COUNT: usize = 44;
 
