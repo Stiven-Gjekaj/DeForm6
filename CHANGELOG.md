@@ -78,8 +78,6 @@ does not do. A change that no release holds yet goes under one
   locals get a type. A local that only the copy of four bytes writes is a
   `Long`, and 646 more locals get that type. A local whose address a call
   takes, and a local with a member, stay a `Variant`.
-- Phase 11 closes. `docs/ROADMAP.md` gives what its gate measured and what
-  stays open.
 - `vm.py` parks the mouse over the task bar while it takes pictures. The
   pointer drifted over the windows, and 9 of 41 pairs of one run differed
   in its box only.
