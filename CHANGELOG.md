@@ -62,14 +62,30 @@ does not do. A change that no release holds yet goes under one
 - The lift writes `vbNullString` where Basic pushes a null string, leaves
   out the null server name of `CreateObject`, and stores an object with
   `Set`.
+- A form whose stream holds no icon opcode has `Icon` set to none. The
+  writer gives it the empty picture record in the `.frx`, and the `.frx`
+  of `Transparency.exe` starts with the 12 bytes of its source.
+- `extract --lift` writes the branches of a body as blocks: `If`, `Else`
+  and `ElseIf`, `Do While` and `Loop`, `Do` and `Loop While` or
+  `Loop Until`, and `For` and `Next`. A branch out of a loop is `Exit For`
+  or `Exit Do`, and a branch to `Exit Sub` is `Exit Sub`. A branch that
+  fits no block stays a `GoTo` with its label. In the 42 P-code programs,
+  1652 `GoTo` statements become 2, and the labels that stay are those of
+  `On Error` and `Resume`, and the targets of the 2 `GoTo` statements.
+  `disasm --lift` still prints each branch as a `GoTo`.
+- The lift declares a local with the type that each of its opcodes gives,
+  as it does for a variable of a module. In the 42 P-code programs, 222
+  locals get a type. A local whose address a call takes stays a `Variant`.
 - `vm.py` parks the mouse over the task bar while it takes pictures. The
   pointer drifted over the windows, and 9 of 41 pairs of one run differed
   in its box only.
 - The start check with all of this, on the author's Windows XP host: VB6
   builds 42 of the 42 lifted projects, and 33 of the 41 pairs that
-  `runs.bat` starts show the same first screen, pixel for pixel. The
-  release 3.0.0 gave 16. Each rebuilt program of the 8 other pairs shows
-  its window with no run-time error.
+  `runs.bat` starts show the same first screen, pixel for pixel. The run
+  before the local types gave 34. In the last run, the text cursor of
+  `ASCII Translator` was on in one picture and off in the other, a
+  difference of 13 pixels. The release 3.0.0 gave 16. Each rebuilt program
+  of the other pairs shows its window with no run-time error.
 
 ### Faults of 3.0.0
 
@@ -95,14 +111,12 @@ does not do. A change that no release holds yet goes under one
   come back. Basic computes them from the client area when it loads a form
   with a scale mode other than 0, and each of the 54 corpus forms with the
   lines agrees, so the program is the same.
-- The icon of a form does not come back. The form stream does not hold it,
-  so the rebuilt `Transparency.exe` shows the default icon.
-- Of the 8 pairs that differ, 4 are forms with `StartUpPosition = 3`,
-  "Windows Default", which open at a place that Windows chooses at each
-  start. Two programs draw random values: the stars of `Physics_Demo.exe`
+- Of the 8 pairs that differ in the last run, 4 are forms with
+  `StartUpPosition = 3`, "Windows Default", which open at a place that
+  Windows chooses at each start. Two programs draw random values: the stars of `Physics_Demo.exe`
   and the identifier of `UUID2.exe`. The map editor differs in the size of
-  the box of a scroll bar and in one picture box, and `Transparency.exe` in
-  its icon.
+  the box of a scroll bar and in one picture box, and `ASCII Translator`
+  in the blink of its text cursor.
 
 ### What this does not do
 

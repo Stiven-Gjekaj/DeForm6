@@ -282,15 +282,18 @@ deform6 extract <path-to-exe> -o <output-directory> --pcode-table derived/pcode-
 ```
 
 With `--lift`, `extract` writes the lift of each procedure into its body,
-with a `Dim` or a declaration for each variable that the lift names.
+with a `Dim` or a declaration for each variable that the lift names. It
+writes each branch that fits a block as that block, such as `If`, `Else`,
+`Do While`, `Loop While`, `For` and `Exit For`, and each other branch as a
+`GoTo` and a label. In the P-code corpus, 2 `GoTo` statements stay.
 `cargo run -p xtask -- export-lift-builds <dir>` writes each P-code program
 of the corpus this way, for a build with the Visual Basic 6 IDE on a
 Windows host. On the author's Windows XP host, VB6 builds 42 of the 42
 lifted projects. With a table from `derive-opcode-table`, 33 of the 41
 rebuilt programs that `runs.bat` starts show the same first screen as the
 original, pixel for pixel. Of the others, four open at another place, which
-Windows chooses, two draw random values, and two differ in an icon or in a
-detail of a control. None of them stops with a run-time error.
+Windows chooses, two draw random values, one differs in a detail of a
+control, and one in the blink of its text cursor. None of them stops with a run-time error.
 `scripts/vm/README.md` gives the steps of such a run.
 `check-pcode-table` holds the statements against the source: 3106 of the 4093 string
 literals and names after a `.` of the source are in the lift. Most of the

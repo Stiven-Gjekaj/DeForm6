@@ -884,10 +884,20 @@ string, a `Set` of an object, and `List` and `ItemData` of a list. 33 of the
 of the 8 others stops with an error. Four of them open at a place that
 Windows chooses, and two draw random values.
 
-**Next.** The lift still gives names of offsets, not of variables, most
-variables are a `Variant`, and each statement stays in the form of `GoTo`
-and labels. The icon of a form does not come back. The start check sees the
-first screen only.
+**The blocks, 2026-10-02.** `vb::structure` writes the branches of a
+lifted body as `If`, `Else`, `ElseIf`, `Do While`, `Do` with `Loop While`
+or `Loop Until`, and `For` and `Next`, with `Exit For`, `Exit Do` and
+`Exit Sub` for a branch out. In the 42 P-code programs, 1652 `GoTo`
+statements become 2: one leaves two `For` loops at once, and one goes past
+an `Exit Sub`. The lift also declares 222 locals with the type that their
+opcodes give, and an `Icon` that is set to none comes back. VB6 builds 42
+of 42 lifted projects, and 33 of the 41 pairs give the same screen. The
+run before the local types gave 34, and the one more pair of the last run
+differs in the blink of a text cursor only.
+
+**Next.** The lift still gives names of offsets, not of variables. A local
+of four bytes, such as a `Long` or a `String`, is still a `Variant`. The
+start check sees the first screen only.
 
 **The gate.** The recovered code compiles, which Phase 8 already measures, and
 the rebuilt program behaves the same as the original.
