@@ -11,6 +11,9 @@
 //!   `End If`.
 //! - `T: If Not c Then GoTo X`, statements, `GoTo T`, `X:` is `Do While c`,
 //!   the statements, `Loop`.
+//! - A `For` and its `Next` hold their statements one depth in.
+//! - A `GoTo` to the statement after the loop that holds it is `Exit For`
+//!   or `Exit Do`, and a `GoTo` to `Exit Sub` is `Exit Sub`.
 //!
 //! A shape becomes a block only when no branch from outside the block lands
 //! inside it, and when each `For` and each `Next` inside it has its partner
@@ -33,6 +36,15 @@ enum Node {
         /// The index of the `GoTo` at the end of `then`, which `Else` takes
         /// the place of, and the statements that run when the branch goes.
         otherwise: Option<(usize, Vec<Node>)>,
+    },
+    /// `For` at `index` and its `Next` at `next`.
+    For {
+        /// The index of the `For`.
+        index: usize,
+        /// The index of the `Next`.
+        next: usize,
+        /// The statements of the loop.
+        body: Vec<Node>,
     },
     /// `Do While`, from the branch at `index` at the top of the loop.
     While {
@@ -135,7 +147,11 @@ impl<'a> Body<'a> {
         let mut out = Vec::new();
         let mut at = lo;
         while at < hi {
-            if let Some((node, next)) = self.loop_at(at, hi).or_else(|| self.if_at(at, hi)) {
+            if let Some((node, next)) = self
+                .loop_at(at, hi)
+                .or_else(|| self.for_at(at, hi))
+                .or_else(|| self.if_at(at, hi))
+            {
                 out.push(node);
                 at = next;
             } else {
@@ -173,6 +189,36 @@ impl<'a> Body<'a> {
                 index: at,
                 back,
                 body: self.nodes(first, back),
+            },
+            end,
+        ))
+    }
+
+    /// The `For` loop that starts at `at`, and the index after it. Its
+    /// `Next` is the statement before the exit of the `For`, and goes back
+    /// to the statement after the `For`.
+    fn for_at(&self, at: usize, hi: usize) -> Option<(Node, usize)> {
+        let Some(Stmt::For { exit, .. }) = self.stmt(at) else {
+            return None;
+        };
+        let end = self.index_of(*exit);
+        let next = end.checked_sub(1)?;
+        let first = at.checked_add(1)?;
+        let Some(Stmt::Next { body, .. }) = self.stmt(next) else {
+            return None;
+        };
+        if next < first
+            || end > hi
+            || self.index_of(*body) != first
+            || !self.is_block(first, next, Some(next))
+        {
+            return None;
+        }
+        Some((
+            Node::For {
+                index: at,
+                next,
+                body: self.nodes(first, next),
             },
             end,
         ))
@@ -264,25 +310,95 @@ fn branch_targets(stmt: &Stmt) -> Vec<u16> {
     }
 }
 
+/// Gives the negation of `condition`: `Not` of a comparison, and else
+/// `Not CBool`, because `Not` of a number that is not 0 or -1 is not 0.
+fn negation(condition: &Expr) -> String {
+    match condition {
+        Expr::Binary(
+            BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Le | BinaryOp::Ge,
+            _,
+            _,
+        ) => format!("Not {}", condition.text()),
+        _ => format!("Not CBool({})", condition.text()),
+    }
+}
+
 /// Gives the condition of an `If` or a `Do While` that runs its block when
 /// the branch of `stmt` does not go.
 fn condition(stmt: &Stmt) -> Option<String> {
     match stmt {
         Stmt::IfNotGoTo { condition, .. } => Some(condition.text()),
-        Stmt::IfGoTo { condition, .. } => Some(match condition {
-            Expr::Binary(
-                BinaryOp::Lt
-                | BinaryOp::Gt
-                | BinaryOp::Eq
-                | BinaryOp::Ne
-                | BinaryOp::Le
-                | BinaryOp::Ge,
-                _,
-                _,
-            ) => format!("Not {}", condition.text()),
-            _ => format!("Not CBool({})", condition.text()),
-        }),
+        Stmt::IfGoTo { condition, .. } => Some(negation(condition)),
         _ => None,
+    }
+}
+
+/// Gives the condition under which the branch of `stmt` goes.
+fn jump_condition(stmt: &Stmt) -> Option<String> {
+    match stmt {
+        Stmt::IfGoTo { condition, .. } => Some(condition.text()),
+        Stmt::IfNotGoTo { condition, .. } => Some(negation(condition)),
+        _ => None,
+    }
+}
+
+/// The text of the branches that leave a loop or the procedure, by the
+/// index of the branch.
+type Exits = Vec<(usize, String)>;
+
+/// Adds to `out` each branch of `nodes` that goes to the statement after
+/// `enclosing`, the innermost loop that holds it, as `Exit For` or
+/// `Exit Do`, and each branch to `Exit Sub` or `Exit Function` as that
+/// statement. `enclosing` is the index after the loop and its word.
+fn exits(
+    nodes: &[Node],
+    body: &Body<'_>,
+    enclosing: Option<(usize, &'static str)>,
+    out: &mut Exits,
+) {
+    for node in nodes {
+        match node {
+            Node::Plain(index) => {
+                let Some(stmt) = body.stmt(*index) else {
+                    continue;
+                };
+                let target = match stmt {
+                    Stmt::GoTo(target)
+                    | Stmt::IfGoTo { target, .. }
+                    | Stmt::IfNotGoTo { target, .. } => *target,
+                    _ => continue,
+                };
+                let to = body.index_of(target);
+                let word = match (enclosing, body.stmt(to)) {
+                    (Some((end, word)), _) if end == to => word.to_owned(),
+                    (_, Some(exit @ Stmt::Exit { .. })) => exit.text(),
+                    _ => continue,
+                };
+                let text = match jump_condition(stmt) {
+                    Some(condition) => format!("If {condition} Then {word}"),
+                    None => word,
+                };
+                out.push((*index, text));
+            }
+            Node::If {
+                then, otherwise, ..
+            } => {
+                exits(then, body, enclosing, out);
+                if let Some((_, otherwise)) = otherwise {
+                    exits(otherwise, body, enclosing, out);
+                }
+            }
+            Node::For {
+                next, body: nodes, ..
+            } => {
+                exits(nodes, body, Some((next.saturating_add(1), "Exit For")), out);
+            }
+            Node::While {
+                back, body: nodes, ..
+            } => {
+                exits(nodes, body, Some((back.saturating_add(1), "Exit Do")), out);
+            }
+        }
     }
 }
 
@@ -352,18 +468,26 @@ fn write(
     depth: usize,
     body: &Body<'_>,
     live: &[u16],
+    exits: &Exits,
     placed: &mut Vec<u16>,
     out: &mut Vec<String>,
 ) {
     for node in nodes {
         let index = match node {
-            Node::Plain(index) | Node::If { index, .. } | Node::While { index, .. } => *index,
+            Node::Plain(index)
+            | Node::If { index, .. }
+            | Node::For { index, .. }
+            | Node::While { index, .. } => *index,
         };
         let Some(lifted) = body.stmts.get(index) else {
             continue;
         };
         let text = match node {
-            Node::Plain(_) => plain_text(&lifted.stmt),
+            Node::Plain(_) => exits
+                .iter()
+                .find(|(at, _)| *at == index)
+                .map_or_else(|| plain_text(&lifted.stmt), |(_, text)| text.clone()),
+            Node::For { .. } => plain_text(&lifted.stmt),
             Node::If { .. } => format!("If {} Then", condition(&lifted.stmt).unwrap_or_default()),
             Node::While { .. } => {
                 format!("Do While {}", condition(&lifted.stmt).unwrap_or_default())
@@ -385,7 +509,7 @@ fn write(
             Node::If {
                 then, otherwise, ..
             } => {
-                write(then, inner, body, live, placed, out);
+                write(then, inner, body, live, exits, placed, out);
                 let mut rest = otherwise.as_ref();
                 while let Some((last, nodes)) = rest {
                     let at_end = labels(*last, body, live, placed);
@@ -406,20 +530,32 @@ fn write(
                             indent(depth),
                             condition(stmt).unwrap_or_default()
                         ));
-                        write(then, inner, body, live, placed, out);
+                        write(then, inner, body, live, exits, placed, out);
                         rest = otherwise.as_ref();
                         continue;
                     }
                     out.push(format!("{}Else", indent(depth)));
-                    write(nodes, inner, body, live, placed, out);
+                    write(nodes, inner, body, live, exits, placed, out);
                     rest = None;
                 }
                 out.push(format!("{}End If", indent(depth)));
             }
+            Node::For {
+                next, body: nodes, ..
+            } => {
+                write(nodes, inner, body, live, exits, placed, out);
+                let at_end = labels(*next, body, live, placed);
+                out.extend(at_end.iter().map(|at| format!("L{at:04X}:")));
+                out.push(format!(
+                    "{}{}",
+                    indent(depth),
+                    body.stmt(*next).map(plain_text).unwrap_or_default()
+                ));
+            }
             Node::While {
                 back, body: nodes, ..
             } => {
-                write(nodes, inner, body, live, placed, out);
+                write(nodes, inner, body, live, exits, placed, out);
                 let at_end = labels(*back, body, live, placed);
                 out.extend(at_end.iter().map(|at| format!("L{at:04X}:")));
                 out.push(format!("{}Loop", indent(depth)));
@@ -430,10 +566,11 @@ fn write(
 
 /// Gives each branch target of the `Plain` nodes of `nodes`: the branches
 /// that stay a `GoTo`, an `On Error` or a `Resume`. A `For` and a `Next`
-/// need no label.
-fn live_targets(nodes: &[Node], body: &Body<'_>, out: &mut Vec<u16>) {
+/// need no label, and neither does a branch of `exits`.
+fn live_targets(nodes: &[Node], body: &Body<'_>, exits: &Exits, out: &mut Vec<u16>) {
     for node in nodes {
         match node {
+            Node::Plain(index) if exits.iter().any(|(at, _)| at == index) => {}
             Node::Plain(index) => match body.stmt(*index) {
                 Some(Stmt::For { .. } | Stmt::Next { .. }) | None => {}
                 Some(stmt) => out.extend(branch_targets(stmt)),
@@ -441,12 +578,14 @@ fn live_targets(nodes: &[Node], body: &Body<'_>, out: &mut Vec<u16>) {
             Node::If {
                 then, otherwise, ..
             } => {
-                live_targets(then, body, out);
+                live_targets(then, body, exits, out);
                 if let Some((_, otherwise)) = otherwise {
-                    live_targets(otherwise, body, out);
+                    live_targets(otherwise, body, exits, out);
                 }
             }
-            Node::While { body: nodes, .. } => live_targets(nodes, body, out),
+            Node::For { body: nodes, .. } | Node::While { body: nodes, .. } => {
+                live_targets(nodes, body, exits, out);
+            }
         }
     }
 }
@@ -457,13 +596,15 @@ fn live_targets(nodes: &[Node], body: &Body<'_>, out: &mut Vec<u16>) {
 pub fn render(stmts: &[LiftedStmt]) -> Vec<String> {
     let body = Body::new(stmts);
     let nodes = body.nodes(0, stmts.len());
+    let mut leaving = Vec::new();
+    exits(&nodes, &body, None, &mut leaving);
     let mut live = Vec::new();
-    live_targets(&nodes, &body, &mut live);
+    live_targets(&nodes, &body, &leaving, &mut live);
     live.sort_unstable();
     live.dedup();
     let mut out = Vec::new();
     let mut placed = Vec::new();
-    write(&nodes, 0, &body, &live, &mut placed, &mut out);
+    write(&nodes, 0, &body, &live, &leaving, &mut placed, &mut out);
     out.extend(
         live.iter()
             .filter(|target| !placed.contains(target))
@@ -582,7 +723,7 @@ mod tests {
     }
 
     #[test]
-    fn a_for_loop_that_crosses_the_block_stays_a_goto() {
+    fn a_for_loop_holds_its_statements_and_a_branch_out_of_it_is_exit_for() {
         let counter = Expr::Local(0x90);
         let body = [
             at(
@@ -604,10 +745,10 @@ mod tests {
             render(&body),
             [
                 "       For local_90 = 0 To 9",
-                "       If Not local_88 Then GoTo L0020",
-                "       local_8C = 1",
+                "           If Not CBool(local_88) Then Exit For",
+                "           local_8C = 1",
                 "       Next local_90",
-                "L0020: Exit Sub"
+                "       Exit Sub"
             ]
         );
     }
@@ -670,6 +811,41 @@ mod tests {
                 "           local_8C = 2",
                 "L0038:",
                 "       Loop",
+                "       Exit Sub"
+            ]
+        );
+    }
+
+    /// `GoTo L00B9` of the main loop of `Physics_Demo.exe` goes to the
+    /// statement after the loop, and a branch to `Exit Sub` is `Exit Sub`.
+    #[test]
+    fn a_branch_out_of_a_do_loop_is_exit_do_and_one_to_exit_sub_is_exit_sub() {
+        let body = [
+            at(0, unless(0x30)),
+            at(
+                5,
+                Stmt::IfGoTo {
+                    condition: Expr::Local(0x8C),
+                    target: 0x30,
+                },
+            ),
+            at(0x0A, set(0x8C, 1)),
+            at(0x10, Stmt::GoTo(0)),
+            at(0x30, set(0x8C, 2)),
+            at(0x38, Stmt::GoTo(0x50)),
+            at(0x40, set(0x8C, 3)),
+            at(0x50, EXIT),
+        ];
+        assert_eq!(
+            render(&body),
+            [
+                "       Do While local_88",
+                "           If local_8C Then Exit Do",
+                "           local_8C = 1",
+                "       Loop",
+                "       local_8C = 2",
+                "       Exit Sub",
+                "       local_8C = 3",
                 "       Exit Sub"
             ]
         );
