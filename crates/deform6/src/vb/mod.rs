@@ -37,6 +37,7 @@ pub mod procdesc;
 pub mod project;
 pub mod propstream;
 pub mod runtime;
+pub mod structure;
 pub mod types;
 pub mod vbstr;
 

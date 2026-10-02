@@ -61,6 +61,7 @@ use crate::vb::object::ObjectTable;
 use crate::vb::pcode::{PcodeListing, PcodeTable, disassemble};
 use crate::vb::procdesc::{FixedArray, MethodEntry, module_fixed_arrays, read_method_table};
 use crate::vb::project::{Declaration, DeclareTable, ExportName, ObjectTableHead, ProjectInfo};
+use crate::vb::structure;
 use crate::vb::types::VbTypes;
 use crate::vb::{ObjectProcedures, ProcedureEntry, Report};
 
@@ -1779,7 +1780,7 @@ pub fn lift_objects(
             }
             bad_records.extend(bad);
             let mut lines = match lift_method(&listing, table, callees, types, *index) {
-                Ok(stmts) => render(&stmts),
+                Ok(stmts) => structure::render(&stmts),
                 Err(fault) => vec![format!("    ' The lift stopped: {fault:?}")],
             };
             if module_base != 0 {
