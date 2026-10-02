@@ -334,6 +334,16 @@ fn labels(index: usize, body: &Body<'_>, live: &[u16], placed: &mut Vec<u16>) ->
     out
 }
 
+/// Tells whether the statement at `index` takes a label that is not
+/// written yet.
+fn has_label(index: usize, body: &Body<'_>, live: &[u16], placed: &[u16]) -> bool {
+    body.stmts.get(index).is_some_and(|lifted| {
+        positions(lifted)
+            .iter()
+            .any(|at| live.contains(at) && !placed.contains(at))
+    })
+}
+
 /// Writes `nodes` at the depth `depth` into `out`, with a label for each
 /// position that a branch in `live` names. `placed` holds the labels that
 /// are written already.
@@ -376,11 +386,33 @@ fn write(
                 then, otherwise, ..
             } => {
                 write(then, inner, body, live, placed, out);
-                if let Some((last, otherwise)) = otherwise {
+                let mut rest = otherwise.as_ref();
+                while let Some((last, nodes)) = rest {
                     let at_end = labels(*last, body, live, placed);
                     out.extend(at_end.iter().map(|at| format!("L{at:04X}:")));
+                    // An `Else` that holds one `If` and no label is `ElseIf`.
+                    if let [
+                        Node::If {
+                            index: next,
+                            then,
+                            otherwise,
+                        },
+                    ] = nodes.as_slice()
+                        && !has_label(*next, body, live, placed)
+                        && let Some(stmt) = body.stmt(*next)
+                    {
+                        out.push(format!(
+                            "{}ElseIf {} Then",
+                            indent(depth),
+                            condition(stmt).unwrap_or_default()
+                        ));
+                        write(then, inner, body, live, placed, out);
+                        rest = otherwise.as_ref();
+                        continue;
+                    }
                     out.push(format!("{}Else", indent(depth)));
-                    write(otherwise, inner, body, live, placed, out);
+                    write(nodes, inner, body, live, placed, out);
+                    rest = None;
                 }
                 out.push(format!("{}End If", indent(depth)));
             }
@@ -576,6 +608,35 @@ mod tests {
                 "       local_8C = 1",
                 "       Next local_90",
                 "L0020: Exit Sub"
+            ]
+        );
+    }
+
+    /// `isRegKey` of `PassGen.exe` tests four conditions in a row: each
+    /// `Else` holds one `If` only.
+    #[test]
+    fn an_else_that_holds_one_if_is_an_else_if() {
+        let body = [
+            at(0, unless(0x10)),
+            at(5, set(0x8C, 1)),
+            at(0x0A, Stmt::GoTo(0x30)),
+            at(0x10, unless(0x20)),
+            at(0x15, set(0x8C, 2)),
+            at(0x1A, Stmt::GoTo(0x30)),
+            at(0x20, set(0x8C, 3)),
+            at(0x30, EXIT),
+        ];
+        assert_eq!(
+            render(&body),
+            [
+                "       If local_88 Then",
+                "           local_8C = 1",
+                "       ElseIf local_88 Then",
+                "           local_8C = 2",
+                "       Else",
+                "           local_8C = 3",
+                "       End If",
+                "       Exit Sub"
             ]
         );
     }
