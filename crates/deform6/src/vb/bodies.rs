@@ -269,7 +269,9 @@ fn add_accesses(
 }
 
 /// Gives the accesses of each local of `ops`, by its name in the lift: each
-/// `FLd` and `FSt` of a frame slot below the frame.
+/// `FLd` and `FSt` of a frame slot below the frame. The handler that loads
+/// four bytes of a local also has the name `ILdRf`, so it gives no access,
+/// and the stores of a local of four bytes give its type.
 fn local_accesses(ops: &[Op<'_>]) -> Accesses {
     let mut out = Accesses::new();
     for (names, arguments) in ops {
@@ -292,7 +294,9 @@ fn local_accesses(ops: &[Op<'_>]) -> Accesses {
 /// Puts a `Dim` before `lines` for each local of `accesses` that `lines` use
 /// and that no `Dim` of `lines` declares, when its accesses give a type. A
 /// local whose address a call takes stays a `Variant`: the parameter of
-/// the call can be a `Variant`, and Basic passes no other type to it.
+/// the call can be a `Variant`, and Basic passes no other type to it. A
+/// local with a member, such as `local_F0.field_0`, stays a `Variant` too:
+/// it holds the address of a struct, and a `Long` has no member.
 fn declare_scalar_locals(lines: &mut Vec<String>, accesses: &Accesses) {
     let used = words_with(lines, "local_");
     let declared: BTreeSet<String> = lines
@@ -303,15 +307,32 @@ fn declare_scalar_locals(lines: &mut Vec<String>, accesses: &Accesses) {
     let dims: Vec<String> = accesses
         .iter()
         .filter(|(local, kinds)| {
+            let member = format!("{local}.");
             used.contains(*local)
                 && !declared.contains(*local)
+                && !lines.iter().any(|line| line.contains(&member))
                 && !kinds.contains(&Access::Reference)
         })
         .filter_map(|(local, kinds)| {
-            scalar_type(kinds).map(|basic| format!("       Dim {local} As {basic}"))
+            local_type(kinds).map(|basic| format!("       Dim {local} As {basic}"))
         })
         .collect();
     lines.splice(0..0, dims);
+}
+
+/// Gives the Basic type of a local whose opcodes give `accesses`: the type
+/// of [`scalar_type`], or a `Long` for a local that only the copy of four
+/// bytes reads and writes. A `String` has its own store, `FStStr`, an
+/// object has `FStAd`, and a `Single` that a sum gives has `FStFPR4`, so
+/// each of them has another access.
+fn local_type(accesses: &BTreeSet<Access>) -> Option<&'static str> {
+    scalar_type(accesses).or_else(|| {
+        accesses
+            .iter()
+            .all(|access| *access == Access::Four)
+            .then_some("Long")
+            .filter(|_| !accesses.is_empty())
+    })
 }
 
 /// Gives the Basic type of a variable whose opcodes give `accesses`, when
@@ -2440,9 +2461,10 @@ names = ["ExitProcCb"]
     }
 
     /// `Dim gray As Byte` of `Grayscale.exe` is `FStUI1` and `FLdUI1` of
-    /// its slot. A local whose address a call takes, a local that a `Dim`
-    /// declares already, a local of a copy of four bytes, and a local that
-    /// the body does not name get no `Dim`.
+    /// its slot. A local that only the copy of four bytes reads and writes
+    /// is a `Long`. A local whose address a call takes, a local that a `Dim`
+    /// declares already, a `String`, and a local that the body does not name
+    /// get no `Dim`.
     #[test]
     fn a_local_takes_the_type_that_each_access_agrees_on() {
         let names =
@@ -2452,7 +2474,9 @@ names = ["ExitProcCb"]
         let store_i2 = names(&["FStI2"]);
         let load_fpr8 = names(&["FLdFPR8"]);
         let reference = names(&["FLdRf"]);
-        let load_four = names(&["FLdAd", "FLdI4", "FLdR4", "FLdStr"]);
+        let load_four = names(&["FLdAd", "FLdI4", "FLdR4", "FLdStr", "ILdRf"]);
+        let store_four = names(&["FStI4", "FStR4"]);
+        let store_string = names(&["FStStr"]);
         let field = names(&["FMemLdI2"]);
         let ops: Vec<Op<'_>> = vec![
             // 0xFF52 is the slot 0xAE below the frame.
@@ -2461,9 +2485,15 @@ names = ["ExitProcCb"]
             (&store_i2, &[0x50, 0xFF]),
             (&reference, &[0x50, 0xFF]),
             (&load_fpr8, &[0x48, 0xFF]),
+            // A String: its own store and the copy of four bytes.
             (&load_four, &[0x60, 0xFF]),
+            (&store_string, &[0x60, 0xFF]),
+            // A Long: the copy of four bytes alone.
+            (&store_four, &[0x5C, 0xFF]),
+            (&load_four, &[0x5C, 0xFF]),
             (&store_i2, &[0x40, 0xFF]),
             (&field, &[0x3C, 0xFF, 4, 0]),
+            // A local with a member.
             (&store_i2, &[0x30, 0xFF]),
             // An argument, above the frame.
             (&store_i2, &[0x0C, 0]),
@@ -2472,18 +2502,21 @@ names = ["ExitProcCb"]
         assert!(!accesses.contains_key("local_C4"));
         let mut lines = vec![
             "       Dim local_C0 As T4_C0".to_owned(),
-            "       local_AE = local_B0 + local_B8 + local_A0".to_owned(),
+            "       local_AE = local_B0 + local_B8 + local_A0 + local_A4".to_owned(),
             "       local_C0.field_4 = 1".to_owned(),
+            "       local_D0.field_4 = local_A8".to_owned(),
         ];
         declare_scalar_locals(&mut lines, &accesses);
         assert_eq!(
             lines,
             [
+                "       Dim local_A4 As Long",
                 "       Dim local_AE As Byte",
                 "       Dim local_B8 As Double",
                 "       Dim local_C0 As T4_C0",
-                "       local_AE = local_B0 + local_B8 + local_A0",
+                "       local_AE = local_B0 + local_B8 + local_A0 + local_A4",
                 "       local_C0.field_4 = 1",
+                "       local_D0.field_4 = local_A8",
             ]
         );
     }
