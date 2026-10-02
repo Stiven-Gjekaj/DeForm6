@@ -258,6 +258,7 @@ fn property_word(property: &PropertyValue) -> String {
         | PropertyValue::Font { name, .. }
         | PropertyValue::Blob { name, .. }
         | PropertyValue::List { name, .. }
+        | PropertyValue::PictureNone { name }
         | PropertyValue::BlobUnreadable { name, .. } => name.clone(),
         PropertyValue::Undecoded { opcode, .. } => format!("opcode{opcode}"),
     }
@@ -309,7 +310,8 @@ fn item_for_property(property: &PropertyValue) -> Option<ReportItem> {
         | PropertyValue::Text { .. }
         | PropertyValue::Position { .. }
         | PropertyValue::Font { .. }
-        | PropertyValue::List { .. } => None,
+        | PropertyValue::List { .. }
+        | PropertyValue::PictureNone { .. } => None,
     }
 }
 

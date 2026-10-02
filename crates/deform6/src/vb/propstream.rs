@@ -157,6 +157,15 @@ pub enum PropertyValue {
         /// The count of items.
         count: u16,
     },
+    /// A picture that the property is set to none. A form whose `Icon` is
+    /// none holds no opcode for it, and a form with the default icon holds
+    /// the opcode with the length `0xFFFFFFFF`. The walk gives this value at
+    /// the end of a form that holds no `Icon` opcode, and the writer gives
+    /// the `.frx` record of an empty picture.
+    PictureNone {
+        /// The property this value names.
+        name: String,
+    },
     /// A resource blob this repository could not read: present in the
     /// file, but its own bound check refused.
     ///
@@ -227,6 +236,7 @@ impl PropertyValue {
             | Self::Font { .. }
             | Self::Blob { .. }
             | Self::List { .. }
+            | Self::PictureNone { .. }
             | Self::BlobUnreadable { .. } => None,
         }
     }
@@ -749,6 +759,13 @@ fn read_scale_mode(block: &Region<'_>, payload_start: u32, block_end: u32) -> Re
         .ok_or_else(|| overrun_defect(block, payload_start, 17, block_end))
 }
 
+/// The opcode of `Icon` on a `Form` and an `MDIForm`: its member id
+/// `0x10023` less `0x10000`. Of the 53 forms of the native corpus, 50 hold
+/// it with the length `0xFFFFFFFF` and have no `Icon` line in their source,
+/// 2 hold an icon, and the one that holds no opcode 35 has an `Icon` line
+/// whose `.frx` record is an empty picture.
+const ICON_OPCODE: u8 = 35;
+
 /// Walks one control block's own property stream.
 ///
 /// `block` is the control block's own bounded window, the same
@@ -791,6 +808,7 @@ pub fn walk_properties(
     let control_type_name = format!("{:?}", classify_control_type(header.c_type));
 
     let mut cursor = header.header_len();
+    let mut icon_seen = false;
 
     while cursor < block_end {
         let opcode_offset = block.file_offset(Off::new(cursor)).map_or(0, Off::get);
@@ -908,6 +926,7 @@ pub fn walk_properties(
                     }
                 },
                 PayloadType::Picture => {
+                    icon_seen |= entry.name == "Icon";
                     // `frx::extract_blob` owns every bound check on the
                     // declared length and the block's own remaining bytes;
                     // this arm computes no width of its own and never
@@ -1004,6 +1023,23 @@ pub fn walk_properties(
                 }
             },
         }
+    }
+
+    let form = header.c_type == CT_FORM || header.c_type == CT_MDIFORM;
+    let complete = defects.is_empty()
+        && !properties.iter().any(|property| {
+            matches!(
+                property,
+                PropertyValue::Undecoded { .. } | PropertyValue::BlobUnreadable { .. }
+            )
+        });
+    let icon_known = table
+        .lookup(header.c_type, ICON_OPCODE)
+        .is_some_and(|entry| entry.name == "Icon" && entry.payload == PayloadType::Picture);
+    if form && complete && icon_known && !icon_seen {
+        properties.push(PropertyValue::PictureNone {
+            name: "Icon".to_owned(),
+        });
     }
 
     let stopped_at = block.file_offset(Off::new(cursor)).map_or(0, Off::get);
@@ -1545,6 +1581,44 @@ mod tests {
 
     // --- Task 2: the position block and its escape at -32768 -------------
 
+    /// A form with the default icon holds opcode 35 with the length
+    /// `0xFFFFFFFF`, and a form whose icon is none holds no opcode 35.
+    #[test]
+    fn a_form_with_no_icon_opcode_ends_with_a_picture_set_to_none() {
+        let table = OpcodeTable::parse(
+            b"[13]\n35 = { name = \"Icon\", payload = \"Picture\" }\n\
+              70 = { name = \"StartUpPosition\", payload = \"Byte\" }\n",
+        )
+        .unwrap();
+        let walk = |body: &[u8]| {
+            let bytes = control_block("Form1", 13, body);
+            let region = Region::new(&bytes, Off::new(0));
+            let (header, _) = read_control_header(&region);
+            walk_properties(&region, &header, &table, &mut BlobCursor::new())
+                .0
+                .properties
+        };
+        assert_eq!(
+            walk(&[70, 2]),
+            [
+                PropertyValue::Byte {
+                    name: "StartUpPosition".to_owned(),
+                    value: 2
+                },
+                PropertyValue::PictureNone {
+                    name: "Icon".to_owned()
+                }
+            ]
+        );
+        assert_eq!(
+            walk(&[35, 0xFF, 0xFF, 0xFF, 0xFF, 70, 2]),
+            [PropertyValue::Byte {
+                name: "StartUpPosition".to_owned(),
+                value: 2
+            }]
+        );
+    }
+
     /// A list payload is a count, a `u16`, and each item as a length and its
     /// text. The walk names its bytes in the file and goes on after them.
     #[test]
@@ -1821,7 +1895,9 @@ mod tests {
     #[test]
     fn a_font_property_wired_through_walk_properties_advances_by_its_own_reported_count() {
         let table = OpcodeTable::builtin();
-        let mut body = vec![64u8]; // opcode 64 = Font on Form
+        // Opcode 35 = Icon, the default icon, as each corpus form holds it.
+        let mut body = vec![35u8, 0xFF, 0xFF, 0xFF, 0xFF];
+        body.push(64); // opcode 64 = Font on Form
         body.push(0); // unknown
         body.push(0); // charset
         body.push(0); // unknown
@@ -1847,7 +1923,9 @@ mod tests {
     #[test]
     fn a_form_scale_mode_byte_of_0_consumes_sixteen_more_bytes_before_the_flags_word() {
         let table = OpcodeTable::builtin();
-        let mut body = vec![25u8, 0]; // opcode 25 = ScaleMode, mode = 0
+        // Opcode 35 = Icon, the default icon, as each corpus form holds it.
+        let mut body = vec![35u8, 0xFF, 0xFF, 0xFF, 0xFF];
+        body.extend_from_slice(&[25, 0]); // opcode 25 = ScaleMode, mode = 0
         body.extend(std::iter::repeat_n(0xAA_u8, 16)); // the 16 skipped bytes
         body.extend_from_slice(&[0, 0x63, 0x00]); // opcode 0, the flags word
         body.push(10); // opcode 10 = WindowState, right after
@@ -1874,7 +1952,9 @@ mod tests {
     #[test]
     fn a_non_zero_form_scale_mode_does_not_skip_sixteen_bytes() {
         let table = OpcodeTable::builtin();
-        let mut body = vec![25u8, 3]; // opcode 25 = ScaleMode, mode = 3
+        // Opcode 35 = Icon, the default icon, as each corpus form holds it.
+        let mut body = vec![35u8, 0xFF, 0xFF, 0xFF, 0xFF];
+        body.extend_from_slice(&[25, 3]); // opcode 25 = ScaleMode, mode = 3
         body.extend_from_slice(&[0, 0x43, 0x00]); // opcode 0, no AutoRedraw
         body.push(10); // opcode 10 = WindowState, right after
         body.push(7);
@@ -1901,7 +1981,8 @@ mod tests {
     fn the_no_output_opcodes_ninety_eight_and_ninety_nine_consume_only_their_own_byte() {
         let table = OpcodeTable::builtin();
         for opcode in [98u8, 99] {
-            let body = vec![opcode, 10, 4]; // the special opcode, then WindowState = 4
+            // The default icon, the special opcode, then WindowState = 4.
+            let body = vec![35, 0xFF, 0xFF, 0xFF, 0xFF, opcode, 10, 4];
             let bytes = control_block("Frm1", 13, &body);
             let region = Region::new(&bytes, Off::new(0));
             let (header, _) = read_control_header(&region);
@@ -1944,7 +2025,8 @@ mod tests {
     #[test]
     fn mdiform_shares_the_forms_special_opcode_handling() {
         let table = OpcodeTable::builtin();
-        let body = vec![98u8, 10, 9]; // a no-output opcode, then WindowState = 9
+        // The default icon, a no-output opcode, then WindowState = 9.
+        let body = vec![35u8, 0xFF, 0xFF, 0xFF, 0xFF, 98, 10, 9];
         let bytes = control_block("Mdi1", 20, &body);
         let region = Region::new(&bytes, Off::new(0));
         let (header, _) = read_control_header(&region);

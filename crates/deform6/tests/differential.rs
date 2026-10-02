@@ -299,6 +299,47 @@ fn the_lists_of_passgen_give_the_frx_of_its_source() {
     }
 }
 
+/// A form whose `Icon` is none holds no opcode 35, and a form with the
+/// default icon holds it with the length `0xFFFFFFFF`. The form of
+/// `Transparency.exe` is the one form of the corpus whose `Icon` is none.
+/// Its walk gives `PictureNone` when the table names each opcode of the
+/// form, and gives nothing when the walk stops before the end.
+#[test]
+fn a_form_with_no_icon_opcode_gives_a_picture_set_to_none() {
+    let root = corpus_root();
+    let form_table = |with_link_topic: bool| {
+        let mut text = String::from(
+            "[13]\n\
+             1 = { name = \"Caption\", payload = \"Text\" }\n\
+             3 = { name = \"BackColor\", payload = \"Long\" }\n\
+             35 = { name = \"Icon\", payload = \"Picture\" }\n\
+             65 = { name = \"Appearance\", payload = \"Byte\" }\n\
+             70 = { name = \"StartUpPosition\", payload = \"Byte\" }\n",
+        );
+        if with_link_topic {
+            text.push_str("36 = { name = \"LinkTopic\", payload = \"Text\" }\n");
+        }
+        OpcodeTable::parse(text.as_bytes()).expect("the table of the test parses")
+    };
+    for exe in [
+        root.join("vb6-code/Transparency-2D/Transparency.exe"),
+        root.join("../corpus-pcode/vb6-code/Transparency-2D/Transparency.exe"),
+    ] {
+        let data = std::fs::read(&exe).expect("reading Transparency.exe");
+        let none = |table: &OpcodeTable| {
+            let report = deform6::inspect(&data, table, deform6::journal::Mode::Strict)
+                .expect("Transparency.exe reads");
+            report.forms[0].controls[0]
+                .properties
+                .iter()
+                .filter(|property| matches!(property, PropertyValue::PictureNone { .. }))
+                .count()
+        };
+        assert_eq!(none(&form_table(true)), 1, "{}", exe.display());
+        assert_eq!(none(&form_table(false)), 0, "{}", exe.display());
+    }
+}
+
 /// The corpus executables that hold a version resource.
 const EXPECTED_VERSIONED_COUNT: usize = 44;
 
@@ -1001,6 +1042,7 @@ fn recovered_property_name(value: &PropertyValue) -> Option<&str> {
         | PropertyValue::Font { name, .. }
         | PropertyValue::Blob { name, .. }
         | PropertyValue::List { name, .. }
+        | PropertyValue::PictureNone { name }
         | PropertyValue::BlobUnreadable { name, .. } => Some(name.as_str()),
         PropertyValue::Undecoded { .. } => None,
     }
@@ -1048,6 +1090,7 @@ fn recovered_property_text(value: &PropertyValue) -> Option<String> {
         | PropertyValue::Font { .. }
         | PropertyValue::Blob { .. }
         | PropertyValue::List { .. }
+        | PropertyValue::PictureNone { .. }
         | PropertyValue::BlobUnreadable { .. }
         | PropertyValue::Undecoded { .. } => None,
     }

@@ -256,6 +256,7 @@ fn property_name(property: &PropertyValue) -> String {
         | PropertyValue::Font { name, .. }
         | PropertyValue::Blob { name, .. }
         | PropertyValue::List { name, .. }
+        | PropertyValue::PictureNone { name }
         | PropertyValue::BlobUnreadable { name, .. } => name.clone(),
         PropertyValue::Undecoded { opcode, .. } => format!("opcode{opcode}"),
     }

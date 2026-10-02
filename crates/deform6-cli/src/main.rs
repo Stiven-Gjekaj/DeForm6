@@ -1449,6 +1449,7 @@ fn print_property(indent: &str, property: &PropertyValue) {
         } => {
             println!("{indent}  {name}: {count} item(s), {len} byte(s) at offset {offset:#x}");
         }
+        PropertyValue::PictureNone { name } => println!("{indent}  {name} = (None)"),
         PropertyValue::Undecoded {
             opcode,
             offset,
