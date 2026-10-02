@@ -293,7 +293,7 @@ lifted projects. With a table from `derive-opcode-table`, 33 of the 41
 rebuilt programs that `runs.bat` starts show the same first screen as the
 original, pixel for pixel. Of the others, four open at another place, which
 Windows chooses, two draw random values, one differs in a detail of a
-control, and one in the blink of its text cursor. None of them stops with a run-time error.
+control, and one in the blink of the cursor of the console behind it. None of them stops with a run-time error.
 `scripts/vm/README.md` gives the steps of such a run.
 `check-pcode-table` holds the statements against the source: 3106 of the 4093 string
 literals and names after a `.` of the source are in the lift. Most of the

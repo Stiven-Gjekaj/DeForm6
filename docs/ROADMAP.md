@@ -769,7 +769,7 @@ method table: each opcode, its bytes and the name of its handler, and how the
 decode ended. `check-pcode-table` now uses the same decoder. The listing is
 not Basic, and the README says so.
 
-#### Part 2, started on 2026-09-27
+#### Part 2, done on 2026-10-02
 
 **The lift, for procedures with no calls.** `vb::lift` follows the stack of
 a decoded body and gives a statement at each store, branch and exit. The
@@ -895,9 +895,36 @@ of 42 lifted projects, and 33 of the 41 pairs give the same screen. The
 run before the local types gave 34, and the one more pair of the last run
 differs in the blink of a text cursor only.
 
-**Next.** The lift still gives names of offsets, not of variables. A local
-of four bytes, such as a `Long` or a `String`, is still a `Variant`. The
-start check sees the first screen only.
+**The locals of four bytes, 2026-10-02.** A `String` has its own store,
+`FStStr`, and an object has `FStAd`. So a local that only `FStI4` writes is
+a `Long`, unless the body uses it with a member, as the address of a struct
+for a `With` block. 646 more locals get a type. VB6 builds 42 of 42 lifted
+projects, and 33 of the 41 pairs give the same screen. Of the 8 others, 4
+open at a place that Windows chooses, 2 draw random values, the map editor
+differs in a scroll bar and a picture box, and 1 differs in the blink of
+the cursor of the console behind it.
+
+#### Did Phase 11 reach its exit
+
+The gate has two parts.
+
+- The recovered code compiles. VB6 builds 42 of the 42 lifted projects, and
+  1652 `GoTo` statements of the lift are 2 in the written code.
+- The rebuilt program behaves the same as the original. The start check
+  measures the first screen: 33 of 41 pairs are the same, pixel for pixel,
+  and no rebuilt program stops with a run-time error. The causes of the 8
+  others are named above, and none of them is a statement of the lift. No
+  check goes past the first screen.
+
+Phase 11 closes on 2026-10-02. These stay open, and no phase holds them:
+
+- A variable keeps the name of its offset, such as `local_88`. 462 of the
+  511 names of locals of four or more letters in the source are in no byte
+  of their executable, in ASCII or in UTF-16, so no reader of the file can
+  give them back.
+- A local whose address a call takes, and a local with a member, stay a
+  `Variant`.
+- No check drives a rebuilt program past its first screen.
 
 **The gate.** The recovered code compiles, which Phase 8 already measures, and
 the rebuilt program behaves the same as the original.
@@ -936,7 +963,7 @@ Phase 8  (exit met on the author's XP host; --verify-build waits)
           |
           +-- Phase 10 (exit met: names and widths, 680 of 680 bodies decode)
                  |
-                 +-- Phase 11 (part 2: 42 of 42 build, 33 of 41 start the same)
+                 +-- Phase 11 (closed: 42 of 42 build, 33 of 41 start the same)
 
 Phase 12 runs beside 10 and 11.
 Phase 13 closes the milestone.

@@ -75,17 +75,22 @@ does not do. A change that no release holds yet goes under one
   `disasm --lift` still prints each branch as a `GoTo`.
 - The lift declares a local with the type that each of its opcodes gives,
   as it does for a variable of a module. In the 42 P-code programs, 222
-  locals get a type. A local whose address a call takes stays a `Variant`.
+  locals get a type. A local that only the copy of four bytes writes is a
+  `Long`, and 646 more locals get that type. A local whose address a call
+  takes, and a local with a member, stay a `Variant`.
+- Phase 11 closes. `docs/ROADMAP.md` gives what its gate measured and what
+  stays open.
 - `vm.py` parks the mouse over the task bar while it takes pictures. The
   pointer drifted over the windows, and 9 of 41 pairs of one run differed
   in its box only.
 - The start check with all of this, on the author's Windows XP host: VB6
   builds 42 of the 42 lifted projects, and 33 of the 41 pairs that
   `runs.bat` starts show the same first screen, pixel for pixel. The run
-  before the local types gave 34. In the last run, the text cursor of
-  `ASCII Translator` was on in one picture and off in the other, a
-  difference of 13 pixels. The release 3.0.0 gave 16. Each rebuilt program
-  of the other pairs shows its window with no run-time error.
+  before the local types gave 34. In the last run, the cursor of the
+  console behind `ScreenCapture.exe` was on in one picture and off in the
+  other, a difference of 24 pixels. The release 3.0.0 gave 16. Each
+  rebuilt program of the other pairs shows its window with no run-time
+  error.
 
 ### Faults of 3.0.0
 
@@ -115,8 +120,8 @@ does not do. A change that no release holds yet goes under one
   `StartUpPosition = 3`, "Windows Default", which open at a place that
   Windows chooses at each start. Two programs draw random values: the stars of `Physics_Demo.exe`
   and the identifier of `UUID2.exe`. The map editor differs in the size of
-  the box of a scroll bar and in one picture box, and `ASCII Translator`
-  in the blink of its text cursor.
+  the box of a scroll bar and in one picture box, and one pair in the
+  blink of the cursor of the console.
 
 ### What this does not do
 
