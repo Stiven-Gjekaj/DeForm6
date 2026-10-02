@@ -268,6 +268,52 @@ fn add_accesses(
     }
 }
 
+/// Gives the accesses of each local of `ops`, by its name in the lift: each
+/// `FLd` and `FSt` of a frame slot below the frame.
+fn local_accesses(ops: &[Op<'_>]) -> Accesses {
+    let mut out = Accesses::new();
+    for (names, arguments) in ops {
+        if names.is_empty()
+            || !names
+                .iter()
+                .all(|name| name.starts_with("FLd") || name.starts_with("FSt"))
+        {
+            continue;
+        }
+        if let Some(slot) = local_slot(arguments) {
+            out.entry(format!("local_{slot:X}"))
+                .or_default()
+                .insert(access_of(names));
+        }
+    }
+    out
+}
+
+/// Puts a `Dim` before `lines` for each local of `accesses` that `lines` use
+/// and that no `Dim` of `lines` declares, when its accesses give a type. A
+/// local whose address a call takes stays a `Variant`: the parameter of
+/// the call can be a `Variant`, and Basic passes no other type to it.
+fn declare_scalar_locals(lines: &mut Vec<String>, accesses: &Accesses) {
+    let used = words_with(lines, "local_");
+    let declared: BTreeSet<String> = lines
+        .iter()
+        .filter_map(|line| line.trim_start().strip_prefix("Dim "))
+        .filter_map(|rest| words_with(&[rest.to_owned()], "local_").into_iter().next())
+        .collect();
+    let dims: Vec<String> = accesses
+        .iter()
+        .filter(|(local, kinds)| {
+            used.contains(*local)
+                && !declared.contains(*local)
+                && !kinds.contains(&Access::Reference)
+        })
+        .filter_map(|(local, kinds)| {
+            scalar_type(kinds).map(|basic| format!("       Dim {local} As {basic}"))
+        })
+        .collect();
+    lines.splice(0..0, dims);
+}
+
 /// Gives the Basic type of a variable whose opcodes give `accesses`, when
 /// they agree: each access of an `Integer` is `I2`, and a `Single` is `FPR4`
 /// or the four bytes of its copy. Gives nothing for each other variable,
@@ -1818,6 +1864,7 @@ pub fn lift_objects(
                 &fixed_shapes(&descriptor.fixed_arrays(&pe)),
             );
             declare_new_locals(&mut lines, &new_locals(&listing, table, callees));
+            declare_scalar_locals(&mut lines, &local_accesses(&ops));
             lifted.procedures.push(LiftedProcedure {
                 index: *index,
                 declaration,
@@ -1931,10 +1978,11 @@ mod tests {
     use super::{
         Accesses, FixedArray, Op, TypedArrays, add_accesses, apply_frame_structs, built_parameters,
         call_arguments, call_arity, declare, declare_arrays, declare_new_locals,
-        declare_statements, declared_bytes, field_declarations, fixed_shapes, frame_structs,
-        indexed_words, member_zero, name_module_fields, new_locals, pointer_fields, procedure_name,
-        record_array, record_fields, redim_arrays, replace_word, scalar_type, slot_uses,
-        struct_pointers, typed_arrays, typed_locals, variable_declaration, words_with,
+        declare_scalar_locals, declare_statements, declared_bytes, field_declarations,
+        fixed_shapes, frame_structs, indexed_words, local_accesses, member_zero,
+        name_module_fields, new_locals, pointer_fields, procedure_name, record_array,
+        record_fields, redim_arrays, replace_word, scalar_type, slot_uses, struct_pointers,
+        typed_arrays, typed_locals, variable_declaration, words_with,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::lift::result_bytes;
@@ -2389,6 +2437,55 @@ names = ["ExitProcCb"]
         assert!(record_array(&array, &[(0, 4, "Long"), (2, 2, "Integer")], false).is_none());
         assert!(record_array(&array, &[(0x0E, 4, "Long")], false).is_none());
         assert!(record_array(&array, &[], false).is_none());
+    }
+
+    /// `Dim gray As Byte` of `Grayscale.exe` is `FStUI1` and `FLdUI1` of
+    /// its slot. A local whose address a call takes, a local that a `Dim`
+    /// declares already, a local of a copy of four bytes, and a local that
+    /// the body does not name get no `Dim`.
+    #[test]
+    fn a_local_takes_the_type_that_each_access_agrees_on() {
+        let names =
+            |list: &[&str]| -> Vec<String> { list.iter().map(|n| (*n).to_owned()).collect() };
+        let store_byte = names(&["FStUI1"]);
+        let load_byte = names(&["FLdUI1"]);
+        let store_i2 = names(&["FStI2"]);
+        let load_fpr8 = names(&["FLdFPR8"]);
+        let reference = names(&["FLdRf"]);
+        let load_four = names(&["FLdAd", "FLdI4", "FLdR4", "FLdStr"]);
+        let field = names(&["FMemLdI2"]);
+        let ops: Vec<Op<'_>> = vec![
+            // 0xFF52 is the slot 0xAE below the frame.
+            (&store_byte, &[0x52, 0xFF]),
+            (&load_byte, &[0x52, 0xFF]),
+            (&store_i2, &[0x50, 0xFF]),
+            (&reference, &[0x50, 0xFF]),
+            (&load_fpr8, &[0x48, 0xFF]),
+            (&load_four, &[0x60, 0xFF]),
+            (&store_i2, &[0x40, 0xFF]),
+            (&field, &[0x3C, 0xFF, 4, 0]),
+            (&store_i2, &[0x30, 0xFF]),
+            // An argument, above the frame.
+            (&store_i2, &[0x0C, 0]),
+        ];
+        let accesses = local_accesses(&ops);
+        assert!(!accesses.contains_key("local_C4"));
+        let mut lines = vec![
+            "       Dim local_C0 As T4_C0".to_owned(),
+            "       local_AE = local_B0 + local_B8 + local_A0".to_owned(),
+            "       local_C0.field_4 = 1".to_owned(),
+        ];
+        declare_scalar_locals(&mut lines, &accesses);
+        assert_eq!(
+            lines,
+            [
+                "       Dim local_AE As Byte",
+                "       Dim local_B8 As Double",
+                "       Dim local_C0 As T4_C0",
+                "       local_AE = local_B0 + local_B8 + local_A0",
+                "       local_C0.field_4 = 1",
+            ]
+        );
     }
 
     /// `SizeX As Integer` of the map editor is `ImpAdLdI2` and `ImpAdStI2`
