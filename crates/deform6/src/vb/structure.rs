@@ -11,6 +11,8 @@
 //!   `End If`.
 //! - `T: If Not c Then GoTo X`, statements, `GoTo T`, `X:` is `Do While c`,
 //!   the statements, `Loop`.
+//! - `T:`, statements, `If c Then GoTo T` is `Do`, the statements,
+//!   `Loop While c`. A `GoTo T` at the end is `Loop` with no test.
 //! - A `For` and its `Next` hold their statements one depth in.
 //! - A `GoTo` to the statement after the loop that holds it is `Exit For`
 //!   or `Exit Do`, and a `GoTo` to `Exit Sub` is `Exit Sub`.
@@ -54,6 +56,16 @@ enum Node {
         /// place of.
         back: usize,
         /// The statements of the loop.
+        body: Vec<Node>,
+    },
+    /// `Do` at `index`, and a branch back to it at `back`, which `Loop`
+    /// takes the place of.
+    Do {
+        /// The index of the first statement of the loop.
+        index: usize,
+        /// The index of the branch back to the top.
+        back: usize,
+        /// The statements of the loop, from `index` to `back`.
         body: Vec<Node>,
     },
 }
@@ -149,6 +161,7 @@ impl<'a> Body<'a> {
         while at < hi {
             if let Some((node, next)) = self
                 .loop_at(at, hi)
+                .or_else(|| self.do_at(at, hi))
                 .or_else(|| self.for_at(at, hi))
                 .or_else(|| self.if_at(at, hi))
             {
@@ -189,6 +202,38 @@ impl<'a> Body<'a> {
                 index: at,
                 back,
                 body: self.nodes(first, back),
+            },
+            end,
+        ))
+    }
+
+    /// The `Do` loop whose first statement is at `at`, with its test at the
+    /// end, and the index after it. The last branch of the body back to `at`
+    /// is the test, and no other branch goes to `at`.
+    fn do_at(&self, at: usize, hi: usize) -> Option<(Node, usize)> {
+        if self.uses_of(at) != 1 {
+            return None;
+        }
+        let lifted = self.stmts.get(at)?;
+        let back = (at..hi).rev().find(|index| {
+            self.stmt(*index).is_some_and(|stmt| {
+                matches!(
+                    stmt,
+                    Stmt::GoTo(_) | Stmt::IfGoTo { .. } | Stmt::IfNotGoTo { .. }
+                ) && branch_targets(stmt)
+                    .iter()
+                    .any(|target| positions(lifted).contains(target))
+            })
+        })?;
+        let end = back.checked_add(1)?;
+        if !self.is_block(at, end, Some(back)) {
+            return None;
+        }
+        Some((
+            Node::Do {
+                index: at,
+                back,
+                body: self.nodes(at, back),
             },
             end,
         ))
@@ -395,6 +440,9 @@ fn exits(
             }
             Node::While {
                 back, body: nodes, ..
+            }
+            | Node::Do {
+                back, body: nodes, ..
             } => {
                 exits(nodes, body, Some((back.saturating_add(1), "Exit Do")), out);
             }
@@ -477,7 +525,8 @@ fn write(
             Node::Plain(index)
             | Node::If { index, .. }
             | Node::For { index, .. }
-            | Node::While { index, .. } => *index,
+            | Node::While { index, .. }
+            | Node::Do { index, .. } => *index,
         };
         let Some(lifted) = body.stmts.get(index) else {
             continue;
@@ -492,10 +541,17 @@ fn write(
             Node::While { .. } => {
                 format!("Do While {}", condition(&lifted.stmt).unwrap_or_default())
             }
+            Node::Do { .. } => "Do".to_owned(),
         };
         let own = labels(index, body, live, placed);
         match own.as_slice() {
-            [only] if depth == 0 && *only == u16::try_from(lifted.offset).unwrap_or(0) => {
+            // The first statement of a `Do` follows it at one depth in, and
+            // its label goes before the `Do`.
+            [only]
+                if depth == 0
+                    && !matches!(node, Node::Do { .. })
+                    && *only == u16::try_from(lifted.offset).unwrap_or(0) =>
+            {
                 out.push(format!("L{only:04X}: {text}"));
             }
             _ => {
@@ -560,6 +616,21 @@ fn write(
                 out.extend(at_end.iter().map(|at| format!("L{at:04X}:")));
                 out.push(format!("{}Loop", indent(depth)));
             }
+            Node::Do {
+                back, body: nodes, ..
+            } => {
+                write(nodes, inner, body, live, exits, placed, out);
+                let at_end = labels(*back, body, live, placed);
+                out.extend(at_end.iter().map(|at| format!("L{at:04X}:")));
+                let test = match body.stmt(*back) {
+                    Some(Stmt::IfGoTo { condition, .. }) => format!(" While {}", condition.text()),
+                    Some(Stmt::IfNotGoTo { condition, .. }) => {
+                        format!(" Until {}", condition.text())
+                    }
+                    _ => String::new(),
+                };
+                out.push(format!("{}Loop{test}", indent(depth)));
+            }
         }
     }
 }
@@ -583,7 +654,9 @@ fn live_targets(nodes: &[Node], body: &Body<'_>, exits: &Exits, out: &mut Vec<u1
                     live_targets(otherwise, body, exits, out);
                 }
             }
-            Node::For { body: nodes, .. } | Node::While { body: nodes, .. } => {
+            Node::For { body: nodes, .. }
+            | Node::While { body: nodes, .. }
+            | Node::Do { body: nodes, .. } => {
                 live_targets(nodes, body, exits, out);
             }
         }
@@ -846,6 +919,57 @@ mod tests {
                 "       local_8C = 2",
                 "       Exit Sub",
                 "       local_8C = 3",
+                "       Exit Sub"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_branch_back_when_true_at_the_end_is_a_do_loop_while() {
+        let body = [
+            at(0, set(0x8C, 0)),
+            at(8, set(0x8C, 1)),
+            at(
+                0x10,
+                Stmt::IfGoTo {
+                    condition: Expr::Local(0x88),
+                    target: 8,
+                },
+            ),
+            at(0x18, EXIT),
+        ];
+        assert_eq!(
+            render(&body),
+            [
+                "       local_8C = 0",
+                "       Do",
+                "           local_8C = 1",
+                "       Loop While local_88",
+                "       Exit Sub"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_branch_back_when_false_is_until_and_a_goto_back_is_a_loop_with_no_test() {
+        let body = [
+            at(0, set(0x8C, 1)),
+            at(8, set(0x8C, 2)),
+            at(0x10, unless(8)),
+            at(0x18, unless(0x28)),
+            at(0x20, Stmt::GoTo(0)),
+            at(0x28, EXIT),
+        ];
+        assert_eq!(
+            render(&body),
+            [
+                "       Do",
+                "           local_8C = 1",
+                "           Do",
+                "               local_8C = 2",
+                "           Loop Until local_88",
+                "           If Not CBool(local_88) Then Exit Do",
+                "       Loop",
                 "       Exit Sub"
             ]
         );
