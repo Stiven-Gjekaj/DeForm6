@@ -291,6 +291,33 @@ fn indent(depth: usize) -> String {
     format!("       {}", "    ".repeat(depth))
 }
 
+/// The text of `stmt`. A `For` and a `Next` are Basic with no comment: the
+/// loop needs no label, and [`live_targets`] gives none for it.
+fn plain_text(stmt: &Stmt) -> String {
+    match stmt {
+        Stmt::For {
+            counter,
+            start,
+            end,
+            step,
+            ..
+        } => {
+            let step = step
+                .as_ref()
+                .map(|step| format!(" Step {}", step.text()))
+                .unwrap_or_default();
+            format!(
+                "For {} = {} To {}{step}",
+                counter.text(),
+                start.text(),
+                end.text()
+            )
+        }
+        Stmt::Next { counter, .. } => format!("Next {}", counter.text()),
+        other => other.text(),
+    }
+}
+
 /// The labels that the statement at `index` takes: each of its positions
 /// that a branch in `live` names, once in the body.
 fn labels(index: usize, body: &Body<'_>, live: &[u16], placed: &mut Vec<u16>) -> Vec<u16> {
@@ -326,7 +353,7 @@ fn write(
             continue;
         };
         let text = match node {
-            Node::Plain(_) => lifted.stmt.text(),
+            Node::Plain(_) => plain_text(&lifted.stmt),
             Node::If { .. } => format!("If {} Then", condition(&lifted.stmt).unwrap_or_default()),
             Node::While { .. } => {
                 format!("Do While {}", condition(&lifted.stmt).unwrap_or_default())
@@ -370,15 +397,15 @@ fn write(
 }
 
 /// Gives each branch target of the `Plain` nodes of `nodes`: the branches
-/// that stay a `GoTo`, a `For`, a `Next`, an `On Error` or a `Resume`.
+/// that stay a `GoTo`, an `On Error` or a `Resume`. A `For` and a `Next`
+/// need no label.
 fn live_targets(nodes: &[Node], body: &Body<'_>, out: &mut Vec<u16>) {
     for node in nodes {
         match node {
-            Node::Plain(index) => {
-                if let Some(stmt) = body.stmt(*index) {
-                    out.extend(branch_targets(stmt));
-                }
-            }
+            Node::Plain(index) => match body.stmt(*index) {
+                Some(Stmt::For { .. } | Stmt::Next { .. }) | None => {}
+                Some(stmt) => out.extend(branch_targets(stmt)),
+            },
             Node::If {
                 then, otherwise, ..
             } => {
@@ -541,10 +568,15 @@ mod tests {
             at(0x14, Stmt::Next { counter, body: 8 }),
             at(0x20, EXIT),
         ];
-        let lines = render(&body);
         assert_eq!(
-            lines.get(1).unwrap(),
-            "L0008: If Not local_88 Then GoTo L0020"
+            render(&body),
+            [
+                "       For local_90 = 0 To 9",
+                "       If Not local_88 Then GoTo L0020",
+                "       local_8C = 1",
+                "       Next local_90",
+                "L0020: Exit Sub"
+            ]
         );
     }
 
