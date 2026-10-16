@@ -106,6 +106,7 @@ mod pcode_table;
 mod pcode_widths;
 mod pdb2;
 mod sample_picture;
+mod steps;
 mod vb_types;
 
 use std::path::Path;

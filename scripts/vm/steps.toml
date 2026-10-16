@@ -1,0 +1,675 @@
+# The keys that the behaviour check sends to each program of the P-code
+# corpus, past its first window. `export-lift-builds` writes the steps of
+# each program to steps\pNN.txt, and drive.vbs sends each step with
+# SendKeys, with a picture after it. The key of a program is its path
+# relative to corpus-pcode/. A step changes nothing that differs from run
+# to run: no random value, no time, no network, no file dialog.
+# The steps of one program build on each other: the focus stays where the
+# last step left it.
+
+# Keyboard test steps for p01, p03 to p13 (p02 is skipped: it locks the session).
+
+[[program]]
+key = "public-domain/HexScroll/Hex Scroll.exe"
+# Focus starts on HsRed (TabIndex 0).
+# 1. END moves HsRed to 255. HsRed_Change calls updateValues: BackColor, TxtRed, TxtHex, TxtRGB change.
+# 2. TAB to HsGreen, END moves it to 255. HsGreen_Change gives a yellow form and #FFFF00.
+# 3. TAB to HsBlue, four RIGHT keys move it to 4. HsBlue_Change gives #FFFF04.
+# 4. TAB to TxtRed, select all, type 128. TxtRed_Change sets HsRed and calls updateValues for 1, 12, 128.
+# 5. TAB to TxtGreen, select all, type 64. TxtGreen_Change sets HsGreen to 64.
+# All values are fixed. F5 (Rnd), Escape (End), Copy (clipboard and caption timer) and Close are not pressed.
+steps = [
+  "{END}",
+  "{TAB}{END}",
+  "{TAB}{RIGHT}{RIGHT}{RIGHT}{RIGHT}",
+  "{TAB}{HOME}+{END}128",
+  "{TAB}{HOME}+{END}64",
+]
+
+[[program]]
+key = "public-domain/PassGen/PassGen.exe"
+# Focus starts on chkUpperChars (TabIndex 0). The passwords are random, so Generate, F5 and Delete are not pressed.
+# 1. SPACE clears chkUpperChars.
+# 2. TAB to chkLowerChars, SPACE clears it.
+# 3. TAB past chkNumChars to chkSpecialChars, SPACE clears it. chkSpecialChars_Click runs; Value is 0, so no MsgBox.
+# 4. SPACE sets chkSpecialChars again. specialString holds 32 characters (2 are needed), so no MsgBox.
+# 5. TAB past cmdSpecial to chkSpaces, SPACE sets it.
+# 6. TAB to cmbNumber (Dropdown List), DOWN changes 64 to 65.
+# 7. TAB to cmbLength, DOWN DOWN changes 16 to 18.
+# chkAutomatic (60 s timer), Escape and Close (registry write, End) are not pressed.
+steps = [
+  " ",
+  "{TAB} ",
+  "{TAB}{TAB} ",
+  " ",
+  "{TAB}{TAB} ",
+  "{TAB}{DOWN}",
+  "{TAB}{DOWN}{DOWN}",
+]
+
+[[program]]
+key = "public-domain/SK-Gradient-Sample__VB6/demo/Project1.exe"
+# Focus starts on Picture1 (TabIndex 0).
+# 1. TAB moves the focus to Command1 (Draw).
+# 2. SPACE clicks Draw. Command1_Click calls CreateGradient on Label1. A Label has no hWnd, so the code goes to errhandler and draws nothing. The step still runs the code; a fault in the rebuild that raises an unhandled error shows on the screen.
+# 3. Alt+D clicks Draw again through the accelerator.
+# No Rnd, no timer, no file.
+steps = [
+  "{TAB}",
+  " ",
+  "%d",
+]
+
+[[program]]
+key = "public-domain/SK-MCI-Sample__VB6/demo/Project1.exe"
+# Focus starts on Command1 (Play WAV, TabIndex 0). Play WAV is not pressed: if the file exists, the progress bar moves with time.
+# 1. TAB to Command5 (Stop WAV), SPACE: stop and close an alias that is not open; nothing changes but the focus.
+# 2. TAB past Play AVI to Command7 (Stop AVI), SPACE: same, no change.
+# 3. TAB past WAV Vol UP and WAV Vol DN to Command2 (Play MID), SPACE: c:\sb16\samples\minuet.mid does not exist, so a MsgBox opens.
+# 4. ENTER closes the MsgBox of step 3.
+# 5. TAB to Command6 (Stop MID), SPACE: no change.
+# Volume buttons (system setting), CD buttons (eject, record to c:\cdtest.wav), Copy AVI Image and Play AVI (d:\ drive) are not pressed.
+steps = [
+  "{TAB} ",
+  "{TAB}{TAB} ",
+  "{TAB}{TAB}{TAB} ",
+  "{ENTER}",
+  "{TAB} ",
+]
+
+[[program]]
+key = "public-domain/SK-TFTP-Sample__VB6/Client/demo/TFTPClient.exe"
+# Focus starts on Command1 (Connect, TabIndex 2). Connect is network, so it is not pressed.
+# 1. TAB to Command3 (Send File), SPACE: SrcPath is empty, so a MsgBox "Select File To Transfer!!!" opens. No network.
+# 2. ENTER closes the MsgBox of step 1.
+# 3. TAB past Drive1, Dir1 and File1 to Text1, change the extension to txt. Text1_Change sets DstPath.
+# 4. Select all in Text1 and type a new path. Text1_Change runs again.
+# Drive1 and File1 are not moved: the drive change reads A:, and the file list depends on the start directory.
+steps = [
+  "{TAB} ",
+  "{ENTER}",
+  "{TAB}{TAB}{TAB}{TAB}{END}{BS}{BS}{BS}txt",
+  '{HOME}+{END}D:\Dest.bin',
+]
+
+[[program]]
+key = "public-domain/SK-TFTP-Sample__VB6/Server/demo/Server.exe"
+# No step. The form holds only Labels and a Winsock control, so no control takes the focus.
+# All event code runs on network events (ConnectionRequest, DataArrival).
+# Note: Form_Load listens on port 1001. If the original and the rebuilt build run at the same time, the second shows a Winsock error MsgBox.
+steps = []
+
+[[program]]
+key = "public-domain/SK-Winsock-Sample__VB6/demo/SubReality_WinsockSample.exe"
+# Focus starts on txtReceived (TabIndex 1). ENTER is never pressed: cmdConnect is the Default button and connects to the network.
+# These steps run no event procedure (txtPort and txtServer have no Change code). They only check the text drawing.
+# 1. TAB past cmdConnect to txtPort, select all, type 8080.
+# 2. TAB to txtServer, select all, type example.test.
+# 3. Shift+TAB back to txtPort, remove two digits.
+steps = [
+  "{TAB}{TAB}{HOME}+{END}8080",
+  "{TAB}{HOME}+{END}example.test",
+  "+{TAB}{END}{BS}{BS}",
+]
+
+[[program]]
+key = "public-domain/UUID2/VB6/UUID2.exe"
+# Focus starts on chkUpper (TabIndex 0). Form_Load writes a random UUID into txtUUID2, so that box differs in each run; mask it.
+# These checkbox clicks have no Click code; they do not make a new UUID.
+# 1. SPACE clears chkUpper.
+# 2. TAB to chkBraces, SPACE clears it.
+# 3. TAB to chkHyphens, SPACE clears it.
+# Generate, F5 (Rnd), chkAutomatic (30 s timer), Copy, Escape and Close (registry write) are not pressed.
+steps = [
+  " ",
+  "{TAB} ",
+  "{TAB} ",
+]
+
+[[program]]
+key = "public-domain/dump/VB6/rot47/Rot47.exe"
+# Focus starts on TxtInput (TabIndex 0). Each key fires TxtInput_Change, which writes rotCode of the input into TxtOutput.
+# 1. Type letters, a comma, a space and an exclamation mark.
+# 2. ENTER adds a new line (no Default button), then letters and digits.
+# 3. Remove three characters, then type ( ~ ) + % through braces.
+# Escape (End), Copy and Close are not pressed.
+steps = [
+  "Hello, World!",
+  "{ENTER}abc XYZ 123",
+  "{BS}{BS}{BS}{(}{~}{)}{+}{%}",
+]
+
+[[program]]
+key = "public-domain/machineLanguageConversion/ASCII/Ascii.exe"
+# Focus starts on TxtInput (TabIndex 0).
+# 1. Type Hello. TxtInput_Change writes the ASCII codes into TxtOutput.
+# 2. TAB past TxtOutput to ChkBreak, SPACE sets it. ChkBreak_Click adds spaces between the codes.
+# 3. Shift+TAB twice back to TxtInput, go to the end, remove two characters, type p!. TxtInput_Change runs with the break on.
+# 4. TAB twice to ChkBreak, SPACE clears it. ChkBreak_Click removes the spaces.
+# Close is not pressed.
+steps = [
+  "Hello",
+  "{TAB}{TAB} ",
+  "+{TAB}+{TAB}^{END}{BS}{BS}p!",
+  "{TAB}{TAB} ",
+]
+
+[[program]]
+key = "public-domain/machineLanguageConversion/Hex/Hex.exe"
+# Focus starts on TxtInput (TabIndex 0).
+# 1. Type Hello. TxtInput_Change writes the hex codes into TxtOutput.
+# 2. TAB past TxtOutput to ChkBreak, SPACE sets it. ChkBreak_Click adds spaces.
+# 3. TAB to ChkPercent, SPACE sets it. ChkPercent_Click adds a % before each code.
+# 4. Shift+TAB to ChkBreak, SPACE clears it. ChkBreak_Click removes the spaces.
+# 5. Shift+TAB twice back to TxtInput, go to the end, type a space and 123. TxtInput_Change runs with % on.
+# Close (TabIndex 4) is not pressed.
+steps = [
+  "Hello",
+  "{TAB}{TAB} ",
+  "{TAB} ",
+  "+{TAB} ",
+  "+{TAB}+{TAB}^{END} 123",
+]
+
+[[program]]
+key = "public-domain/machineLanguageConversion/Octal/Octal.exe"
+# Focus starts on TxtInput (TabIndex 0).
+# 1. Type Hello. TxtInput_Change writes the octal codes into TxtOutput.
+# 2. TAB past TxtOutput to ChkBreak, SPACE sets it. ChkBreak_Click adds spaces.
+# 3. Shift+TAB twice back to TxtInput, go to the end, remove two characters, type p!. TxtInput_Change runs with the break on.
+# 4. TAB twice to ChkBreak, SPACE clears it. ChkBreak_Click removes the spaces.
+# Close is not pressed.
+steps = [
+  "Hello",
+  "{TAB}{TAB} ",
+  "+{TAB}+{TAB}^{END}{BS}{BS}p!",
+  "{TAB}{TAB} ",
+]
+
+# Keyboard steps for p14 to p24.
+# A focused scroll bar has a blinking thumb, and a focused text box has a
+# blinking caret. Each step that moves a scroll bar or types into a text box
+# moves the focus to a control without a blink at its end.
+
+[[program]]
+key = "vb6-code/Artificial-life/Artificial Life.exe"
+# The simulation uses Rnd and runs in a DoEvents loop, so START is never pressed.
+# chkDisplayDead is never toggled: its Click calls DrawMap, which reads creatures(0) = Nothing and ends the program with error 91.
+# Focus starts on cmdStart (TabIndex 2).
+# Step 1: Tab to cmdStop and press it. cmdStop_Click sets runSim = False. Only the focus moves. No Rnd.
+# Step 2: Tab 9 times (cmbOrganisms, txtInfo, seven text boxes) to chkMultiply and clear it. chkMultiply_Click runs. No Rnd.
+# Step 3: Set chkMultiply again. chkMultiply_Click runs. No Rnd.
+# Step 4: Tab past chkDisplayDead to txtMutateTurns, type 300, and go back to chkMultiply. No event code runs. The text is fixed.
+steps = [
+  "{TAB} ",
+  "{TAB 9} ",
+  " ",
+  "{TAB}{TAB}{HOME}+{END}300+{TAB}+{TAB}",
+]
+
+[[program]]
+key = "vb6-code/Blacklight-effect/Blacklight.exe"
+# Focus starts on picMain. picBack is not visible. The order is picMain, hScroll, chkEnable.
+# Step 1: hScroll 2 to 3. hScroll_Change runs DrawBlacklight. Focus goes to chkEnable. No Rnd.
+# Step 2: hScroll to Max 10 (clamp at 255). Focus goes to chkEnable.
+# Step 3: hScroll to Min 1. Focus goes to chkEnable.
+# Step 4: Clear chkEnable. chkEnable_Click copies the original picture into picMain.
+# Step 5: Set chkEnable again. chkEnable_Click redraws the effect at intensity 1.
+# Step 6: hScroll 1 to 2. Focus goes to chkEnable.
+steps = [
+  "{TAB}{RIGHT}{TAB}",
+  "+{TAB}{END}{TAB}",
+  "+{TAB}{HOME}{TAB}",
+  " ",
+  " ",
+  "+{TAB}{RIGHT}{TAB}",
+]
+
+[[program]]
+key = "vb6-code/Brightness-effect/Part 1 - Pure VB6/vbBrightness.exe"
+# Focus starts on Picture1. The order is Picture1, CmdBrightness, TxtBrightness, ChkAutoRedraw.
+# Each press runs DrawVBBrightness with Point and PSet over 400x300 pixels. This is the slowest program here.
+# The effect applies to Picture1 itself, so each step builds on the step before. The result is fixed.
+# Step 1: Tab to CmdBrightness and press it. Brightness 150 percent.
+# Step 2: Tab to TxtBrightness, type 50, Shift+Tab to CmdBrightness, press it. Brightness 50 percent.
+# Step 3: The same with 200 percent (the look-up table clamps at 255).
+steps = [
+  "{TAB} ",
+  "{TAB}{HOME}+{END}50+{TAB} ",
+  "{TAB}{HOME}+{END}200+{TAB} ",
+]
+
+[[program]]
+key = "vb6-code/Brightness-effect/Part 2 - API - GetPixel and SetPixel/apiBrightness.exe"
+# Focus starts on Picture1. The order is Picture1, CmdBrightness, TxtBrightness, ChkAutoRedraw.
+# Each press runs DrawBrightness_API with GetPixel and SetPixelV over 400x300 pixels.
+# The effect applies to Picture1 itself, so each step builds on the step before. The result is fixed.
+# Step 1: Tab to CmdBrightness and press it. Brightness 150 percent.
+# Step 2: Tab to TxtBrightness, type 50, Shift+Tab to CmdBrightness, press it. Brightness 50 percent.
+# Step 3: The same with 200 percent.
+# Step 4: The same with 75 percent.
+steps = [
+  "{TAB} ",
+  "{TAB}{HOME}+{END}50+{TAB} ",
+  "{TAB}{HOME}+{END}200+{TAB} ",
+  "{TAB}{HOME}+{END}75+{TAB} ",
+]
+
+[[program]]
+key = "vb6-code/Brightness-effect/Part 4 - Even faster DIBs/Realtime_Brightness.exe"
+# Focus starts on Picture1. The order is Picture1, ChkMethod, hScrollBrightness, Picture2. LargeChange is 1.
+# Step 1: hScrollBrightness 0 to 20 in 20 Change events (DrawFastBrightness). Focus goes to Picture2.
+# Step 2: Clear ChkMethod. ChkMethod has no Click code. Focus stays on ChkMethod.
+# Step 3: hScrollBrightness 20 to 21. Change runs DrawBrightness (the 3D array path). Focus goes to Picture2.
+# Step 4: hScrollBrightness 21 to 19 in 2 Change events (DrawBrightness).
+# Step 5: Set ChkMethod again, then hScrollBrightness to 255 (DrawFastBrightness, clamp high).
+# Step 6: hScrollBrightness to -255 (DrawFastBrightness, clamp low).
+steps = [
+  "{TAB}{TAB}{RIGHT 20}{TAB}",
+  "+{TAB}+{TAB} ",
+  "{TAB}{RIGHT}{TAB}",
+  "+{TAB}{LEFT 2}{TAB}",
+  "+{TAB}+{TAB} {TAB}{END}{TAB}",
+  "+{TAB}{HOME}{TAB}",
+]
+
+[[program]]
+key = "vb6-code/Color-shift-effect/ColorShift.exe"
+# Focus starts on picMain. picBack is not visible. The order is picMain, cmdRight, cmdLeft.
+# Each press runs DrawColorShift on picMain itself, so the steps build on each other. No Rnd.
+# Step 1: Tab to cmdRight and press it. Shift right.
+# Step 2: Press cmdRight again.
+# Step 3: Tab to cmdLeft and press it. Shift left.
+# Step 4: Press cmdLeft again.
+# Step 5: Press cmdLeft again.
+steps = [
+  "{TAB} ",
+  " ",
+  "{TAB} ",
+  " ",
+  " ",
+]
+
+[[program]]
+key = "vb6-code/Colorize-effect/Colorize.exe"
+# Focus starts on picMain. picBack is not visible.
+# The order is picMain, cmdReset, picHueDemo, hScrollHue, option group (optKeepSaturation selected), hScrollSaturation.
+# Step 1: hScrollHue 180 to 359. Change runs DrawColorize with the pixel saturation. Focus goes to optKeepSaturation.
+# Step 2: hScrollHue to 0. Focus goes to optKeepSaturation.
+# Step 3: Down arrow selects optForceSaturation. Its Click redraws with 50 percent saturation.
+# Step 4: hScrollSaturation 50 to 100. Change sets lblSaturation to 100% and redraws. Focus goes back to optForceSaturation.
+# Step 5: Up arrow selects optKeepSaturation. Its Click redraws with the pixel saturation.
+# Step 6: Shift+Tab three times to cmdReset and press it. cmdReset_Click shows the original picture.
+steps = [
+  "{TAB}{TAB}{TAB}{END}{TAB}",
+  "+{TAB}{HOME}{TAB}",
+  "{DOWN}",
+  "{TAB}{END}+{TAB}",
+  "{UP}",
+  "+{TAB}+{TAB}+{TAB} ",
+]
+
+[[program]]
+key = "vb6-code/Contrast-effect/Contrast.exe"
+# PicBack (TabIndex 0) is not visible, so focus starts on hScrContrast. The order is hScrContrast, PicMain. LargeChange is 1.
+# Each Change runs ModifyContrast from PicBack into PicMain. No Rnd.
+# Step 1: hScrContrast 0 to 15. Focus goes to PicMain.
+# Step 2: hScrContrast 15 to -15.
+# Step 3: hScrContrast to Max 200 (clamp at 255).
+# Step 4: hScrContrast to Min -100 (clamp at 0).
+# Step 5: hScrContrast -100 to -80.
+steps = [
+  "{RIGHT 15}{TAB}",
+  "+{TAB}{LEFT 30}{TAB}",
+  "+{TAB}{END}{TAB}",
+  "+{TAB}{HOME}{TAB}",
+  "+{TAB}{RIGHT 20}{TAB}",
+]
+
+[[program]]
+key = "vb6-code/Curves-effect/Curves.exe"
+# No safe step. The curve changes only through MouseDown and MouseMove on picCurve.
+# No control has keyboard event code. The only other control that can take the focus is txtExplanation, which only shows a blinking caret.
+steps = []
+
+[[program]]
+key = "vb6-code/Custom-image-filters/Custom_Filters.exe"
+# Focus starts on picMain. picBack is not visible.
+# The order is picMain, cmdReset, TxtBias, cmdApply (Default), TxtWeight, TxtF(24) to TxtF(0), cmbFilter.
+# Shift+Tab from picMain goes to cmbFilter. Tab from cmbFilter goes back to picMain. cmbFilter starts at Emboss (2).
+# Each filter runs DoFilter with a 5x5 kernel over the picture. No Rnd. All text stays numeric, so no MsgBox shows.
+# Step 1: Down arrow in cmbFilter selects Engrave. cmbFilter_Click sets the boxes and redraws. Focus goes to picMain.
+# Step 2: The same, Grease.
+# Step 3: The same, Unfocus (scale 4).
+# Step 4: The same, Vibrate.
+# Step 5: Tab to cmdReset and press it. The original picture shows.
+# Step 6: Tab to TxtBias (GotFocus selects the text), type 50, Enter fires cmdApply. Tab moves the focus to cmdApply.
+# Step 7: Tab to TxtWeight, type 2, Enter fires cmdApply. Shift+Tab moves the focus back to cmdApply.
+steps = [
+  "+{TAB}{DOWN}{TAB}",
+  "+{TAB}{DOWN}{TAB}",
+  "+{TAB}{DOWN}{TAB}",
+  "+{TAB}{DOWN}{TAB}",
+  "{TAB} ",
+  "{TAB}50{ENTER}{TAB}",
+  "{TAB}2{ENTER}+{TAB}",
+]
+
+[[program]]
+key = "vb6-code/Diffuse-effect/Diffuse.exe"
+# DrawDiffuse calls Randomize Timer and Rnd. The result is random unless both distances are 0.
+# With hScrollX = 0 and hScrollY = 0, each offset is Rnd * 0, so the output is the original picture. The explosion button is never pressed.
+# The first screen (Form_Load diffuses 20 px) is random. The steps make it fixed.
+# Focus starts on picMain. picBack is not visible. The order is picMain, cmdReset, hScrollX, hScrollY, chkWrap, cmdDrawExplosion.
+# Step 1: Tab to cmdReset and press it. cmdReset_Click shows the original picture.
+# Step 2: hScrollX 20 to 0. Change sets lblX to 0 px and runs ProcessDiffuse with 0, 0. Focus goes past hScrollY to chkWrap.
+# Step 3: Set chkWrap. chkWrap_Click runs DrawDiffuse with wrap and 0, 0.
+# Step 4: Clear chkWrap. chkWrap_Click runs DrawDiffuse without wrap and 0, 0.
+steps = [
+  "{TAB} ",
+  "{TAB}{HOME}{TAB}{TAB}",
+  " ",
+  " ",
+]
+
+# Keyboard steps for p25 to p33.
+# Focus at start is the control with the lowest TabIndex that can take the focus.
+
+[[program]]
+key = "vb6-code/Emboss-engrave-effect/Emboss_Engrave.exe"
+# Focus starts on picMain (0). Tab order: picMain 0, cmdReset 2, option group (optEmboss 3, optEngrave 4, optRelief 7), chkColor 5, picColor 6. No option is selected at start, so no effect is drawn at load.
+# Step 1: Tab to cmdReset, Tab to the option group, space selects the focused option (optEmboss) and its Click runs UpdateEffect. No random input.
+# Step 2: Right arrow selects the next option (Engrave); optEngrave_Click draws the engrave filter.
+# Step 3: Right arrow selects Relief; optRelief_Click disables chkColor and draws the relief filter.
+# Step 4: Left arrow goes back to Engrave; chkColor is enabled again and the engrave filter is drawn.
+# Step 5: Tab to chkColor (5) and space checks it; chkColor_Click draws engrave with the fixed color of picColor (&HFF8080).
+# Step 6: Shift+Tab back to the selected option, Left arrow selects Emboss; emboss with the fixed color.
+# Step 7: Shift+Tab to cmdReset (2), space runs cmdReset_Click, which paints the original image. picColor is never clicked, so no color dialog opens.
+steps = [
+  "{TAB}{TAB} ",
+  "{RIGHT}",
+  "{RIGHT}",
+  "{LEFT}",
+  "{TAB} ",
+  "+{TAB}{LEFT}",
+  "+{TAB} ",
+]
+
+[[program]]
+key = "vb6-code/Fill-image-region/Filling.exe"
+# No safe keyboard step. The only event code is picDemo_MouseDown, MouseMove and MouseUp: the left button draws lines and the right button fills with a color from Rnd. No key event exists.
+steps = []
+
+[[program]]
+key = "vb6-code/Fire-effect/Fast_Flames.exe"
+# cmdStart is never pressed: the fire uses Rnd and animates without end. These steps run no drawing code; they only change control states, which are deterministic.
+# Focus starts on picDest (0). Tab order: picDest 0, cmdStart 1, cmdStop 2, txtWidth 3, txtHeight 4, scrUniformity 10, hsRed 14, hsGreen 15, hsBlue 16.
+# Step 1: Tab twice to cmdStop, space runs cmdStop_Click (Engage = False). Nothing is drawn; the focus rectangle moves.
+# Step 2: Tab to txtWidth (the edit selects all text on focus) and type 300 over 512. No Change code exists.
+# Step 3: Tab to txtHeight, Tab to scrUniformity, Right arrow moves it from 2 to 3.
+# Step 4: Tab to hsRed, End moves it to Max 300.
+# Step 5: Tab to hsGreen, Home moves it to 0.
+steps = [
+  "{TAB}{TAB} ",
+  "{TAB}300",
+  "{TAB}{TAB}{RIGHT}",
+  "{TAB}{END}",
+  "{TAB}{HOME}",
+]
+
+[[program]]
+key = "vb6-code/Game-physics-basic/Physics_Demo.exe"
+# No safe keyboard step. MainLoop redraws 500 stars each frame, and BuildStar places them with Rnd, so the screen never holds still. Arrow keys and space move the ship and fire, but the star field around it differs in every screenshot. Escape and cmdExit end the program.
+steps = []
+
+[[program]]
+key = "vb6-code/Gradient-2D/Gradient.exe"
+# Focus starts on picColor1 (0). Tab order: picColor1 0, picColor2 1, cmbStyle 3. The picture boxes open a color dialog on a mouse click only; no key reaches that code. Form_Load sets ListIndex 1 (Vertical).
+# Step 1: Tab twice to cmbStyle, Up arrow selects Horizontal; cmbStyle_Click draws a horizontal red-to-black gradient.
+# Step 2: Down arrow selects Vertical; cmbStyle_Click draws a vertical gradient.
+# Step 3: Up arrow selects Horizontal again; cmbStyle_Click draws the horizontal gradient.
+# Step 4: Backspace edits the combo text; cmbStyle_Change runs with ListIndex -1 and draws the horizontal branch.
+# Step 5: Down arrow selects a list item again; cmbStyle_Click draws that direction. The colors are fixed, nothing is random.
+steps = [
+  "{TAB}{TAB}{UP}",
+  "{DOWN}",
+  "{UP}",
+  "{BS}",
+  "{DOWN}",
+]
+
+[[program]]
+key = "vb6-code/Grayscale-effect/Grayscale.exe"
+# Focus starts on picMain (0). Tab order: picMain 0, cmdReset 2, lstFilters 4, then the controls of the visible frame (optChannel 6-8, optDecompose 10-11, hscrShades 13). Form_Load sets ListIndex -1.
+# Step 1: Tab twice to lstFilters, Down arrow selects the first item; lstFilters_Click draws the average grayscale.
+# Step 2: Down arrow selects "Adjusted for the human eye"; the weighted grayscale is drawn.
+# Step 3: Down arrow selects "Desaturate".
+# Step 4: Down arrow selects "Decompose" and shows frameDecompose; Tab goes to optDecompose(0), Down arrow selects optDecompose(1); optDecompose_Click draws the maximum decompose.
+# Step 5: Shift+Tab back to lstFilters, Down arrow selects "Single color channel" and shows frameChannel with Red.
+# Step 6: Tab to optChannel(0), Down arrow selects Green; optChannel_Click draws the green channel.
+# Step 7: Shift+Tab to lstFilters, Down arrow selects "Specific # of shades" and shows frameShades; Tab to hscrShades, two Right arrows move it from 6 to 8; each hscrShades_Change redraws.
+# Step 8: Shift+Tab to lstFilters, Down arrow selects the dithered shades with 8 shades. Every filter is a fixed formula on sample.jpg.
+steps = [
+  "{TAB}{TAB}{DOWN}",
+  "{DOWN}",
+  "{DOWN}",
+  "{DOWN}{TAB}{DOWN}",
+  "+{TAB}{DOWN}",
+  "{TAB}{DOWN}",
+  "+{TAB}{DOWN}{TAB}{RIGHT}{RIGHT}",
+  "+{TAB}{DOWN}",
+]
+
+[[program]]
+key = "vb6-code/Histograms-advanced/Advanced Histogram Viewer.exe"
+# Two windows: frmMain and the owned tool window frmHistogram (shown last in Form_Load). These steps assume that the driver activates frmMain. If it activates frmHistogram, the keys go to its combo boxes instead; that is also deterministic.
+# Focus on frmMain starts on PicMain (0). Tab order: PicMain 0, cmdDispHistogram 1, cmdStretchHistogram 3, cmdEqualize 4, chkRed 5, chkGreen 6, chkBlue 7, cmdEqualizeLuminance 8, cmdReset 10. cmdDispHistogram is never pressed, so frmMain keeps the focus.
+# Step 1: Tab twice to cmdStretchHistogram, space stretches the image and regenerates the histogram.
+# Step 2: Tab to cmdEqualize, Tab to chkRed, space unchecks it (no Click code; the box changes).
+# Step 3: Shift+Tab to cmdEqualize, space equalizes green and blue only and regenerates the histogram.
+# Step 4: Tab four times to cmdEqualizeLuminance, space equalizes the luminance (HSL round trip) and regenerates the histogram.
+# Step 5: Tab to cmdReset, space paints the original image again.
+# Step 6: Shift+Tab four times to chkRed, space checks it again.
+# Step 7: Shift+Tab to cmdEqualize, space equalizes all three channels. All operations are fixed formulas on sample.jpg.
+steps = [
+  "{TAB}{TAB} ",
+  "{TAB}{TAB} ",
+  "+{TAB} ",
+  "{TAB}{TAB}{TAB}{TAB} ",
+  "{TAB} ",
+  "+{TAB}+{TAB}+{TAB}+{TAB} ",
+  "+{TAB} ",
+]
+
+[[program]]
+key = "vb6-code/Histograms-basic/Basic Histogram Viewer.exe"
+# frmMain holds only cmdDispHistogram; all event code that draws is on the owned tool window frmHistogram. Step 1 presses cmdDispHistogram, which calls frmHistogram.Show and activates that window.
+# The later steps assume that frmHistogram keeps the focus between steps. If the driver activates frmMain again, Tab and the arrow keys only move the focus between PicMain and the button; that is also deterministic.
+# frmHistogram tab order: picH 0, cmbHistMethod 1, cmbHistSource 2, picGradient 5. Start: source Luminance (3), method Connecting lines (0).
+# Step 1: Tab to cmdDispHistogram, space shows and activates frmHistogram.
+# Step 2: Tab to cmbHistMethod, Down arrow selects Solid bars; cmbHistMethod_Click draws the bar histogram.
+# Step 3: Tab to cmbHistSource, Up arrow selects Blue; the blue histogram and a blue gradient are drawn.
+# Step 4: Up arrow selects Green.
+# Step 5: Up arrow selects Red.
+# Step 6: Shift+Tab to cmbHistMethod, Up arrow selects Connecting lines; the red histogram is drawn as lines.
+steps = [
+  "{TAB} ",
+  "{TAB}{DOWN}",
+  "{TAB}{UP}",
+  "{UP}",
+  "{UP}",
+  "+{TAB}{UP}",
+]
+
+[[program]]
+key = "vb6-code/Levels-effect/Image Levels.exe"
+# Focus starts on picMain (0). Tab order: picMain 0, cmdDispHistogram 1, hsOutL 5, hsOutR 9, hsInR 12, hsInL 13, hsInM 18, cmdReset 23. cmdDispHistogram is never pressed.
+# Each arrow key gives one Change event and one MapImageLevels pass on the 256x192 image, so a step holds at most 20 of them.
+# Step 1: Tab twice to hsOutL, Right arrow 10 times moves the output left limit from 0 to 10.
+# Step 2: Tab to hsOutR, Left arrow 10 times moves the output right limit from 255 to 245.
+# Step 3: Tab to hsInR, Left arrow 10 times moves the input right limit to 245; FixScrollBars moves the midtone bar.
+# Step 4: Tab to hsInL, Right arrow 10 times moves the input left limit to 10.
+# Step 5: Tab to hsInM, Left arrow 20 times moves the midtone (gamma) bar down.
+# Step 6: Tab to cmdReset, space runs cmdReset_Click, which sets all bars back and redraws.
+# Step 7: Shift+Tab to hsInM, End moves the midtone to its maximum (254); the image becomes darker. All values are fixed, nothing is random.
+steps = [
+  "{TAB}{TAB}{RIGHT 10}",
+  "{TAB}{LEFT 10}",
+  "{TAB}{LEFT 10}",
+  "{TAB}{RIGHT 10}",
+  "{TAB}{LEFT 20}",
+  "{TAB} ",
+  "+{TAB}{END}",
+]
+
+
+[[program]]
+key = "vb6-code/Mandelbrot/Mandelbrot.exe"
+# The focus starts on PicDraw (TabIndex 0). The tab order is TxtXMin, TxtXMax, TxtYMin, TxtYMax, CmdRedraw, scrAccuracy, CmdReset.
+# The default frame holds the set, and many points recurse to IterationLimit 400. That render is too slow, so no step presses Reset or draws the default frame.
+# The steps set the frame to X 1..2, Y 0..1. A simulation of Calculate gives a mean of 1.1 recursions and a maximum of 7 for each pixel there, so the render of 601x601 pixels is fast.
+# Step 1: Tab to TxtXMin, select all, type 1. No Rnd, no time.
+# Step 2: Tab to TxtXMax, select all, type 2.
+# Step 3: Tab to TxtYMin, select all, type 0.
+# Step 4: Tab to TxtYMax, select all, type 1.
+# Step 5: Tab to CmdRedraw and press it. CmdRedraw_Click runs Calculate and SetPixelV for each pixel and sets the caption to "Redraw the Fractal". The image depends only on the four text values. If the VM is slow, the render can still run at the screenshot; the time was not measured.
+steps = [
+  "{TAB}{HOME}+{END}1",
+  "{TAB}{HOME}+{END}2",
+  "{TAB}{HOME}+{END}0",
+  "{TAB}{HOME}+{END}1",
+  "{TAB} ",
+]
+
+[[program]]
+key = "vb6-code/Map-editor-2D/Map Editor.exe"
+# Form_Load reads Demo.map and calls DrawMap. The focus starts on PicTiles (TabIndex 0). The tab order is PicTiles, Pic1, MainPic, HSTileBar, VSMain, HSMain, Pic2, cmbDrawMethod. PicTilesBuffer is not visible.
+# Step 1: three Tabs to HSTileBar, then RIGHT. HSTileBar_Change calls DrawTileBar with PaintPicture, and the tile bar moves by one tile.
+# Step 2: Tab to VSMain, END. VSMain_Change calls ScrollMap and DrawMap (PaintPicture). The map scrolls to the bottom (Max 833).
+# Step 3: Tab to HSMain, END. HSMain_Change scrolls the map to the right edge (Max 473).
+# Step 4: two Tabs (Pic2, cmbDrawMethod), DOWN. cmbDrawMethod_Click sets UseStretchBlt to True. The combo box shows "Use StretchBlt".
+# Step 5: two Shift+Tabs back to HSMain, HOME. DrawMap runs again, now with StretchBlt, and the map scrolls back to the left.
+# Step 6: Shift+Tab to VSMain, HOME. DrawMap with StretchBlt scrolls back to the top.
+# Step 7: Shift+Tab to HSTileBar, END. DrawTileBar with StretchBlt shows the last tiles (value 3).
+# Step 8: Ctrl+N (File > New Map). MnuNew_Click sets all tiles to 0 and calls DrawMap. No dialog, no file. Ctrl+O, Ctrl+S, Ctrl+X and Ctrl+Z (InputBox) are not used.
+steps = [
+  "{TAB}{TAB}{TAB}{RIGHT}",
+  "{TAB}{END}",
+  "{TAB}{END}",
+  "{TAB}{TAB}{DOWN}",
+  "+{TAB}+{TAB}{HOME}",
+  "+{TAB}{HOME}",
+  "+{TAB}{END}",
+  "^n",
+]
+
+[[program]]
+key = "vb6-code/Nature-effects/Nature_Filters.exe"
+# Form_Load loads sample.jpg. The focus starts on picMain (TabIndex 0). picBack is not visible, so Tab goes to lstFilters and then to cmdReset.
+# Each list move fires lstFilters_Click and UpdateEffect. Each filter is a fixed pixel formula on picBack, with no Rnd and no time.
+# Step 1: Tab to the list, HOME. DrawAtmosphere.
+# Step 2: DOWN. DrawBurn.
+# Step 3: DOWN. DrawFog.
+# Step 4: DOWN. DrawFreeze.
+# Step 5: DOWN twice. DrawLava runs, then DrawMetal shows.
+# Step 6: DOWN twice. DrawOcean runs, then DrawRainbow (HSL conversion) shows.
+# Step 7: END. DrawWater.
+# Step 8: Tab to cmdReset, Space. cmdReset_Click copies picBack back to picMain and clears the list selection.
+steps = [
+  "{TAB}{HOME}",
+  "{DOWN}",
+  "{DOWN}",
+  "{DOWN}",
+  "{DOWN}{DOWN}",
+  "{DOWN}{DOWN}",
+  "{END}",
+  "{TAB} ",
+]
+
+[[program]]
+key = "vb6-code/Randomize-effects/RandomizationFX.exe"
+# Both effects call Randomize Timer and Rnd, so the default effect differs on each run.
+# The steps set Line Length to 1. Then lenHalf is 0 and Int(Rnd * 1) is 0, so each line or triangle is one point at (x, y), and its color is the color of that same pixel.
+# Thus the image stays equal to the original for every Rnd sequence. The code runs, but the picture does not change. A crash or a wrong length rule shows on the screen.
+# The focus starts on picMain. The tab order is cmdDrawLines, txtIterations, txtLength, cmdReset, cmdDrawTriangles. picBack is not visible.
+# Step 1: two Tabs to txtIterations, select all, type 10.
+# Step 2: Tab to txtLength, select all, type 1.
+# Step 3: two Shift+Tabs to cmdDrawLines, Space. DrawLineEffect runs 11 one-point lines.
+# Step 4: four Tabs to cmdDrawTriangles, Space. DrawTriangleEffect runs 11 one-point polygons.
+# Step 5: Shift+Tab to cmdReset, Space. cmdReset_Click copies picBack to picMain.
+steps = [
+  "{TAB}{TAB}{HOME}+{END}10",
+  "{TAB}{HOME}+{END}1",
+  "+{TAB}+{TAB} ",
+  "{TAB}{TAB}{TAB}{TAB} ",
+  "+{TAB} ",
+]
+
+[[program]]
+key = "vb6-code/Scanner-TWAIN/VB_Scanner_Support.exe"
+# No safe step. EZTW32.dll is not in the program folder. Form_Load calls TWAIN_IsAvailable through a Declare on EZTW32.dll with no error handler.
+# This gives run-time error 53 at load, and the program ends before the form shows. If the DLL were present, both buttons open a TWAIN dialog or a MsgBox, and the option buttons have no event code.
+steps = []
+
+[[program]]
+key = "vb6-code/Screen-capture/ScreenCapture.exe"
+# No safe step. The only code is Form_Load, which copies the whole screen into the form. That picture depends on what is behind the window, so it is not the same on both sides.
+# The form has no control that takes the focus and no key procedure, so no key runs code.
+steps = []
+
+[[program]]
+key = "vb6-code/Sepia-effect/Sepia.exe"
+# Form_Load loads sample.jpg. The focus starts on picMain (TabIndex 0). picBack is not visible, so Tab goes to cmdSepia and then to cmdReset.
+# DrawSepia reads picMain and writes picMain, so a second press applies the effect again on the result. It is a fixed formula with no Rnd.
+# Step 1: Tab to cmdSepia, Space. Sepia once.
+# Step 2: Space. Sepia twice.
+# Step 3: Tab to cmdReset, Space. LoadImageAutosized copies picBack to picMain.
+# Step 4: Shift+Tab to cmdSepia, Space. Sepia once on the original.
+# Step 5: Tab to cmdReset, Space. Original again.
+steps = [
+  "{TAB} ",
+  " ",
+  "{TAB} ",
+  "+{TAB} ",
+  "{TAB} ",
+]
+
+[[program]]
+key = "vb6-code/Threshold-effect/Threshold.exe"
+# Form_Load loads sample.jpg and draws the threshold 127. The focus starts on picMain. The tab order is cmdReset, hscrThreshold, chkWhite. picBack is not visible.
+# Each scroll bar move fires hscrThreshold_Change, which sets lblThreshold and calls DrawThreshold. It is a fixed formula with no Rnd.
+# Step 1: two Tabs to the scroll bar, RIGHT. The threshold is 128.
+# Step 2: PGDN. LargeChange is 10, so the threshold is 138.
+# Step 3: END. The threshold is 255, and the image is all black.
+# Step 4: HOME. The threshold is 0.
+# Step 5: PGDN ten times. The threshold is 100.
+# Step 6: Tab to chkWhite, Space. chkWhite_Click forces the pixels above 100 to white.
+# Step 7: Space. The check box clears, and the colors come back.
+# Step 8: two Shift+Tabs to cmdReset, Space. cmdReset_Click shows the original image.
+steps = [
+  "{TAB}{TAB}{RIGHT}",
+  "{PGDN}",
+  "{END}",
+  "{HOME}",
+  "{PGDN 10}",
+  "{TAB} ",
+  " ",
+  "+{TAB}+{TAB} ",
+]
+
+[[program]]
+key = "vb6-code/Transparency-2D/Transparency.exe"
+# Form_Load blends the two pictures at 50 percent. Picture1 and Picture2 are not visible, so the focus starts on Picture3 and Tab goes to hScroll1.
+# Each move fires hScroll1_Change, which calls DrawTransparency with the scroll value. It is a fixed blend with no Rnd. LargeChange is 1.
+# Step 1: Tab to the scroll bar, RIGHT. 51 percent.
+# Step 2: END. 100 percent, only the second picture.
+# Step 3: HOME. 0 percent, only the first picture.
+# Step 4: RIGHT 25 times. 25 percent.
+# Step 5: LEFT. 24 percent.
+steps = [
+  "{TAB}{RIGHT}",
+  "{END}",
+  "{HOME}",
+  "{RIGHT 25}",
+  "{LEFT}",
+]

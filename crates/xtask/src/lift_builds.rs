@@ -27,6 +27,7 @@ use crate::builds::{
 use crate::pcode_record::pcode_root;
 use crate::ratios::differential::support::vbp;
 use crate::sample_picture::{missing_pictures, sample_bitmap};
+use crate::steps::{drive_script, parse_steps, render_steps, steps_path};
 
 /// The options of `export-lift-builds`.
 struct Options {
@@ -97,6 +98,11 @@ fn export(options: &Options) -> Result<usize, String> {
         .map_err(|err| format!("{}: {err}", options.types))?;
     let opcodes = OpcodeTable::parse(&read(&options.opcodes)?)
         .map_err(|err| format!("{}: {err}", options.opcodes))?;
+    let steps_file = steps_path();
+    let steps = parse_steps(
+        &std::fs::read_to_string(&steps_file)
+            .map_err(|err| format!("reading {}: {err}", steps_file.display()))?,
+    )?;
     let dir = Path::new(&options.dir);
     prepare(dir)?;
     let root = pcode_root();
@@ -149,6 +155,28 @@ fn export(options: &Options) -> Result<usize, String> {
         });
     }
     write_lists(dir, &exported)?;
+    if let Some(unknown) = steps
+        .keys()
+        .find(|key| !exported.iter().any(|program| &program.key == *key))
+    {
+        return Err(format!(
+            "{}: no program of the corpus has the key {unknown}",
+            steps_file.display()
+        ));
+    }
+    let steps_dir = dir.join("steps");
+    std::fs::create_dir_all(&steps_dir)
+        .map_err(|err| format!("making {}: {err}", steps_dir.display()))?;
+    for program in &exported {
+        if let Some(list) = steps.get(&program.key).filter(|list| !list.is_empty()) {
+            let path = steps_dir.join(format!("{}.txt", program.short));
+            std::fs::write(&path, render_steps(list))
+                .map_err(|err| format!("writing {}: {err}", path.display()))?;
+        }
+    }
+    let drive = dir.join("drive.vbs");
+    std::fs::write(&drive, drive_script())
+        .map_err(|err| format!("writing {}: {err}", drive.display()))?;
     let runs = dir.join("runs.bat");
     std::fs::write(&runs, render_runs(&exported))
         .map_err(|err| format!("writing {}: {err}", runs.display()))?;
@@ -173,11 +201,14 @@ const RUN_WAIT_SECONDS: u8 = 6;
 /// Renders `runs.bat`, with CRLF at the end of each line.
 ///
 /// After `build.bat`, the file starts each executable that VB6 built, the
-/// original side and then the extracted side of each program. It waits
-/// [`RUN_WAIT_SECONDS`] seconds, sends `===SHOT <short> <side>===` out
-/// through `COM1`, waits again, and ends the program. The other machine
-/// takes a picture of the screen at each marker, so the first window of each
-/// rebuilt program can be compared with the first window of its original.
+/// original side and then the extracted side of each program, through
+/// `drive.vbs` (see `steps.rs`). The script sends
+/// `===SHOT <short> <side>===` out through `COM1` while the first window
+/// shows, and then a marker after each step of the program. The file then
+/// ends the program, and waits [`RUN_WAIT_SECONDS`] seconds. The other
+/// machine takes a picture of the screen at each marker, so each screen of
+/// each rebuilt program can be compared with the same screen of its
+/// original.
 /// The file copies the source project of each program into
 /// [`RUN_DIR`]`\<short>`, copies each executable there as `run-original.exe`
 /// or `run-extracted.exe`, and starts it there: a program reads its data
@@ -231,10 +262,7 @@ fn render_runs(programs: &[Exported]) -> String {
             ":one",
             "set FOUND=1",
             &format!(r#"copy /y %3 "{RUN_DIR}\%1\run-%2.exe" >nul"#),
-            &format!(r#"start "" "{RUN_DIR}\%1\run-%2.exe""#),
-            &wait,
-            ">COM1 echo ===SHOT %1 %2===",
-            &wait,
+            &format!(r#"cscript //nologo drive.vbs "{RUN_DIR}\%1\run-%2.exe" %1 %2"#),
             r#"taskkill /f /im run-%2.exe >nul 2>&1"#,
             &wait,
             &format!(r#"del "{RUN_DIR}\%1\run-%2.exe""#),
@@ -308,7 +336,6 @@ mod tests {
             ]
         );
         assert!(text.contains(r#"for %%e in ("%SystemDrive%\deform6-out\%1\%2\*.exe")"#));
-        assert!(text.contains(">COM1 echo ===SHOT %1 %2==="));
         assert!(text.contains(">COM1 echo ===SKIP p03 it locks the session==="));
         assert!(text.contains("ping -n 7 127.0.0.1 >nul"));
         assert!(
@@ -317,7 +344,9 @@ mod tests {
             )
         );
         assert!(text.contains(r#"copy /y %3 "%SystemDrive%\deform6-run\%1\run-%2.exe" >nul"#));
-        assert!(text.contains(r#"start "" "%SystemDrive%\deform6-run\%1\run-%2.exe""#));
+        assert!(text.contains(
+            r#"cscript //nologo drive.vbs "%SystemDrive%\deform6-run\%1\run-%2.exe" %1 %2"#
+        ));
         assert!(text.contains("taskkill /f /im run-%2.exe"));
         assert!(text.contains(r#"pushd "%~dp0""#));
     }
