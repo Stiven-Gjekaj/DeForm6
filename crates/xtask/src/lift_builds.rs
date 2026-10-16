@@ -205,7 +205,9 @@ const RUN_WAIT_SECONDS: u8 = 6;
 /// `drive.vbs` (see `steps.rs`). The script sends
 /// `===SHOT <short> <side>===` out through `COM1` while the first window
 /// shows, and then a marker after each step of the program. The file then
-/// ends the program, and waits [`RUN_WAIT_SECONDS`] seconds. The other
+/// ends the program, waits [`RUN_WAIT_SECONDS`] seconds, and closes the
+/// error report of Windows (`dwwin.exe`) that a program that ends in the
+/// middle of its work can leave, which covers the next pictures. The other
 /// machine takes a picture of the screen at each marker, so each screen of
 /// each rebuilt program can be compared with the same screen of its
 /// original.
@@ -265,6 +267,7 @@ fn render_runs(programs: &[Exported]) -> String {
             &format!(r#"cscript //nologo drive.vbs "{RUN_DIR}\%1\run-%2.exe" %1 %2"#),
             r#"taskkill /f /im run-%2.exe >nul 2>&1"#,
             &wait,
+            r#"taskkill /f /im dwwin.exe >nul 2>&1"#,
             &format!(r#"del "{RUN_DIR}\%1\run-%2.exe""#),
             "goto :eof",
         ]
@@ -348,6 +351,9 @@ mod tests {
             r#"cscript //nologo drive.vbs "%SystemDrive%\deform6-run\%1\run-%2.exe" %1 %2"#
         ));
         assert!(text.contains("taskkill /f /im run-%2.exe"));
+        let ended = text.find("taskkill /f /im run-%2.exe").unwrap();
+        let report = text.find("taskkill /f /im dwwin.exe >nul 2>&1").unwrap();
+        assert!(ended < report);
         assert!(text.contains(r#"pushd "%~dp0""#));
     }
 
