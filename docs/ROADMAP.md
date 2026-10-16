@@ -904,21 +904,40 @@ open at a place that Windows chooses, 2 draw random values, the map editor
 differs in a scroll bar and a picture box, and 1 differs in the blink of
 the cursor of the console behind it.
 
+**The behaviour check, 2026-10-16.** `runs.bat` sends the keys of
+`scripts/vm/steps.toml` to each program and its original, and `vm.py`
+compares the screen after each step. A program that loads a missing
+`sample.jpg` gets a picture of the export, so that its image code runs. The
+check found three faults of the lift, and each got a fix with its own
+test: `vbNullString` to a `ByVal String`, the `Static` variables of a
+procedure, and a struct whose first member the body writes. It also found a
+leftover error report of Windows that covered the next pictures. The lift also types 119 more
+locals as `String` and 115 loop counters, and names the 62 public variables
+of each corpus as the source does.
+
 **Where the gate stands.** The recovered code compiles: VB6 builds 42 of
 the 42 lifted projects, and 1652 `GoTo` statements of the lift are 2 in the
-written code. That the rebuilt program behaves the same as the original is
-measured on the first screen only: 33 of 41 pairs are the same, pixel for
-pixel, and no rebuilt program stops with a run-time error.
+written code. In the last full run, 182 of the 226 screens of the 41
+programs are the same, pixel for pixel, and 175 of the 185 steps change the
+screen of the original. Of the 12 programs with a screen that differs, 4
+open at a place that Windows chooses and 4 draw random values. The map
+editor differs in two controls, `Colorize.exe` and `Nature_Filters.exe` in a
+rounding of 35 and 918 pixels, and `Realtime_Brightness.exe` is fixed after
+the run: a run of it alone gives 7 of its 7 screens the same.
 
-**Next.** Phase 11 stays open until the second part of the gate is met.
+**Next.**
 
-- No check drives a rebuilt program past its first screen.
-- A local whose address a call takes, and a local with a member, stay a
-  `Variant`.
-- A variable keeps the name of its offset, such as `local_88`. 462 of the
-  511 names of locals of four or more letters in the source are in no byte
-  of their executable, in ASCII or in UTF-16, so no reader of the file can
-  give them back.
+- The rounding of `Colorize.exe` and `Nature_Filters.exe`, and the two
+  controls of the map editor.
+- A program that draws random values or opens where Windows chooses needs a
+  check other than the pixels.
+- A local whose address a call takes stays a `Variant`. A rule that typed
+  it when only a `Declare` took the address broke a struct that the lift
+  did not find (the `BITMAPINFO` above, before its fix).
+- A variable keeps the name of its offset, such as `local_88`, apart from
+  the public variables. 462 of the 511 names of locals of four or more
+  letters in the source are in no byte of their executable, in ASCII or in
+  UTF-16, so no reader of the file can give them back.
 
 **The gate.** The recovered code compiles, which Phase 8 already measures, and
 the rebuilt program behaves the same as the original.
@@ -957,7 +976,7 @@ Phase 8  (exit met on the author's XP host; --verify-build waits)
           |
           +-- Phase 10 (exit met: names and widths, 680 of 680 bodies decode)
                  |
-                 +-- Phase 11 (part 2: 42 of 42 build, 33 of 41 start the same)
+                 +-- Phase 11 (part 2: 42 of 42 build, 182 of 226 screens the same)
 
 Phase 12 runs beside 10 and 11.
 Phase 13 closes the milestone.

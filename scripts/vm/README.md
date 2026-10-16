@@ -16,7 +16,13 @@ The script uses only the standard library of Python 3.
 - When the firewall asks about a program, the user answers. Escape closes the
   question and changes no setting.
 
-## A build and a start check
+## Where the files of a run go
+
+Put the export, the CD image, the capture and the pictures of a run into
+`derived/vm/` of the checkout. Git ignores that folder. Do not use `/tmp`:
+the system clears it, once in the middle of a run.
+
+## A build and a behaviour check
 
 1. Export the lifted corpus and make a CD image of it:
 
@@ -56,9 +62,20 @@ The script uses only the standard library of Python 3.
 
    `build.bat` builds each original and each lifted project. `sendlogs.bat`
    sends the logs through the serial port, and then `===END===`. `runs.bat`
-   starts each program, sends `===SHOT pNN side===` while its first window
-   shows, and sends `===END===` at the end. The watcher takes a picture at
-   each marker, and stops at the second `===END===`.
+   starts each program through `drive.vbs`. The script sends
+   `===SHOT pNN side===` while the first window shows. Then it sends each
+   step of `steps\pNN.txt` to the program with `SendKeys`, and
+   `===SHOT pNN side-sN===` after step N. `runs.bat` sends `===END===` at the
+   end. The watcher takes three pictures at each marker, and stops at the
+   second `===END===`.
+
+   `scripts/vm/steps.toml` holds the steps of each program, and
+   `export-lift-builds` writes them. A step must give the same screen at each
+   run: no random value, no time, no network and no file dialog. The steps of
+   one program build on each other. When the program has ended or does not
+   come to the front, the script sends no keys and sends
+   `===NOKEYS pNN side-sN===`, because keys that go to the window of
+   `runs.bat` can run a command there.
 
 5. Read the results:
 
@@ -68,10 +85,24 @@ The script uses only the standard library of Python 3.
    python3 scripts/vm/vm.py compare <pictures>
    ```
 
-   `compare` gives, for each program, the share of the pixels above the task
-   bar that differ between the original and the rebuilt program. A share of
-   0 is the same screen. A share above 0 is a difference to look at: a form
-   with no recovered properties opens at another place and size.
+   `compare` gives, for each screen of each program, the share of the pixels
+   above the task bar that differ between the original and the rebuilt
+   program, and the count. It takes the least count over each pair of the
+   three pictures of a marker, because a caret blinks. A count of 0 is the
+   same screen. A count above 0 is a difference to look at. For a step,
+   `moved` tells that the step changed the screen of the original, and
+   `still` that it did not, so that the step checks nothing.
+
+   A program that loads `App.Path & "\sample.jpg"` gets a picture that
+   `export-lift-builds` makes, because the corpus does not hold one.
+
+## Stop a run
+
+`drive.vbs` brings the program to the front at each step, so keys that you
+type into the machine during a run can go to the program. Stop the run with
+Windows key and R, then type `taskkill /f /im cscript.exe` at once. Then
+stop `runs.bat` the same way with `taskkill /f /im cmd.exe`. A run of the 41
+programs with their steps takes about 60 minutes.
 
 ## What each command does
 
@@ -84,8 +115,8 @@ The script uses only the standard library of Python 3.
 | `cd ISO` | Copies the image into the sandbox of QEMU and puts it into the CD drive |
 | `nudge` | Moves the mouse one pixel and back, which stops the screen saver |
 | `read OUT` | Copies the serial port into the file, until the process ends |
-| `shots CAPTURE DIR [ENDS]` | Takes a picture at each marker, until `ENDS` end markers |
-| `compare DIR` | Compares the pictures of each program |
+| `shots CAPTURE DIR [ENDS]` | Takes three pictures at each marker, until `ENDS` end markers |
+| `compare DIR` | Compares the pictures of each screen of each program |
 | `builds CAPTURE` | Counts the builds that succeeded on each side |
 | `errors CAPTURE EXTRACTED` | Gives the first compile error of each lifted project, with its line |
 

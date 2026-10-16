@@ -90,6 +90,40 @@ does not do. A change that no release holds yet goes under one
   rebuilt program of the other pairs shows its window with no run-time
   error.
 
+- The behaviour check: `export-lift-builds` writes the keys of
+  `scripts/vm/steps.toml` for each program, and `runs.bat` sends them
+  through `drive.vbs` with `SendKeys`, with a marker after each step. `vm.py`
+  takes three pictures at each marker, because a caret blinks, and
+  `compare` gives each step of each program, and whether the step changed
+  the screen of the original. A step sends its keys only while its program
+  runs and is in front. In the last full run, VB6 builds 42 of the 42
+  lifted projects, and 182 of the 226 screens of 41 programs are the same,
+  pixel for pixel. 175 of the 185 steps change the screen of the original.
+- A lifted program that loads a picture that the corpus does not hold, such
+  as `App.Path & "\sample.jpg"` in 16 programs, gets a bitmap that the export
+  makes. Before this, the original and the rebuilt program both stopped
+  with error 53, and the check compared two error boxes.
+- `runs.bat` ends the error report of Windows after each program, which
+  covered the pictures of the next program.
+- The lift declares a local that only the stores of a string write as a
+  `String` (119 locals), and the counter of a `For` loop with the type of
+  its loop (115 counters: 87 `Long` and 28 `Integer`).
+- `public_variables` reads the public variables of an object. `lpPublicVars`
+  is an array of pointers, and not of records. In each corpus, 62 public
+  variables come back with the name, the order and the type of the source.
+  The lift writes them by name, such as `frmPassGen.useAmpersand`, and the
+  measure of the lift goes from 3106 to 3246 of the 4093 tokens of the
+  source.
+- The behaviour check found these faults in the lift, and each got a fix
+  with its own test: `vbNullString` that a call passed to a `ByVal String`
+  of a private procedure came back as 0, and seven image programs stopped
+  with error 53 at Reset or at a check box. The `Static` variables of a procedure were
+  members of an empty `Variant`, and `Mandelbrot.exe` stopped with error
+  424. A struct whose first member the body writes, such as `BITMAPINFO`,
+  came back as separate locals, and the rebuilt `Realtime_Brightness.exe`
+  drew nothing. A run of only that program and `RandomizationFX.exe`, after
+  the fix, gives 11 of their 13 screens the same.
+
 ### Faults of 3.0.0
 
 - A `Boolean` property is one byte in the form stream, `0xFF` for `True`.
@@ -114,12 +148,17 @@ does not do. A change that no release holds yet goes under one
   come back. Basic computes them from the client area when it loads a form
   with a scale mode other than 0, and each of the 54 corpus forms with the
   lines agrees, so the program is the same.
-- Of the 8 pairs that differ in the last run, 4 are forms with
-  `StartUpPosition = 3`, "Windows Default", which open at a place that
-  Windows chooses at each start. Two programs draw random values: the stars of `Physics_Demo.exe`
-  and the identifier of `UUID2.exe`. The map editor differs in the size of
-  the box of a scroll bar and in one picture box, and one pair in the
-  blink of the cursor of the console.
+- Of the 12 programs with a screen that differs in the last full run, 4
+  are forms with `StartUpPosition = 3`, "Windows Default", which open at a
+  place that Windows chooses at each start. Four draw random values:
+  `UUID2.exe`, `Diffuse.exe`, `Physics_Demo.exe` and `RandomizationFX.exe`.
+  The map editor differs in the size of the box of a scroll bar and in
+  one picture box. `Colorize.exe` and `Nature_Filters.exe` differ in 35 and
+  918 pixels of one step, a difference of rounding that is not explained
+  yet. `Realtime_Brightness.exe` is fixed after that run.
+- A local whose address a call takes stays a `Variant`. A rule that typed
+  such a local when only a `Declare` took its address broke a struct that
+  the lift did not find, and it is not in this release.
 
 ### What this does not do
 

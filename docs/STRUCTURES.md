@@ -623,7 +623,7 @@ same 64 bytes AI calls the PrivateObjectDescriptor. **[L]**
 | 0x14 | 4 | `nul3` | 0 |
 | 0x18 | 4 | `lpFuncTypeInfo` | **VA of the `FuncTypDesc` pointer array** |
 | 0x1C | 4 | `nul4` | 0 |
-| 0x20 | 4 | `lpPublicVars` | **VA of the `PubVarDesc` array** |
+| 0x20 | 4 | `lpPublicVars` | **VA of an array of `cntPublicVars` pointers to `PubVarDesc` records** (§6.4) |
 | 0x24 | 4 | `lpEventsTypeInfo` | **VA of the `EventDesc` pointer array** |
 | 0x28 | 4 | `lpNull` | 0 |
 | 0x2C | 4 | `nul5` | 0 |
@@ -647,7 +647,7 @@ Object                                  (ObjectTable.lpObjectArray[i], 0x30 byte
       ├─ lpPrivateObject 0x0C → PrivateObj      (0x40 bytes)
       │    ├─ lpFuncTypeInfo   0x18 → VA[N]     (parallel to lpProcNamesArray)
       │    ├─ cntPublicVars    0x10 → V
-      │    ├─ lpPublicVars     0x20 → PubVarDesc[V]   (contiguous records)
+      │    ├─ lpPublicVars     0x20 → VA[V]     (pointers to PubVarDesc)
       │    ├─ cntEvents        0x12 → E
       │    └─ lpEventsTypeInfo 0x24 → VA[E]     (pointers to EventDesc)
       └─ (ObjectInfo + 0x38) → OptionalObjectInfo, if fObjectType & 2
@@ -658,9 +658,9 @@ and both have length `ProcCount`.** A `NULL` at index *i* in either means the
 procedure at that index is private and has no recoverable name or prototype.
 GD's figures show the same `NULL` at the same index in both arrays. **[C]**
 
-Note the asymmetry, which is real and which GD's figures make explicit:
-`lpFuncTypeInfo` and `lpEventsTypeInfo` are arrays of **pointers**;
-`lpPublicVars` is an array of **inline records**.
+All three are arrays of **pointers**. GD's figures show `lpPublicVars` as an
+array of inline records, and that is wrong: the corpus measurement of §6.4
+finds a pointer in each entry. **[C]**
 
 ### 6.3 `FuncTypDesc`
 
@@ -707,28 +707,32 @@ matching by position, which is a heuristic. DeForm6 should recover event
 *signatures* (argument names and types are reachable) and mark event *names* as
 inferred, or omit them.
 
-**`PubVarDesc`**, from GD's `publicVar` figure. Inline records, `cntPublicVars`
-of them starting at `PrivateObj.lpPublicVars`. **[L]**
+**`PubVarDesc`**, from GD's `publicVar` figure, corrected against the corpus
+on 2026-10-16. `PrivateObj.lpPublicVars` is an array of `cntPublicVars`
+pointers. An entry that points to a record is a public variable. Each other
+entry is not a record. **[C]**
 
 | Offset | Size | Name | Meaning |
 |---|---|---|---|
 | 0x00 | 4 | `lpName` | VA of the variable name NTS |
 | 0x04 | 4 | `nul1` | 0 |
 | 0x08 | 4 | `nul2` | 0 |
-| 0x0C | 2 | `index` | 0 in sample |
-| 0x0E | 1 | `unk1` | 3 in sample |
-| 0x0F | 1 | `unk2` | 0x40 in sample |
-| 0x10 | 2 | `unk3` | 2 in sample |
-| 0x12 | 2 | `unk4` | 0x1C in sample |
+| 0x0C | 4 | `memberID` | `0x4003nnnn`. The low word `nnnn` is the place of the variable among the variables of the object, in the order of the source. GD read the bytes `index`, `unk1` 3 and `unk2` 0x40. |
+| 0x10 | 2 | `unk3` | 2 in each corpus record |
+| 0x12 | 2 | `vOff` | The vtable offset of the get accessor of the variable. The let follows 4 bytes later. GD's sample gives 0x1C, the first slot after `IDispatch`. |
 | 0x14 | 4 | `varOffset` | **Byte offset of the field inside the instance.** GD: `ObjPtr(obj) + varOffset` is where the data lives; `ObjPtr` + 0 is the vtable pointer. |
 | 0x18 | 4 | type code | The §6.5 type byte, zero-extended / padded to 4 bytes |
 | 0x1C | 4 | extra | Present only for `comobj` (0x1D) and `internal` (0x13). See §6.6. |
 
-**Record stride is not stated by GD.** **[G]** The sample shows 0x20 bytes for a
-`comobj` variable. A variable of a plain scalar type presumably occupies 0x1C.
-Do not assume a fixed stride. Verify against a real binary before implementing;
-if the stride turns out to be variable, the array must be walked record by
-record with the type code deciding whether the trailing pointer is present.
+**There is no stride.** The array holds pointers, so each record stands
+alone. The place of a record in the array is not its member id: the P-code
+build of `PassGen.exe` holds member `n` at entry `n`, and the native build of
+`Artificial Life.exe` holds it at entry `n + 1`. `Organism.cls` gives its 17
+public variables in 23 entries, and the source holds 22 variables. In the
+native corpus, 91 objects give 62 public variables, and in the P-code corpus
+86 objects give 62. Each has the name, the order and the type of its source
+(`crates/deform6/tests/public_variables.rs`). What `cntPublicVars` counts
+stays open: `pdOpenSaveDialog.cls` declares no variable and gives 4 entries.
 
 **Only public variables survive.** SVBD's native decompiler notes that a class's
 private backing variables are null-stripped from the type info and can only be
@@ -1856,7 +1860,7 @@ answer stated confidently would be worse than no answer.
 | 5 | Type codes 0x00-0x02, 0x04, 0x07, 0x09, 0x0E, 0x11, 0x12, 0x14-0x1A (§6.5) | full prototype coverage | Compile variations, diff |
 | 6 | `FuncTypDesc` offsets 0x06-0x0B (§6.3) | every prototype | Validate `constFFFF == 0xFFFF` on a real file |
 | 7 | `optionalVals` target (§6.3) | `Optional x As Long = 5` default values | Debug the runtime, or diff compiled defaults |
-| 8 | `PubVarDesc` record stride (§6.4) | walking public variables | Diff two adjacent records in a real file |
+| 8 | `PubVarDesc` record stride (§6.4) | walking public variables | CLOSED 2026-10-16, 62 public variables in each corpus. `lpPublicVars` holds pointers, not records, so there is no stride. What `cntPublicVars` counts beyond the public variables stays open (§6.4). |
 | 9 | Event name strings (§6.4) | naming recovered events | Positional heuristic after `ProcNamesArray`; mark inferred |
 | 10 | Ordinal `Declare` encoding (§7.2) | `Alias "#123"` | Compile a sample |
 | 11 | Control array index location (§8.4) | `Index = N` in `.frm` | CLOSED 2026-09-10, 30 array elements across 2 files. The array `Index` is the two byte value at control block offset 0x05. Method and worked example in §14. |
