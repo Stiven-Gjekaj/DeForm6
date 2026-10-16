@@ -2,20 +2,19 @@
 //!
 //! This is OBJ-03 and OBJ-06: recover every public procedure name an object
 //! carries, and report a private procedure as private rather than inventing a
-//! name for it. It also carries [`PrivateObj`]'s two open counts,
-//! `cnt_public_vars` and `cnt_events`, and the one array plan 02-05 adds a
-//! walk for: [`event_descriptor_addresses`].
+//! name for it. It also carries [`PrivateObj`]'s two counts,
+//! `cnt_public_vars` and `cnt_events`, and walks the arrays that they size:
+//! [`public_variables`] and [`event_descriptor_addresses`].
 //!
-//! # Two structures this file is named for and does not implement
+//! # The public variables, and a structure this file does not implement
 //!
-//! Plan 02-05 owns the public variable and event half of this file, and it
-//! ships neither a `PubVarDesc` walk nor an event decoder. Both are measured
-//! absences in this corpus, not unfinished work:
-//!
-//! - `cnt_public_vars` does not count source-level `Public` declarations
-//!   (D-14). [`PrivateObj::gaps`] carries a non-zero value to the report as
-//!   an open question, and no function anywhere in this crate walks
-//!   `lpPublicVars`.
+//! - `lpPublicVars` is an array of `cnt_public_vars` pointers, and not an
+//!   array of records. [`public_variables`] reads the `PubVarDesc` of each
+//!   entry that points to one: each public variable of the object. The
+//!   count does not count source-level `Public` declarations (D-14):
+//!   `Organism.cls` has 17 public variables in 23 entries.
+//!   [`PrivateObj::gaps`] carries a non-zero value to the report as an open
+//!   question, because nothing yet explains each entry that is not a record.
 //! - No corpus program carries a single `EventDesc`: `cnt_events` is `0` in
 //!   97 of 97 objects that hold a `PrivateObj`. [`event_descriptor_addresses`]
 //!   walks the pointer array anyway, proven only by synthetic fixtures, and
@@ -174,13 +173,14 @@ impl ObjectInfo {
 pub enum PrivateObj {
     /// The object carries a real `PrivateObj`.
     Present {
-        /// The number of entries in the `PubVarDesc` array, as
-        /// `STRUCTURES.md` section 6.1 names it.
+        /// The number of entries in the pointer array at `lpPublicVars`,
+        /// which `STRUCTURES.md` section 6.1 names `cntPublicVars`.
         ///
         /// **Distrust this field.** Per decision D-14, it does not count
-        /// source-level `Public variable As Type` declarations, and no
-        /// stride hypothesis over `lpPublicVars` ever converges against it
-        /// (`STRUCTURES.md` section 11, gap 8, stays open). Three measured
+        /// source-level `Public variable As Type` declarations. It sizes the
+        /// pointer array at `lpPublicVars`, which [`public_variables`]
+        /// walks, and an entry that points to no record is not explained
+        /// yet. Three measured
         /// counter-examples, each against a source file this repository
         /// vendors beside the binary that reports it:
         ///
@@ -233,13 +233,11 @@ pub enum PrivateObj {
         /// [`event_descriptor_addresses`], which gives the address of each
         /// entry and decodes none of them.
         lp_events_type_info: Va,
-        /// The address of the `PubVarDesc` array.
+        /// The address of the array of pointers to the `PubVarDesc` records.
         ///
-        /// `STRUCTURES.md` gap 8 records that no record stride hypothesis
-        /// over this array converges against the corpus. No function in
-        /// this crate walks it; [`PrivateObj::gaps`] is the only thing this
-        /// file does with it, and that is to say a non-zero
-        /// `cnt_public_vars` is a fact nobody has explained yet.
+        /// It holds `cnt_public_vars` pointers. No stride hypothesis over
+        /// it converged (`STRUCTURES.md` gap 8), because it holds no
+        /// records. [`public_variables`] walks it.
         lp_public_vars: Va,
     },
     /// The object carries no `PrivateObj`. This is the standard-module case.
