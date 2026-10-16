@@ -35,3 +35,9 @@ __pycache__/
 # and the OCX files of a Visual Basic 6 install that the user owns. They
 # may not be redistributed, so they never enter the repository.
 derived/inputs/
+
+# The run files of the build host: the exports, the CD images, the serial
+# captures and the pictures that scripts/vm/vm.py writes. An export holds
+# the corpus sources, and /tmp is cleared during a long run, so they stay
+# here and out of the repository.
+derived/vm/
