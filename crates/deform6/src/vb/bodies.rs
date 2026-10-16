@@ -431,6 +431,76 @@ fn string_parameters(declaration: &str, slots: &[i16]) -> String {
     out
 }
 
+/// The members of the blocks of `Static` variables of one body: by the
+/// field of `Me` that points to the block, the accesses of each member, by
+/// its offset in the block.
+type StaticBlocks = BTreeMap<u16, BTreeMap<u16, BTreeSet<Access>>>;
+
+/// Gives the `Static` variables of `ops`. Basic keeps the `Static`
+/// variables of a procedure in a block that a field of `Me` points to:
+/// `FMemLdPr` of `Me` at 8 and the field loads the address, and a `MemLd` or
+/// a `MemSt` at the offset of the variable reads or writes it.
+fn static_members(ops: &[Op<'_>]) -> StaticBlocks {
+    let word = |bytes: &[u8], at: usize| {
+        bytes
+            .get(at..at.checked_add(2)?)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+    };
+    let mut out = StaticBlocks::new();
+    for pair in ops.windows(2) {
+        let [(first, pointer), (second, member)] = pair else {
+            continue;
+        };
+        let memory = !second.is_empty()
+            && second
+                .iter()
+                .all(|name| name.starts_with("MemLd") || name.starts_with("MemSt"));
+        if !first.iter().any(|name| name == "FMemLdPr") || !memory || word(pointer, 0) != Some(8) {
+            continue;
+        }
+        let (Some(field), Some(offset)) = (word(pointer, 2), word(member, 0)) else {
+            continue;
+        };
+        out.entry(field)
+            .or_default()
+            .entry(offset)
+            .or_default()
+            .insert(access_of(second));
+    }
+    out
+}
+
+/// Writes each member of `blocks` in `lines` as a `Static` variable of the
+/// procedure: `field_B0.field_8` is `static_B0_8`, with a `Static` line
+/// before `lines` and the type that its accesses give. A field that `lines`
+/// also name with no member stays as it is.
+fn declare_statics(lines: &mut Vec<String>, blocks: &StaticBlocks) {
+    let mut dims = Vec::new();
+    for (field, members) in blocks {
+        let pointer = format!("field_{field:X}");
+        let plain = lines.iter().any(|line| {
+            replace_word(line, &pointer, "\u{0}")
+                .split('\u{0}')
+                .skip(1)
+                .any(|after| !after.starts_with(".field_"))
+        });
+        if plain {
+            continue;
+        }
+        for (offset, accesses) in members {
+            let from = format!("{pointer}.field_{offset:X}");
+            let to = format!("static_{field:X}_{offset:X}");
+            for line in lines.iter_mut() {
+                *line = line.replace(&from, &to);
+            }
+            let basic = local_type(accesses).unwrap_or("Variant");
+            dims.push(format!("       Static {to} As {basic}"));
+        }
+    }
+    lines.splice(0..0, dims);
+}
+
 /// Gives the public variables of `object`, from its `PubVarDesc` records.
 fn object_public_variables(pe: &PeImage<'_>, object: &Object) -> Vec<PublicVariable> {
     ObjectInfo::read(pe, object.lp_object_info)
@@ -1939,6 +2009,7 @@ pub fn lift_objects(
             if module_base != 0 {
                 name_module_fields(&mut lines, module_base);
             }
+            declare_statics(&mut lines, &static_members(&ops));
             fields.extend(words_with(&lines, "field_"));
             all_lines.extend(lines.iter().cloned());
             globals.extend(words_with(&lines, "g_"));
@@ -2087,11 +2158,12 @@ mod tests {
     use super::{
         Accesses, FixedArray, Op, TypedArrays, add_accesses, apply_frame_structs, built_parameters,
         call_arguments, call_arity, declare, declare_arrays, declare_new_locals,
-        declare_scalar_locals, declare_statements, declared_bytes, field_declarations,
-        fixed_shapes, frame_structs, indexed_words, local_accesses, member_zero,
-        name_module_fields, new_locals, pointer_fields, procedure_name, record_array,
-        record_fields, redim_arrays, replace_word, scalar_type, slot_uses, string_parameters,
-        struct_pointers, typed_arrays, typed_locals, variable_declaration, words_with,
+        declare_scalar_locals, declare_statements, declare_statics, declared_bytes,
+        field_declarations, fixed_shapes, frame_structs, indexed_words, local_accesses,
+        member_zero, name_module_fields, new_locals, pointer_fields, procedure_name, record_array,
+        record_fields, redim_arrays, replace_word, scalar_type, slot_uses, static_members,
+        string_parameters, struct_pointers, typed_arrays, typed_locals, variable_declaration,
+        words_with,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::lift::result_bytes;
@@ -2607,6 +2679,49 @@ names = ["ExitProcCb"]
                 "       local_AE = local_B0 + local_B8 + local_A0 + local_A4",
                 "       local_C0.field_4 = 1",
                 "       local_D0.field_4 = local_A8",
+            ]
+        );
+    }
+
+    /// `Static NewX As Double, NewY As Double` of `Calculate` in
+    /// `Mandelbrot.exe` lives in a block that the field 0xB0 of `Me` points
+    /// to: `FMemLdPr` of the field, then `MemStFPR8` at 0 and at 8. The lift
+    /// gave `field_B0.field_0` on an empty `Variant`, and the rebuilt program
+    /// stopped with error 424. A field that a body also names with no member
+    /// is not a block.
+    #[test]
+    fn the_members_of_a_static_block_are_static_variables() {
+        let names =
+            |list: &[&str]| -> Vec<String> { list.iter().map(|n| (*n).to_owned()).collect() };
+        let pointer = names(&["FMemLdPr"]);
+        let store = names(&["MemStFPR8"]);
+        let load = names(&["MemLdFPR8"]);
+        let store_four = names(&["MemStI4", "MemStR4"]);
+        let ops: Vec<Op<'_>> = vec![
+            (&pointer, &[8, 0, 0xB0, 0]),
+            (&store, &[0, 0]),
+            (&pointer, &[8, 0, 0xB0, 0]),
+            (&load, &[8, 0]),
+            (&pointer, &[8, 0, 0x9C, 0]),
+            (&store_four, &[0, 0]),
+            // Another object than Me.
+            (&pointer, &[0x70, 0xFF, 0xA0, 0]),
+            (&store, &[0, 0]),
+        ];
+        let blocks = static_members(&ops);
+        assert_eq!(blocks.keys().copied().collect::<Vec<u16>>(), [0x9C, 0xB0]);
+        let mut lines = vec![
+            "       field_B0.field_0 = field_B0.field_8 + 1".to_owned(),
+            "       field_9C.field_0 = field_9C".to_owned(),
+        ];
+        declare_statics(&mut lines, &blocks);
+        assert_eq!(
+            lines,
+            [
+                "       Static static_B0_0 As Double",
+                "       Static static_B0_8 As Double",
+                "       static_B0_0 = static_B0_8 + 1",
+                "       field_9C.field_0 = field_9C",
             ]
         );
     }
