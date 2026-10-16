@@ -188,6 +188,9 @@ enum Access {
     Four,
     /// The eight bytes that one handler copies for `Cy` and `R8`.
     Eight,
+    /// The store of a `String`, which frees the string that the variable
+    /// held before.
+    String,
     /// The address of the variable, which any type gives.
     Reference,
     /// Each other access, such as a `String`, an object or a `Variant`.
@@ -203,6 +206,12 @@ fn access_of(names: &[String]) -> Access {
     };
     if all(&["Rf", "RfVar"]) {
         Access::Reference
+    } else if names
+        .iter()
+        .all(|name| ["FStStr", "FStStrCopy", "FStStrNoPop"].contains(&name.as_str()))
+        && !names.is_empty()
+    {
+        Access::String
     } else if all(&["FPR4"]) {
         Access::Single
     } else if all(&["FPR8"]) {
@@ -321,18 +330,16 @@ fn declare_scalar_locals(lines: &mut Vec<String>, accesses: &Accesses) {
 }
 
 /// Gives the Basic type of a local whose opcodes give `accesses`: the type
-/// of [`scalar_type`], or a `Long` for a local that only the copy of four
-/// bytes reads and writes. A `String` has its own store, `FStStr`, an
-/// object has `FStAd`, and a `Single` that a sum gives has `FStFPR4`, so
-/// each of them has another access.
+/// of [`scalar_type`], a `Long` for a local that only the copy of four
+/// bytes reads and writes, or a `String` for a local that only the stores
+/// of a string write. A `String` has its own store, `FStStr`, an object
+/// has `FStAd`, and a `Single` that a sum gives has `FStFPR4`, so each of
+/// them has another access.
 fn local_type(accesses: &BTreeSet<Access>) -> Option<&'static str> {
-    scalar_type(accesses).or_else(|| {
-        accesses
-            .iter()
-            .all(|access| *access == Access::Four)
-            .then_some("Long")
-            .filter(|_| !accesses.is_empty())
-    })
+    let only = |kind: Access| !accesses.is_empty() && accesses.iter().all(|access| *access == kind);
+    scalar_type(accesses)
+        .or_else(|| only(Access::Four).then_some("Long"))
+        .or_else(|| only(Access::String).then_some("String"))
 }
 
 /// Gives the Basic type of a variable whose opcodes give `accesses`, when
@@ -2462,9 +2469,9 @@ names = ["ExitProcCb"]
 
     /// `Dim gray As Byte` of `Grayscale.exe` is `FStUI1` and `FLdUI1` of
     /// its slot. A local that only the copy of four bytes reads and writes
-    /// is a `Long`. A local whose address a call takes, a local that a `Dim`
-    /// declares already, a `String`, and a local that the body does not name
-    /// get no `Dim`.
+    /// is a `Long`, and a local that only `FStStr` writes is a `String`. A
+    /// local whose address a call takes, a local that a `Dim` declares
+    /// already, and a local that the body does not name get no `Dim`.
     #[test]
     fn a_local_takes_the_type_that_each_access_agrees_on() {
         let names =
@@ -2485,7 +2492,8 @@ names = ["ExitProcCb"]
             (&store_i2, &[0x50, 0xFF]),
             (&reference, &[0x50, 0xFF]),
             (&load_fpr8, &[0x48, 0xFF]),
-            // A String: its own store and the copy of four bytes.
+            // A String: its own store, and the load of four bytes, which gives
+            // no access.
             (&load_four, &[0x60, 0xFF]),
             (&store_string, &[0x60, 0xFF]),
             // A Long: the copy of four bytes alone.
@@ -2510,6 +2518,7 @@ names = ["ExitProcCb"]
         assert_eq!(
             lines,
             [
+                "       Dim local_A0 As String",
                 "       Dim local_A4 As Long",
                 "       Dim local_AE As Byte",
                 "       Dim local_B8 As Double",
