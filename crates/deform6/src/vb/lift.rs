@@ -376,6 +376,7 @@ pub struct Callees {
     strings: Vec<(u16, String)>,
     names: Vec<(u16, String)>,
     variables: Vec<(u16, u32, bool)>,
+    variable_names: Vec<(u32, String)>,
     classes: Vec<(u16, Callees)>,
     class_interfaces: Vec<(u16, String)>,
     imports: Vec<(u16, String, Option<String>)>,
@@ -450,6 +451,25 @@ impl Callees {
     pub fn with_variable(mut self, vtable_offset: u16, field: u32, get: bool) -> Self {
         self.variables.push((vtable_offset, field, get));
         self
+    }
+
+    /// Adds the name `name` of the public variable at `field`, which its
+    /// `PubVarDesc` gives.
+    #[must_use]
+    pub fn with_variable_name(mut self, field: u32, name: &str) -> Self {
+        self.variable_names.retain(|(at, _)| *at != field);
+        self.variable_names.push((field, name.to_owned()));
+        self
+    }
+
+    /// Gives the name of the public variable at `field`, when its
+    /// `PubVarDesc` names it.
+    #[must_use]
+    pub fn variable_name(&self, field: u32) -> Option<&str> {
+        self.variable_names
+            .iter()
+            .find(|(at, _)| *at == field)
+            .map(|(_, name)| name.as_str())
     }
 
     /// Gives the field of each accessor of a public variable, once each, in
@@ -2321,8 +2341,13 @@ fn project_call(
     let (field, get) = profile
         .variable(vtable_offset)
         .ok_or(LiftFault::NoFunction(at))?;
-    let field = u16::try_from(field).map_err(|_| LiftFault::NoFunction(at))?;
-    let target = Expr::Field(Box::new(object), field);
+    let target = match profile.variable_name(field) {
+        Some(name) => Expr::Member(Box::new(object), name.to_owned()),
+        None => Expr::Field(
+            Box::new(object),
+            u16::try_from(field).map_err(|_| LiftFault::NoFunction(at))?,
+        ),
+    };
     let value = state.stack.pop().ok_or(LiftFault::StackShort(at))?;
     if get {
         let slot = value.slot.ok_or(LiftFault::NoResultSlot(at))?;

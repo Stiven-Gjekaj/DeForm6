@@ -57,8 +57,9 @@ use crate::vb::context::callees_of_project_named;
 use crate::vb::functyp::{Prototype, TypeEntry, VbType};
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::lift::{Callees, lift_method, render, result_bytes};
-use crate::vb::object::ObjectTable;
+use crate::vb::object::{Object, ObjectTable};
 use crate::vb::pcode::{PcodeListing, PcodeTable, disassemble};
+use crate::vb::privateobj::{ObjectInfo, PrivateObj, PublicVariable, public_variables};
 use crate::vb::procdesc::{FixedArray, MethodEntry, module_fixed_arrays, read_method_table};
 use crate::vb::project::{Declaration, DeclareTable, ExportName, ObjectTableHead, ProjectInfo};
 use crate::vb::structure;
@@ -406,6 +407,62 @@ fn field_declarations(
             .map(|field| declaration("Private", field)),
     );
     out
+}
+
+/// Gives the public variables of `object`, from its `PubVarDesc` records.
+fn object_public_variables(pe: &PeImage<'_>, object: &Object) -> Vec<PublicVariable> {
+    ObjectInfo::read(pe, object.lp_object_info)
+        .ok()
+        .and_then(|info| PrivateObj::read(pe, info.lp_private_object).ok())
+        .map(|private| public_variables(pe, &private))
+        .unwrap_or_default()
+}
+
+/// Gives the Basic type of the type code `code` of `STRUCTURES.md` section
+/// 6.5, for a type that is one word in Basic. A class of the project and a
+/// COM type need more than the code, and give nothing.
+fn type_code_basic(code: u8) -> Option<&'static str> {
+    match code {
+        0x03 => Some("Boolean"),
+        0x05 => Some("Byte"),
+        0x06 => Some("Integer"),
+        0x08 => Some("Long"),
+        0x0A => Some("Single"),
+        0x0B => Some("Double"),
+        0x0C => Some("Date"),
+        0x0D => Some("Currency"),
+        0x0F => Some("Variant"),
+        0x10 => Some("String"),
+        0x1B => Some("Object"),
+        _ => None,
+    }
+}
+
+/// Gives each public variable of `variables` its name in the body and in
+/// the declarations of `lifted`, in place of the name of its field, and its
+/// type in its declaration. A member of a record, such as `.field_34`,
+/// keeps its name.
+fn name_public_variables(lifted: &mut LiftedObject, variables: &[PublicVariable]) {
+    for variable in variables {
+        let field = format!("field_{:X}", variable.field);
+        for procedure in &mut lifted.procedures {
+            for line in &mut procedure.lines {
+                *line = replace_word(line, &field, &variable.name);
+            }
+        }
+        let basic = type_code_basic(variable.type_code);
+        for line in &mut lifted.declarations {
+            let renamed = replace_word(line, &field, &variable.name);
+            let scalar = ["Public", "Private"].iter().find_map(|scope| {
+                let rest = renamed.strip_prefix(&format!("{scope} {} As ", variable.name))?;
+                (!rest.contains(' ') && !rest.contains('(')).then_some(*scope)
+            });
+            *line = match (scalar, basic) {
+                (Some(scope), Some(basic)) => format!("{scope} {} As {basic}", variable.name),
+                _ => renamed,
+            };
+        }
+    }
 }
 
 /// Gives the declaration of the variable `name` with the scope `scope`: an
@@ -1962,6 +2019,7 @@ pub fn lift_objects(
             &fixed,
             &scalars,
         ));
+        name_public_variables(&mut lifted, &object_public_variables(&pe, object));
         out.push(Some(lifted));
         variables.push(globals);
     }

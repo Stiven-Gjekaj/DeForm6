@@ -44,7 +44,9 @@ use crate::vb::lift::{
 use crate::vb::links::read_method_links;
 use crate::vb::object::Object;
 use crate::vb::pcode::{PcodeListing, PcodeTable, disassemble};
-use crate::vb::privateobj::{ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureList};
+use crate::vb::privateobj::{
+    ObjectInfo, PrivateObj, ProcNames, Procedure, ProcedureList, public_variables,
+};
 use crate::vb::procdesc::{MethodEntry, read_method_table};
 use crate::vb::project::{DeclareTable, ProjectInfo};
 use crate::vb::types::VbTypes;
@@ -238,6 +240,13 @@ fn profile(pe: &PeImage<'_>, object: &Object, types: Option<&VbTypes>) -> Callee
         .map(|links| links.callees(&methods))
         .unwrap_or_default()
         .with_object_name(&object.name);
+    if let Ok(info) = ObjectInfo::read(pe, object.lp_object_info)
+        && let Ok(private) = PrivateObj::read(pe, info.lp_private_object)
+    {
+        for variable in public_variables(pe, &private) {
+            callees = callees.with_variable_name(variable.field, &variable.name);
+        }
+    }
     if classify(object.f_object_type) == ObjectKind::Form {
         callees = callees.with_form_name(&object.name);
     }

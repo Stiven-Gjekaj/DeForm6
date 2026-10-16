@@ -15,7 +15,7 @@ source = 1
 lifted = 1
 
 ["public-domain/PassGen/PassGen.exe"]
-matched = 744
+matched = 828
 source = 828
 lifted = 828
 
@@ -70,7 +70,7 @@ source = 6
 lifted = 6
 
 ["vb6-code/Artificial-life/Artificial Life.exe"]
-matched = 107
+matched = 163
 source = 183
 lifted = 238
 
