@@ -70,6 +70,44 @@ fn listings(pe: &PeImage<'_>, object: &Object, table: &PcodeTable) -> Vec<(u16, 
         .unwrap_or_default()
 }
 
+/// Gives the argument slots of `listing` that hold a `ByVal String`. Basic
+/// copies such an argument into a local at the start of the body: `FLdAd`
+/// of the argument, then `FStStrCopy` of the local.
+#[must_use]
+pub fn string_value_arguments(listing: &PcodeListing, table: &PcodeTable) -> Vec<i16> {
+    let named = |at: usize, name: &str| {
+        listing
+            .instructions
+            .get(at)
+            .and_then(|instruction| table.slot(instruction.lead, instruction.opcode))
+            .is_some_and(|slot| slot.names.iter().any(|known| known == name))
+    };
+    let slot = |at: usize| {
+        listing
+            .instructions
+            .get(at)
+            .and_then(|instruction| instruction.arguments.get(..2))
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(i16::from_le_bytes)
+    };
+    let mut out = Vec::new();
+    for at in 0..listing.instructions.len() {
+        let Some(next) = at.checked_add(1) else {
+            continue;
+        };
+        if named(at, "FLdAd")
+            && named(next, "FStStrCopy")
+            && let (Some(argument), Some(local)) = (slot(at), slot(next))
+            && argument >= FIRST_ARGUMENT
+            && local < 0
+            && !out.contains(&argument)
+        {
+            out.push(argument);
+        }
+    }
+    out
+}
+
 /// The number of rounds of [`with_arguments`].
 const ARGUMENT_ROUNDS: usize = 2;
 
@@ -336,6 +374,9 @@ pub fn callees_of_project_named(
                 if result_bytes(&listing, table).is_some() {
                     profile = profile.with_function(index);
                 }
+                for slot in string_value_arguments(&listing, table) {
+                    profile = profile.with_string_argument(index, slot);
+                }
             }
             profile
         })
@@ -509,12 +550,14 @@ fn with_arguments(
     reason = "a test reads a file of the corpus and must fail loudly when it cannot"
 )]
 mod tests {
-    use super::{CallClass, call_class, default_iid};
+    use super::{CallClass, call_class, default_iid, string_value_arguments};
     use crate::read::pe::PeImage;
+    use crate::read::region::{Off, Region};
     use crate::vb::constants::constant_guid;
     use crate::vb::header::{VbHeader, header_region};
     use crate::vb::lift::Callees;
     use crate::vb::object::ObjectTable;
+    use crate::vb::pcode::{PcodeTable, disassemble};
     use crate::vb::project::{ObjectTableHead, ProjectInfo};
     use crate::vb::types::VbTypes;
 
@@ -522,6 +565,27 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/../../corpus-pcode/vb6-code/Diffuse-effect/Diffuse.exe"
     ));
+
+    /// `LoadImageAutosized` of `Blacklight.exe` starts with `FLdAd` of its
+    /// argument at 0x0C and `FStStrCopy` of the local at -0x88, the copy of
+    /// a `ByVal String`. A copy into an argument and a load with no copy
+    /// give nothing. The opcode numbers are placeholders.
+    #[test]
+    fn a_string_copy_of_an_argument_into_a_local_is_a_byval_string() {
+        let table = PcodeTable::parse(
+            b"[primary.6C]\nwidth = 2\nnames = [\"FLdAd\", \"FLdI4\"]\n\
+              [primary.43]\nwidth = 2\nnames = [\"FStStrCopy\"]\n\
+              [primary.13]\nwidth = 0\nnames = [\"ExitProcHresult\"]\n",
+        )
+        .unwrap();
+        let body = [
+            0x6C, 0x0C, 0x00, 0x43, 0x78, 0xFF, // arg_C into local_88
+            0x6C, 0x10, 0x00, 0x43, 0x14, 0x00, // arg_10 into arg_14
+            0x6C, 0x18, 0x00, 0x13, // arg_18 with no copy
+        ];
+        let listing = disassemble(&Region::new(&body, Off::new(0)), &table);
+        assert_eq!(string_value_arguments(&listing, &table), [0x0C]);
+    }
 
     /// The null GUID names a control array; the default interface of an
     /// object of the project comes before an interface of the types file;

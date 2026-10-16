@@ -53,7 +53,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::Refusal;
 use crate::read::pe::PeImage;
-use crate::vb::context::callees_of_project_named;
+use crate::vb::context::{callees_of_project_named, string_value_arguments};
 use crate::vb::functyp::{Prototype, TypeEntry, VbType};
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::lift::{Callees, lift_method, render, result_bytes};
@@ -406,6 +406,28 @@ fn field_declarations(
             .filter(|field| !public.contains(*field))
             .map(|field| declaration("Private", field)),
     );
+    out
+}
+
+/// Gives `declaration` with each parameter of `slots` that it declares
+/// `arg_X As Variant` as `ByVal arg_X As String`. A `Private` procedure has
+/// no record of its parameters, and the body copies a `ByVal String`
+/// argument with `FStStrCopy`.
+fn string_parameters(declaration: &str, slots: &[i16]) -> String {
+    let mut out = declaration.to_owned();
+    for slot in slots {
+        let plain = format!("arg_{slot:X} As Variant");
+        let Some(at) = out.find(&plain) else {
+            continue;
+        };
+        if out
+            .get(..at)
+            .is_some_and(|before| before.ends_with("ByVal "))
+        {
+            continue;
+        }
+        out = out.replacen(&plain, &format!("ByVal arg_{slot:X} As String"), 1);
+    }
     out
 }
 
@@ -1921,7 +1943,7 @@ pub fn lift_objects(
             all_lines.extend(lines.iter().cloned());
             globals.extend(words_with(&lines, "g_"));
             let result = result_bytes(&listing, table);
-            let (declaration, closing) = declare(
+            let (mut declaration, closing) = declare(
                 &own.procedures,
                 *index,
                 descriptor.arg_size,
@@ -1930,6 +1952,7 @@ pub fn lift_objects(
                 &typed,
                 &mut lines,
             );
+            declaration = string_parameters(&declaration, &string_value_arguments(&listing, table));
             frame_types.extend(declare_frame_structs(
                 &listing, table, &mut lines, &calls, result, *index,
             ));
@@ -2067,8 +2090,8 @@ mod tests {
         declare_scalar_locals, declare_statements, declared_bytes, field_declarations,
         fixed_shapes, frame_structs, indexed_words, local_accesses, member_zero,
         name_module_fields, new_locals, pointer_fields, procedure_name, record_array,
-        record_fields, redim_arrays, replace_word, scalar_type, slot_uses, struct_pointers,
-        typed_arrays, typed_locals, variable_declaration, words_with,
+        record_fields, redim_arrays, replace_word, scalar_type, slot_uses, string_parameters,
+        struct_pointers, typed_arrays, typed_locals, variable_declaration, words_with,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::lift::result_bytes;
@@ -2586,6 +2609,18 @@ names = ["ExitProcCb"]
                 "       local_D0.field_4 = local_A8",
             ]
         );
+    }
+
+    /// A `Private` procedure has no record of its parameters. A parameter
+    /// whose slot the body copies with `FStStrCopy` is a `ByVal String`.
+    #[test]
+    fn a_copied_string_parameter_is_declared_byval_as_string() {
+        let declaration = "Private Sub method_5(arg_C As Variant, ByVal arg_10 As Variant)";
+        assert_eq!(
+            string_parameters(declaration, &[0x0C, 0x10, 0x14]),
+            "Private Sub method_5(ByVal arg_C As String, ByVal arg_10 As Variant)"
+        );
+        assert_eq!(string_parameters(declaration, &[]), declaration);
     }
 
     /// `SizeX As Integer` of the map editor is `ImpAdLdI2` and `ImpAdStI2`

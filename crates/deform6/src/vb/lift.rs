@@ -387,6 +387,7 @@ pub struct Callees {
     stubs: Vec<(u16, ProjectCall)>,
     arguments: Vec<(u16, i16, String)>,
     value_arguments: Vec<(u16, i16)>,
+    string_arguments: Vec<(u16, i16)>,
     argument_sizes: Vec<(u16, Vec<u8>)>,
     procedures: Vec<(u16, String)>,
     form_name: Option<String>,
@@ -619,6 +620,27 @@ impl Callees {
     pub fn with_value_argument(mut self, method: u16, slot: i16) -> Self {
         self.value_arguments.push((method, slot));
         self
+    }
+
+    /// Adds the argument at the frame offset `slot` of the method `method`
+    /// that the method takes `ByVal As String`: the body copies it into a
+    /// local with `FStStrCopy`.
+    #[must_use]
+    pub fn with_string_argument(mut self, method: u16, slot: i16) -> Self {
+        self.string_arguments.push((method, slot));
+        self
+    }
+
+    /// Gives the frame offset of each argument of the method `method` that
+    /// is a `ByVal String`, as [`with_string_argument`](Self::with_string_argument)
+    /// adds it.
+    #[must_use]
+    pub fn string_arguments_of(&self, method: u16) -> Vec<i16> {
+        self.string_arguments
+            .iter()
+            .filter(|(at, _)| *at == method)
+            .map(|(_, slot)| *slot)
+            .collect()
     }
 
     /// Gives the frame offset of each argument of the method `method` that
@@ -2326,7 +2348,8 @@ fn project_call(
             .arg_size
             .checked_sub(4)
             .ok_or(LiftFault::CallArguments(at))?;
-        let args = call_arguments(&mut state.stack, bytes, at)?;
+        let mut args = call_arguments(&mut state.stack, bytes, at)?;
+        null_strings(&mut args, &profile.string_arguments_of(method.index));
         calls.push((
             profile.owner,
             method.index,
@@ -2361,6 +2384,21 @@ fn project_call(
         target,
         value: value.expr,
     }))
+}
+
+/// Writes as `vbNullString` each argument of `args` that is the constant 0
+/// and goes to a frame offset of `strings`, a `ByVal String`: Basic pushes
+/// the null string as 0, and a 0 to a `String` is the text `"0"`.
+fn null_strings(args: &mut [Value], strings: &[i16]) {
+    // The first argument is after the saved `ebp`, the return address and
+    // `Me`.
+    let mut slot: i16 = 0x0C;
+    for arg in args {
+        if strings.contains(&slot) && arg.expr == Expr::Const(0) {
+            arg.expr = Expr::Word("vbNullString");
+        }
+        slot = slot.saturating_add(i16::from(arg.bytes));
+    }
 }
 
 /// Gives the class that the entry at `index` of the constant table names:
@@ -2805,7 +2843,8 @@ fn run(
                     .arg_size
                     .checked_sub(4)
                     .ok_or(LiftFault::CallArguments(at))?;
-                let args = call_arguments(&mut state.stack, bytes, at)?;
+                let mut args = call_arguments(&mut state.stack, bytes, at)?;
+                null_strings(&mut args, &callees.string_arguments_of(method.index));
                 calls.push((
                     callees.owner,
                     method.index,
@@ -4523,6 +4562,32 @@ dispid = 67
         constant.extend_from_slice(&BOX1_IN_LOCAL_68);
         constant.extend_from_slice(&[0xFF, 0x1C, 0xA8, 0x00, 0x00, 0x00, 0x0C]);
         assert_eq!(object_lines(&constant), Err(LiftFault::NoResultSlot(12)));
+    }
+
+    /// `LoadImageAutosized vbNullString` of `Blacklight.exe` pushes the
+    /// null string as the constant 0. The procedure takes a `ByVal String`,
+    /// so the 0 is `vbNullString`, and not the text "0" that the rebuilt
+    /// program gave to `LoadPicture`.
+    #[test]
+    fn a_zero_to_a_byval_string_of_a_method_of_me_is_vbnullstring() {
+        let body = [
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x11, 0xF8, 0x06, 0x00, 0x00, 0x0C,
+        ];
+        let plain = Callees::default().with_method(0x6F8, 5, 8);
+        assert_eq!(
+            lines_with(&body, &plain).unwrap(),
+            ["       Call method_5(0)", "       Exit Sub"]
+        );
+        let string = plain.clone().with_string_argument(5, 0x0C);
+        assert_eq!(
+            lines_with(&body, &string).unwrap(),
+            ["       Call method_5(vbNullString)", "       Exit Sub"]
+        );
+        let other = plain.with_string_argument(4, 0x0C);
+        assert_eq!(
+            lines_with(&body, &other).unwrap(),
+            ["       Call method_5(0)", "       Exit Sub"]
+        );
     }
 
     #[test]
