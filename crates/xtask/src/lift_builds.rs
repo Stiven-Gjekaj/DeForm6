@@ -26,6 +26,7 @@ use crate::builds::{
 };
 use crate::pcode_record::pcode_root;
 use crate::ratios::differential::support::vbp;
+use crate::sample_picture::{missing_pictures, sample_bitmap};
 
 /// The options of `export-lift-builds`.
 struct Options {
@@ -126,8 +127,14 @@ fn export(options: &Options) -> Result<usize, String> {
         let original_dir = original
             .parent()
             .ok_or_else(|| format!("{key}: the project file has no directory"))?;
-        copy_without_executables(original_dir, &dir.join("original").join(&short))
+        let original_out = dir.join("original").join(&short);
+        copy_without_executables(original_dir, &original_out)
             .map_err(|err| format!("{key}: {err}"))?;
+        for name in missing_pictures(original_dir).map_err(|err| format!("{key}: {err}"))? {
+            let path = original_out.join(&name);
+            std::fs::write(&path, sample_bitmap())
+                .map_err(|err| format!("{key}: writing {}: {err}", path.display()))?;
+        }
         let original_vbp = original
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
@@ -175,7 +182,9 @@ const RUN_WAIT_SECONDS: u8 = 6;
 /// [`RUN_DIR`]`\<short>`, copies each executable there as `run-original.exe`
 /// or `run-extracted.exe`, and starts it there: a program reads its data
 /// files, such as `sample.jpg`, from the folder of its executable, and only
-/// the source project holds them. The folder is the same for each export,
+/// the source project holds them. The export writes the picture of
+/// `sample_picture.rs` for each picture that the source loads and does not
+/// hold. The folder is the same for each export,
 /// so the firewall of the host asks once about a program that listens on
 /// the network, and not again for each export.
 /// A side with no executable sends `===NONE <short> <side>===`, and a
