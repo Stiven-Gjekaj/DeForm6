@@ -45,6 +45,8 @@ SERIAL_LABEL = "term0"
 
 # The rows at the bottom of the screen that the task bar and its clock take.
 TASKBAR_ROWS = 30
+# The pictures that `shots` takes at each marker.
+PICTURES = 3
 
 # A move of the mouse that is larger than the screen: the pointer stops at
 # the corner.
@@ -243,9 +245,14 @@ def watch_shots(capture, folder, ends):
         marks = MARKER.findall(data)
         for kind, short, side in marks[seen:]:
             if kind == "SHOT":
-                qmp = Qmp()
-                shot(qmp, os.path.join(folder, f"{short}-{side}.png"))
-                qmp.close()
+                # A text caret and the box of a scroll bar with the focus
+                # blink, so each marker gets PICTURES pictures, a part of a
+                # blink apart.
+                for take in range(PICTURES):
+                    qmp = Qmp()
+                    name = f"{short}-{side}.png" if take == 0 else f"{short}-{side}~{take}.png"
+                    shot(qmp, os.path.join(folder, name))
+                    qmp.close()
             print(kind, short, side, flush=True)
         seen = len(marks)
         if data.count("===END===") >= ends:
@@ -253,33 +260,59 @@ def watch_shots(capture, folder, ends):
         time.sleep(0.3)
 
 
-def compare(folder):
-    """Prints the share of the pixels above the task bar that differ between
-    the picture of the original and the rebuilt program."""
-    shorts = sorted({
-        match.group(1)
-        for name in os.listdir(folder)
-        if (match := re.match(r"(p\d\d)-", name))
-    })
-    same = 0
-    for short in shorts:
-        paths = [os.path.join(folder, f"{short}-{side}.png") for side in ("original", "extracted")]
-        if not all(os.path.exists(path) for path in paths):
-            print(short, "missing")
-            continue
-        width, height, first = load_png(paths[0])
-        _, _, second = load_png(paths[1])
-        differ = 0
-        for y in range(height - TASKBAR_ROWS):
-            if first[y] != second[y]:
-                differ += sum(
-                    first[y][x * 3:x * 3 + 3] != second[y][x * 3:x * 3 + 3]
-                    for x in range(width)
-                )
-        same += differ == 0
-        print(f"{short} {differ / (width * (height - TASKBAR_ROWS)):.4f} {differ}")
-    print(f"{same} of {len(shorts)} pairs are the same")
+def pixels_apart(first, second, width, height):
+    """Counts the pixels above the task bar that differ between two pictures."""
+    differ = 0
+    for y in range(height - TASKBAR_ROWS):
+        if first[y] != second[y]:
+            differ += sum(
+                first[y][x * 3:x * 3 + 3] != second[y][x * 3:x * 3 + 3]
+                for x in range(width)
+            )
+    return differ
 
+
+def takes(folder, stem):
+    """Gives the rows of each picture of one marker: STEM.png and STEM~N.png."""
+    out = []
+    for name in sorted(os.listdir(folder)):
+        if name == f"{stem}.png" or re.fullmatch(re.escape(stem) + r"~\d+\.png", name):
+            width, height, rows = load_png(os.path.join(folder, name))
+            out.append(rows)
+    return width if out else 0, height if out else 0, out
+
+
+def compare(folder):
+    """Prints, for each screen of each program, the pixels above the task bar
+    that differ between the original and the rebuilt program: the least over
+    each pair of the pictures of the marker, since a caret blinks. A screen
+    is the first window (no suffix) or a step (-sN). For a step, `moved`
+    tells whether the step changed the screen of the original."""
+    screens = sorted({
+        (match.group(1), match.group(2))
+        for name in os.listdir(folder)
+        if (match := re.fullmatch(r"(p\d\d)-original((?:-s\d+)?)(?:~\d+)?\.png", name))
+    }, key=lambda pair: (pair[0], int(pair[1][2:] or 0)))
+    same = steps = moved = 0
+    for short, suffix in screens:
+        width, height, first = takes(folder, f"{short}-original{suffix}")
+        _, _, second = takes(folder, f"{short}-extracted{suffix}")
+        if not second:
+            print(short + suffix, "missing")
+            continue
+        differ = min(pixels_apart(a, b, width, height) for a in first for b in second)
+        same += differ == 0
+        note = ""
+        if suffix:
+            steps += 1
+            before = int(suffix[2:]) - 1
+            _, _, earlier = takes(folder, f"{short}-original" + (f"-s{before}" if before else ""))
+            change = earlier and min(pixels_apart(a, b, width, height) for a in first for b in earlier)
+            moved += bool(change)
+            note = " moved" if change else " still"
+        share = differ / (width * (height - TASKBAR_ROWS))
+        print(f"{short}{suffix} {share:.4f} {differ}{note}")
+    print(f"{same} of {len(screens)} screens are the same; {moved} of {steps} steps changed the screen of the original")
 
 def capture_files(capture):
     data = open(capture, "rb").read().decode("latin-1").replace("\r\n", "\n")
