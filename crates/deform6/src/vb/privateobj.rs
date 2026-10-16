@@ -730,6 +730,122 @@ pub fn event_descriptor_addresses(pe: &PeImage<'_>, private: &PrivateObj) -> Vec
     addresses
 }
 
+/// The width of one entry in `PrivateObj.lpPublicVars`.
+const PUB_VAR_PTR_SIZE: u32 = 4;
+
+/// The bytes of a `PubVarDesc` that [`public_variables`] reads.
+const PUB_VAR_DESC_SIZE: u32 = 0x1C;
+
+/// The high word of the member id of a public variable.
+const PUB_VAR_MEMBER: u32 = 0x4003;
+
+/// One public variable of an object, from its `PubVarDesc`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PublicVariable {
+    /// The low word of the member id: the place of the variable among the
+    /// variables of the object, public and private, in the order of the
+    /// source.
+    pub index: u16,
+    /// The name of the variable.
+    pub name: String,
+    /// The vtable offset of the get accessor of the variable.
+    pub vtable_offset: u16,
+    /// The byte offset of the variable in an instance of the object.
+    pub field: u32,
+    /// The type code of `STRUCTURES.md` section 6.5.
+    pub type_code: u8,
+}
+
+/// Gives the public variables of `private`.
+///
+/// `PrivateObj.lpPublicVars` is an array of `cntPublicVars` pointers. An
+/// entry that points to a record is a public variable, and each other entry
+/// is not: a private variable has no record. The place of a record in the
+/// array is not its member id. The P-code build of `PassGen.exe` gives
+/// member `n` at entry `n`, and the native build of `Artificial Life.exe`
+/// at entry `n + 1`. So the index comes from the member id. A record gives
+/// the name, the vtable offset of the accessor, the field and the type. A
+/// record whose member id does not start with `0x4003`, a second record of
+/// one index, and a record whose name is not an identifier are left out.
+/// The count is bounded by the bytes that the array holds. The result is in
+/// the order of the index.
+#[must_use]
+pub fn public_variables(pe: &PeImage<'_>, private: &PrivateObj) -> Vec<PublicVariable> {
+    let PrivateObj::Present {
+        cnt_public_vars,
+        lp_public_vars,
+        ..
+    } = private
+    else {
+        return Vec::new();
+    };
+    if lp_public_vars.is_null() {
+        return Vec::new();
+    }
+    let Some(array) = pe.region_at_va(*lp_public_vars) else {
+        return Vec::new();
+    };
+    let Some(window) = u32::from(*cnt_public_vars)
+        .checked_mul(PUB_VAR_PTR_SIZE)
+        .and_then(|size| array.subregion(Off::new(0), size))
+    else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for index in 0..*cnt_public_vars {
+        let Some(entry) = u32::from(index)
+            .checked_mul(PUB_VAR_PTR_SIZE)
+            .and_then(|at| window.va_le(Off::new(at)))
+        else {
+            break;
+        };
+        if entry.is_null() {
+            continue;
+        }
+        let Some(record) = pe
+            .region_at_va(entry)
+            .and_then(|region| region.subregion(Off::new(0), PUB_VAR_DESC_SIZE))
+        else {
+            continue;
+        };
+        let (Some(name_va), Some(member), Some(vtable_offset), Some(field), Some(type_code)) = (
+            record.va_le(Off::new(0)),
+            record.u32_le(Off::new(0x0C)),
+            record.u16_le(Off::new(0x12)),
+            record.u32_le(Off::new(0x14)),
+            record.u8(Off::new(0x18)),
+        ) else {
+            continue;
+        };
+        let Some(member_index) = u16::try_from(member & 0xFFFF).ok() else {
+            continue;
+        };
+        if member.checked_shr(16) != Some(PUB_VAR_MEMBER)
+            || out
+                .iter()
+                .any(|known: &PublicVariable| known.index == member_index)
+        {
+            continue;
+        }
+        let Some(name) = pe
+            .region_at_va(name_va)
+            .and_then(|region| region.cstr(Off::new(0), PROC_NAME_MAX))
+            .filter(|bytes| is_plausible_identifier(bytes))
+        else {
+            continue;
+        };
+        out.push(PublicVariable {
+            index: member_index,
+            name: name.iter().copied().map(char::from).collect(),
+            vtable_offset,
+            field,
+            type_code,
+        });
+    }
+    out.sort_by_key(|variable| variable.index);
+    out
+}
+
 /// Reads an unsigned 16-bit value out of a structure window.
 fn u16_at(window: &Region<'_>, at: u32, what: &'static str) -> Result<u16, Refusal> {
     window.u16_le(Off::new(at)).ok_or(Refusal::Damaged(what))
@@ -758,6 +874,7 @@ mod tests {
     use super::{
         Gap, OBJECT_INFO_SIZE, ObjectInfo, PROC_NAME_MAX, PrivateObj, ProcNames, Procedure,
         ProcedureCounts, ProcedureList, event_descriptor_addresses, is_plausible_identifier,
+        public_variables,
     };
     use crate::error::{Defect, DefectKind, Refusal, Site};
     use crate::read::pe::PeImage;
@@ -1418,6 +1535,103 @@ mod tests {
         let image = PeImage::parse(data).unwrap();
         let info = ObjectInfo::read(&image, object.lp_object_info).unwrap();
         PrivateObj::read(&image, info.lp_private_object).unwrap()
+    }
+
+    /// Gives the names of the source-level `Public` variables of `source`, in
+    /// the order of the source, with the same rule as
+    /// [`count_declared_public_variables`].
+    fn declared_public_variables(source: &[u8]) -> Vec<String> {
+        const NOT_A_VARIABLE: [&str; 8] = [
+            "Sub", "Function", "Property", "Enum", "Type", "Const", "Event", "Declare",
+        ];
+        let text: String = source.iter().copied().map(char::from).collect();
+        let mut out = Vec::new();
+        for line in text.lines() {
+            let Some(rest) = line.trim_start().strip_prefix("Public ") else {
+                continue;
+            };
+            if NOT_A_VARIABLE.contains(&rest.split_whitespace().next().unwrap_or("")) {
+                continue;
+            }
+            for part in rest.split(',') {
+                let name = part.split_whitespace().next().unwrap_or("");
+                out.push(name.trim_end_matches("()").to_owned());
+            }
+        }
+        out
+    }
+
+    /// `Organism.cls` declares 17 public variables among 23 entries of
+    /// `lpPublicVars`. The other 6 entries are its private variables. Each
+    /// record names its variable as the source does, in the order of the
+    /// source, at consecutive fields, with the type of the source:
+    /// `ID As Long` is code 8, `isAlive As Boolean` is code 3, and
+    /// `osX As Single` is code 0x0A.
+    #[test]
+    fn organism_gives_each_public_variable_by_name_field_and_type() {
+        let image = PeImage::parse(ARTIFICIAL_LIFE).unwrap();
+        let found = public_variables(&image, &private_obj_of(ARTIFICIAL_LIFE, "Organism"));
+        let names: Vec<String> = found.iter().map(|variable| variable.name.clone()).collect();
+        assert_eq!(
+            names,
+            declared_public_variables(ARTIFICIAL_LIFE_ORGANISM_SRC)
+        );
+        assert_eq!(names.len(), 17);
+        let id = found.first().unwrap();
+        assert_eq!(
+            (id.index, id.vtable_offset, id.field, id.type_code),
+            (0, 0x1C, 0x34, 8)
+        );
+        let is_alive = found
+            .iter()
+            .find(|variable| variable.name == "isAlive")
+            .unwrap();
+        assert_eq!((is_alive.field, is_alive.type_code), (0x40, 3));
+        let osx = found
+            .iter()
+            .find(|variable| variable.name == "osX")
+            .unwrap();
+        assert_eq!((osx.index, osx.field, osx.type_code), (7, 0x4C, 0x0A));
+        assert!(found.windows(2).all(|pair| match pair {
+            [first, second] => first.index < second.index && first.field < second.field,
+            _ => true,
+        }));
+    }
+
+    /// `pdOpenSaveDialog.cls` declares no public variable, and its four
+    /// entries are private.
+    #[test]
+    fn pd_open_save_dialog_gives_no_public_variable() {
+        let image = PeImage::parse(GRAYSCALE).unwrap();
+        let found = public_variables(&image, &private_obj_of(GRAYSCALE, "pdOpenSaveDialog"));
+        assert!(found.is_empty());
+    }
+
+    /// A count that the array cannot hold, and an array in no section, give
+    /// no variable and read nothing past the file.
+    #[test]
+    fn a_count_past_the_file_and_an_array_in_no_section_give_no_variable() {
+        let image = PeImage::parse(GRAYSCALE).unwrap();
+        let PrivateObj::Present {
+            cnt_events,
+            lp_func_type_info,
+            lp_events_type_info,
+            lp_public_vars,
+            ..
+        } = private_obj_of(GRAYSCALE, "pdOpenSaveDialog")
+        else {
+            panic!("pdOpenSaveDialog is a class");
+        };
+        let with = |count: u16, array: Va| PrivateObj::Present {
+            cnt_public_vars: count,
+            cnt_events,
+            lp_func_type_info,
+            lp_events_type_info,
+            lp_public_vars: array,
+        };
+        assert!(public_variables(&image, &with(u16::MAX, lp_public_vars)).is_empty());
+        assert!(public_variables(&image, &with(4, Va::new(0x7FFF_0000))).is_empty());
+        assert!(public_variables(&image, &with(4, Va::new(0))).is_empty());
     }
 
     /// `pdOpenSaveDialog.cls`, present in 15 of the 44 corpus programs,
