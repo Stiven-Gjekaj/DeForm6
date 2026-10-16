@@ -805,6 +805,8 @@ struct SlotUse {
     number: Option<(u8, &'static str)>,
     /// An opcode uses the slot in another way, or as another number.
     other: bool,
+    /// An opcode loads the value of the slot.
+    read: bool,
 }
 
 /// The loads and stores of a number, in a frame slot or in a field through
@@ -923,6 +925,9 @@ fn slot_uses(ops: &[Op<'_>]) -> BTreeMap<u16, SlotUse> {
             continue;
         }
         let is_field = names.iter().any(|name| name.starts_with("FMem"));
+        if !is_field && names.iter().any(|name| name.starts_with("FLd")) {
+            entry.read = true;
+        }
         match number_access(names) {
             Some(number) if !is_field && entry.number.is_none_or(|known| known.0 == number.0) => {
                 entry.number.get_or_insert(number);
@@ -1003,6 +1008,9 @@ struct FrameStruct {
     /// The offset in the struct, the bytes and the Basic type of each field,
     /// in the order of the offsets.
     fields: Vec<(u16, u8, &'static str)>,
+    /// The body writes the member at the start, which is then its own
+    /// field at 0.
+    written_start: bool,
 }
 
 /// Finds the structs of a frame. A local of `uses` whose address a call of
@@ -1022,12 +1030,7 @@ fn frame_structs(
 ) -> Vec<FrameStruct> {
     let mut out = Vec::new();
     for (&start, used) in uses {
-        if !used.address
-            || used.number.is_some()
-            || used.other
-            || !passed.contains(&start)
-            || bad.contains(&start)
-        {
+        if !used.address || used.other || !passed.contains(&start) || bad.contains(&start) {
             continue;
         }
         let end = uses
@@ -1049,6 +1052,22 @@ fn frame_structs(
                     .map(|(width, basic)| (start.saturating_sub(*slot), width, basic))
             })
             .collect();
+        // A struct can start with a member that the body writes, such as
+        // `bmi.bmHeader.bmSize = 40` before `StretchDIBits`. Then each other
+        // member is written and never read, as the members of a struct that
+        // a call of a DLL reads are. A `Long` whose address a call takes,
+        // next to locals that the body reads, is no struct.
+        if let Some((width, basic)) = used.number {
+            let write_only = !used.read
+                && uses
+                    .iter()
+                    .filter(|(slot, _)| **slot < start && **slot > end)
+                    .all(|(_, member)| !member.read);
+            if fields.is_empty() || !write_only {
+                continue;
+            }
+            fields.push((0, width, basic));
+        }
         fields.extend(through.get(&start).into_iter().flatten().copied());
         fields.sort_unstable_by_key(|(offset, width, _)| (*offset, *width));
         fields.dedup_by_key(|(offset, width, _)| (*offset, *width));
@@ -1064,6 +1083,7 @@ fn frame_structs(
             start,
             size,
             fields,
+            written_start: used.number.is_some(),
         });
     }
     out
@@ -1133,6 +1153,15 @@ fn apply_frame_structs(
             ));
         }
         types.push("End Type".to_owned());
+        if frame.written_start {
+            let write = format!("{local} = ");
+            let member = format!("{local}.f0 = ");
+            for line in lines.iter_mut() {
+                if line.trim_start().starts_with(&write) {
+                    *line = line.replacen(&write, &member, 1);
+                }
+            }
+        }
         for (pointer, _) in pointers
             .iter()
             .filter(|(_, target)| **target == frame.start)
@@ -2444,6 +2473,54 @@ mod tests {
         let passed: BTreeSet<u16> = passed.iter().copied().collect();
         let structs = frame_structs(&uses, &passed, result, &through, &bad);
         apply_frame_structs(lines, &structs, &pointers, 4)
+    }
+
+    /// `Dim bmi As BITMAPINFO` of `SetImageDataStream` in
+    /// `Realtime_Brightness.exe`: the body writes `bmSize = 40` at the start
+    /// of the struct, the other members after it, and passes the address of
+    /// the start to `StretchDIBits`. The lift wrote the members as separate
+    /// locals, the call read a `Variant`, and the rebuilt program drew
+    /// nothing. A `Long` whose address a call takes, next to a local that the
+    /// body reads, stays a local.
+    #[test]
+    fn a_struct_can_start_with_a_member_that_the_body_writes() {
+        let store_four = ["FStI4", "FStR4"];
+        let store_two = ["FStI2"];
+        let ops = [
+            op(&store_four, &[0x28, 0xFB]),
+            op(&store_four, &[0x2C, 0xFB]),
+            op(&store_two, &[0x34, 0xFB]),
+            op(&["FLdRf", "FLdRfVar"], &[0x28, 0xFB]),
+        ];
+        let mut lines = vec![
+            "       local_4D8 = 40".to_owned(),
+            "       local_4D4 = local_88".to_owned(),
+            "       local_4CC = 1".to_owned(),
+            "       Call StretchDIBits(ImageData(0), local_4D8)".to_owned(),
+        ];
+        let types = structs_of(&ops, &[0x4D8], None, &mut lines);
+        assert_eq!(
+            types.first().map(String::as_str),
+            Some("Private Type T4_4D8")
+        );
+        assert_eq!(
+            lines,
+            [
+                "       Dim local_4D8 As T4_4D8",
+                "       local_4D8.f0 = 40",
+                "       local_4D8.f4 = local_88",
+                "       local_4D8.fC = 1",
+                "       Call StretchDIBits(ImageData(0), local_4D8)",
+            ]
+        );
+        // A read of the slot after the start: no struct.
+        let mut read = ops.to_vec();
+        read.push(op(
+            &["FLdAd", "FLdI4", "FLdR4", "FLdStr", "ILdRf"],
+            &[0x2C, 0xFB],
+        ));
+        let mut plain = vec!["       Call Sleep(local_4D8)".to_owned()];
+        assert!(structs_of(&read, &[0x4D8], None, &mut plain).is_empty());
     }
 
     #[test]
