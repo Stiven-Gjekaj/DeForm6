@@ -56,7 +56,7 @@ use crate::read::pe::PeImage;
 use crate::vb::context::{callees_of_project_named, string_value_arguments};
 use crate::vb::functyp::{Prototype, TypeEntry, VbType};
 use crate::vb::header::{VbHeader, header_region};
-use crate::vb::lift::{Callees, lift_method, render, result_bytes};
+use crate::vb::lift::{Callee, Callees, Expr, LiftedStmt, Stmt, lift_method, render, result_bytes};
 use crate::vb::object::{Object, ObjectTable};
 use crate::vb::pcode::{PcodeListing, PcodeTable, disassemble};
 use crate::vb::privateobj::{ObjectInfo, PrivateObj, PublicVariable, public_variables};
@@ -299,6 +299,147 @@ fn local_accesses(ops: &[Op<'_>]) -> Accesses {
         }
     }
     out
+}
+
+/// Gives the access that a `For` with the handler names `names` gives its
+/// counter: `ForI4` counts a `Long`, `ForStepR8` a `Double`, and `ForVar` a
+/// `Variant`. Gives nothing for each other opcode, and for `For Each`.
+fn counter_access(names: &[String]) -> Option<Access> {
+    let kinds: Vec<Access> = names
+        .iter()
+        .map(|name| {
+            let kind = ["ForStep", "For"]
+                .iter()
+                .find_map(|prefix| name.strip_prefix(prefix))
+                .filter(|_| !name.starts_with("ForEach"))?;
+            Some(match kind {
+                "UI1" => Access::Byte,
+                "I2" => Access::Integer,
+                "I4" => Access::Four,
+                "R4" => Access::Single,
+                "R8" => Access::Double,
+                _ => Access::Other,
+            })
+        })
+        .collect::<Option<_>>()?;
+    let first = *kinds.first()?;
+    kinds.iter().all(|kind| *kind == first).then_some(first)
+}
+
+/// Gives the locals of `stmts` that a call or a keyword takes as a plain
+/// argument, which is the address of the local.
+fn call_addresses(stmts: &[LiftedStmt]) -> BTreeSet<u16> {
+    fn expr(found: &mut BTreeSet<u16>, value: &Expr) {
+        match value {
+            Expr::Field(inner, _)
+            | Expr::Convert(_, inner)
+            | Expr::Member(inner, _)
+            | Expr::Late(inner, _)
+            | Expr::ByVal(inner)
+            | Expr::Bound(_, _, inner) => expr(found, inner),
+            Expr::Binary(_, left, right) => {
+                expr(found, left);
+                expr(found, right);
+            }
+            Expr::Call(callee, args) => call(found, callee, args),
+            Expr::Index(array, indexes) => {
+                expr(found, array);
+                for index in indexes {
+                    expr(found, index);
+                }
+            }
+            _ => {}
+        }
+    }
+    fn call(found: &mut BTreeSet<u16>, callee: &Callee, args: &[Expr]) {
+        if let Callee::Member(object, _) = callee {
+            expr(found, object);
+        }
+        arguments(found, args);
+    }
+    fn arguments(found: &mut BTreeSet<u16>, args: &[Expr]) {
+        for arg in args {
+            if let Expr::Local(slot) = arg {
+                found.insert(*slot);
+            }
+            expr(found, arg);
+        }
+    }
+    let mut found = BTreeSet::new();
+    for lifted in stmts {
+        match &lifted.stmt {
+            Stmt::Assign { target, value } | Stmt::Set { target, value } => {
+                expr(&mut found, target);
+                expr(&mut found, value);
+            }
+            Stmt::IfGoTo { condition, .. } | Stmt::IfNotGoTo { condition, .. } => {
+                expr(&mut found, condition);
+            }
+            Stmt::Call(callee, args) => call(&mut found, callee, args),
+            Stmt::Keyword(_, args) => arguments(&mut found, args),
+            Stmt::For {
+                start, end, step, ..
+            } => {
+                for value in [start, end].into_iter().chain(step) {
+                    expr(&mut found, value);
+                }
+            }
+            _ => {}
+        }
+    }
+    found
+}
+
+/// Gives the access of the counter of each `For` of `stmts` that is a
+/// local, by its name: the n-th `For` of the statements is the n-th `For`
+/// opcode of `ops`, whose handler names give the type. Gives nothing when
+/// the two counts differ.
+fn for_counters(stmts: &[LiftedStmt], ops: &[Op<'_>]) -> BTreeMap<String, Access> {
+    let kinds: Vec<Access> = ops
+        .iter()
+        .filter_map(|(names, _)| counter_access(names))
+        .collect();
+    let counters: Vec<Option<u16>> = stmts
+        .iter()
+        .filter_map(|lifted| match &lifted.stmt {
+            Stmt::For { counter, .. } => Some(match counter {
+                Expr::Local(slot) => Some(*slot),
+                _ => None,
+            }),
+            _ => None,
+        })
+        .collect();
+    if kinds.len() != counters.len() {
+        return BTreeMap::new();
+    }
+    counters
+        .into_iter()
+        .zip(kinds)
+        .filter_map(|(slot, kind)| Some((format!("local_{:X}", slot?), kind)))
+        .collect()
+}
+
+/// Gives `accesses` with the access of each counter of `counters` whose
+/// address no call takes, in place of the address that its `For` and its
+/// `Next` take.
+fn with_counters(
+    mut accesses: Accesses,
+    counters: &BTreeMap<String, Access>,
+    calls: &BTreeSet<u16>,
+) -> Accesses {
+    for (local, kind) in counters {
+        let called = local
+            .strip_prefix("local_")
+            .and_then(|digits| u16::from_str_radix(digits, 16).ok())
+            .is_some_and(|slot| calls.contains(&slot));
+        if called {
+            continue;
+        }
+        let kinds = accesses.entry(local.clone()).or_default();
+        kinds.remove(&Access::Reference);
+        kinds.insert(*kind);
+    }
+    accesses
 }
 
 /// Puts a `Dim` before `lines` for each local of `accesses` that `lines` use
@@ -2002,8 +2143,14 @@ pub fn lift_objects(
                 members.entry(slot).or_default().extend(fields);
             }
             bad_records.extend(bad);
+            let mut counters = BTreeMap::new();
+            let mut addressed = BTreeSet::new();
             let mut lines = match lift_method(&listing, table, callees, types, *index) {
-                Ok(stmts) => structure::render(&stmts),
+                Ok(stmts) => {
+                    counters = for_counters(&stmts, &ops);
+                    addressed = call_addresses(&stmts);
+                    structure::render(&stmts)
+                }
                 Err(fault) => vec![format!("    ' The lift stopped: {fault:?}")],
             };
             if module_base != 0 {
@@ -2043,7 +2190,10 @@ pub fn lift_objects(
                 &fixed_shapes(&descriptor.fixed_arrays(&pe)),
             );
             declare_new_locals(&mut lines, &new_locals(&listing, table, callees));
-            declare_scalar_locals(&mut lines, &local_accesses(&ops));
+            declare_scalar_locals(
+                &mut lines,
+                &with_counters(local_accesses(&ops), &counters, &addressed),
+            );
             lifted.procedures.push(LiftedProcedure {
                 index: *index,
                 declaration,
@@ -2157,16 +2307,16 @@ mod tests {
 
     use super::{
         Accesses, FixedArray, Op, TypedArrays, add_accesses, apply_frame_structs, built_parameters,
-        call_arguments, call_arity, declare, declare_arrays, declare_new_locals,
+        call_addresses, call_arguments, call_arity, declare, declare_arrays, declare_new_locals,
         declare_scalar_locals, declare_statements, declare_statics, declared_bytes,
-        field_declarations, fixed_shapes, frame_structs, indexed_words, local_accesses,
-        member_zero, name_module_fields, new_locals, pointer_fields, procedure_name, record_array,
-        record_fields, redim_arrays, replace_word, scalar_type, slot_uses, static_members,
-        string_parameters, struct_pointers, typed_arrays, typed_locals, variable_declaration,
-        words_with,
+        field_declarations, fixed_shapes, for_counters, frame_structs, indexed_words,
+        local_accesses, local_type, member_zero, name_module_fields, new_locals, pointer_fields,
+        procedure_name, record_array, record_fields, redim_arrays, replace_word, scalar_type,
+        slot_uses, static_members, string_parameters, struct_pointers, typed_arrays, typed_locals,
+        variable_declaration, with_counters, words_with,
     };
     use crate::read::region::{Off, Region};
-    use crate::vb::lift::result_bytes;
+    use crate::vb::lift::{Callee, Expr, LiftedStmt, Stmt, result_bytes};
     use crate::vb::pcode::{PcodeTable, disassemble};
     use crate::vb::project::{Declaration, ExportName};
     use crate::vb::{ObjectProcedures, ProcedureEntry};
@@ -2681,6 +2831,71 @@ names = ["ExitProcCb"]
                 "       local_D0.field_4 = local_A8",
             ]
         );
+    }
+
+    /// `For x = 0 To 255` of `DrawFastBrightness` in
+    /// `Realtime_Brightness.exe` is `ForI4`, and the source declares `x As
+    /// Long`. The lift takes the counter from the stack, where `FLdRf` puts
+    /// its address, so the counter has only the access of an address. The
+    /// n-th `For` statement goes with the n-th `For` opcode. A counter whose
+    /// address a call also takes, and the counter of a `Variant` loop, give
+    /// no type.
+    #[test]
+    fn the_counter_of_a_for_loop_takes_the_type_of_the_loop() {
+        let names =
+            |list: &[&str]| -> Vec<String> { list.iter().map(|n| (*n).to_owned()).collect() };
+        let at = |stmt: Stmt| LiftedStmt {
+            offset: 0,
+            also_at: Vec::new(),
+            stmt,
+        };
+        let for_of = |slot: u16| Stmt::For {
+            counter: Expr::Local(slot),
+            start: Expr::Const(0),
+            end: Expr::Const(255),
+            step: None,
+            exit: 0x40,
+        };
+        let stmts = [
+            at(for_of(0x8C)),
+            at(for_of(0x90)),
+            at(Stmt::Call(
+                Callee::Declare("Sleep".to_owned()),
+                vec![Expr::Local(0x90)],
+            )),
+            at(for_of(0x94)),
+        ];
+        let reference = names(&["FLdRf"]);
+        let for_long = names(&["ForI4"]);
+        let for_double = names(&["ForStepR8"]);
+        let for_variant = names(&["ForVar"]);
+        let ops: Vec<Op<'_>> = vec![
+            (&reference, &[0x74, 0xFF]),
+            (&for_long, &[0x28, 0xFF, 0x40, 0x00]),
+            (&reference, &[0x70, 0xFF]),
+            (&for_double, &[0x20, 0xFF, 0x40, 0x00]),
+            (&reference, &[0x6C, 0xFF]),
+            (&for_variant, &[0x18, 0xFF, 0x40, 0x00]),
+        ];
+        let counters = for_counters(&stmts, &ops);
+        assert_eq!(counters.len(), 3);
+        let addressed = call_addresses(&stmts);
+        assert_eq!(addressed.iter().copied().collect::<Vec<u16>>(), [0x90]);
+        let accesses = with_counters(local_accesses(&ops), &counters, &addressed);
+        let types: Vec<(String, Option<&'static str>)> = accesses
+            .iter()
+            .map(|(name, kinds)| (name.clone(), local_type(kinds)))
+            .collect();
+        assert_eq!(
+            types,
+            [
+                ("local_8C".to_owned(), Some("Long")),
+                ("local_90".to_owned(), None),
+                ("local_94".to_owned(), None),
+            ]
+        );
+        // A count that differs gives no counter.
+        assert!(for_counters(stmts.get(..1).unwrap(), &ops).is_empty());
     }
 
     /// `Static NewX As Double, NewY As Double` of `Calculate` in
