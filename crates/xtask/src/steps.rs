@@ -75,7 +75,10 @@ pub(crate) fn render_steps(steps: &[String]) -> String {
 /// The script that starts one program and sends its steps. `runs.bat`
 /// calls it with the path of the executable, the short name and the side.
 /// It waits after each marker, so that the other machine takes its picture
-/// before the next keys arrive.
+/// before the next keys arrive. It sends the keys of a step only while the
+/// program runs and `AppActivate` brings it to the front: keys that go to
+/// the window of `runs.bat` can run a command there. A step whose keys it
+/// does not send gives `===NOKEYS <short> <side>-s<n>===` before its marker.
 const DRIVE_LINES: &[&str] = &[
     "' Starts one program, sends a marker through COM1 while its first window",
     "' shows, and sends each step of steps\\<short>.txt to it with SendKeys,",
@@ -96,9 +99,12 @@ const DRIVE_LINES: &[&str] = &[
     "  Do Until list.AtEndOfStream",
     "    keys = list.ReadLine",
     "    count = count + 1",
-    "    shell.AppActivate program.ProcessID",
-    "    WScript.Sleep 500",
-    "    shell.SendKeys keys",
+    "    If program.Status = 0 And shell.AppActivate(program.ProcessID) Then",
+    "      WScript.Sleep 500",
+    "      shell.SendKeys keys",
+    "    Else",
+    "      shell.Run \"cmd /c >COM1 echo ===NOKEYS \" & short & \" \" & side & \"-s\" & count & \"===\", 0, True",
+    "    End If",
     "    WScript.Sleep 2500",
     "    Mark side & \"-s\" & count",
     "  Loop",
@@ -161,7 +167,12 @@ mod tests {
         let text = drive_script();
         assert!(!text.replace("\r\n", "").contains('\n'));
         assert!(text.contains(r#"path = files.GetAbsolutePathName("steps\" & short & ".txt")"#));
-        assert!(text.contains("    shell.SendKeys keys\r\n"));
+        assert!(text.contains("      shell.SendKeys keys\r\n"));
+        let guard = text
+            .find("If program.Status = 0 And shell.AppActivate(program.ProcessID) Then")
+            .unwrap();
+        assert!(guard < text.find("shell.SendKeys").unwrap());
+        assert!(text.contains(r#"===NOKEYS " & short & " " & side & "-s" & count & "==="#));
         assert!(text.contains(r#"    Mark side & "-s" & count"#));
         assert!(text.contains(
             r#"shell.Run "cmd /c >COM1 echo ===SHOT " & short & " " & name & "===", 0, True"#
