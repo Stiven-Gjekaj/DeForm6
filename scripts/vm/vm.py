@@ -13,7 +13,7 @@ folder for the order of the steps.
     vm.py nudge                       moves the mouse by one pixel and back
     vm.py read OUT                    copies the serial port into OUT
     vm.py shots CAPTURE DIR [ENDS]    takes a picture at each run marker
-    vm.py compare DIR                 compares the pictures of each program
+    vm.py compare DIR [EXPORT]        compares the pictures of each program
     vm.py builds CAPTURE              counts the builds that succeeded
     vm.py errors CAPTURE EXTRACTED    gives the first error of each project
 """
@@ -28,6 +28,7 @@ import subprocess
 import sys
 import termios
 import time
+import tomllib
 import tty
 import zlib
 
@@ -45,6 +46,17 @@ SERIAL_LABEL = "term0"
 
 # The rows at the bottom of the screen that the task bar and its clock take.
 TASKBAR_ROWS = 30
+# The file of the steps, which also tells how `compare` compares a program.
+STEPS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "steps.toml")
+# The colour at the left end of the caption of the active window, in the
+# classic theme of the build host.
+ACTIVE_CAPTION = bytes((10, 36, 106))
+# The colours of the outer frame of a window in the classic theme: the light
+# top and left lines, and the dark pixel at the end of each of them.
+FRAME_LIGHT = (bytes((212, 208, 200)), bytes((255, 255, 255)))
+FRAME_DARK = bytes((64, 64, 64))
+# The most pixels between the outer frame and the caption.
+FRAME_WIDTH = 6
 # The pictures that `shots` takes at each marker.
 PICTURES = 3
 
@@ -260,16 +272,111 @@ def watch_shots(capture, folder, ends):
         time.sleep(0.3)
 
 
-def pixels_apart(first, second, width, height):
-    """Counts the pixels above the task bar that differ between two pictures."""
+def pixels_apart(first, second, width, height, boxes=()):
+    """Counts the pixels above the task bar that differ between two pictures.
+
+    A pixel in one of BOXES, each (x0, y0, x1, y1) with both ends in it, is
+    not counted.
+    """
     differ = 0
     for y in range(height - TASKBAR_ROWS):
         if first[y] != second[y]:
             differ += sum(
                 first[y][x * 3:x * 3 + 3] != second[y][x * 3:x * 3 + 3]
+                and not any(x0 <= x <= x1 and y0 <= y <= y1 for x0, y0, x1, y1 in boxes)
                 for x in range(width)
             )
     return differ
+
+
+def pixel(rows, x, y):
+    return rows[y][x * 3:x * 3 + 3]
+
+
+def window_box(rows, width, height):
+    """Gives the box (x0, y0, x1, y1) of the active window, or None.
+
+    The caption of the active window starts with ACTIVE_CAPTION. The outer
+    frame is light up to FRAME_WIDTH pixels to the left of the caption, and
+    the frame is as wide above the caption. A scan up from the caption can
+    go into the white text of a desktop icon, so the top comes from the
+    left. The top line of the frame is light to the dark pixel at its
+    right end, and the left line to the dark pixel at its bottom end.
+    """
+    for y in range(height - TASKBAR_ROWS):
+        row = rows[y]
+        at = row.find(ACTIVE_CAPTION * 8)
+        while at >= 0 and at % 3:
+            at = row.find(ACTIVE_CAPTION * 8, at + 1)
+        if at < 0:
+            continue
+        x = at // 3
+        left = x
+        while x - left < FRAME_WIDTH and left > 0 and pixel(rows, left - 1, y) in FRAME_LIGHT:
+            left -= 1
+        top = y - (x - left)
+        if top < 0 or pixel(rows, left, top) != FRAME_LIGHT[0]:
+            return None
+        right = next(
+            (r for r in range(left + 1, width) if pixel(rows, r, top) == FRAME_DARK), None
+        )
+        bottom = next(
+            (b for b in range(top + 1, height) if pixel(rows, left, b) == FRAME_DARK), None
+        )
+        if right is None or bottom is None:
+            return None
+        return left, top, right, bottom
+    return None
+
+
+def windows_apart(first, second, width, height):
+    """Counts the pixels that differ between the active windows of two
+    pictures, each at its own place. Gives None when a picture has no
+    active window or the two windows differ in size."""
+    one = window_box(first, width, height)
+    two = window_box(second, width, height)
+    if one is None or two is None:
+        return None
+    if (one[2] - one[0], one[3] - one[1]) != (two[2] - two[0], two[3] - two[1]):
+        return None
+    differ = 0
+    for dy in range(one[3] - one[1] + 1):
+        a = first[one[1] + dy][one[0] * 3:(one[2] + 1) * 3]
+        b = second[two[1] + dy][two[0] * 3:(two[2] + 1) * 3]
+        if a != b:
+            differ += sum(a[i:i + 3] != b[i:i + 3] for i in range(0, len(a), 3))
+    return differ
+
+
+def compare_rules(export):
+    """Gives the compare rules of each short name of the manifest of EXPORT.
+
+    A program of `steps.toml` with `window = true` is put by Windows, which
+    puts each new window at another place, so `compare` compares its active
+    window at its own place. Each entry of `random` gives a box of pixels
+    that a random value draws, for the screens that it names: "" is the
+    first window and "s1" the first step.
+    """
+    if export is None:
+        return {}
+    steps = tomllib.load(open(STEPS_FILE, "rb"))
+    by_key = {program["key"]: program for program in steps.get("program", [])}
+    rules = {}
+    for line in open(os.path.join(export, "manifest.txt"), encoding="utf-8"):
+        fields = line.rstrip("\n").split("\t")
+        if len(fields) > 1 and not line.startswith("#") and fields[1] in by_key:
+            rules[fields[0]] = by_key[fields[1]]
+    return rules
+
+
+def screen_boxes(rule, suffix):
+    """Gives the boxes of RULE that the screen SUFFIX (such as -s2) leaves out."""
+    name = suffix[1:]
+    return [
+        tuple(entry["box"])
+        for entry in rule.get("random", [])
+        if name in entry["screens"]
+    ]
 
 
 def takes(folder, stem):
@@ -282,37 +389,62 @@ def takes(folder, stem):
     return width if out else 0, height if out else 0, out
 
 
-def compare(folder):
+def compare(folder, export=None):
     """Prints, for each screen of each program, the pixels above the task bar
     that differ between the original and the rebuilt program: the least over
     each pair of the pictures of the marker, since a caret blinks. A screen
     is the first window (no suffix) or a step (-sN). For a step, `moved`
-    tells whether the step changed the screen of the original."""
+    tells whether the step changed the screen of the original.
+
+    With EXPORT, the rules of `steps.toml` apply (see `compare_rules`). A
+    screen that a rule compares is marked `window` or `random`, and the
+    summary counts those screens apart from the others."""
+    rules = compare_rules(export)
     screens = sorted({
         (match.group(1), match.group(2))
         for name in os.listdir(folder)
         if (match := re.fullmatch(r"(p\d\d)-original((?:-s\d+)?)(?:~\d+)?\.png", name))
     }, key=lambda pair: (pair[0], int(pair[1][2:] or 0)))
     same = steps = moved = 0
+    by_rule = {"window": [0, 0], "random": [0, 0]}
     for short, suffix in screens:
         width, height, first = takes(folder, f"{short}-original{suffix}")
         _, _, second = takes(folder, f"{short}-extracted{suffix}")
         if not second:
             print(short + suffix, "missing")
             continue
-        differ = min(pixels_apart(a, b, width, height) for a in first for b in second)
-        same += differ == 0
-        note = ""
+        rule = rules.get(short, {})
+        boxes = screen_boxes(rule, suffix)
+        kind = ""
+        if rule.get("window"):
+            counts = [windows_apart(a, b, width, height) for a in first for b in second]
+            counts = [count for count in counts if count is not None]
+            if counts:
+                kind = " window"
+                differ = min(counts)
+        if not kind:
+            differ = min(pixels_apart(a, b, width, height, boxes) for a in first for b in second)
+            if boxes:
+                kind = " random"
+        if kind:
+            by_rule[kind.strip()][0] += differ == 0
+            by_rule[kind.strip()][1] += 1
+        else:
+            same += differ == 0
+        note = kind
         if suffix:
             steps += 1
             before = int(suffix[2:]) - 1
             _, _, earlier = takes(folder, f"{short}-original" + (f"-s{before}" if before else ""))
             change = earlier and min(pixels_apart(a, b, width, height) for a in first for b in earlier)
             moved += bool(change)
-            note = " moved" if change else " still"
+            note += " moved" if change else " still"
         share = differ / (width * (height - TASKBAR_ROWS))
         print(f"{short}{suffix} {share:.4f} {differ}{note}")
-    print(f"{same} of {len(screens)} screens are the same; {moved} of {steps} steps changed the screen of the original")
+    plain = len(screens) - by_rule["window"][1] - by_rule["random"][1]
+    print(f"{same} of {plain} screens are the same; {moved} of {steps} steps changed the screen of the original")
+    print(f"{by_rule['window'][0]} of {by_rule['window'][1]} screens put by Windows have the same window")
+    print(f"{by_rule['random'][0]} of {by_rule['random'][1]} screens with random boxes are the same outside the boxes")
 
 def capture_files(capture):
     data = open(capture, "rb").read().decode("latin-1").replace("\r\n", "\n")
@@ -382,7 +514,7 @@ def main():
     elif what == "shots":
         watch_shots(rest[0], rest[1], int(rest[2]) if len(rest) > 2 else 1)
     elif what == "compare":
-        compare(rest[0])
+        compare(rest[0], rest[1] if len(rest) > 1 else None)
     elif what == "builds":
         builds(rest[0])
     elif what == "errors":

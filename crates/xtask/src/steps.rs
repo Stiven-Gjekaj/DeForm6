@@ -35,6 +35,30 @@ struct ProgramSteps {
     key: String,
     /// The keys of each step, in the syntax of `SendKeys`.
     steps: Vec<String>,
+    /// Windows puts the window of the program, at another place for each
+    /// new window, so `vm.py compare` compares the window at its own place.
+    /// The export does not use it.
+    #[serde(default)]
+    #[allow(dead_code, reason = "vm.py reads it; the export only checks the file")]
+    window: bool,
+    /// The boxes of pixels that a random value draws, which `vm.py compare`
+    /// leaves out.
+    #[serde(default)]
+    random: Vec<RandomBox>,
+}
+
+/// A box of pixels that a random value draws on some screens of a program.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RandomBox {
+    /// The screens of the box: "" is the first window and "s1" the first step.
+    screens: Vec<String>,
+    /// The left, top, right and bottom pixel of the box, all in the box.
+    #[serde(rename = "box")]
+    corners: [u32; 4],
+    /// What draws the random value.
+    #[allow(dead_code, reason = "a reader of steps.toml reads it; no code does")]
+    why: String,
 }
 
 /// Gives the path of `scripts/vm/steps.toml`.
@@ -57,6 +81,23 @@ pub(crate) fn parse_steps(text: &str) -> Result<BTreeMap<String, Vec<String>>, S
                     "{STEPS_FILE}: {}: the step {step:?} is empty or holds a character that \
                      is not printable ASCII",
                     program.key
+                ));
+            }
+        }
+        for random in &program.random {
+            let [left, top, right, bottom] = random.corners;
+            let screens = random.screens.iter().all(|screen| {
+                screen.is_empty()
+                    || screen
+                        .strip_prefix('s')
+                        .and_then(|step| step.parse::<usize>().ok())
+                        .is_some_and(|step| (1..=program.steps.len()).contains(&step))
+            });
+            if left > right || top > bottom || random.screens.is_empty() || !screens {
+                return Err(format!(
+                    "{STEPS_FILE}: {}: the random box {:?} for the screens {:?} is empty or \
+                     names a screen that the program does not have",
+                    program.key, random.corners, random.screens
                 ));
             }
         }
@@ -160,6 +201,22 @@ mod tests {
         assert!(parse_steps(line_break).is_err());
         let unknown = "[[program]]\nkey = \"a\"\nsteps = []\nwait = 1\n";
         assert!(parse_steps(unknown).is_err());
+    }
+
+    #[test]
+    fn a_random_box_must_hold_a_pixel_and_name_a_screen_of_the_program() {
+        let text = |screens: &str, corners: &str| {
+            format!(
+                "[[program]]\nkey = \"a\"\nsteps = [\"x\"]\nwindow = true\n\
+                 random = [{{ screens = {screens}, box = {corners}, why = \"Rnd\" }}]\n"
+            )
+        };
+        assert!(parse_steps(&text(r#"["", "s1"]"#, "[1, 2, 1, 2]")).is_ok());
+        assert!(parse_steps(&text(r#"["s2"]"#, "[1, 2, 3, 4]")).is_err());
+        assert!(parse_steps(&text(r#"["s0"]"#, "[1, 2, 3, 4]")).is_err());
+        assert!(parse_steps(&text("[]", "[1, 2, 3, 4]")).is_err());
+        assert!(parse_steps(&text(r#"[""]"#, "[3, 2, 1, 4]")).is_err());
+        assert!(parse_steps(&text(r#"[""]"#, "[1, 4, 3, 2]")).is_err());
     }
 
     #[test]

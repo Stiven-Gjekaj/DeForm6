@@ -49,6 +49,8 @@ steps = [
 
 [[program]]
 key = "public-domain/SK-Gradient-Sample__VB6/demo/Project1.exe"
+# Windows puts the window (StartUpPosition 3), at another place for each new window. vm.py compare compares the window at its own place.
+window = true
 # Focus starts on Picture1 (TabIndex 0).
 # 1. TAB moves the focus to Command1 (Draw).
 # 2. SPACE clicks Draw. Command1_Click calls CreateGradient on Label1. A Label has no hWnd, so the code goes to errhandler and draws nothing. The step still runs the code; a fault in the rebuild that raises an unhandled error shows on the screen.
@@ -101,6 +103,8 @@ steps = []
 
 [[program]]
 key = "public-domain/SK-Winsock-Sample__VB6/demo/SubReality_WinsockSample.exe"
+# Windows puts the window (StartUpPosition 3), at another place for each new window. vm.py compare compares the window at its own place.
+window = true
 # Focus starts on txtReceived (TabIndex 1). ENTER is never pressed: cmdConnect is the Default button and connects to the network.
 # These steps run no event procedure (txtPort and txtServer have no Change code). They only check the text drawing.
 # 1. TAB past cmdConnect to txtPort, select all, type 8080.
@@ -114,6 +118,7 @@ steps = [
 
 [[program]]
 key = "public-domain/UUID2/VB6/UUID2.exe"
+random = [{ screens = ["", "s1", "s2", "s3"], box = [472, 363, 798, 386], why = "Form_Load writes a random UUID into txtUUID2." }]
 # Focus starts on chkUpper (TabIndex 0). Form_Load writes a random UUID into txtUUID2, so that box differs in each run; mask it.
 # These checkbox clicks have no Click code; they do not make a new UUID.
 # 1. SPACE clears chkUpper.
@@ -357,6 +362,7 @@ steps = [
 
 [[program]]
 key = "vb6-code/Diffuse-effect/Diffuse.exe"
+random = [{ screens = [""], box = [109, 344, 364, 535], why = "Form_Load calls ProcessDiffuse, which moves the pixels of picMain by Rnd." }]
 # DrawDiffuse calls Randomize Timer and Rnd. The result is random unless both distances are 0.
 # With hScrollX = 0 and hScrollY = 0, each offset is Rnd * 0, so the output is the original picture. The explosion button is never pressed.
 # The first screen (Form_Load diffuses 20 px) is random. The steps make it fixed.
@@ -397,6 +403,8 @@ steps = [
 
 [[program]]
 key = "vb6-code/Fill-image-region/Filling.exe"
+# Windows puts the window (StartUpPosition 3), at another place for each new window. vm.py compare compares the window at its own place.
+window = true
 # No safe keyboard step. The only event code is picDemo_MouseDown, MouseMove and MouseUp: the left button draws lines and the right button fills with a color from Rnd. No key event exists.
 steps = []
 
@@ -419,11 +427,14 @@ steps = [
 
 [[program]]
 key = "vb6-code/Game-physics-basic/Physics_Demo.exe"
+random = [{ screens = [""], box = [110, 68, 913, 663], why = "BuildStar places the stars of PicMain with Rnd." }]
 # No safe keyboard step. MainLoop redraws 500 stars each frame, and BuildStar places them with Rnd, so the screen never holds still. Arrow keys and space move the ship and fire, but the star field around it differs in every screenshot. Escape and cmdExit end the program.
 steps = []
 
 [[program]]
 key = "vb6-code/Gradient-2D/Gradient.exe"
+# Windows puts the window (StartUpPosition 3), at another place for each new window. vm.py compare compares the window at its own place.
+window = true
 # Focus starts on picColor1 (0). Tab order: picColor1 0, picColor2 1, cmbStyle 3. The picture boxes open a color dialog on a mouse click only; no key reaches that code. Form_Load sets ListIndex 1 (Vertical).
 # Step 1: Tab twice to cmbStyle, Up arrow selects Horizontal; cmbStyle_Click draws a horizontal red-to-black gradient.
 # Step 2: Down arrow selects Vertical; cmbStyle_Click draws a vertical gradient.
