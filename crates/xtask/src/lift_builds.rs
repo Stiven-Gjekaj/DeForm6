@@ -207,7 +207,10 @@ const RUN_WAIT_SECONDS: u8 = 6;
 /// shows, and then a marker after each step of the program. The file then
 /// ends the program, waits [`RUN_WAIT_SECONDS`] seconds, and closes the
 /// error report of Windows (`dwwin.exe`) that a program that ends in the
-/// middle of its work can leave, which covers the next pictures. The other
+/// middle of its work can leave, which covers the next pictures. It also
+/// closes Help and Support (`helpctr.exe`): in one run, the keys of a step
+/// went to the Start menu, and the `H` of `Hello` opened Help, which then
+/// covered each later program. The other
 /// machine takes a picture of the screen at each marker, so each screen of
 /// each rebuilt program can be compared with the same screen of its
 /// original.
@@ -268,6 +271,7 @@ fn render_runs(programs: &[Exported]) -> String {
             r#"taskkill /f /im run-%2.exe >nul 2>&1"#,
             &wait,
             r#"taskkill /f /im dwwin.exe >nul 2>&1"#,
+            r#"taskkill /f /im helpctr.exe >nul 2>&1"#,
             &format!(r#"del "{RUN_DIR}\%1\run-%2.exe""#),
             "goto :eof",
         ]
@@ -354,6 +358,8 @@ mod tests {
         let ended = text.find("taskkill /f /im run-%2.exe").unwrap();
         let report = text.find("taskkill /f /im dwwin.exe >nul 2>&1").unwrap();
         assert!(ended < report);
+        let help = text.find("taskkill /f /im helpctr.exe >nul 2>&1").unwrap();
+        assert!(ended < help);
         assert!(text.contains(r#"pushd "%~dp0""#));
     }
 
