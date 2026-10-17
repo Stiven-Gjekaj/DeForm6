@@ -793,6 +793,23 @@ const ICON_OPCODE: u8 = 35;
 /// could not read gives a [`PropertyValue::BlobUnreadable`], carries its
 /// own defect into the returned list, and does stop the loop, the same
 /// honest treatment every other unreadable payload in this function gets.
+/// Gives the `Length` of the control block `block`.
+///
+/// VB6 writes only the low 16 bits of the length. The control tree finds the
+/// true length of a block that holds a picture of more than 64 KiB, and
+/// gives a window of the true length plus 2 bytes. When the size of `block`
+/// less 2 has the low 16 bits of the `Length` field, this gives that size.
+/// Else it gives the `Length` field.
+fn block_length(block: &Region<'_>) -> u32 {
+    let declared = u32::from(block.u16_le(Off::new(0)).unwrap_or(0));
+    let window = block.len().saturating_sub(2);
+    if window > declared && window & 0xFFFF == declared {
+        window
+    } else {
+        declared
+    }
+}
+
 #[must_use]
 pub fn walk_properties(
     block: &Region<'_>,
@@ -803,8 +820,8 @@ pub fn walk_properties(
     let mut properties = Vec::new();
     let mut defects = Vec::new();
 
-    let length = block.u16_le(Off::new(0)).unwrap_or(0);
-    let block_end = u32::from(length).saturating_sub(1);
+    let length = block_length(block);
+    let block_end = length.saturating_sub(1);
     let control_type_name = format!("{:?}", classify_control_type(header.c_type));
 
     let mut cursor = header.header_len();
@@ -2157,6 +2174,45 @@ mod tests {
             stream.properties[1]
         );
         assert!(defects.is_empty(), "{defects:?}");
+    }
+
+    /// `PicTilesBuffer` of `Map Editor.exe` holds a picture of 196670 bytes,
+    /// and the `Length` field holds only the low 16 bits of the length of
+    /// its block. The window of the block has the true length.
+    #[test]
+    fn the_properties_after_a_picture_of_more_than_64_kib_are_read() {
+        let table = picture_table();
+        let mut body = vec![1u8]; // opcode 1 = Icon (Picture)
+        let image = 0x1_0010_u32;
+        body.extend_from_slice(&(image + 8).to_le_bytes());
+        body.extend_from_slice(&[0xAA; 8]);
+        body.resize(body.len() + usize::try_from(image).unwrap(), 0xBB);
+        body.push(2); // opcode 2 = After (Byte), right after the blob
+        body.push(7);
+        let mut bytes = control_block("Cmd", 4, &[]);
+        bytes.extend_from_slice(&body);
+        let length = u32::try_from(bytes.len()).unwrap() + 1;
+        let low = u16::try_from(length & 0xFFFF).unwrap();
+        bytes[0..2].copy_from_slice(&low.to_le_bytes());
+        // The separator at `Length - 1`, and the two bytes up to the end of
+        // the window, `Length + 2`.
+        bytes.extend_from_slice(&[0xFF, 0x00, 0x00]);
+        assert_eq!(bytes.len(), usize::try_from(length + 2).unwrap());
+        let region = Region::new(&bytes, Off::new(0));
+        let (header, _) = read_control_header(&region);
+        let (stream, defects) = walk_properties(&region, &header, &table, &mut BlobCursor::new());
+        assert_eq!(stream.properties.len(), 2, "{:?}", stream.properties);
+        assert!(
+            matches!(&stream.properties[1], PropertyValue::Byte { name, value: 7 } if name == "After"),
+            "{:?}",
+            stream.properties[1]
+        );
+        assert!(defects.is_empty(), "{defects:?}");
+        // A window that does not have the low 16 bits of the field keeps the
+        // field: the walk stops in the picture and reads nothing after it.
+        let short = Region::new(bytes.get(..bytes.len() - 1).unwrap(), Off::new(0));
+        let (stream, _) = walk_properties(&short, &header, &table, &mut BlobCursor::new());
+        assert!(stream.properties.len() < 2, "{:?}", stream.properties);
     }
 
     #[test]
