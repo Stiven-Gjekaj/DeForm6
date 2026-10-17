@@ -1371,6 +1371,126 @@ fn typed_arrays<'a>(
     out
 }
 
+/// The Basic type of each argument by reference of a public procedure that
+/// is a number or a string, by the position of the argument, when each
+/// lifted call passes a plain local there. The procedure keeps that type,
+/// and each caller declares the local that it passes. Basic refuses a
+/// `Variant` for an argument by reference of another type, so the lift
+/// wrote each such argument as a `Variant` by reference. That lost the
+/// type: `tRGBToHSL h As Single` of `Colorize.exe` computed in `Double`, and
+/// the rebuilt program gave other colours.
+fn typed_scalars<'a>(
+    procedures: impl Iterator<Item = &'a ObjectProcedures>,
+    lines: &[String],
+) -> TypedArrays {
+    let mut found: BTreeMap<String, Option<Vec<(usize, &'static str)>>> = BTreeMap::new();
+    for own in procedures {
+        let ObjectProcedures::Slots(slots) = own else {
+            continue;
+        };
+        for slot in slots {
+            let ProcedureEntry::Public {
+                name,
+                prototype: Some(prototype),
+            } = slot
+            else {
+                continue;
+            };
+            let scalars: Vec<(usize, &'static str)> = prototype
+                .arguments
+                .iter()
+                .enumerate()
+                .filter(|(_, argument)| argument.entry.by_ref && !argument.entry.array)
+                .filter_map(|(at, argument)| element_type(&argument.entry.vb_type).map(|t| (at, t)))
+                .filter(|(_, basic)| *basic != "Variant")
+                .collect();
+            if scalars.is_empty() {
+                continue;
+            }
+            let entry = found
+                .entry(name.clone())
+                .or_insert_with(|| Some(scalars.clone()));
+            if entry.as_ref() != Some(&scalars) {
+                *entry = None;
+            }
+        }
+    }
+    let mut out = TypedArrays::new();
+    for (name, scalars) in found {
+        let Some(scalars) = scalars else {
+            continue;
+        };
+        let calls = call_arguments(lines, &name);
+        let kept: Vec<(usize, &'static str)> = scalars
+            .into_iter()
+            .filter(|(at, _)| {
+                !calls.is_empty()
+                    && calls.iter().all(|arguments| {
+                        arguments
+                            .get(*at)
+                            .is_some_and(|argument| is_local(argument))
+                    })
+            })
+            .collect();
+        if !kept.is_empty() {
+            out.insert(name, kept);
+        }
+    }
+    out
+}
+
+/// Gives `declaration` of the procedure `name` with each argument of
+/// `scalars` by reference as its type, in place of the `Variant` of
+/// [`by_reference_variants`].
+fn typed_parameters(
+    declaration: &str,
+    procedures: &ObjectProcedures,
+    name: &str,
+    scalars: &TypedArrays,
+) -> String {
+    let (Some(positions), ObjectProcedures::Slots(slots)) = (scalars.get(name), procedures) else {
+        return declaration.to_owned();
+    };
+    let Some(prototype) = slots.iter().find_map(|slot| match slot {
+        ProcedureEntry::Public {
+            name: own,
+            prototype: Some(prototype),
+        } if own == name => Some(prototype),
+        _ => None,
+    }) else {
+        return declaration.to_owned();
+    };
+    let mut out = declaration.to_owned();
+    for (at, basic) in positions {
+        if let Some(argument) = prototype.arguments.get(*at) {
+            out = out.replacen(
+                &format!("ByRef {} As Variant", argument.name),
+                &format!("ByRef {} As {basic}", argument.name),
+                1,
+            );
+        }
+    }
+    out
+}
+
+/// Puts a `Dim` before `lines` for each local of `locals`, a plain local
+/// that a call passes by reference to an argument of [`typed_scalars`], that
+/// `lines` use and that no `Dim` of `lines` declares.
+fn declare_typed_scalars(lines: &mut Vec<String>, locals: &BTreeMap<String, &'static str>) {
+    let used = words_with(lines, "local_");
+    let declared: BTreeSet<String> = lines
+        .iter()
+        .filter_map(|line| line.trim_start().strip_prefix("Dim "))
+        .filter_map(|rest| words_with(&[rest.to_owned()], "local_").into_iter().next())
+        .collect();
+    let dims: Vec<String> = locals
+        .iter()
+        .filter(|(local, _)| used.contains(*local) && !declared.contains(*local))
+        .map(|(local, basic)| format!("       Dim {local} As {basic}"))
+        .collect();
+    lines.splice(0..0, dims);
+}
+
 /// Gives the element type of each local of `lines` that a call passes as a
 /// typed array of `typed`.
 fn typed_locals(lines: &[String], typed: &TypedArrays) -> BTreeMap<String, &'static str> {
@@ -2113,6 +2233,7 @@ pub fn lift_objects(
         .filter_map(|(name, accesses)| scalar_type(accesses).map(|basic| (name.clone(), basic)))
         .collect();
     let typed = typed_arrays(report.objects.iter().map(|own| &own.procedures), &raw);
+    let scalars = typed_scalars(report.objects.iter().map(|own| &own.procedures), &raw);
     let mut arrays: BTreeMap<String, &'static str> = BTreeMap::new();
     let mut global_shapes: BTreeMap<String, String> = BTreeMap::new();
     let mut out: Vec<Option<LiftedObject>> = Vec::new();
@@ -2200,9 +2321,17 @@ pub fn lift_objects(
                 &mut lines,
             );
             declaration = string_parameters(&declaration, &string_value_arguments(&listing, table));
+            declaration = typed_parameters(
+                &declaration,
+                &own.procedures,
+                &procedure_name(&own.procedures, *index),
+                &scalars,
+            );
             frame_types.extend(declare_frame_structs(
                 &listing, table, &mut lines, &calls, result, *index,
             ));
+            let scalar_locals = typed_locals(&lines, &scalars);
+            declare_typed_scalars(&mut lines, &scalar_locals);
             let mut locals = typed_locals(&lines, &typed);
             for (array, element) in redim_arrays(&listing, table, &lines) {
                 if array.starts_with("local_") {
@@ -2337,12 +2466,13 @@ mod tests {
     use super::{
         Accesses, FixedArray, Op, TypedArrays, add_accesses, apply_frame_structs, built_parameters,
         call_addresses, call_arguments, call_arity, declare, declare_arrays, declare_new_locals,
-        declare_scalar_locals, declare_statements, declare_statics, declared_bytes,
-        field_declarations, fixed_shapes, for_counters, frame_structs, indexed_words,
-        local_accesses, local_type, member_zero, name_module_fields, new_locals, pointer_fields,
-        procedure_name, record_array, record_fields, redim_arrays, replace_word, scalar_type,
-        slot_uses, static_members, string_parameters, struct_pointers, typed_arrays, typed_locals,
-        variable_declaration, with_counters, words_with,
+        declare_scalar_locals, declare_statements, declare_statics, declare_typed_scalars,
+        declared_bytes, field_declarations, fixed_shapes, for_counters, frame_structs,
+        indexed_words, local_accesses, local_type, member_zero, name_module_fields, new_locals,
+        pointer_fields, procedure_name, record_array, record_fields, redim_arrays, replace_word,
+        scalar_type, slot_uses, static_members, string_parameters, struct_pointers, typed_arrays,
+        typed_locals, typed_parameters, typed_scalars, variable_declaration, with_counters,
+        words_with,
     };
     use crate::read::region::{Off, Region};
     use crate::vb::lift::{Callee, Expr, LiftedStmt, Stmt, result_bytes};
@@ -3290,6 +3420,76 @@ names = ["ExitProcCb"]
         assert_eq!(
             call_arguments(&mixed, "Fill"),
             [vec!["arg_C", "local_88"], vec!["arg_C", "field_34"]]
+        );
+    }
+
+    #[test]
+    fn a_number_by_reference_that_each_call_fills_with_a_local_keeps_its_type() {
+        use crate::vb::functyp::{
+            Argument, OptionalDefaultsOutcome, PropertyKind, Prototype, TypeEntry, VbType,
+        };
+        let argument = |name: &str, vb_type, by_ref| Argument {
+            name: name.to_owned(),
+            entry: TypeEntry {
+                vb_type,
+                optional: false,
+                array: false,
+                by_ref,
+            },
+            default: None,
+        };
+        let prototype = Prototype {
+            member_id: 0,
+            v_off: 0,
+            const_ffff: 0xFFFF,
+            nul1: 0,
+            property_kind: PropertyKind::None,
+            is_function: false,
+            arguments: vec![
+                argument("r", VbType::Long, false),
+                argument("h", VbType::Single, true),
+                argument("v", VbType::Variant, true),
+                argument("l", VbType::Single, true),
+            ],
+            return_type: None,
+            optional_defaults: OptionalDefaultsOutcome::NoOptionalVals,
+        };
+        let slots = ObjectProcedures::Slots(vec![ProcedureEntry::Public {
+            name: "ToHsl".to_owned(),
+            prototype: Some(prototype),
+        }]);
+        let calls = vec![
+            "       Call ToHsl(local_A4, local_B0, local_B4, local_B8)".to_owned(),
+            "       Call ToHsl(255, local_C0, local_C8, (local_C4 / 2))".to_owned(),
+        ];
+        let scalars = typed_scalars(std::iter::once(&slots), &calls);
+        // `v` is a Variant already. `l` takes an expression in the second
+        // call, so it stays a Variant.
+        assert_eq!(scalars.get("ToHsl"), Some(&vec![(1, "Single")]));
+        // A procedure that no lifted line calls keeps its Variants.
+        assert!(typed_scalars(std::iter::once(&slots), &[]).is_empty());
+        let locals = typed_locals(&calls, &scalars);
+        let mut lines = calls.clone();
+        lines.push("       Dim local_C0 As Single".to_owned());
+        declare_typed_scalars(&mut lines, &locals);
+        assert_eq!(
+            lines.first().map(String::as_str),
+            Some("       Dim local_B0 As Single")
+        );
+        assert_eq!(lines.len(), 4);
+        let (declaration, _) = declare(
+            &slots,
+            0,
+            20,
+            None,
+            None,
+            &TypedArrays::new(),
+            &mut Vec::new(),
+        );
+        assert_eq!(
+            typed_parameters(&declaration, &slots, "ToHsl", &scalars),
+            "Public Sub ToHsl(ByVal r As Long, ByRef h As Single, ByRef v As Variant, \
+             ByRef l As Variant)"
         );
     }
 
