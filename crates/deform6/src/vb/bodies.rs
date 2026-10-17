@@ -1652,35 +1652,52 @@ type RecordFields = BTreeMap<u16, Vec<(u16, u8, &'static str)>>;
 
 /// Gives the fields that `ops` read and write in an element of an array of
 /// the object whose offset is in `records`. Basic reads a field of
-/// `StarArray(X).Y` as the address of the array in `Me` (`FMemLdRf` with
-/// `Me` at 8), the address of the element (`Ary1LdPr` or `AryLdPr`), and a
-/// load or a store at the offset of the field (`MemLdFPR4 4`). A record with
-/// a field access that is not a number is in the second set.
+/// `StarArray(X).Y` as the address of the array in `Me`, the address of the
+/// element (`Ary1LdPr` or `AryLdPr`), and a load or a store at the offset of
+/// the field (`MemLdFPR4 4`). A standard module takes the address of the
+/// array with `FMemLdRf` and `Me` at 8. A form loads `Me` with `FLdPr 8`
+/// and then takes the address with `MemLdRf`. A record with a field access
+/// that is not a number is in the second set.
 fn record_fields(ops: &[Op<'_>], records: &BTreeSet<u16>) -> (RecordFields, BTreeSet<u16>) {
+    let word = |bytes: &[u8], at: usize| {
+        bytes
+            .get(at..at.checked_add(2)?)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+    };
+    let named = |names: &[String], name: &str| names.iter().any(|own| own == name);
     let mut fields: RecordFields = BTreeMap::new();
     let mut bad = BTreeSet::new();
-    for window in ops.windows(3) {
-        let [(array, at), (element, _), (access, offset)] = window else {
+    for (at, (names, arguments)) in ops.iter().enumerate() {
+        let (slot, element) = if named(names, "FMemLdRf") && word(arguments, 0) == Some(8) {
+            (word(arguments, 2), at.checked_add(1))
+        } else if named(names, "FLdPr") && word(arguments, 0) == Some(8) {
+            let Some((next, next_arguments)) = at.checked_add(1).and_then(|next| ops.get(next))
+            else {
+                continue;
+            };
+            if !named(next, "MemLdRf") {
+                continue;
+            }
+            (word(next_arguments, 0), at.checked_add(2))
+        } else {
             continue;
         };
-        let word = |bytes: &[u8], at: usize| {
-            bytes
-                .get(at..at.checked_add(2)?)
-                .and_then(|bytes| bytes.try_into().ok())
-                .map(u16::from_le_bytes)
+        let Some(slot) = slot.filter(|slot| records.contains(slot)) else {
+            continue;
         };
-        if !array.iter().any(|name| name == "FMemLdRf") || word(at, 0) != Some(8) {
+        let Some(element) = element else {
+            continue;
+        };
+        let Some((names, _)) = ops.get(element) else {
+            continue;
+        };
+        if !named(names, "Ary1LdPr") && !named(names, "AryLdPr") {
             continue;
         }
-        let Some(slot) = word(at, 2).filter(|slot| records.contains(slot)) else {
+        let Some((access, offset)) = element.checked_add(1).and_then(|next| ops.get(next)) else {
             continue;
         };
-        if !element
-            .iter()
-            .any(|name| name == "Ary1LdPr" || name == "AryLdPr")
-        {
-            continue;
-        }
         if !access
             .iter()
             .any(|name| name.starts_with("MemLd") || name.starts_with("MemSt"))
@@ -2935,6 +2952,39 @@ names = ["ExitProcCb"]
             record_fields(&ops, &BTreeSet::from([0x48])).1,
             BTreeSet::from([0x48])
         );
+    }
+
+    /// The opcodes of `fxTri(1).x = x2` and `fxTri(1).y = y2` of
+    /// `RandomizationFX.exe`, a form with the array at 0x38 of `Me`.
+    #[test]
+    fn a_form_reads_a_record_field_after_it_loads_me() {
+        let names =
+            |list: &[&str]| -> Vec<String> { list.iter().map(|n| (*n).to_owned()).collect() };
+        let me = names(&["FLdPr"]);
+        let array = names(&["MemLdRf"]);
+        let element = names(&["Ary1LdPr"]);
+        let store = names(&["MemStI4"]);
+        let ops: Vec<Op<'_>> = vec![
+            (&me, &[8, 0]),
+            (&array, &[0x38, 0]),
+            (&element, &[]),
+            (&store, &[0, 0]),
+            (&me, &[8, 0]),
+            (&array, &[0x38, 0]),
+            (&element, &[]),
+            (&store, &[4, 0]),
+            // A load of a local in place of `Me`.
+            (&me, &[0x70, 0xFF]),
+            (&array, &[0x38, 0]),
+            (&element, &[]),
+            (&store, &[8, 0]),
+        ];
+        let (fields, bad) = record_fields(&ops, &BTreeSet::from([0x38]));
+        assert_eq!(
+            fields,
+            BTreeMap::from([(0x38, vec![(0, 4, "Long"), (4, 4, "Long")])])
+        );
+        assert!(bad.is_empty());
     }
 
     #[test]
