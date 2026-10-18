@@ -289,14 +289,15 @@ writes each branch that fits a block as that block, such as `If`, `Else`,
 `cargo run -p xtask -- export-lift-builds <dir>` writes each P-code program
 of the corpus this way, for a build with the Visual Basic 6 IDE on a
 Windows host. On the author's Windows XP host, VB6 builds 42 of the 42
-lifted projects. `runs.bat` starts each rebuilt program and its original,
-and sends the same keys to each, from `scripts/vm/steps.toml`. With a table
-from `derive-opcode-table`, 182 of the 226 screens of the 41 programs are
-the same as the original, pixel for pixel, and 175 of the 185 steps change
-the screen of the original. Of the 12 programs with a screen that differs,
-four open at a place that Windows chooses, four draw random values, the
-map editor differs in a detail of two controls, two differ in a rounding
-of a few pixels, and one is fixed after that run.
+lifted projects. Both sides build as P-code, as the corpus binary was
+built. `runs.bat` starts each rebuilt program and its original, and sends
+the same keys to each, from `scripts/vm/steps.toml`. With a table from
+`derive-opcode-table`, each of the 226 screens of the 41 programs is the
+same as the original: 205 pixel for pixel, 15 in the window of a program
+that Windows places, and 6 outside the boxes where a program draws random
+values. 175 of the 185 steps change the screen of the original. The
+variables keep the names of their offsets, such as `local_88`, apart from
+the public variables.
 `scripts/vm/README.md` gives the steps of such a run.
 `check-pcode-table` holds the statements against the source: 3246 of the 4093 string
 literals and names after a `.` of the source are in the lift. Most of the

@@ -82,7 +82,7 @@ the system clears it, once in the middle of a run.
    ```
    python3 scripts/vm/vm.py builds <capture>
    python3 scripts/vm/vm.py errors <capture> <dir>/extracted
-   python3 scripts/vm/vm.py compare <pictures>
+   python3 scripts/vm/vm.py compare <pictures> <dir>
    ```
 
    `compare` gives, for each screen of each program, the share of the pixels
@@ -93,8 +93,33 @@ the system clears it, once in the middle of a run.
    `moved` tells that the step changed the screen of the original, and
    `still` that it did not, so that the step checks nothing.
 
+   With the export folder `<dir>`, `compare` applies the rules of
+   `steps.toml`. A program with `window = true` opens where Windows places
+   it, at another place for each new window, so `compare` finds the active
+   window of each picture by its caption and its frame, and compares the
+   two windows at their own places. An entry of `random` gives a box of
+   pixels that a random value draws, the screens of the box, and the
+   reason. `compare` leaves out the pixels of the box, and an error box
+   elsewhere still shows. It counts the screens of each rule apart from the
+   others, so the count of the same screens keeps its meaning.
+
+   `export-lift-builds` gives the source project `CompilationType=-1`, so
+   both sides build P-code, as the program of `corpus-pcode/` was built. A
+   native build of the source computes floating point in other places, and
+   with `UnroundedFP=-1` it rounds in other places.
+
+   After the keys of a step, `drive.vbs` waits until the program uses no
+   processor time for 3 samples of half a second, for at most 20 seconds.
+   A P-code redraw can take longer than the fixed wait. Keys that come
+   during a redraw are lost, so a step sends one key that changes a value,
+   and not twenty.
+
    A program that loads `App.Path & "\sample.jpg"` gets a picture that
    `export-lift-builds` makes, because the corpus does not hold one.
+
+   `runs.bat` ends the error report of Windows (`dwwin.exe`) and Help and
+   Support (`helpctr.exe`) after each program. In one run, the keys of a
+   step went to the Start menu, and Help covered each later program.
 
 ## Stop a run
 

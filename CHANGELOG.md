@@ -96,15 +96,24 @@ does not do. A change that no release holds yet goes under one
   takes three pictures at each marker, because a caret blinks, and
   `compare` gives each step of each program, and whether the step changed
   the screen of the original. A step sends its keys only while its program
-  runs and is in front. In the last full run, VB6 builds 42 of the 42
-  lifted projects, and 182 of the 226 screens of 41 programs are the same,
-  pixel for pixel. 175 of the 185 steps change the screen of the original.
+  runs and is in front, and after its keys the script waits until the
+  program is idle. Both sides build as P-code. In the last full run, VB6
+  builds 42 of the 42 lifted projects, and each of the 226 screens of 41
+  programs is the same as the original: 205 pixel for pixel, 15 in the
+  window of a program that Windows places, and 6 outside the boxes where a
+  program draws random values. 175 of the 185 steps change the screen of
+  the original.
+- `vm.py compare <pictures> <export>` applies the rules of `steps.toml`:
+  `window = true` compares the active window of a program that Windows
+  places, at its own place, and a `random` box with its screens and its
+  reason leaves out the pixels of a random value. The summary counts these
+  screens apart from the others.
 - A lifted program that loads a picture that the corpus does not hold, such
   as `App.Path & "\sample.jpg"` in 16 programs, gets a bitmap that the export
   makes. Before this, the original and the rebuilt program both stopped
   with error 53, and the check compared two error boxes.
-- `runs.bat` ends the error report of Windows after each program, which
-  covered the pictures of the next program.
+- `runs.bat` ends the error report of Windows and Help and Support after
+  each program. Each of them covered the pictures of the next programs.
 - The lift declares a local that only the stores of a string write as a
   `String` (119 locals), and the counter of a `For` loop with the type of
   its loop (115 counters: 87 `Long` and 28 `Integer`).
@@ -121,8 +130,20 @@ does not do. A change that no release holds yet goes under one
   members of an empty `Variant`, and `Mandelbrot.exe` stopped with error
   424. A struct whose first member the body writes, such as `BITMAPINFO`,
   came back as separate locals, and the rebuilt `Realtime_Brightness.exe`
-  drew nothing. A run of only that program and `RandomizationFX.exe`, after
-  the fix, gives 11 of their 13 screens the same.
+  drew nothing. An array of records of a form, such as
+  `fxTri(0 To 2) As POINTAPI`, came back as a `Variant`, and
+  `RandomizationFX.exe` stopped with error 13. A number by reference of a
+  public procedure, such as `h As Single` of `tRGBToHSL`, came back as a
+  `Variant` and computed in `Double`. A private procedure now takes the
+  type of the locals that each call passes, by reference.
+- The project of a P-code executable holds `CompilationType=-1`, so VB6
+  builds P-code from it. It held `0`, and VB6 built native code, which
+  rounds floating point in other places.
+- The properties of a control after a picture of more than 64 KiB come
+  back. The walk of the properties read the 16-bit `Length` field again,
+  and stopped after the picture of `PicTilesBuffer` of the map editor, with
+  no warning. 11 lines of its `.frm`, such as `AutoSize`, `ScaleMode` and
+  `Visible`, were lost.
 
 ### Faults of 3.0.0
 
@@ -148,17 +169,16 @@ does not do. A change that no release holds yet goes under one
   come back. Basic computes them from the client area when it loads a form
   with a scale mode other than 0, and each of the 54 corpus forms with the
   lines agrees, so the program is the same.
-- Of the 12 programs with a screen that differs in the last full run, 4
-  are forms with `StartUpPosition = 3`, "Windows Default", which open at a
-  place that Windows chooses at each start. Four draw random values:
-  `UUID2.exe`, `Diffuse.exe`, `Physics_Demo.exe` and `RandomizationFX.exe`.
-  The map editor differs in the size of the box of a scroll bar and in
-  one picture box. `Colorize.exe` and `Nature_Filters.exe` differ in 35 and
-  918 pixels of one step, a difference of rounding that is not explained
-  yet. `Realtime_Brightness.exe` is fixed after that run.
-- A local whose address a call takes stays a `Variant`. A rule that typed
-  such a local when only a `Declare` took its address broke a struct that
-  the lift did not find, and it is not in this release.
+- 10 of the 185 steps do not change the screen of the original, so they
+  check nothing that a picture shows. `LockWorkStation.exe` does not run in
+  the check, because it locks the session.
+- A local whose address a `Declare` takes stays a `Variant`. A rule that
+  typed such a local broke a struct that the lift did not find, and it is
+  not in this release. The `ByVal` arguments of a private procedure stay
+  `Variant` too, which makes `Mandelbrot.exe` slower, with the same values.
+- A variable keeps the name of its offset, such as `local_88`, apart from
+  the public variables. 462 of the 511 names of locals of four or more
+  letters in the source are in no byte of their executable.
 
 ### What this does not do
 

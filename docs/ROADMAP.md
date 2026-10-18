@@ -769,7 +769,7 @@ method table: each opcode, its bytes and the name of its handler, and how the
 decode ended. `check-pcode-table` now uses the same decoder. The listing is
 not Basic, and the README says so.
 
-#### Part 2, started on 2026-09-27
+#### Part 2, done on 2026-10-18
 
 **The lift, for procedures with no calls.** `vb::lift` follows the stack of
 a decoded body and gives a statement at each store, branch and exit. The
@@ -915,25 +915,35 @@ leftover error report of Windows that covered the next pictures. The lift also t
 locals as `String` and 115 loop counters, and names the 62 public variables
 of each corpus as the source does.
 
-**Where the gate stands.** The recovered code compiles: VB6 builds 42 of
-the 42 lifted projects, and 1652 `GoTo` statements of the lift are 2 in the
-written code. In the last full run, 182 of the 226 screens of the 41
-programs are the same, pixel for pixel, and 175 of the 185 steps change the
-screen of the original. Of the 12 programs with a screen that differs, 4
-open at a place that Windows chooses and 4 draw random values. The map
-editor differs in two controls, `Colorize.exe` and `Nature_Filters.exe` in a
-rounding of 35 and 918 pixels, and `Realtime_Brightness.exe` is fixed after
-the run: a run of it alone gives 7 of its 7 screens the same.
+**The P-code build, 2026-10-18.** The check found five more faults, and
+each got a fix with its own test. An array of records of a form came back
+as a `Variant`, and `RandomizationFX.exe` stopped with error 13. The walk
+of the properties stopped after a picture of more than 64 KiB, with no
+warning, and the map editor lost 11 lines of a picture box. A number by
+reference of a public procedure, and the argument of a private procedure,
+came back as a `Variant`. The written project held `CompilationType=0`, so
+VB6 built native code from a P-code program. The check itself had faults
+too: it built the source as native code, with unrounded floating point,
+and it took a picture of a step while a slow redraw still ran. Both sides
+now build as P-code, and the script waits until the program is idle. The
+`compare` of `vm.py` gives the window of a program that Windows places at
+its own place, and leaves out the boxes where a program draws random
+values, with the reason in `steps.toml`.
 
-**Next.**
+**The exit is met.** The recovered code compiles: VB6 builds 42 of the 42
+lifted projects, and 1652 `GoTo` statements of the lift are 2 in the
+written code. The rebuilt programs behave the same as the originals in the
+last full run: each of the 226 screens of the 41 programs that run is the
+same as the original. 205 are the same pixel for pixel, 15 are the window
+of a program that Windows places, and 6 are the same outside the boxes of
+random values. 175 of the 185 steps change the screen of the original, so
+they check the code that they run. These are the limits:
 
-- The rounding of `Colorize.exe` and `Nature_Filters.exe`, and the two
-  controls of the map editor.
-- A program that draws random values or opens where Windows chooses needs a
-  check other than the pixels.
-- A local whose address a call takes stays a `Variant`. A rule that typed
-  it when only a `Declare` took the address broke a struct that the lift
-  did not find (the `BITMAPINFO` above, before its fix).
+- 10 steps change nothing on the screen of the original, and
+  `LockWorkStation.exe` does not run, because it locks the session.
+- A local whose address a `Declare` takes stays a `Variant`, and so do the
+  `ByVal` arguments of a private procedure. The values are the same, and
+  `Mandelbrot.exe` is slower.
 - A variable keeps the name of its offset, such as `local_88`, apart from
   the public variables. 462 of the 511 names of locals of four or more
   letters in the source are in no byte of their executable, in ASCII or in
@@ -976,7 +986,7 @@ Phase 8  (exit met on the author's XP host; --verify-build waits)
           |
           +-- Phase 10 (exit met: names and widths, 680 of 680 bodies decode)
                  |
-                 +-- Phase 11 (part 2: 42 of 42 build, 182 of 226 screens the same)
+                 +-- Phase 11 (exit met: 42 of 42 build, 226 of 226 screens the same)
 
 Phase 12 runs beside 10 and 11.
 Phase 13 closes the milestone.
