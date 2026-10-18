@@ -1491,6 +1491,239 @@ fn declare_typed_scalars(lines: &mut Vec<String>, locals: &BTreeMap<String, &'st
     lines.splice(0..0, dims);
 }
 
+/// Gives the parameters of `declaration`, the text between its first `(`
+/// and the `)` that closes it, apart by the commas.
+fn declared_parameters(declaration: &str) -> Vec<String> {
+    let Some(open) = declaration.find('(') else {
+        return Vec::new();
+    };
+    let inner = declaration
+        .get(open.saturating_add(1)..)
+        .unwrap_or_default();
+    let close = inner.rfind(')').unwrap_or(inner.len());
+    inner
+        .get(..close)
+        .unwrap_or_default()
+        .split(',')
+        .map(|parameter| parameter.trim().to_owned())
+        .filter(|parameter| !parameter.is_empty())
+        .collect()
+}
+
+/// Gives the arguments of each call of the procedure `name` of the same
+/// object in `lines`: `name(` or `Me.name(`, and not `Other.name(`, which
+/// calls a procedure of another object with the same generated name.
+fn own_call_arguments(lines: &[String], name: &str) -> Vec<Vec<String>> {
+    let mine = format!("Me.{name}(");
+    let other = format!(".{name}(");
+    let own: Vec<String> = lines
+        .iter()
+        .map(|line| {
+            line.replace(&mine, &format!("{name}("))
+                .replace(&other, ".\u{0}(")
+        })
+        .collect();
+    call_arguments(&own, name)
+}
+
+/// Counts the places in `lines` where `local` is a whole argument of a
+/// call or an index: after `(` or `, ` and before `,` or `)`.
+fn whole_arguments(lines: &[String], local: &str) -> usize {
+    let mut count = 0_usize;
+    for line in lines {
+        for (at, _) in line.match_indices(local) {
+            let before = line.get(..at).unwrap_or_default();
+            let after = line
+                .get(at.saturating_add(local.len())..)
+                .unwrap_or_default();
+            if (before.ends_with('(') || before.ends_with(", "))
+                && (after.starts_with(',') || after.starts_with(')'))
+            {
+                count = count.saturating_add(1);
+            }
+        }
+    }
+    count
+}
+
+/// One argument of a private procedure that can keep a number type: the
+/// index of the procedure, the parameter text, the name of the argument,
+/// its type, and each caller with the local that it passes.
+struct TypedParameter {
+    callee: usize,
+    parameter: String,
+    argument: String,
+    basic: &'static str,
+    passed: Vec<(usize, String)>,
+}
+
+/// Gives the private procedures of `procedures` an argument of a number
+/// type where each call passes a plain local of that type, and declares
+/// each such local in its caller.
+///
+/// Each argument of a private procedure is a `Variant` by reference, and a
+/// local whose address a call takes stays a `Variant`, so a local of the
+/// source that the code passes to a private procedure lost its type.
+/// `rR = r / 255` of `tRGBToHSL` in `Colorize.exe` then held a `Double` and
+/// not a `Single`, and some pixels came back one step apart. `accesses`
+/// gives the accesses of the locals of each procedure, in the order of
+/// `procedures`. A local keeps the type that its accesses give apart from
+/// the reference. Each call of the procedure in the object must pass a
+/// plain local at the position, all of one type. Each place where a call
+/// or an index takes the local as a whole argument must be such a typed
+/// argument, else the local stays a `Variant` and its arguments too. The
+/// procedure must not pass its argument on as a whole argument, and must
+/// not write it.
+fn type_private_parameters(procedures: &mut [LiftedProcedure], accesses: &[Accesses]) {
+    let mut candidates = private_candidates(procedures, accesses);
+    loop {
+        let before = candidates.len();
+        let uses = |caller: usize, local: &str, candidates: &[TypedParameter]| {
+            candidates
+                .iter()
+                .flat_map(|candidate| candidate.passed.iter())
+                .filter(|(own, name)| *own == caller && name == local)
+                .count()
+        };
+        let kept: Vec<TypedParameter> = candidates
+            .iter()
+            .filter(|candidate| {
+                candidate.passed.iter().all(|(caller, local)| {
+                    let lines = procedures
+                        .get(*caller)
+                        .map(|procedure| procedure.lines.as_slice())
+                        .unwrap_or_default();
+                    let one_type = candidates.iter().all(|other| {
+                        other.basic == candidate.basic
+                            || !other
+                                .passed
+                                .iter()
+                                .any(|(own, name)| own == caller && name == local)
+                    });
+                    one_type && whole_arguments(lines, local) == uses(*caller, local, &candidates)
+                })
+            })
+            .map(|candidate| TypedParameter {
+                callee: candidate.callee,
+                parameter: candidate.parameter.clone(),
+                argument: candidate.argument.clone(),
+                basic: candidate.basic,
+                passed: candidate.passed.clone(),
+            })
+            .collect();
+        candidates = kept;
+        if candidates.len() == before {
+            break;
+        }
+    }
+    let mut dims: Vec<BTreeMap<String, &'static str>> = vec![BTreeMap::new(); procedures.len()];
+    for candidate in &candidates {
+        if let Some(callee) = procedures.get_mut(candidate.callee) {
+            callee.declaration = callee.declaration.replacen(
+                &candidate.parameter,
+                &format!("ByRef {} As {}", candidate.argument, candidate.basic),
+                1,
+            );
+        }
+        for (caller, local) in &candidate.passed {
+            if let Some(own) = dims.get_mut(*caller) {
+                own.insert(local.clone(), candidate.basic);
+            }
+        }
+    }
+    for (procedure, locals) in procedures.iter_mut().zip(&dims) {
+        declare_typed_scalars(&mut procedure.lines, locals);
+    }
+}
+
+/// Gives each argument of a private procedure of `procedures` where each
+/// call passes a plain local of one number type, before the check of the
+/// other uses of the locals.
+fn private_candidates(
+    procedures: &[LiftedProcedure],
+    accesses: &[Accesses],
+) -> Vec<TypedParameter> {
+    let all: Vec<String> = procedures
+        .iter()
+        .flat_map(|procedure| procedure.lines.iter().cloned())
+        .collect();
+    let mut out = Vec::new();
+    for (at, callee) in procedures.iter().enumerate() {
+        if !callee.declaration.starts_with("Private ") {
+            continue;
+        }
+        let Some(name) = callee
+            .declaration
+            .split_whitespace()
+            .nth(2)
+            .and_then(|rest| rest.split('(').next())
+        else {
+            continue;
+        };
+        if own_call_arguments(&all, name).is_empty() {
+            continue;
+        }
+        for (position, parameter) in declared_parameters(&callee.declaration).iter().enumerate() {
+            let Some(argument) = parameter.strip_suffix(" As Variant") else {
+                continue;
+            };
+            // An argument that the procedure writes can be `ByVal` in the
+            // source, and by reference the write would reach the caller.
+            let assign = format!("{argument} = ");
+            let written = callee
+                .lines
+                .iter()
+                .any(|line| line.trim_start().starts_with(&assign));
+            if argument.contains(' ') || written || whole_arguments(&callee.lines, argument) > 0 {
+                continue;
+            }
+            let mut passed: Vec<(usize, String)> = Vec::new();
+            let mut types = BTreeSet::new();
+            let mut ok = true;
+            for (caller, procedure) in procedures.iter().enumerate() {
+                for arguments in own_call_arguments(&procedure.lines, name) {
+                    let Some(local) = arguments.get(position).filter(|text| is_local(text)) else {
+                        ok = false;
+                        continue;
+                    };
+                    let member = format!("{local}.");
+                    let kinds: BTreeSet<Access> = accesses
+                        .get(caller)
+                        .and_then(|own| own.get(local))
+                        .into_iter()
+                        .flatten()
+                        .copied()
+                        .filter(|kind| *kind != Access::Reference)
+                        .collect();
+                    match local_type(&kinds) {
+                        Some(basic)
+                            if !procedure.lines.iter().any(|line| line.contains(&member)) =>
+                        {
+                            types.insert(basic);
+                            passed.push((caller, local.clone()));
+                        }
+                        _ => ok = false,
+                    }
+                }
+            }
+            let mut types = types.into_iter();
+            let (Some(basic), None) = (types.next(), types.next()) else {
+                continue;
+            };
+            if ok {
+                out.push(TypedParameter {
+                    callee: at,
+                    parameter: parameter.clone(),
+                    argument: argument.to_owned(),
+                    basic,
+                    passed,
+                });
+            }
+        }
+    }
+    out
+}
+
 /// Gives the element type of each local of `lines` that a call passes as a
 /// typed array of `typed`.
 fn typed_locals(lines: &[String], typed: &TypedArrays) -> BTreeMap<String, &'static str> {
@@ -2286,6 +2519,7 @@ pub fn lift_objects(
             .collect();
         let mut members: RecordFields = BTreeMap::new();
         let mut bad_records = BTreeSet::new();
+        let mut procedure_accesses: Vec<Accesses> = Vec::new();
         for entry in &methods.entries {
             let MethodEntry::Descriptor { index, descriptor } = entry else {
                 continue;
@@ -2365,10 +2599,9 @@ pub fn lift_objects(
                 &fixed_shapes(&descriptor.fixed_arrays(&pe)),
             );
             declare_new_locals(&mut lines, &new_locals(&listing, table, callees));
-            declare_scalar_locals(
-                &mut lines,
-                &with_counters(local_accesses(&ops), &counters, &addressed),
-            );
+            let accesses = with_counters(local_accesses(&ops), &counters, &addressed);
+            declare_scalar_locals(&mut lines, &accesses);
+            procedure_accesses.push(accesses);
             lifted.procedures.push(LiftedProcedure {
                 index: *index,
                 declaration,
@@ -2376,6 +2609,7 @@ pub fn lift_objects(
                 closing,
             });
         }
+        type_private_parameters(&mut lifted.procedures, &procedure_accesses);
         let public = callees.variable_fields();
         let mut fixed: BTreeMap<String, String> = BTreeMap::new();
         for array in &module_arrays {
@@ -2481,13 +2715,14 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
     use super::{
-        Accesses, FixedArray, Op, TypedArrays, add_accesses, apply_frame_structs, built_parameters,
-        call_addresses, call_arguments, call_arity, declare, declare_arrays, declare_new_locals,
-        declare_scalar_locals, declare_statements, declare_statics, declare_typed_scalars,
-        declared_bytes, field_declarations, fixed_shapes, for_counters, frame_structs,
-        indexed_words, local_accesses, local_type, member_zero, name_module_fields, new_locals,
-        pointer_fields, procedure_name, record_array, record_fields, redim_arrays, replace_word,
-        scalar_type, slot_uses, static_members, string_parameters, struct_pointers, typed_arrays,
+        Access, Accesses, FixedArray, LiftedProcedure, Op, TypedArrays, add_accesses,
+        apply_frame_structs, built_parameters, call_addresses, call_arguments, call_arity, declare,
+        declare_arrays, declare_new_locals, declare_scalar_locals, declare_statements,
+        declare_statics, declare_typed_scalars, declared_bytes, field_declarations, fixed_shapes,
+        for_counters, frame_structs, indexed_words, local_accesses, local_type, member_zero,
+        name_module_fields, new_locals, own_call_arguments, pointer_fields, procedure_name,
+        record_array, record_fields, redim_arrays, replace_word, scalar_type, slot_uses,
+        static_members, string_parameters, struct_pointers, type_private_parameters, typed_arrays,
         typed_locals, typed_parameters, typed_scalars, variable_declaration, with_counters,
         words_with,
     };
@@ -3540,6 +3775,100 @@ names = ["ExitProcCb"]
             typed_parameters(&declaration, &slots, "ToHsl", &scalars),
             "Public Sub ToHsl(ByVal r As Long, ByRef h As Single, ByRef v As Variant, \
              ByRef l As Variant)"
+        );
+    }
+
+    /// `Maximum` and `Minimum` of `Colorize.exe` take `rR`, `rG` and `rB`,
+    /// which `tRGBToHSL` stores as `Single`.
+    #[test]
+    fn a_private_argument_takes_the_type_of_the_locals_that_each_call_passes() {
+        let procedure = |declaration: &str, lines: &[&str]| LiftedProcedure {
+            index: 0,
+            declaration: declaration.to_owned(),
+            lines: lines.iter().map(|line| (*line).to_owned()).collect(),
+            closing: "End Function",
+        };
+        let mut procedures = vec![
+            procedure(
+                "Public Sub ToHsl(ByVal r As Long)",
+                &[
+                    "       local_94 = (r / 255)",
+                    "       local_A0 = Maximum(local_94, local_98)",
+                    "       local_A0 = Minimum(local_94, local_98)",
+                    "       Call Other.Maximum(local_9C, 1)",
+                    "       Call Scale(local_B0)",
+                ],
+            ),
+            procedure(
+                "Private Sub Scale(arg_C As Variant)",
+                &["       local_88 = arg_C"],
+            ),
+            procedure(
+                "Private Function Maximum(arg_C As Variant, arg_10 As Variant) As Variant",
+                &["       Maximum = arg_C"],
+            ),
+            procedure(
+                "Private Function Minimum(arg_C As Variant, arg_10 As Variant) As Variant",
+                &["       arg_10 = 0", "       Minimum = arg_C"],
+            ),
+        ];
+        let single = |reference: bool| {
+            let mut kinds = BTreeSet::from([Access::Single]);
+            if reference {
+                kinds.insert(Access::Reference);
+            }
+            kinds
+        };
+        let caller: Accesses = BTreeMap::from([
+            ("local_94".to_owned(), single(true)),
+            ("local_98".to_owned(), single(true)),
+            ("local_9C".to_owned(), single(true)),
+            ("local_A0".to_owned(), BTreeSet::from([Access::Reference])),
+            (
+                "local_B0".to_owned(),
+                BTreeSet::from([Access::Four, Access::Reference]),
+            ),
+        ]);
+        let accesses = vec![caller, Accesses::new(), Accesses::new(), Accesses::new()];
+        type_private_parameters(&mut procedures, &accesses);
+        let to_hsl = procedures.first().unwrap();
+        let scale = procedures.get(1).unwrap();
+        let maximum = procedures.get(2).unwrap();
+        let minimum = procedures.get(3).unwrap();
+        // A local that only the copy of four bytes reads and writes, apart
+        // from its address, is a `Long`.
+        assert_eq!(scale.declaration, "Private Sub Scale(ByRef arg_C As Long)");
+        // `Other.Maximum` is a procedure of another object.
+        assert!(
+            !to_hsl
+                .lines
+                .iter()
+                .any(|line| line.contains("Dim local_9C"))
+        );
+        // `Minimum` writes `arg_10`, so it keeps its `Variant`. Then
+        // `local_98`, which both calls pass at 1, stays a `Variant`, and so
+        // does `arg_10` of `Maximum`. `local_94` is a `Single` at 0 in both.
+        assert_eq!(
+            maximum.declaration,
+            "Private Function Maximum(ByRef arg_C As Single, arg_10 As Variant) As Variant"
+        );
+        assert_eq!(
+            minimum.declaration,
+            "Private Function Minimum(ByRef arg_C As Single, arg_10 As Variant) As Variant"
+        );
+        assert_eq!(
+            to_hsl.lines.get(..3),
+            Some(
+                &[
+                    "       Dim local_94 As Single".to_owned(),
+                    "       Dim local_B0 As Long".to_owned(),
+                    "       local_94 = (r / 255)".to_owned()
+                ][..]
+            )
+        );
+        assert_eq!(
+            own_call_arguments(&to_hsl.lines, "Maximum"),
+            [vec!["local_94", "local_98"]]
         );
     }
 
