@@ -85,6 +85,11 @@ const DEFAULT_COMPILER_FLAGS: [(&str, i32); 10] = [
     ("UnroundedFP", 0),
 ];
 
+/// The value of `CompilationType` that makes VB6 build P-code. The probe of
+/// `xtask export-pcode` measured `-1` and `1` both to give P-code on VB6
+/// SP6, and the IDE writes `-1`.
+const PCODE_COMPILATION_TYPE: i32 = -1;
+
 /// Writes the complete `.vbp`: the component lines in recovered order, the
 /// 34 key setting block, and the transaction server section, plus every
 /// report item a default value this function chose produced.
@@ -424,12 +429,28 @@ fn write_settings(
     writer.push_line("ServerSupportFiles=0");
 
     for (key, value) in DEFAULT_COMPILER_FLAGS {
+        // A P-code executable has `lpNativeCode` 0, and VB6 builds P-code
+        // from a project with `CompilationType=-1`. A native build of a
+        // P-code program computes in other places with other rounding.
+        if key == "CompilationType" && !report.native {
+            writer.push_line(&format!("{key}={PCODE_COMPILATION_TYPE}"));
+            items.push(ReportItem {
+                path: crate::report::META_PATH.to_owned(),
+                confidence: Confidence::Proven,
+                basis: "the executable is P-code (lpNativeCode is 0), so the project builds \
+                        P-code"
+                    .to_owned(),
+                evidence: Vec::new(),
+            });
+            continue;
+        }
         writer.push_line(&format!("{key}={value}"));
+        let kind = if report.native { "native" } else { "P-code" };
         items.push(ReportItem {
             path: crate::report::META_PATH.to_owned(),
             confidence: Confidence::Inferred,
             basis: format!(
-                "a native executable does not carry the {key} compiler flag; the IDE default \
+                "a {kind} executable does not carry the {key} compiler flag; the IDE default \
                  is written"
             ),
             evidence: Vec::new(),
@@ -756,6 +777,27 @@ mod tests {
         assert!(text.contains("HelpFile=\"\""));
         assert!(text.contains("CompilationType=0"));
         assert!(!text.contains("CompilationType=\"0\""));
+    }
+
+    #[test]
+    fn a_p_code_executable_gives_a_project_that_builds_p_code() {
+        let objects = vec![minimal_object("frmMain", ObjectKind::Form)];
+        let forms = vec![minimal_form("frmMain")];
+        let mut report = minimal_report(objects, forms, Vec::new());
+        report.native = false;
+        let (model, _items) = from_report(&report, &[]);
+        let (bytes, items) = write_vbp(&report, &model);
+        let written = lines(&bytes);
+        assert!(
+            written.contains(&"CompilationType=-1".to_owned()),
+            "{written:?}"
+        );
+        assert!(!written.contains(&"CompilationType=0".to_owned()));
+        assert!(
+            items
+                .iter()
+                .any(|item| item.confidence == Confidence::Proven && item.basis.contains("P-code"))
+        );
     }
 
     #[test]

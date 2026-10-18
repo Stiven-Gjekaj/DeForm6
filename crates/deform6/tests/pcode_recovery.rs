@@ -190,7 +190,7 @@ fn mask_offsets(bytes: &[u8]) -> Vec<u8> {
 fn sorted_lines(bytes: &[u8]) -> Vec<&[u8]> {
     let mut lines: Vec<&[u8]> = bytes
         .split(|byte| *byte == b'\n')
-        .filter(|line| !line.starts_with(b"RevisionVer="))
+        .filter(|line| !line.starts_with(b"RevisionVer=") && !line.starts_with(b"CompilationType="))
         .collect();
     lines.sort_unstable();
     lines
@@ -224,8 +224,10 @@ fn only_the_byte_offset_of_a_report_comment_is_masked() {
 /// project file are compared in any order, because `Grayscale.exe` in
 /// `corpus/` holds its objects in another order than its source. The
 /// `RevisionVer` line is left out: each build holds its own revision, and
-/// a project with `AutoIncrementVer=1` raised it after each build. The test
-/// above holds the P-code order to the source.
+/// a project with `AutoIncrementVer=1` raised it after each build. The
+/// `CompilationType` line is left out and checked apart: the project of a
+/// P-code binary builds P-code, `-1`, and the native one native code, `0`.
+/// The test above holds the P-code order to the source.
 #[test]
 fn each_pcode_program_writes_the_project_of_its_native_build() {
     let root = build_record::corpus_root();
@@ -250,6 +252,17 @@ fn each_pcode_program_writes_the_project_of_its_native_build() {
             let (pcode_bytes, native_bytes) =
                 (mask_offsets(pcode_bytes), mask_offsets(native_bytes));
             let same = if name.to_ascii_lowercase().ends_with(".vbp") {
+                let mode = |bytes: &[u8], line: &[u8]| {
+                    bytes
+                        .split(|byte| *byte == b'\n')
+                        .filter(|own| own.starts_with(b"CompilationType="))
+                        .eq([line])
+                };
+                if !mode(&pcode_bytes, b"CompilationType=-1\r")
+                    || !mode(&native_bytes, b"CompilationType=0\r")
+                {
+                    failures.push(format!("{key}: {name} does not give the mode of its build"));
+                }
                 sorted_lines(&pcode_bytes) == sorted_lines(&native_bytes)
             } else {
                 pcode_bytes == native_bytes
