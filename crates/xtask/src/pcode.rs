@@ -58,7 +58,7 @@ const NATIVE_LINE: &str = "CompilationType=0";
 /// gives native code. The IDE writes `-1`: of the 19 project files in the
 /// VB6 install of that host that hold the key, 18 hold `0`, 1 holds `-1`,
 /// and none holds `1`.
-const PCODE_VALUE: &str = "-1";
+pub(crate) const PCODE_VALUE: &str = "-1";
 
 /// The values of `CompilationType` that the probe builds, each with the key
 /// of its project and the name of its executable.

@@ -5,7 +5,11 @@
 //! The layout is the layout of `export-builds` (see `builds.rs`):
 //! `extracted/pNN/` holds the project that DeForm6 writes with the lifted
 //! bodies, `original/pNN/` holds the project of the source, and `build.bat`
-//! builds each side. The logs tell which lifted project compiles, and the
+//! builds each side. The project of the source gets `CompilationType=-1`,
+//! as in `export-pcode`, so that both sides build P-code, as the program of
+//! `corpus-pcode/` was built. A native build of the source computes floating
+//! point in other places, and with `UnroundedFP=-1` it rounds in other
+//! places, so its screens differ from a P-code build. The logs tell which lifted project compiles, and the
 //! first error of each one that does not.
 //!
 //! The P-code table, the types file and the property opcode table are not
@@ -24,6 +28,7 @@ use crate::builds::{
     Exported, HOST_OUT_DIR, check_batch_name, copy_without_executables, crlf_text, prepare,
     short_name, write_files, write_lists,
 };
+use crate::pcode::{PCODE_VALUE, with_compilation_type};
 use crate::pcode_record::pcode_root;
 use crate::ratios::differential::support::vbp;
 use crate::sample_picture::{missing_pictures, sample_bitmap};
@@ -146,6 +151,7 @@ fn export(options: &Options) -> Result<usize, String> {
             .map(|name| name.to_string_lossy().into_owned())
             .ok_or_else(|| format!("{key}: the project file has no name"))?;
         check_batch_name(&original_vbp).map_err(|err| format!("{key}: {err}"))?;
+        build_pcode(&original_out.join(&original_vbp)).map_err(|err| format!("{key}: {err}"))?;
         exported.push(Exported {
             short,
             key,
@@ -281,6 +287,15 @@ fn render_runs(programs: &[Exported]) -> String {
     crlf_text(&lines)
 }
 
+/// Changes the line `CompilationType=0` of the project file `project` to
+/// the value of `export-pcode`, so that VB6 builds P-code from it.
+fn build_pcode(project: &Path) -> Result<(), String> {
+    let text =
+        std::fs::read(project).map_err(|err| format!("reading {}: {err}", project.display()))?;
+    let pcode = with_compilation_type(&text, PCODE_VALUE)?;
+    std::fs::write(project, pcode).map_err(|err| format!("writing {}: {err}", project.display()))
+}
+
 /// Runs `export-lift-builds`.
 pub(crate) fn run(args: &[String]) -> i32 {
     let Some(options) = options(args) else {
@@ -312,7 +327,7 @@ pub(crate) fn run(args: &[String]) -> i32 {
     reason = "a test builds the state it needs and must fail loudly when that state is wrong"
 )]
 mod tests {
-    use super::{options, render_runs};
+    use super::{build_pcode, options, render_runs};
     use crate::builds::Exported;
 
     #[test]
@@ -361,6 +376,27 @@ mod tests {
         let help = text.find("taskkill /f /im helpctr.exe >nul 2>&1").unwrap();
         assert!(ended < help);
         assert!(text.contains(r#"pushd "%~dp0""#));
+    }
+
+    #[test]
+    fn the_project_of_the_source_builds_p_code() {
+        let dir = std::env::temp_dir().join(format!("deform6-pcode-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let project = dir.join("a.vbp");
+        // A byte above 127 stays one byte, as in a project of ISO-8859-1.
+        std::fs::write(
+            &project,
+            b"Name=\"A\xe9\"\r\nCompilationType=0\r\nOptimizationType=0\r\n",
+        )
+        .unwrap();
+        build_pcode(&project).unwrap();
+        assert_eq!(
+            std::fs::read(&project).unwrap(),
+            b"Name=\"A\xe9\"\r\nCompilationType=-1\r\nOptimizationType=0\r\n"
+        );
+        // A project that is not native already is refused.
+        assert!(build_pcode(&project).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
