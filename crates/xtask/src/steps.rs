@@ -120,14 +120,19 @@ pub(crate) fn render_steps(steps: &[String]) -> String {
 /// program runs and `AppActivate` brings it to the front: keys that go to
 /// the window of `runs.bat` can run a command there. A step whose keys it
 /// does not send gives `===NOKEYS <short> <side>-s<n>===` before its marker.
+/// After the keys of a step, it waits until the program uses no processor
+/// time for 3 samples of half a second, for at most 20 seconds: a P-code
+/// program can redraw for longer than the fixed wait, and the picture then
+/// shows the middle of its work.
 const DRIVE_LINES: &[&str] = &[
     "' Starts one program, sends a marker through COM1 while its first window",
     "' shows, and sends each step of steps\\<short>.txt to it with SendKeys,",
     "' with a marker after each step.",
     "Option Explicit",
-    "Dim shell, files, program, short, side, path, list, keys, count",
+    "Dim shell, files, program, short, side, path, list, keys, count, wmi",
     "Set shell = CreateObject(\"WScript.Shell\")",
     "Set files = CreateObject(\"Scripting.FileSystemObject\")",
+    "Set wmi = GetObject(\"winmgmts:\\\\.\\root\\cimv2\")",
     "short = WScript.Arguments(1)",
     "side = WScript.Arguments(2)",
     "Set program = shell.Exec(\"\"\"\" & WScript.Arguments(0) & \"\"\"\")",
@@ -147,11 +152,27 @@ const DRIVE_LINES: &[&str] = &[
     "      shell.Run \"cmd /c >COM1 echo ===NOKEYS \" & short & \" \" & side & \"-s\" & count & \"===\", 0, True",
     "    End If",
     "    WScript.Sleep 2500",
+    "    WaitIdle",
     "    Mark side & \"-s\" & count",
     "  Loop",
     "  list.Close",
     "End If",
     "If program.Status = 0 Then program.Terminate",
+    "",
+    "Sub WaitIdle()",
+    "  Dim quiet, samples, busy, item",
+    "  quiet = 0",
+    "  samples = 0",
+    "  Do While quiet < 3 And samples < 40 And program.Status = 0",
+    "    WScript.Sleep 500",
+    "    samples = samples + 1",
+    "    busy = False",
+    "    For Each item In wmi.ExecQuery(\"Select PercentProcessorTime From Win32_PerfFormattedData_PerfProc_Process Where IDProcess = \" & program.ProcessID)",
+    "      If CLng(item.PercentProcessorTime) > 0 Then busy = True",
+    "    Next",
+    "    If busy Then quiet = 0 Else quiet = quiet + 1",
+    "  Loop",
+    "End Sub",
     "",
     "Sub Mark(name)",
     "  shell.Run \"cmd /c >COM1 echo ===SHOT \" & short & \" \" & name & \"===\", 0, True",
@@ -219,6 +240,10 @@ mod tests {
         assert!(parse_steps(&text(r#"[""]"#, "[1, 4, 3, 2]")).is_err());
     }
 
+    fn keys_at(text: &str) -> usize {
+        text.find("shell.SendKeys keys").unwrap()
+    }
+
     #[test]
     fn the_script_sends_a_marker_before_and_after_each_step() {
         let text = drive_script();
@@ -234,6 +259,11 @@ mod tests {
         assert!(text.contains(
             r#"shell.Run "cmd /c >COM1 echo ===SHOT " & short & " " & name & "===", 0, True"#
         ));
+        let idle = text.find("    WaitIdle\r\n").unwrap();
+        let marker = text.find("    Mark side & \"-s\" & count").unwrap();
+        assert!(keys_at(&text) < idle && idle < marker);
+        assert!(text.contains("Do While quiet < 3 And samples < 40 And program.Status = 0"));
+        assert!(text.contains("Where IDProcess = \" & program.ProcessID"));
         let first = text.find("Mark side\r\n").unwrap();
         let keys = text.find("shell.SendKeys").unwrap();
         assert!(first < keys);

@@ -263,17 +263,18 @@ steps = [
 [[program]]
 key = "vb6-code/Brightness-effect/Part 4 - Even faster DIBs/Realtime_Brightness.exe"
 # Focus starts on Picture1. The order is Picture1, ChkMethod, hScrollBrightness, Picture2. LargeChange is 1.
-# Step 1: hScrollBrightness 0 to 20 in 20 Change events (DrawFastBrightness). Focus goes to Picture2.
+# Each step sends one key that changes the value. Keys that come while a P-code redraw runs are lost, and how many depends on the speed: {RIGHT 20} gave 2 and 3 Change events on the two sides.
+# Step 1: hScrollBrightness 0 to 1. Change runs DrawFastBrightness. Focus goes to Picture2.
 # Step 2: Clear ChkMethod. ChkMethod has no Click code. Focus stays on ChkMethod.
-# Step 3: hScrollBrightness 20 to 21. Change runs DrawBrightness (the 3D array path). Focus goes to Picture2.
-# Step 4: hScrollBrightness 21 to 19 in 2 Change events (DrawBrightness).
+# Step 3: hScrollBrightness 1 to 2. Change runs DrawBrightness (the 3D array path). Focus goes to Picture2.
+# Step 4: hScrollBrightness 2 to 1 (DrawBrightness).
 # Step 5: Set ChkMethod again, then hScrollBrightness to 255 (DrawFastBrightness, clamp high).
 # Step 6: hScrollBrightness to -255 (DrawFastBrightness, clamp low).
 steps = [
-  "{TAB}{TAB}{RIGHT 20}{TAB}",
+  "{TAB}{TAB}{RIGHT}{TAB}",
   "+{TAB}+{TAB} ",
   "{TAB}{RIGHT}{TAB}",
-  "+{TAB}{LEFT 2}{TAB}",
+  "+{TAB}{LEFT}{TAB}",
   "+{TAB}+{TAB} {TAB}{END}{TAB}",
   "+{TAB}{HOME}{TAB}",
 ]
