@@ -31,10 +31,11 @@ A version number follows the rule that `CHANGELOG.md` applies: a release that
 breaks code written against the release before it takes the next major
 number. The shell breaks code written against 1.0.0, so it is 2.0.0 and not
 1.1. The logic takes the number that the same rule gives when it ships.
-The next release, 3.0.0, holds the first part of it: `extract --lift`
-writes the P-code of each procedure as statements, and VB6 builds each
-lifted project of the corpus. It changes public functions and structs of
-2.0.0, so it is 3.0.0.
+The release 3.0.0 holds the first part of it: `extract --lift` writes the
+P-code of each procedure as statements, and VB6 builds each lifted project
+of the corpus. The release 4.0.0 holds the blocks, the types and the
+behaviour check of Phase 11. Each one changes public items of the release
+before it, so each one takes the next major number.
 
 ## A note on the numbers below
 
@@ -546,6 +547,26 @@ writes the class identifier on the `Object=` line, and VB6 does not load that
 line. A second control in the corpus can add a row. `--verify-build` waits for
 a Windows 10 host.
 
+#### Part 3, done on 2026-11-05
+
+**`--verify-build`.** `extract --verify-build` finds `VB6.EXE` through
+`--compiler`, the variable `DEFORM6_VB6`, or the program files. It runs
+`VB6.EXE /make` on the written project, and reads the result with the rule
+of part 2: `built`, `built with load errors`, `failed`, `timed out`, or
+`not run`. The report gets the key `build`, which the schema names. Exit
+code 6 tells that VB6 did not build the project.
+
+**A host where DeForm6 runs.** The author's Windows 11 ARM virtual machine
+runs `deform6.exe` from the ARM64 and from the x64 build. Each gives the
+same 400 files as the macOS build for the 86 corpus programs. The first
+build needed `VCRUNTIME140.dll`, which a clean Windows 11 does not hold,
+and the Windows build now links the C runtime.
+
+**What stays open.** The tests run `--verify-build` against a script that
+acts as `VB6.EXE`, in the shapes that part 1 and part 2 measured. No run
+has used a real `VB6.EXE` yet, because the Windows 11 host has no Visual
+Basic 6 IDE. That run closes the phase.
+
 ### Phase 9: The P-code corpus
 
 **Goal.** 44 P-code binaries whose exact source is already held.
@@ -976,11 +997,26 @@ messages name the next action.
 
 **Estimate.** 2 to 4 weeks.
 
+#### Part 1, done on 2026-11-05
+
+**The path.** `docs/WORKFLOW.md` gives the steps: make the tables one time,
+write the project, build it with `--verify-build`, and edit and build it in
+the Visual Basic 6 IDE. For each result of the build, it gives the next
+action.
+
+**The messages.** A table that `extract` cannot read now names the command
+that writes it. A missing `VB6.EXE` names `--compiler` and `DEFORM6_VB6`.
+A test holds each message.
+
+**What stays open.** Nobody has walked the path on a Windows host with the
+Visual Basic 6 IDE from start to end. This project has not tested
+twinBASIC, so `docs/WORKFLOW.md` gives its route as untested.
+
 ## What blocks what
 
 ```
 Phase 7  (no dependency, starts today)
-Phase 8  (exit met on the author's XP host; --verify-build waits)
+Phase 8  (exit met on the author's XP host; --verify-build written, a run with VB6 waits)
    |
    +-- Phase 9  (exit met: 42 P-code binaries with their source)
           |
@@ -1003,6 +1039,8 @@ Windows XP with the Visual Basic 6 IDE, in a virtual machine.
 - One compiler. The Visual Basic 6 IDE, if a lawful copy is available, or
   twinBASIC. Done.
 - A Windows 10 host, for `--verify-build`, where DeForm6 itself must run.
+  The author's Windows 11 ARM virtual machine runs DeForm6. It needs the
+  Visual Basic 6 IDE.
 - For automated builds in a pipeline, twinBASIC requires its Professional
   Edition. The free edition permits commercial use but not unattended command
   line builds.
