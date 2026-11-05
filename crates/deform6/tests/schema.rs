@@ -755,3 +755,61 @@ fn a_report_that_carries_an_item_length_too_small_defect_validates() {
         );
     }
 }
+
+/// A report that carries the result of `extract --verify-build` validates,
+/// and a result with an outcome or a key that the schema does not name is
+/// refused.
+///
+/// No corpus run writes a build result, because only the command line
+/// writes it after the compiler ran. The test adds one to a real report.
+#[test]
+fn a_report_with_a_build_result_validates_and_a_wrong_one_is_refused() {
+    let validator = compiled_schema();
+    let exe = corpus_root().join("vb6-code/Fire-effect/Fast_Flames.exe");
+    let mut value = report_value_for(&exe);
+    value["build"] = serde_json::json!({
+        "compiler": "C:\\VB98\\VB6.EXE",
+        "outcome": "built with load errors",
+        "exit_code": 0,
+        "messages": ["Build of 'Project1' succeeded.", "Form1.log: Class MSComctlLib.ListView of control lv was not a loaded control class."],
+    });
+    assert!(
+        validator.is_valid(&value),
+        "a build result must validate: {:?}",
+        describe_errors(&validator, &value)
+    );
+
+    let mut not_run = value.clone();
+    not_run["build"]["compiler"] = serde_json::Value::Null;
+    not_run["build"]["outcome"] = serde_json::json!("not run");
+    not_run["build"]["exit_code"] = serde_json::Value::Null;
+    assert!(
+        validator.is_valid(&not_run),
+        "a build that did not run must validate: {:?}",
+        describe_errors(&validator, &not_run)
+    );
+
+    let mut bad_outcome = value.clone();
+    bad_outcome["build"]["outcome"] = serde_json::json!("compiled");
+    assert!(
+        !validator.is_valid(&bad_outcome),
+        "an outcome that the schema does not name must be refused"
+    );
+
+    let mut extra = value.clone();
+    extra["build"]["seconds"] = serde_json::json!(4);
+    assert!(
+        !validator.is_valid(&extra),
+        "a build result with an extra key must be refused"
+    );
+
+    let mut missing = value;
+    missing["build"]
+        .as_object_mut()
+        .expect("the build result must be a JSON object")
+        .remove("messages");
+    assert!(
+        !validator.is_valid(&missing),
+        "a build result with no messages must be refused"
+    );
+}

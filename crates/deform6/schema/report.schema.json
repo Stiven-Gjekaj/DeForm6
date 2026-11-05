@@ -18,9 +18,28 @@
     "limits": {
       "type": "array",
       "items": { "type": "string" }
-    }
+    },
+    "build": { "$ref": "#/$defs/build" }
   },
   "$defs": {
+    "build": {
+      "description": "What the Visual Basic 6 IDE gave for the written project. Only extract --verify-build writes this key.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["compiler", "outcome", "exit_code", "messages"],
+      "properties": {
+        "compiler": { "type": ["string", "null"] },
+        "outcome": {
+          "type": "string",
+          "enum": ["built", "built with load errors", "failed", "timed out", "not run"]
+        },
+        "exit_code": { "type": ["integer", "null"] },
+        "messages": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
     "reportItem": {
       "type": "object",
       "additionalProperties": false,
