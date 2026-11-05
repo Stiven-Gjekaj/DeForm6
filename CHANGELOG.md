@@ -5,9 +5,12 @@ the one it uses. Every release gets one level two heading in the form
 `## [X.Y.Z] - YYYY-MM-DD`. The newest release comes first. Each section
 states what the release delivers, what stays open, and what the release
 does not do. A change that no release holds yet goes under one
-`## [Unreleased]
+`## [Unreleased]` heading above the newest release. A release gives that
+heading its version and its date.
 
-### What this delivers
+## [4.0.0] - 2026-11-05
+
+### What this release delivers
 
 - `cargo run -p xtask -- derive-opcode-table <VB6.OLB>` writes the property
   opcode table from a copy of `VB6.OLB` that the user owns, on any host. It
@@ -144,6 +147,11 @@ does not do. A change that no release holds yet goes under one
   and stopped after the picture of `PicTilesBuffer` of the map editor, with
   no warning. 11 lines of its `.frm`, such as `AutoSize`, `ScaleMode` and
   `Visible`, were lost.
+- A Windows build links the C runtime into `deform6.exe`. A clean Windows
+  11 has no `VCRUNTIME140.dll`, and a dynamic build did not start there.
+  On the author's Windows 11 ARM host, the ARM64 and the x64 build give
+  the same 400 files as the macOS build for each of the 86 corpus
+  programs.
 
 ### Faults of 3.0.0
 
@@ -180,12 +188,38 @@ does not do. A change that no release holds yet goes under one
   the public variables. 462 of the 511 names of locals of four or more
   letters in the source are in no byte of their executable.
 
-### What this does not do
+### What changes for a caller
 
-- It does not change the version in `Cargo.toml`, and it has no tag.
+These changes break code that was written against 3.0.0. This release is
+therefore 4.0.0, not 3.1.0.
+
 - `Report` has the new public field `file_version`. A caller that builds a
-  `Report` with a struct literal must add it, so the next release is a new
-  major version. `PayloadType::Boolean` now reads one byte.
+  `Report` with a struct literal must add it.
+- `PayloadType::Boolean` now reads one byte.
+- `PayloadType` has the new variant `List`, and `PropertyValue` has the new
+  variants `List` and `PictureNone`. Neither enum is `non_exhaustive`, so a
+  `match` with no wildcard arm must add them. The numbers of the
+  `PropertyValue` variants after them move by two.
+- This release adds the module `vb::structure`, the struct
+  `PublicVariable` and the function `public_variables` in
+  `vb::privateobj`, `PeImage::file_version`, `write::values::shortcut_text`,
+  `vb::context::string_value_arguments`, and builder and query methods of
+  `Callees` for variable names, globals, and value and string arguments.
+  `Object` gets the fields `lp_public_bytes` and `lp_module_public`, and
+  `FixedArray` gets `element_bytes`. Both structs are `non_exhaustive`. It
+  removes no public item.
+
+### What this release does not do
+
+- DeForm6 does not recover the source of a procedure. The lift names
+  variables by their offsets, apart from the public variables.
+- The lift reads P-code only. A native program gets no statements.
+- No test starts VB6. The author's Windows XP host built the lifted
+  projects and ran the behaviour check, and this changelog gives the
+  result.
+- The opcode table and the types file come from Microsoft files that the
+  user owns. The repository holds the tools that derive them, not the
+  files.
 
 ## [3.0.0] - 2026-09-29
 
