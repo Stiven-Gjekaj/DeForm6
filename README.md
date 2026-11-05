@@ -179,6 +179,8 @@ A check that passes because it reads the wrong place is worse than no check.
    `'MSWINSCK.OCX' could not be loaded`.
    No test starts VB6, because the test machine has no Windows. The gate
    fails when DeForm6 writes different files than the Windows host built.
+   On your own Windows host, `extract --verify-build` runs VB6 on the
+   project that it writes.
 
 ---
 
@@ -304,13 +306,26 @@ literals and names after a `.` of the source are in the lift. Most of the
 others are the fields of a user-defined type, which the lift names by their
 offsets.
 
+On a Windows host with the Visual Basic 6 IDE, `--verify-build` builds the
+written project with `VB6.EXE /make`, and writes the result into the report
+as `build`. The executable goes into `<output-directory>/build`. DeForm6
+finds `VB6.EXE` through `--compiler`, then the variable `DEFORM6_VB6`, then
+`Microsoft Visual Studio\VB98\VB6.EXE` under the program files.
+[docs/WORKFLOW.md](docs/WORKFLOW.md) gives the whole path from an
+executable to a project that you edit and build, and what to do after each
+result.
+
+```
+deform6 extract <path-to-exe> -o <output-directory> --opcode-table derived/opcode-table.toml --verify-build
+```
+
 Run everything the gate runs, in one command:
 
 ```
 cargo fmt --all --check && cargo clippy --all-targets -- -D warnings && cargo test --workspace
 ```
 
-DeForm6 gives one of six exit codes.
+DeForm6 gives one of seven exit codes.
 
 | Code | Meaning |
 |---|---|
@@ -320,6 +335,7 @@ DeForm6 gives one of six exit codes.
 | 3 | Visual Basic, but not version 6. |
 | 4 | Visual Basic 6, but damaged. |
 | 5 | An internal error, including a usage error. |
+| 6 | `extract --verify-build` wrote the project, and VB6 did not build it. |
 
 ---
 
@@ -532,7 +548,7 @@ crates/
     tests/          26 integration suites, including the corpus sweep
   deform6-cli/      the command line: it owns the file system
   xtask/            build tasks, including the licence audit
-docs/               the reverse engineering surveys the source cites
+docs/               the surveys the source cites, and WORKFLOW.md
 scripts/            the walls: each one proves a property and fails loudly
 corpus/             44 Visual Basic 6 programs, with sources, and a manifest
 corpus-pcode/       a P-code build of 42 of those programs, with notices
