@@ -8,6 +8,39 @@ does not do. A change that no release holds yet goes under one
 `## [Unreleased]` heading above the newest release. A release gives that
 heading its version and its date.
 
+## [Unreleased]
+
+### What this delivers
+
+- `extract --verify-build` builds the written project with the Visual
+  Basic 6 IDE that the user owns. It finds `VB6.EXE` through `--compiler`,
+  the variable `DEFORM6_VB6`, or `Microsoft Visual Studio\VB98\VB6.EXE`
+  under the program files, and runs `VB6.EXE /make`. The executable goes
+  into `<output>/build`. The report gets the key `build`, with the
+  compiler, the outcome, the exit code and the lines that VB6 wrote. The
+  outcome is `built`, `built with load errors`, `failed`, `timed out` or
+  `not run`, with the rule that the build record of Phase 8 measured.
+- The new exit code 6 tells that `extract --verify-build` wrote the
+  project, and VB6 did not build it. The codes 0 to 5 do not change.
+- The report schema names the optional key `build`.
+- A table that `extract` cannot read names the command that writes it.
+- `docs/WORKFLOW.md` gives the path from an executable to a project that
+  the user edits and builds, and the next action after each result of the
+  build.
+
+### What stays open
+
+- The tests run `--verify-build` against a script that acts as `VB6.EXE`.
+  No run has used a real `VB6.EXE` yet.
+- This project has not tested twinBASIC. `--verify-build` runs the Visual
+  Basic 6 IDE only.
+
+### What this does not do
+
+- It does not change the version in `Cargo.toml`, and it has no tag.
+- It changes no public item of the library. A report without
+  `--verify-build` has the same bytes as before.
+
 ## [4.0.0] - 2026-11-05
 
 ### What this release delivers
