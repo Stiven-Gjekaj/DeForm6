@@ -341,15 +341,30 @@ fn run(cli: &Cli) -> Exit {
 fn load_pcode_table(path: &Path) -> Result<PcodeTable, Exit> {
     match std::fs::read(path) {
         Ok(bytes) => PcodeTable::parse(&bytes).map_err(|err| {
-            eprintln!("{}: {err}", path.display());
+            eprintln!("{}: {err}; {DERIVE_PCODE_TABLE}", path.display());
             Exit::Internal
         }),
         Err(err) => {
-            eprintln!("could not read {}: {err}", path.display());
+            eprintln!(
+                "could not read {}: {err}; {DERIVE_PCODE_TABLE}",
+                path.display()
+            );
             Err(Exit::Internal)
         }
     }
 }
+
+/// The next action after a P-code table that cannot be used.
+const DERIVE_PCODE_TABLE: &str = "write the table with `cargo run -p xtask -- \
+     derive-pcode-table <path-to-MSVBVM60.DLL> <path-to-MSVBVM60.pdb>`";
+
+/// The next action after a types file that cannot be used.
+const DERIVE_VB_TYPES: &str = "write the file with `cargo run -p xtask -- \
+     derive-vb-types <path-to-VB6.OLB> [<path-to-MSVBVM60.DLL>] [<path-to-OCX>...]`";
+
+/// The next action after an opcode table that cannot be used.
+const DERIVE_OPCODE_TABLE: &str =
+    "write the table with `cargo run -p xtask -- derive-opcode-table <path-to-VB6.OLB>`";
 
 /// Reads the types file at `path`, when a path is given.
 ///
@@ -365,12 +380,15 @@ fn load_vb_types(path: Option<&Path>) -> Result<Option<VbTypes>, Exit> {
         Ok(bytes) => match VbTypes::parse(&bytes) {
             Ok(types) => Ok(Some(types)),
             Err(err) => {
-                eprintln!("{}: {err}", path.display());
+                eprintln!("{}: {err}; {DERIVE_VB_TYPES}", path.display());
                 Err(Exit::Internal)
             }
         },
         Err(err) => {
-            eprintln!("could not read {}: {err}", path.display());
+            eprintln!(
+                "could not read {}: {err}; {DERIVE_VB_TYPES}",
+                path.display()
+            );
             Err(Exit::Internal)
         }
     }
@@ -416,7 +434,10 @@ fn load_opcode_table(opcode_table_path: Option<&Path>) -> Result<(OpcodeTable, S
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(err) => {
-            eprintln!("could not read {}: {err}", path.display());
+            eprintln!(
+                "could not read {}: {err}; {DERIVE_OPCODE_TABLE}",
+                path.display()
+            );
             return Err(Exit::Internal);
         }
     };
@@ -430,7 +451,7 @@ fn load_opcode_table(opcode_table_path: Option<&Path>) -> Result<(OpcodeTable, S
             ))
         }
         Err(err) => {
-            eprintln!("{err}");
+            eprintln!("{err}; {DERIVE_OPCODE_TABLE}");
             Err(Exit::Internal)
         }
     }

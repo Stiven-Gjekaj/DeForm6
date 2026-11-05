@@ -1981,3 +1981,37 @@ fn compiler_without_verify_build_is_a_usage_error() {
     assert_eq!(code, 5, "{stderr}");
     assert!(!out_dir.exists(), "a usage error must write nothing");
 }
+
+/// A table that cannot be read gives exit code 5 and a message that names
+/// the command that writes the table.
+#[test]
+fn a_missing_table_names_the_command_that_writes_it() {
+    let missing = Path::new(env!("CARGO_TARGET_TMPDIR")).join("no-such-table.toml");
+    let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "deform6-cli-test-missing-table-{}",
+        std::process::id()
+    ));
+    for (flag, command) in [
+        ("--opcode-table", "derive-opcode-table"),
+        ("--vb-types", "derive-vb-types"),
+        ("--pcode-table", "derive-pcode-table"),
+    ] {
+        fs::remove_dir_all(&out_dir).ok();
+        let mut args = vec![
+            OsStr::new("extract").to_os_string(),
+            gradient_sample_path().into_os_string(),
+            OsStr::new("-o").to_os_string(),
+            out_dir.clone().into_os_string(),
+            OsStr::new(flag).to_os_string(),
+            missing.clone().into_os_string(),
+        ];
+        if flag == "--pcode-table" {
+            args.push(OsStr::new("--lift").to_os_string());
+        }
+        let args: Vec<&OsStr> = args.iter().map(std::ffi::OsString::as_os_str).collect();
+        let (code, _stdout, stderr) = run(&args);
+        assert_eq!(code, 5, "{flag}: {stderr}");
+        assert!(stderr.contains(command), "{flag}: {stderr}");
+    }
+    fs::remove_dir_all(&out_dir).ok();
+}
