@@ -1823,3 +1823,161 @@ fn each_command_help_names_its_own_work() {
         "{disasm}"
     );
 }
+
+/// Writes a shell script that acts as `VB6.EXE /make` for the
+/// `--verify-build` tests. It writes `out` into the file after `/out`,
+/// writes `log` (when not empty) into `Form1.log` beside the project, and
+/// exits with `code`. The shapes come from the runs on the XP host that
+/// `crates/xtask/src/builds.rs` records.
+#[cfg(unix)]
+fn fake_vb6(dir: &Path, out: &str, log: &str, code: i32) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt as _;
+    fs::create_dir_all(dir).unwrap();
+    let path = dir.join("VB6.EXE");
+    let out_text = dir.join("out.txt");
+    let log_text = dir.join("log.txt");
+    fs::write(&out_text, out).unwrap();
+    fs::remove_file(&log_text).ok();
+    if !log.is_empty() {
+        fs::write(&log_text, log).unwrap();
+    }
+    let script = format!(
+        "#!/bin/sh\n\
+         out=''; vbp=''\n\
+         while [ $# -gt 0 ]; do\n\
+           case \"$1\" in /out) out=\"$2\"; shift;; /make) vbp=\"$2\"; shift;; esac\n\
+           shift\n\
+         done\n\
+         cat '{}' > \"$out\"\n\
+         if [ -f '{}' ]; then cat '{}' > \"$(dirname \"$vbp\")/Form1.log\"; fi\n\
+         exit {code}\n",
+        out_text.display(),
+        log_text.display(),
+        log_text.display(),
+    );
+    fs::write(&path, script).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    path
+}
+
+/// Runs `extract --verify-build` on the Gradient sample with `compiler`,
+/// with no `DEFORM6_VB6` and no program files in the environment. Gives the
+/// exit code, stdout, stderr and the parsed report.
+fn extract_and_verify(
+    label: &str,
+    compiler: Option<&Path>,
+) -> (i32, String, String, serde_json::Value) {
+    let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "deform6-cli-test-verify-{label}-{}",
+        std::process::id()
+    ));
+    fs::remove_dir_all(&out_dir).ok();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_deform6"));
+    command
+        .arg("extract")
+        .arg(gradient_sample_path())
+        .arg("-o")
+        .arg(&out_dir)
+        .arg("--verify-build")
+        .env_remove("DEFORM6_VB6")
+        .env_remove("ProgramFiles")
+        .env_remove("ProgramFiles(x86)");
+    if let Some(compiler) = compiler {
+        command.arg("--compiler").arg(compiler);
+    }
+    let out = command.output().unwrap();
+    let code = out.status.code().expect("the process was not signalled");
+    let report = fs::read_dir(&out_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.to_string_lossy().ends_with(".report.json"))
+        .expect("the project must hold a report");
+    let value = serde_json::from_str(&fs::read_to_string(report).unwrap()).unwrap();
+    (
+        code,
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+        value,
+    )
+}
+
+#[cfg(unix)]
+#[test]
+fn verify_build_records_a_build_and_exits_zero() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fake-vb6-built");
+    let vb6 = fake_vb6(&dir, "Build of 'Project1' succeeded.", "", 0);
+    let (code, stdout, stderr, report) = extract_and_verify("built", Some(&vb6));
+    assert_eq!(code, 0, "stdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(report["build"]["outcome"], "built");
+    assert_eq!(report["build"]["exit_code"], 0);
+    assert_eq!(report["build"]["compiler"], vb6.display().to_string());
+    assert_eq!(
+        report["build"]["messages"],
+        serde_json::json!(["Build of 'Project1' succeeded."])
+    );
+    assert!(stdout.contains("build: built"), "{stdout}");
+}
+
+#[cfg(unix)]
+#[test]
+fn verify_build_with_a_load_log_exits_six() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fake-vb6-load");
+    let vb6 = fake_vb6(
+        &dir,
+        "Build of 'Project1' succeeded.",
+        "Line 9: Class X.Y of control z was not a loaded control class.",
+        0,
+    );
+    let (code, stdout, stderr, report) = extract_and_verify("load", Some(&vb6));
+    assert_eq!(code, 6, "stdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(report["build"]["outcome"], "built with load errors");
+    let messages = report["build"]["messages"].as_array().unwrap();
+    assert!(
+        messages.iter().any(|line| line
+            == "Form1.log: Line 9: Class X.Y of control z was not a loaded control class."),
+        "{messages:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn verify_build_with_a_failed_build_exits_six_and_keeps_the_error() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fake-vb6-failed");
+    let vb6 = fake_vb6(&dir, "Compile error in File 'Form1.frm', Line 4", "", 1);
+    let (code, stdout, stderr, report) = extract_and_verify("failed", Some(&vb6));
+    assert_eq!(code, 6, "stdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(report["build"]["outcome"], "failed");
+    assert_eq!(report["build"]["exit_code"], 1);
+    assert_eq!(
+        report["build"]["messages"],
+        serde_json::json!(["Compile error in File 'Form1.frm', Line 4"])
+    );
+}
+
+#[test]
+fn verify_build_with_no_compiler_exits_five_and_records_not_run() {
+    let (code, stdout, stderr, report) = extract_and_verify("missing", None);
+    assert_eq!(code, 5, "stdout: {stdout}\nstderr: {stderr}");
+    assert!(stderr.contains("--compiler"), "{stderr}");
+    assert_eq!(report["build"]["outcome"], "not run");
+    assert_eq!(report["build"]["compiler"], serde_json::Value::Null);
+}
+
+#[test]
+fn compiler_without_verify_build_is_a_usage_error() {
+    let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "deform6-cli-test-compiler-alone-{}",
+        std::process::id()
+    ));
+    fs::remove_dir_all(&out_dir).ok();
+    let (code, _stdout, stderr) = run(&[
+        OsStr::new("extract"),
+        gradient_sample_path().as_os_str(),
+        OsStr::new("-o"),
+        out_dir.as_os_str(),
+        OsStr::new("--compiler"),
+        OsStr::new("VB6.EXE"),
+    ]);
+    assert_eq!(code, 5, "{stderr}");
+    assert!(!out_dir.exists(), "a usage error must write nothing");
+}

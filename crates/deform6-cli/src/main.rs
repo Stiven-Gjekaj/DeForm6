@@ -13,6 +13,7 @@
 //! | 3 | Visual Basic, but not version 6 |
 //! | 4 | Visual Basic 6, but damaged |
 //! | 5 | An internal error, including a usage error |
+//! | 6 | `extract --verify-build` wrote the project, and VB6 did not build it |
 //!
 //! The infallible clap entry point calls the process exit function itself,
 //! with status 2 for a usage error. Code 2 is locked to "a PE file, but it
@@ -32,6 +33,8 @@ use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Parser as _;
+
+mod verify;
 
 use deform6::Report;
 use deform6::read::pe::PeImage;
@@ -201,6 +204,19 @@ enum Command {
         /// DeForm6 uses the small table built into the binary.
         #[arg(long)]
         opcode_table: Option<PathBuf>,
+
+        /// Builds the written project with `VB6.EXE /make`, and writes the
+        /// result into the report as `build`. The executable goes into
+        /// `<output>/build`. Exit code 6 tells that VB6 did not build the
+        /// project. DeForm6 does not ship VB6: it uses `--compiler`, then
+        /// `DEFORM6_VB6`, then `Microsoft Visual Studio\VB98\VB6.EXE` under
+        /// the program files.
+        #[arg(long)]
+        verify_build: bool,
+
+        /// The `VB6.EXE` that `--verify-build` runs.
+        #[arg(long, requires = "verify_build")]
+        compiler: Option<PathBuf>,
     },
 }
 
@@ -238,6 +254,9 @@ enum Exit {
     /// An internal error: the file could not be read, or the arguments were
     /// not usable.
     Internal = 5,
+    /// `extract --verify-build` wrote the project, and VB6 did not build
+    /// it: it failed, it built with load errors, or it ran too long.
+    NotBuilt = 6,
 }
 
 impl From<Exit> for ExitCode {
@@ -295,6 +314,8 @@ fn run(cli: &Cli) -> Exit {
             pcode_table,
             lift,
             opcode_table,
+            verify_build,
+            compiler,
         } => run_extract(
             input,
             output,
@@ -306,6 +327,7 @@ fn run(cli: &Cli) -> Exit {
                 opcodes: opcode_table.as_deref(),
             },
             mode_for(*salvage),
+            verify_build.then_some(compiler.as_deref()),
         ),
     }
 }
@@ -647,6 +669,7 @@ fn run_extract(
     force: bool,
     tables: &ExtractTables<'_>,
     mode: deform6::journal::Mode,
+    verify: Option<Option<&Path>>,
 ) -> Exit {
     let (table, _) = match load_opcode_table(tables.opcodes) {
         Ok(loaded) => loaded,
@@ -711,7 +734,99 @@ fn run_extract(
         Err(exit) => return exit,
     };
 
-    write_project(&written, &resolved_output, report_path, force)
+    match write_project(&written, &resolved_output, report_path, force) {
+        Exit::Ok => {}
+        other => return other,
+    }
+    match verify {
+        Some(compiler) => verify_build(&written, &resolved_output, report_path, compiler),
+        None => Exit::Ok,
+    }
+}
+
+/// Builds the project that [`write_project`] wrote into `resolved_output`,
+/// and writes the result into its report.
+///
+/// A missing compiler gives [`Exit::Internal`] with the message that names
+/// the next action, and the report records `not run`. A build that is not
+/// `built` gives [`Exit::NotBuilt`].
+fn verify_build(
+    written: &deform6::write::WrittenProject,
+    resolved_output: &Path,
+    report_path: Option<&Path>,
+    compiler: Option<&Path>,
+) -> Exit {
+    let report_file = match report_path {
+        Some(path) => match resolve_report_path(path) {
+            Ok(resolved) => resolved,
+            Err(exit) => return exit,
+        },
+        None => match written
+            .files
+            .iter()
+            .find(|file| file.name.ends_with(".report.json"))
+        {
+            Some(file) => resolved_output.join(&file.name),
+            None => {
+                eprintln!("the written project holds no report");
+                return Exit::Internal;
+            }
+        },
+    };
+    let Some(vbp) = written
+        .files
+        .iter()
+        .find(|file| file.name.ends_with(".vbp"))
+    else {
+        eprintln!("the written project holds no .vbp file");
+        return Exit::Internal;
+    };
+
+    let (result, exit) = match verify::find_compiler(compiler, |name: &str| std::env::var_os(name))
+    {
+        Ok(found) => {
+            let result = verify::run(
+                &found,
+                &resolved_output.join(&vbp.name),
+                resolved_output,
+                verify::BUILD_TIMEOUT,
+            );
+            let exit = if result.outcome == verify::Outcome::Built {
+                Exit::Ok
+            } else {
+                Exit::NotBuilt
+            };
+            (result, exit)
+        }
+        Err(reason) => {
+            eprintln!("{reason}");
+            (verify::BuildResult::not_run(reason), Exit::Internal)
+        }
+    };
+
+    let report = match std::fs::read_to_string(&report_file) {
+        Ok(text) => text,
+        Err(err) => {
+            eprintln!("could not read {}: {err}", report_file.display());
+            return Exit::Internal;
+        }
+    };
+    let updated = match verify::with_build(&report, &result) {
+        Ok(updated) => updated,
+        Err(reason) => {
+            eprintln!("{}: {reason}", report_file.display());
+            return Exit::Internal;
+        }
+    };
+    if let Err(err) = std::fs::write(&report_file, updated) {
+        eprintln!("could not write {}: {err}", report_file.display());
+        return Exit::Internal;
+    }
+    println!("build: {}", result.outcome.as_str());
+    for message in &result.messages {
+        println!("  {message}");
+    }
+    exit
 }
 
 /// Resolves `output` to an absolute, canonicalized path, following
