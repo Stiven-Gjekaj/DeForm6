@@ -544,8 +544,7 @@ which the first run names.
 
 **What stays open.** The table has one row. For another control, DeForm6
 writes the class identifier on the `Object=` line, and VB6 does not load that
-line. A second control in the corpus can add a row. `--verify-build` waits for
-a Windows 10 host.
+line. A second control in the corpus can add a row.
 
 #### Part 3, done on 2026-11-05
 
@@ -1026,8 +1025,9 @@ action.
 that writes it. A missing `VB6.EXE` names `--compiler` and `DEFORM6_VB6`.
 A test holds each message.
 
-**What stays open.** Nobody has walked the path on a Windows host with the
-Visual Basic 6 IDE from start to end. This project has not tested
+**What stays open.** Steps 1 to 3 ran on the author's Windows 11 host with
+the Visual Basic 6 IDE: `--verify-build` built 86 of 86. Nobody has done
+step 4, the edit and build in the IDE, by hand. This project has not tested
 twinBASIC, so `docs/WORKFLOW.md` gives its route as untested.
 
 ## What blocks what
