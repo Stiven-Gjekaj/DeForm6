@@ -562,10 +562,28 @@ same 400 files as the macOS build for the 86 corpus programs. The first
 build needed `VCRUNTIME140.dll`, which a clean Windows 11 does not hold,
 and the Windows build now links the C runtime.
 
-**What stays open.** The tests run `--verify-build` against a script that
-acts as `VB6.EXE`, in the shapes that part 1 and part 2 measured. No run
-has used a real `VB6.EXE` yet, because the Windows 11 host has no Visual
-Basic 6 IDE. That run closes the phase.
+**The run with VB6, 2026-11-07.** The Windows 11 ARM host now has the
+Visual Basic 6 IDE with SP6 (`VB6.EXE` 6.00.9782, 1,895,424 bytes, the
+same file as on the XP host). Its 16-bit setup starters do not run on a
+64-bit Windows, so `Setup\acmsetup.exe` ran directly, with the arguments
+that `acmboot.lst` and `setupsp6.lst` give.
+
+The first run found a fault: `std::fs::canonicalize` gives the verbatim
+form `\\?\C:\...` on Windows, and the linker of VB6 stops on that form
+with an internal error during `SetupPhase` (exception `C00000FD`). Every
+build failed. `--verify-build` now gives VB6 the plain form, with its own
+test.
+
+Then `deform6.exe extract --verify-build` ran on each of the 86 corpus
+programs, with the opcode table and the types file, and with `--lift` for
+the 42 P-code programs. In the first full run, 85 built, and
+`TFTPClient.exe` failed with `Error accessing the system registry`. It
+built in two runs alone after that, and the second full run gave `built`
+for 86 of 86, each with exit code 0.
+
+**The exit is met for `--verify-build`.** DeForm6 runs the compiler of the
+user on the project that it wrote, and records the result. No test holds
+the run on the Windows host, and this section gives its result.
 
 ### Phase 9: The P-code corpus
 
@@ -1016,7 +1034,7 @@ twinBASIC, so `docs/WORKFLOW.md` gives its route as untested.
 
 ```
 Phase 7  (no dependency, starts today)
-Phase 8  (exit met on the author's XP host; --verify-build written, a run with VB6 waits)
+Phase 8  (exit met: 44 of 44 on XP; --verify-build 86 of 86 on Windows 11)
    |
    +-- Phase 9  (exit met: 42 P-code binaries with their source)
           |
@@ -1039,8 +1057,8 @@ Windows XP with the Visual Basic 6 IDE, in a virtual machine.
 - One compiler. The Visual Basic 6 IDE, if a lawful copy is available, or
   twinBASIC. Done.
 - A Windows 10 host, for `--verify-build`, where DeForm6 itself must run.
-  The author's Windows 11 ARM virtual machine runs DeForm6. It needs the
-  Visual Basic 6 IDE.
+  The author's Windows 11 ARM virtual machine runs DeForm6 and the Visual
+  Basic 6 IDE with SP6. Done.
 - For automated builds in a pipeline, twinBASIC requires its Professional
   Edition. The free edition permits commercial use but not unattended command
   line builds.
