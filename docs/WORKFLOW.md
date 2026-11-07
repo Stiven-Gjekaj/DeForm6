@@ -15,7 +15,10 @@ program, each procedure body stays empty, and you write the logic.
 - A copy of `VB6.OLB` and of `MSVBVM60.DLL` that you own. The Visual Basic 6
   IDE installs both.
 - For the build step, a Windows host with the Visual Basic 6 IDE. DeForm6
-  runs on Windows 10 or later. It does not run on Windows XP.
+  runs on Windows 10 or later. It does not run on Windows XP. The setup of
+  VB6 starts with a 16-bit program, which a 64-bit Windows does not run.
+  Start `Setup\acmsetup.exe /T VB98ENT.STF /S <drive>:\` from the VB6
+  disc instead, and clear **Data Access** in a custom install.
 
 ## Step 1: make the tables, one time
 
@@ -78,7 +81,7 @@ compiler, the outcome, the exit code and the lines that VB6 wrote.
 |---|---|---|
 | `built` | 0 | Go to step 4. |
 | `built with load errors` | 6 | VB6 could not load a control class, and it put a picture box in its place. The messages name the `.log` file and the control. Make sure that the OCX of the control is registered on the host. Then compare the `Object=` line of the `.vbp` with the line that VB6 writes when you add the same component to a new project, and copy that line. |
-| `failed` | 6 | The messages give the file and the line that VB6 refused. Open the project in the IDE and correct that line. |
+| `failed` | 6 | The messages give the file and the line that VB6 refused. Open the project in the IDE and correct that line. If the message is `Error accessing the system registry`, run the same command again: on the author's Windows 11 host, this error came once and did not come back. |
 | `timed out` | 6 | A dialog of the IDE stopped the build. Open the project in the IDE to see the dialog. |
 | `not run` | 5 | DeForm6 found no `VB6.EXE`. Give its path with `--compiler`. |
 
