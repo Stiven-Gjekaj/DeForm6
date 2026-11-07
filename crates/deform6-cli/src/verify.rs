@@ -217,13 +217,17 @@ pub(crate) fn run(
         std::fs::remove_file(project_dir.join(name)).ok();
     }
 
+    // The paths come from `std::fs::canonicalize`, which gives the verbatim
+    // form `\\?\C:\...` on Windows. The linker of VB6 stops with an
+    // internal error (stack overflow, C00000FD) on that form, so VB6 gets
+    // the plain form.
     let mut child = match Command::new(compiler)
         .arg("/make")
-        .arg(vbp)
+        .arg(plain_path(vbp))
         .arg("/outdir")
-        .arg(&build_dir)
+        .arg(plain_path(&build_dir))
         .arg("/out")
-        .arg(&out_path)
+        .arg(plain_path(&out_path))
         .spawn()
     {
         Ok(child) => child,
@@ -265,6 +269,22 @@ pub(crate) fn run(
             exit_code: None,
             messages,
         },
+    }
+}
+
+/// Gives `path` without the verbatim prefix of Windows: `\\?\C:\x` gives
+/// `C:\x`, and `\\?\UNC\server\share\x` gives `\\server\share\x`. Any
+/// other path, and a path that is not Unicode, comes back unchanged.
+pub(crate) fn plain_path(path: &Path) -> PathBuf {
+    let Some(text) = path.to_str() else {
+        return path.to_path_buf();
+    };
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
+        _ => path.to_path_buf(),
     }
 }
 
@@ -460,6 +480,26 @@ mod tests {
         let missing = std::env::temp_dir().join("deform6-cli-test-verify-no-such-vb6.exe");
         let err = find_compiler(Some(&missing), |_| None).unwrap_err();
         assert!(err.contains("not a file"), "{err}");
+    }
+
+    #[test]
+    fn a_verbatim_path_loses_its_prefix_and_other_paths_stay() {
+        assert_eq!(
+            plain_path(Path::new(r"\\?\C:\Users\boss\p\HexScroll.vbp")),
+            PathBuf::from(r"C:\Users\boss\p\HexScroll.vbp")
+        );
+        assert_eq!(
+            plain_path(Path::new(r"\\?\UNC\server\share\p\a.vbp")),
+            PathBuf::from(r"\\server\share\p\a.vbp")
+        );
+        for unchanged in [
+            r"C:\p\a.vbp",
+            r"\\server\share\a.vbp",
+            r"\\?\GLOBALROOT\Device\x",
+            "/tmp/p/a.vbp",
+        ] {
+            assert_eq!(plain_path(Path::new(unchanged)), PathBuf::from(unchanged));
+        }
     }
 
     #[test]
