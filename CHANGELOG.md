@@ -28,10 +28,19 @@ heading its version and its date.
   the user edits and builds, and the next action after each result of the
   build.
 
+- `--verify-build` gives VB6 the plain form of each path. The verbatim
+  form `\\?\C:\...` that `std::fs::canonicalize` gives on Windows made
+  the linker of VB6 stop with an internal error, and every build failed.
+- On the author's Windows 11 ARM host with VB6 SP6, `extract
+  --verify-build` gives `built` for each of the 86 corpus programs, with
+  `--lift` for the 42 P-code programs. In the first full run,
+  `TFTPClient.exe` failed once with `Error accessing the system registry`,
+  and it built in each run after that. No test holds this run.
+
 ### What stays open
 
-- The tests run `--verify-build` against a script that acts as `VB6.EXE`.
-  No run has used a real `VB6.EXE` yet.
+- No test starts VB6. The tests run `--verify-build` against a script that
+  acts as `VB6.EXE`.
 - This project has not tested twinBASIC. `--verify-build` runs the Visual
   Basic 6 IDE only.
 
