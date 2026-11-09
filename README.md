@@ -141,7 +141,7 @@ A check that passes because it reads the wrong place is worse than no check.
 
 ---
 
-## Three facts to read before you run it
+## Four facts to read before you run it
 
 1. **In a P-code program, a handler address is not the address of machine
    code.**
@@ -181,6 +181,13 @@ A check that passes because it reads the wrong place is worse than no check.
    fails when DeForm6 writes different files than the Windows host built.
    On your own Windows host, `extract --verify-build` runs VB6 on the
    project that it writes.
+
+4. **A native program gives annotated x86, and not Basic.**
+   `disasm` on a native program prints the x86 instructions of each
+   procedure, with a note for each runtime helper, each string constant and
+   each procedure that it calls. A note gives the idiom that a helper
+   carries out, such as `a & b` for `__vbaStrCat`. The listing is not Basic,
+   and a compiler cannot take it.
 
 ---
 
