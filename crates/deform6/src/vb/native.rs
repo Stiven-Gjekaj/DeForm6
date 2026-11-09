@@ -31,6 +31,11 @@ use iced_x86::{
 
 use crate::read::pe::{ImportName, ImportedFunction, PeImage};
 use crate::read::region::{Off, Region, Va};
+use crate::vb::Report;
+use crate::vb::controlinfo::EventReport;
+use crate::vb::helpers;
+use crate::vb::project::DeclareTable;
+use crate::vb::types::VbTypes;
 
 /// The most instructions that one listing holds.
 ///
@@ -54,6 +59,9 @@ const STUB_LEN: u32 = 13;
 
 /// The opcode of `jmp dword ptr [address]`, the shape of an import thunk.
 const JUMP_THROUGH_ADDRESS: [u8; 2] = [0xFF, 0x25];
+
+/// Where the stub of a `Declare` call holds the address that it pushes.
+const DECLARE_PUSH_AT: u32 = 12;
 
 /// The bytes of the stub of a `Declare` call, after the address of its
 /// cache: `or eax, eax`, `je +2`, `jmp eax`, `push`.
@@ -665,6 +673,141 @@ pub fn disassemble(pe: &PeImage<'_>) -> Listing {
         procedures,
         truncated: walk.truncated,
     }
+}
+
+/// Gives the name of each event handler of a form in `report`, by the
+/// address of the machine code of the handler.
+///
+/// A handler takes the name that Basic gives it, such as `Form1.cmdOK_Click`.
+/// With no name for its event, it takes the index of the slot, such as
+/// `Form1.cmdOK_event3`.
+#[must_use]
+pub fn handler_names(report: &Report) -> BTreeMap<u32, String> {
+    let mut names = BTreeMap::new();
+    for form in &report.forms {
+        for control in &form.controls {
+            let owner = if control.parent.is_some() {
+                control.name.as_str()
+            } else {
+                "Form"
+            };
+            for event in &control.events {
+                let (address, label) = match event {
+                    EventReport::Named {
+                        event_name,
+                        handler_address: Some(address),
+                        ..
+                    } => (*address, event_name.clone()),
+                    EventReport::BoundUnnamed {
+                        index,
+                        handler_address: Some(address),
+                        ..
+                    } => (*address, format!("event{index}")),
+                    _ => continue,
+                };
+                names.insert(address, format!("{}.{owner}_{label}", form.name));
+            }
+        }
+    }
+    names
+}
+
+/// The names that the text of a listing needs.
+pub struct Names<'t> {
+    /// The name of each handler, by its address.
+    pub handlers: BTreeMap<u32, String>,
+    /// The types file, which names an import by its ordinal.
+    pub types: Option<&'t VbTypes>,
+    /// The `Declare` table of the program.
+    pub declares: Option<DeclareTable>,
+}
+
+impl Names<'_> {
+    /// Gives the name of the procedure at `va`.
+    fn procedure(&self, va: Va) -> String {
+        self.handlers
+            .get(&va.get())
+            .cloned()
+            .unwrap_or_else(|| format!("sub_{:08X}", va.get()))
+    }
+
+    /// Gives the text of `note`.
+    fn note(&self, pe: &PeImage<'_>, note: &Note) -> String {
+        match note {
+            Note::Import(function) => match &function.name {
+                ImportName::Name(name) => match helpers::idiom(name) {
+                    Some(idiom) => format!("{name}: {idiom}"),
+                    None => name.clone(),
+                },
+                ImportName::Ordinal(ordinal) => {
+                    match self.types.and_then(|types| types.import(*ordinal)) {
+                        Some(import) => format!("{} (ordinal {ordinal})", import.name),
+                        None => format!("ordinal {ordinal} of {}", function.dll),
+                    }
+                }
+            },
+            Note::Procedure(va) => self.procedure(*va),
+            Note::Declare(stub) => pe
+                .region_at_va(*stub)
+                .and_then(|region| region.va_le(Off::new(DECLARE_PUSH_AT)))
+                .and_then(|descriptor| self.declares.as_ref()?.export_at(pe, descriptor))
+                .map_or_else(
+                    || format!("Declare stub {:08X}", stub.get()),
+                    |export| format!("Declare {export}"),
+                ),
+            Note::Text(text) => format!("{text:?}"),
+        }
+    }
+}
+
+/// Gives the text of `listing`.
+#[must_use]
+pub fn listing_text(pe: &PeImage<'_>, listing: &Listing, names: &Names<'_>) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    for procedure in &listing.procedures {
+        let _ = writeln!(
+            out,
+            "\n{} at {:08X}",
+            names.procedure(procedure.entry),
+            procedure.entry.get()
+        );
+        for line in &procedure.lines {
+            let notes: Vec<String> = line.notes.iter().map(|note| names.note(pe, note)).collect();
+            if notes.is_empty() {
+                let _ = writeln!(out, "  {:08X}  {}", line.va.get(), line.text);
+            } else {
+                let _ = writeln!(
+                    out,
+                    "  {:08X}  {:<36} ; {}",
+                    line.va.get(),
+                    line.text,
+                    notes.join("; ")
+                );
+            }
+        }
+        for jump in &procedure.open_jumps {
+            let _ = writeln!(
+                out,
+                "  {:08X}  this jump goes to an unknown place",
+                jump.get()
+            );
+        }
+        for place in &procedure.undecoded {
+            let _ = writeln!(
+                out,
+                "  {:08X}  these bytes are not an instruction",
+                place.get()
+            );
+        }
+    }
+    if listing.truncated {
+        let _ = writeln!(
+            out,
+            "\nThe listing stops at {MAX_INSTRUCTIONS} instructions."
+        );
+    }
+    out
 }
 
 #[cfg(test)]

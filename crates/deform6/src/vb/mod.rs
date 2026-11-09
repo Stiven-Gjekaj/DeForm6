@@ -26,6 +26,7 @@ pub mod frx;
 pub mod functyp;
 pub mod gui;
 pub mod header;
+pub mod helpers;
 pub mod lift;
 pub mod links;
 pub mod native;

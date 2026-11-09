@@ -504,7 +504,13 @@ fn drive_native_listing(data: &[u8]) {
     let Ok(pe) = deform6::read::pe::PeImage::parse(data) else {
         return;
     };
-    let _ = deform6::vb::native::disassemble(&pe);
+    let listing = deform6::vb::native::disassemble(&pe);
+    let names = deform6::vb::native::Names {
+        handlers: std::collections::BTreeMap::new(),
+        types: None,
+        declares: None,
+    };
+    let _ = deform6::vb::native::listing_text(&pe, &listing, &names);
 }
 
 fn drive_method_tables(data: &[u8]) {
