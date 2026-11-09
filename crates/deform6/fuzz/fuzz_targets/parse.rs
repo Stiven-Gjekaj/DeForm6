@@ -49,12 +49,7 @@ fuzz_target!(|data: &[u8]| {
     // The native walk follows addresses and jump tables that the file gives.
     if let Ok(pe) = deform6::read::pe::PeImage::parse(data) {
         let listing = deform6::vb::native::disassemble(&pe);
-        let names = deform6::vb::native::Names {
-            handlers: std::collections::BTreeMap::new(),
-            methods: deform6::vb::native::object_methods(&pe),
-            types: None,
-            declares: None,
-        };
+        let names = deform6::vb::native::Names::read(&pe, None, None);
         let _ = deform6::vb::native::listing_text(&pe, &listing, &names);
     }
 });

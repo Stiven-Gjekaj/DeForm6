@@ -2056,7 +2056,7 @@ fn expressions(args: Vec<Value>) -> Vec<Expr> {
 
 /// The name that the lift gives the functions at one offset: the first name
 /// that is not the default member, or else the first name.
-fn member_name(function: &TypeFunction) -> String {
+pub(crate) fn member_name(function: &TypeFunction) -> String {
     function
         .names
         .iter()
@@ -2172,7 +2172,7 @@ pub(crate) const CONTROL_ARRAY: &str = "[]";
 /// `MSVBVM60.DLL` 6.0.98.2 holds `Item(Integer, CTL**)` at `0x40`, then
 /// `LBound`, `UBound` and `Count` at `0x44`, `0x48` and `0x4C`. Each of the
 /// last three writes an `Integer`. No type library gives them.
-fn control_array_function(element: &str, vtable_offset: u16) -> Option<TypeFunction> {
+pub(crate) fn control_array_function(element: &str, vtable_offset: u16) -> Option<TypeFunction> {
     let (name, arg_bytes, result_interface) = match vtable_offset {
         0x40 => ("Item", 8, (!element.is_empty()).then(|| element.to_owned())),
         0x44 => ("LBound", 4, None),

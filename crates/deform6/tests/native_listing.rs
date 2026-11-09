@@ -22,8 +22,9 @@ use std::path::{Path, PathBuf};
 
 use deform6::read::pe::{ImportName, PeImage};
 use deform6::vb::helpers::idiom;
-use deform6::vb::native::{Listing, Note, disassemble, handler_names, object_methods};
+use deform6::vb::native::{Listing, Names, Note, disassemble, handler_names, object_methods};
 use deform6::vb::opcodes::OpcodeTable;
+use deform6::vb::types::VbTypes;
 use support::{source, vbp};
 
 /// What one program gives.
@@ -318,6 +319,111 @@ fn each_link_slot_gives_the_place_of_its_procedure_in_the_source() {
         (methods, public, handlers),
         (684, 185, 389),
         "the number of the checked procedures moved"
+    );
+}
+
+/// The default member of a control or of `Err`. A statement can leave the
+/// name out, such as `Text1 = "a"`.
+const DEFAULT_MEMBERS: [&str; 4] = ["Text", "Caption", "Value", "Number"];
+
+/// Gives the types file of this machine, when `derive-vb-types` wrote it.
+fn derived_types() -> Option<VbTypes> {
+    let path = vbp::corpus_root().join("../derived/vb-types.toml");
+    VbTypes::parse(&std::fs::read(path).ok()?).ok()
+}
+
+/// Gives the name that the text of an object call gives: the member at the
+/// end of the text, with no `(get)`.
+fn member_of(text: &str) -> &str {
+    let name = text.rsplit_once('.').map_or(text, |(_, name)| name);
+    name.split(' ').next().unwrap_or(name)
+}
+
+/// The source of the procedure at the place of an object call names the
+/// member that the listing names for the call. A call of a default member
+/// can have no name in the source. The rest of the calls have no name in
+/// the listing, and the test counts them.
+#[test]
+fn each_object_call_names_a_member_that_its_source_procedure_names() {
+    let Some(types) = derived_types() else {
+        println!("no types file in derived/, so this test checks nothing");
+        return;
+    };
+    let table = OpcodeTable::builtin();
+    let projects = vbp::project_files();
+    let (mut total, mut found, mut unnamed) = (0, 0, 0);
+    let mut misses = BTreeSet::<String>::new();
+    for exe in &vbp::executables() {
+        let data = std::fs::read(exe).unwrap();
+        let pe = PeImage::parse(&data).unwrap();
+        let report = deform6::inspect_with_types(
+            &data,
+            &table,
+            Some(&types),
+            deform6::journal::Mode::Strict,
+        )
+        .unwrap();
+        let names = Names::read(&pe, Some(&report), Some(&types));
+        let project_path = vbp::select_project_file(exe, &projects).unwrap();
+        let bodies: BTreeMap<String, Vec<(String, Vec<String>)>> =
+            vbp::Project::read(&project_path)
+                .declared_objects()
+                .into_iter()
+                .filter(|object| object.source_file.is_file())
+                .filter_map(|object| {
+                    let bodies = source::procedure_bodies(&object.source_file);
+                    Some((object.name?, bodies))
+                })
+                .collect();
+        let listing = disassemble(&pe);
+        for procedure in &listing.procedures {
+            let Some(method) = names.methods.get(&procedure.entry.get()) else {
+                continue;
+            };
+            let Some(objects) = bodies.get(&method.object) else {
+                continue;
+            };
+            let (_, lines) = &objects[usize::from(method.index)];
+            let body = lines.join("\n").to_ascii_lowercase();
+            for note in procedure.lines.iter().flat_map(|line| &line.notes) {
+                if !matches!(note, Note::Me(_) | Note::Interface { .. }) {
+                    continue;
+                }
+                let text = names.note(&pe, note, procedure.entry);
+                let member = member_of(&text);
+                if text.contains("vtable offset") || text.contains("public variable") {
+                    unnamed += 1;
+                    continue;
+                }
+                if matches!(member, "AddRef" | "Release" | "QueryInterface" | "Item") {
+                    continue;
+                }
+                total += 1;
+                let word = match member.strip_prefix("proc") {
+                    Some(place) if place.parse::<usize>().is_ok() => objects
+                        [place.parse::<usize>().unwrap()]
+                    .0
+                    .to_ascii_lowercase(),
+                    _ => member.to_ascii_lowercase(),
+                };
+                if body.contains(&word) {
+                    found += 1;
+                } else {
+                    misses.insert(text);
+                }
+            }
+        }
+    }
+    for text in &misses {
+        assert!(
+            DEFAULT_MEMBERS.contains(&member_of(text)),
+            "{text} is in no statement of its procedure"
+        );
+    }
+    assert_eq!(
+        (total, found, unnamed),
+        (4406, 4309, 180),
+        "the object calls moved"
     );
 }
 

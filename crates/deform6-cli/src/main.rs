@@ -51,7 +51,7 @@ use deform6::vb::opcodes::OpcodeTable;
 use deform6::vb::pcode::{PcodeEnd, PcodeInstruction, PcodeTable, disassemble};
 use deform6::vb::privateobj::Gap;
 use deform6::vb::procdesc::{MethodEntry, read_method_table};
-use deform6::vb::project::{Declaration, DeclareTable, ExportName};
+use deform6::vb::project::{Declaration, ExportName};
 use deform6::vb::project::{ObjectTableHead, ProjectInfo};
 use deform6::vb::propstream::PropertyValue;
 use deform6::vb::types::VbTypes;
@@ -538,15 +538,8 @@ fn print_native(
     types: Option<&VbTypes>,
 ) -> Result<(), deform6::Refusal> {
     let pe = PeImage::parse(data)?;
-    let header = VbHeader::read(&header_region(&pe)?)?;
-    let info = ProjectInfo::read(&pe, header.lp_project_data)?;
     let listing = native::disassemble(&pe);
-    let names = native::Names {
-        handlers: native::handler_names(report),
-        methods: native::object_methods(&pe),
-        types,
-        declares: Some(DeclareTable::read(&pe, &info)),
-    };
+    let names = native::Names::read(&pe, Some(report), types);
     println!("Mode         native");
     println!("Procedures   {}", listing.procedures.len());
     println!("These are x86 instructions with notes. They are not Basic statements.");

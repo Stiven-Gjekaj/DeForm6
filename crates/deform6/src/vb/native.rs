@@ -32,14 +32,16 @@ use iced_x86::{
 use crate::read::pe::{ImportName, ImportedFunction, PeImage};
 use crate::read::region::{Off, Region, Va};
 use crate::vb::Report;
+use crate::vb::context::{default_iid, profile};
 use crate::vb::controlinfo::EventReport;
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::helpers;
+use crate::vb::lift::{Callees, control_array_function, member_name};
 use crate::vb::links::{LinkSlot, read_method_links};
 use crate::vb::object::{Object, ObjectTable};
 use crate::vb::privateobj::{ProcNames, Procedure as ProcedureName, ProcedureList};
 use crate::vb::project::{DeclareTable, ObjectTableHead, ProjectInfo};
-use crate::vb::types::{VbTypes, guid_text};
+use crate::vb::types::{TypeFunction, VbTypes, guid_text};
 
 /// The most instructions that one listing holds.
 ///
@@ -1021,19 +1023,160 @@ pub fn object_methods(pe: &PeImage<'_>) -> BTreeMap<u32, ObjectMethod> {
         .collect()
 }
 
+/// What the file gives for one object of the program.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ObjectFacts {
+    /// The name of the object.
+    pub name: String,
+    /// The GUID of the default interface of the object.
+    pub default_iid: Option<[u8; 16]>,
+    /// The members of the object that the file names, by vtable offset.
+    pub callees: Callees,
+    /// The code of each procedure of the object, by vtable offset.
+    pub slots: BTreeMap<u16, u32>,
+}
+
+/// Gives the text of `function`: its name, and how a property goes.
+fn function_text(function: &TypeFunction) -> String {
+    let name = member_name(function);
+    match function.kinds.first().map(String::as_str) {
+        Some(kind @ ("get" | "let" | "set")) => format!("{name} ({kind})"),
+        _ => name,
+    }
+}
+
+/// Gives what the file tells about `object`.
+fn facts_of(pe: &PeImage<'_>, object: &Object, types: Option<&VbTypes>) -> ObjectFacts {
+    let mut slots = BTreeMap::new();
+    let links = read_method_links(pe, object).unwrap_or_default();
+    for (slot, link) in (links.first_slot..).zip(&links.slots) {
+        if let LinkSlot::Native(target) = link
+            && let Some(offset) = slot
+                .checked_mul(4)
+                .and_then(|offset| u16::try_from(offset).ok())
+        {
+            slots.insert(offset, target.get());
+        }
+    }
+    ObjectFacts {
+        name: object.name.clone(),
+        default_iid: default_iid(pe, object),
+        callees: profile(pe, object, types),
+        slots,
+    }
+}
+
 /// The names that the text of a listing needs.
 pub struct Names<'t> {
     /// The name of each handler, by its address.
     pub handlers: BTreeMap<u32, String>,
     /// Each procedure that a link table names, by its address.
     pub methods: BTreeMap<u32, ObjectMethod>,
-    /// The types file, which names an import by its ordinal.
+    /// What the file gives for each object.
+    pub objects: Vec<ObjectFacts>,
+    /// The types file, which names an import by its ordinal and a member
+    /// of an interface by its vtable offset.
     pub types: Option<&'t VbTypes>,
     /// The `Declare` table of the program.
     pub declares: Option<DeclareTable>,
 }
 
-impl Names<'_> {
+impl<'t> Names<'t> {
+    /// Gives the names of `pe`. A caller with no report gives no handler
+    /// name.
+    #[must_use]
+    pub fn read(pe: &PeImage<'_>, report: Option<&Report>, types: Option<&'t VbTypes>) -> Self {
+        let objects = objects_of(pe);
+        let declares = header_region(pe)
+            .ok()
+            .and_then(|region| VbHeader::read(&region).ok())
+            .and_then(|header| ProjectInfo::read(pe, header.lp_project_data).ok())
+            .map(|info| DeclareTable::read(pe, &info));
+        Names {
+            handlers: report.map(handler_names).unwrap_or_default(),
+            methods: object_methods(pe),
+            objects: objects
+                .iter()
+                .map(|object| facts_of(pe, object, types))
+                .collect(),
+            types,
+            declares,
+        }
+    }
+
+    /// Gives the text of the function at `offset` of the interface `name`.
+    fn function_text(&self, name: &str, offset: u16) -> Option<String> {
+        Some(function_text(
+            self.types?.interface(name)?.function(offset)?,
+        ))
+    }
+
+    /// Gives the text of the member at `offset` of `object`, after the name
+    /// `prefix`.
+    fn member_text(&self, object: &ObjectFacts, prefix: &str, offset: u16) -> Option<String> {
+        if let Some((control, _)) = object.callees.control(offset) {
+            return Some(format!("{prefix}.{control}"));
+        }
+        if let Some((field, get)) = object.callees.variable(offset) {
+            let way = if get { "get" } else { "let" };
+            return Some(match object.callees.variable_name(field) {
+                Some(name) => format!("{prefix}.{name} ({way})"),
+                None => format!("{prefix}, public variable at {field:#X} ({way})"),
+            });
+        }
+        if let Some(method) = object
+            .slots
+            .get(&offset)
+            .and_then(|target| self.methods.get(target))
+        {
+            return Some(match &method.name {
+                Some(name) => format!("{prefix}.{name}"),
+                None => format!("{prefix}.proc{}", method.index),
+            });
+        }
+        let base = object.callees.base()?;
+        Some(format!("{prefix}.{}", self.function_text(base, offset)?))
+    }
+
+    /// Gives the text of the member at `offset` of the interface `iid`.
+    fn interface_text(&self, iid: &[u8; 16], offset: u16) -> Option<String> {
+        if *iid == [0; 16] {
+            let function = control_array_function("", offset)?;
+            return Some(format!("control array.{}", function_text(&function)));
+        }
+        if let Some(object) = self
+            .objects
+            .iter()
+            .find(|object| object.default_iid.as_ref() == Some(iid))
+        {
+            return self.member_text(object, &object.name, offset);
+        }
+        let name = self.types?.interface_of_iid(iid)?;
+        Some(format!("{name}.{}", self.function_text(name, offset)?))
+    }
+
+    /// Gives the text of the member at `offset` of the object of the
+    /// procedure at `entry`.
+    fn me_text(&self, entry: Va, offset: u16) -> String {
+        match offset {
+            0 => return "Me.QueryInterface".to_owned(),
+            4 => return "Me.AddRef".to_owned(),
+            8 => return "Me.Release".to_owned(),
+            _ => {}
+        }
+        self.methods
+            .get(&entry.get())
+            .and_then(|method| {
+                let object = self
+                    .objects
+                    .iter()
+                    .find(|object| object.name == method.object)?;
+                self.member_text(object, "Me", offset)
+            })
+            .unwrap_or_else(|| format!("Me, vtable offset {offset:#X}"))
+    }
+
     /// Gives the name of the procedure at `va`.
     fn procedure(&self, va: Va) -> String {
         self.handlers
@@ -1043,8 +1186,9 @@ impl Names<'_> {
             .unwrap_or_else(|| format!("sub_{:08X}", va.get()))
     }
 
-    /// Gives the text of `note`.
-    fn note(&self, pe: &PeImage<'_>, note: &Note) -> String {
+    /// Gives the text of `note`, in the procedure at `entry`.
+    #[must_use]
+    pub fn note(&self, pe: &PeImage<'_>, note: &Note, entry: Va) -> String {
         match note {
             Note::Import(function) => match &function.name {
                 ImportName::Name(name) => match helpers::idiom(name) {
@@ -1068,9 +1212,11 @@ impl Names<'_> {
                     |export| format!("Declare {export}"),
                 ),
             Note::Text(text) => format!("{text:?}"),
-            Note::Me(offset) => format!("Me, vtable offset {offset:#X}"),
+            Note::Me(offset) => self.me_text(entry, *offset),
             Note::Interface { iid, offset } => {
-                format!("interface {}, vtable offset {offset:#X}", guid_text(iid))
+                self.interface_text(iid, *offset).unwrap_or_else(|| {
+                    format!("interface {}, vtable offset {offset:#X}", guid_text(iid))
+                })
             }
         }
     }
@@ -1089,7 +1235,11 @@ pub fn listing_text(pe: &PeImage<'_>, listing: &Listing, names: &Names<'_>) -> S
             procedure.entry.get()
         );
         for line in &procedure.lines {
-            let notes: Vec<String> = line.notes.iter().map(|note| names.note(pe, note)).collect();
+            let notes: Vec<String> = line
+                .notes
+                .iter()
+                .map(|note| names.note(pe, note, procedure.entry))
+                .collect();
             if notes.is_empty() {
                 let _ = writeln!(out, "  {:08X}  {}", line.va.get(), line.text);
             } else {

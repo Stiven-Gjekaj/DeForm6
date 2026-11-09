@@ -221,7 +221,7 @@ const DEFAULT_IID_TABLE_AT: u32 = 0x1C;
 
 /// Gives the GUID of the first default interface of `object`, when it has
 /// an `OptionalObjectInfo` that names one.
-fn default_iid(pe: &PeImage<'_>, object: &Object) -> Option<[u8; 16]> {
+pub(crate) fn default_iid(pe: &PeImage<'_>, object: &Object) -> Option<[u8; 16]> {
     if !has_optional_info(object.f_object_type) {
         return None;
     }
@@ -272,7 +272,7 @@ fn call_class<'a>(
 
 /// Gives the vtable of `object`: its methods and accessors, and its control
 /// accessors when `types` is given.
-fn profile(pe: &PeImage<'_>, object: &Object, types: Option<&VbTypes>) -> Callees {
+pub(crate) fn profile(pe: &PeImage<'_>, object: &Object, types: Option<&VbTypes>) -> Callees {
     let methods = read_method_table(pe, object.lp_object_info).unwrap_or_default();
     let mut callees = read_method_links(pe, object)
         .map(|links| links.callees(&methods))
