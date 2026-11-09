@@ -1005,6 +1005,47 @@ This phase is independent of 10 and 11 and can run beside them.
 
 **Estimate.** 6 to 12 months.
 
+#### Part 1, done on 2026-11-09
+
+**The listing.** `disasm` on a native program now prints each procedure as
+x86 instructions with notes. No P-code table is necessary. The README states
+the limit: the listing is not Basic, and a compiler cannot take it.
+
+**The entries.** The walk starts at each native stub and at each frame
+prologue that installs `__vbaExceptHandler`. A direct call to code adds
+another entry. The walk follows the control flow, the jump table of a `Select
+Case`, and the address that a `push` gives to a later `ret`. A hole inside a
+procedure is an error cleanup block, which only the exception handler
+reaches. The walk decodes a hole only when each byte of it decodes.
+
+**The notes.** A note names each runtime helper, and gives its idiom, such as
+`a & b` for `__vbaStrCat`. A note also gives each string constant, each
+`Declare` export and each called procedure. A helper that the file imports
+by its ordinal takes its name from the types file.
+
+**What it measures,** over the 44 native corpus programs, against the
+source. `tests/native.toml` pins each program:
+
+| Measured | Result |
+|---|---|
+| Procedures that the source declares and the listing holds | 701 of 701 |
+| Procedures that the listing holds | 718 |
+| Instructions | 170239 |
+| Places that do not decode, and jumps with no known target | 0 and 0 |
+| String notes that the source holds as a literal | 1024 of 1026 |
+| Notes of a runtime import | 17443 |
+| Notes of a runtime import with an idiom | 16486 |
+
+The 17 extra procedures and the 2 other strings are in the class
+`cCommonDialog` of `Edge_Detection.exe`, whose source is not in the
+repository.
+
+**What stays open.** The call of a method through an object table has no
+note, such as `call dword ptr [edx+4]`. The walk does not name a local
+variable. A procedure of a standard module has no name. The text of an idiom
+comes from what the runtime is known to do, and no test compares an idiom
+with a statement of the source. The notes do not join into statements.
+
 ### Phase 13: The workflow
 
 **Goal.** One documented path from a compiled program to a rebuilt one.
