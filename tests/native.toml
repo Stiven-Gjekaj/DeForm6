@@ -18,6 +18,9 @@
 #
 # `checked_calls` is the count of object calls that a check block names. The
 # corpus holds 3094 calls of `__vbaHresultCheckObj`, and each one names a call.
+#
+# `me_calls` is the count of calls through the vtable of the object of the
+# procedure.
 
 [program."public-domain/HexScroll/Hex Scroll.exe"]
 procedures = 23
@@ -28,6 +31,7 @@ strings_in_source = 14
 runtime_calls = 413
 idioms = 367
 checked_calls = 80
+me_calls = 106
 
 [program."public-domain/LockWorkStation/LockWorkStation.exe"]
 procedures = 1
@@ -38,6 +42,7 @@ strings_in_source = 1
 runtime_calls = 7
 idioms = 6
 checked_calls = 0
+me_calls = 2
 
 [program."public-domain/PassGen/PassGen.exe"]
 procedures = 83
@@ -48,6 +53,7 @@ strings_in_source = 290
 runtime_calls = 2852
 idioms = 2699
 checked_calls = 553
+me_calls = 476
 
 [program."public-domain/SK-Gradient-Sample__VB6/demo/Project1.exe"]
 procedures = 3
@@ -58,6 +64,7 @@ strings_in_source = 0
 runtime_calls = 54
 idioms = 47
 checked_calls = 0
+me_calls = 3
 
 [program."public-domain/SK-MCI-Sample__VB6/demo/Project1.exe"]
 procedures = 21
@@ -68,6 +75,7 @@ strings_in_source = 64
 runtime_calls = 655
 idioms = 597
 checked_calls = 70
+me_calls = 85
 
 [program."public-domain/SK-TFTP-Sample__VB6/Client/demo/TFTPClient.exe"]
 procedures = 15
@@ -78,6 +86,7 @@ strings_in_source = 26
 runtime_calls = 260
 idioms = 237
 checked_calls = 24
+me_calls = 51
 
 [program."public-domain/SK-TFTP-Sample__VB6/Server/demo/Server.exe"]
 procedures = 6
@@ -88,6 +97,7 @@ strings_in_source = 12
 runtime_calls = 141
 idioms = 132
 checked_calls = 19
+me_calls = 27
 
 [program."public-domain/SK-Winsock-Sample__VB6/demo/SubReality_WinsockSample.exe"]
 procedures = 5
@@ -98,6 +108,7 @@ strings_in_source = 3
 runtime_calls = 95
 idioms = 94
 checked_calls = 14
+me_calls = 30
 
 [program."public-domain/UUID2/VB6/UUID2.exe"]
 procedures = 25
@@ -108,6 +119,7 @@ strings_in_source = 46
 runtime_calls = 630
 idioms = 557
 checked_calls = 79
+me_calls = 82
 
 [program."public-domain/dump/VB6/rot47/Rot47.exe"]
 procedures = 10
@@ -118,6 +130,7 @@ strings_in_source = 3
 runtime_calls = 97
 idioms = 90
 checked_calls = 16
+me_calls = 25
 
 [program."public-domain/machineLanguageConversion/ASCII/Ascii.exe"]
 procedures = 6
@@ -128,6 +141,7 @@ strings_in_source = 1
 runtime_calls = 61
 idioms = 58
 checked_calls = 8
+me_calls = 18
 
 [program."public-domain/machineLanguageConversion/Hex/Hex.exe"]
 procedures = 7
@@ -138,6 +152,7 @@ strings_in_source = 2
 runtime_calls = 74
 idioms = 70
 checked_calls = 11
+me_calls = 22
 
 [program."public-domain/machineLanguageConversion/Octal/Octal.exe"]
 procedures = 6
@@ -148,6 +163,7 @@ strings_in_source = 1
 runtime_calls = 55
 idioms = 51
 checked_calls = 7
+me_calls = 17
 
 [program."vb6-code/Artificial-life/Artificial Life.exe"]
 procedures = 33
@@ -158,6 +174,7 @@ strings_in_source = 73
 runtime_calls = 824
 idioms = 776
 checked_calls = 166
+me_calls = 106
 
 [program."vb6-code/Blacklight-effect/Blacklight.exe"]
 procedures = 14
@@ -168,6 +185,7 @@ strings_in_source = 13
 runtime_calls = 332
 idioms = 314
 checked_calls = 56
+me_calls = 44
 
 [program."vb6-code/Brightness-effect/Part 1 - Pure VB6/vbBrightness.exe"]
 procedures = 7
@@ -178,6 +196,7 @@ strings_in_source = 0
 runtime_calls = 47
 idioms = 45
 checked_calls = 16
+me_calls = 19
 
 [program."vb6-code/Brightness-effect/Part 2 - API - GetPixel and SetPixel/apiBrightness.exe"]
 procedures = 7
@@ -188,6 +207,7 @@ strings_in_source = 0
 runtime_calls = 49
 idioms = 47
 checked_calls = 18
+me_calls = 19
 
 [program."vb6-code/Brightness-effect/Part 4 - Even faster DIBs/Realtime_Brightness.exe"]
 procedures = 15
@@ -198,6 +218,7 @@ strings_in_source = 0
 runtime_calls = 257
 idioms = 254
 checked_calls = 59
+me_calls = 44
 
 [program."vb6-code/Color-shift-effect/ColorShift.exe"]
 procedures = 12
@@ -208,6 +229,7 @@ strings_in_source = 13
 runtime_calls = 331
 idioms = 313
 checked_calls = 54
+me_calls = 35
 
 [program."vb6-code/Colorize-effect/Colorize.exe"]
 procedures = 22
@@ -218,6 +240,7 @@ strings_in_source = 15
 runtime_calls = 396
 idioms = 377
 checked_calls = 73
+me_calls = 76
 
 [program."vb6-code/Contrast-effect/Contrast.exe"]
 procedures = 13
@@ -228,6 +251,7 @@ strings_in_source = 13
 runtime_calls = 334
 idioms = 316
 checked_calls = 56
+me_calls = 38
 
 [program."vb6-code/Curves-effect/Curves.exe"]
 procedures = 19
@@ -238,6 +262,7 @@ strings_in_source = 20
 runtime_calls = 487
 idioms = 463
 checked_calls = 76
+me_calls = 66
 
 [program."vb6-code/Custom-image-filters/Custom_Filters.exe"]
 procedures = 20
@@ -248,6 +273,7 @@ strings_in_source = 21
 runtime_calls = 781
 idioms = 758
 checked_calls = 172
+me_calls = 130
 
 [program."vb6-code/Diffuse-effect/Diffuse.exe"]
 procedures = 18
@@ -258,6 +284,7 @@ strings_in_source = 17
 runtime_calls = 436
 idioms = 414
 checked_calls = 75
+me_calls = 74
 
 [program."vb6-code/Edge-detection/Edge_Detection.exe"]
 procedures = 30
@@ -268,6 +295,7 @@ strings_in_source = 108
 runtime_calls = 813
 idioms = 775
 checked_calls = 88
+me_calls = 91
 
 [program."vb6-code/Emboss-engrave-effect/Emboss_Engrave.exe"]
 procedures = 24
@@ -278,6 +306,7 @@ strings_in_source = 13
 runtime_calls = 462
 idioms = 442
 checked_calls = 101
+me_calls = 86
 
 [program."vb6-code/Fill-image-region/Filling.exe"]
 procedures = 3
@@ -288,6 +317,7 @@ strings_in_source = 0
 runtime_calls = 36
 idioms = 30
 checked_calls = 4
+me_calls = 10
 
 [program."vb6-code/Fire-effect/Fast_Flames.exe"]
 procedures = 9
@@ -298,6 +328,7 @@ strings_in_source = 1
 runtime_calls = 161
 idioms = 154
 checked_calls = 28
+me_calls = 33
 
 [program."vb6-code/Game-physics-basic/Physics_Demo.exe"]
 procedures = 12
@@ -308,6 +339,7 @@ strings_in_source = 1
 runtime_calls = 204
 idioms = 193
 checked_calls = 39
+me_calls = 25
 
 [program."vb6-code/Gradient-2D/Gradient.exe"]
 procedures = 9
@@ -318,6 +350,7 @@ strings_in_source = 2
 runtime_calls = 200
 idioms = 178
 checked_calls = 43
+me_calls = 47
 
 [program."vb6-code/Grayscale-effect/Grayscale.exe"]
 procedures = 26
@@ -328,6 +361,7 @@ strings_in_source = 20
 runtime_calls = 594
 idioms = 576
 checked_calls = 133
+me_calls = 132
 
 [program."vb6-code/Hidden-Markov-model/HMM.exe"]
 procedures = 8
@@ -338,6 +372,7 @@ strings_in_source = 64
 runtime_calls = 610
 idioms = 573
 checked_calls = 73
+me_calls = 80
 
 [program."vb6-code/Histograms-advanced/Advanced Histogram Viewer.exe"]
 procedures = 29
@@ -348,6 +383,7 @@ strings_in_source = 20
 runtime_calls = 619
 idioms = 593
 checked_calls = 108
+me_calls = 95
 
 [program."vb6-code/Histograms-basic/Basic Histogram Viewer.exe"]
 procedures = 18
@@ -358,6 +394,7 @@ strings_in_source = 20
 runtime_calls = 481
 idioms = 455
 checked_calls = 86
+me_calls = 73
 
 [program."vb6-code/Levels-effect/Image Levels.exe"]
 procedures = 34
@@ -368,6 +405,7 @@ strings_in_source = 20
 runtime_calls = 686
 idioms = 659
 checked_calls = 137
+me_calls = 171
 
 [program."vb6-code/Mandelbrot/Mandelbrot.exe"]
 procedures = 8
@@ -378,6 +416,7 @@ strings_in_source = 6
 runtime_calls = 223
 idioms = 217
 checked_calls = 53
+me_calls = 67
 
 [program."vb6-code/Map-editor-2D/Map Editor.exe"]
 procedures = 31
@@ -388,6 +427,7 @@ strings_in_source = 17
 runtime_calls = 594
 idioms = 571
 checked_calls = 96
+me_calls = 70
 
 [program."vb6-code/Nature-effects/Nature_Filters.exe"]
 procedures = 26
@@ -398,6 +438,7 @@ strings_in_source = 22
 runtime_calls = 507
 idioms = 489
 checked_calls = 121
+me_calls = 92
 
 [program."vb6-code/Randomize-effects/RandomizationFX.exe"]
 procedures = 20
@@ -408,6 +449,7 @@ strings_in_source = 13
 runtime_calls = 591
 idioms = 547
 checked_calls = 105
+me_calls = 59
 
 [program."vb6-code/Scanner-TWAIN/VB_Scanner_Support.exe"]
 procedures = 4
@@ -418,6 +460,7 @@ strings_in_source = 23
 runtime_calls = 142
 idioms = 136
 checked_calls = 25
+me_calls = 9
 
 [program."vb6-code/Screen-capture/ScreenCapture.exe"]
 procedures = 1
@@ -428,6 +471,7 @@ strings_in_source = 0
 runtime_calls = 36
 idioms = 36
 checked_calls = 13
+me_calls = 2
 
 [program."vb6-code/Sepia-effect/Sepia.exe"]
 procedures = 12
@@ -438,6 +482,7 @@ strings_in_source = 13
 runtime_calls = 333
 idioms = 315
 checked_calls = 53
+me_calls = 34
 
 [program."vb6-code/Threshold-effect/Threshold.exe"]
 procedures = 15
@@ -448,6 +493,7 @@ strings_in_source = 13
 runtime_calls = 352
 idioms = 334
 checked_calls = 59
+me_calls = 49
 
 [program."vb6-code/Transparency-2D/Transparency.exe"]
 procedures = 8
@@ -458,3 +504,4 @@ strings_in_source = 0
 runtime_calls = 131
 idioms = 131
 checked_calls = 27
+me_calls = 28

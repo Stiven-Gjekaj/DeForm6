@@ -45,6 +45,8 @@ struct Measure {
     idioms: usize,
     /// The object calls that a check block names.
     checked_calls: usize,
+    /// The calls through the vtable of the object of the procedure.
+    me_calls: usize,
 }
 
 /// Gives the source text of each object of the project of `exe`, and the
@@ -88,6 +90,7 @@ fn measure(exe: &Path, listing: &Listing, text: &str, declared: usize) -> Measur
         runtime_calls: 0,
         idioms: 0,
         checked_calls: 0,
+        me_calls: 0,
     };
     assert!(!listing.truncated, "{}: truncated", exe.display());
     for procedure in &listing.procedures {
@@ -118,6 +121,7 @@ fn measure(exe: &Path, listing: &Listing, text: &str, declared: usize) -> Measur
                     }
                 }
                 Note::Interface { .. } => result.checked_calls += 1,
+                Note::Me(_) => result.me_calls += 1,
                 _ => {}
             }
         }
@@ -162,7 +166,7 @@ fn each_native_program_gives_the_pinned_listing_with_no_fault() {
         let key = key_of(exe);
         if print {
             println!(
-                "[program.\"{key}\"]\nprocedures = {}\ndeclared = {}\ninstructions = {}\nstrings = {}\nstrings_in_source = {}\nruntime_calls = {}\nidioms = {}\nchecked_calls = {}\n",
+                "[program.\"{key}\"]\nprocedures = {}\ndeclared = {}\ninstructions = {}\nstrings = {}\nstrings_in_source = {}\nruntime_calls = {}\nidioms = {}\nchecked_calls = {}\nme_calls = {}\n",
                 got.procedures,
                 got.declared,
                 got.instructions,
@@ -170,7 +174,8 @@ fn each_native_program_gives_the_pinned_listing_with_no_fault() {
                 got.strings_in_source,
                 got.runtime_calls,
                 got.idioms,
-                got.checked_calls
+                got.checked_calls,
+                got.me_calls
             );
             continue;
         }
@@ -189,6 +194,7 @@ fn each_native_program_gives_the_pinned_listing_with_no_fault() {
             runtime_calls: number("runtime_calls"),
             idioms: number("idioms"),
             checked_calls: number("checked_calls"),
+            me_calls: number("me_calls"),
         };
         if got != want {
             failures.push(format!("{key}: pinned {want:?}, now {got:?}"));

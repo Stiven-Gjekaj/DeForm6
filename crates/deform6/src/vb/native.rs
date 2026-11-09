@@ -77,6 +77,9 @@ const CHECK_OBJECT: &str = "__vbaHresultCheckObj";
 /// How many instructions before a check block the search goes.
 const MAX_CHECK_REACH: usize = 64;
 
+/// Where a procedure of an object finds the object in its frame.
+const ME_ARGUMENT_AT: u32 = 8;
+
 /// The name of the exception handler of the runtime.
 const EXCEPTION_HANDLER: &str = "__vbaExceptHandler";
 
@@ -100,6 +103,9 @@ pub enum Note {
         /// The vtable offset of the member.
         offset: u16,
     },
+    /// The instruction calls a member of the object of the procedure, at
+    /// this vtable offset.
+    Me(u16),
 }
 
 /// One decoded instruction.
@@ -277,6 +283,9 @@ struct Walk<'p, 'a> {
     truncated: bool,
     /// The number of jump table entries that the walk may still read.
     table_budget: u32,
+    /// Each entry that is a procedure of an object, so that its first
+    /// argument is the object.
+    methods: BTreeSet<u32>,
 }
 
 impl Walk<'_, '_> {
@@ -491,11 +500,17 @@ impl Walk<'_, '_> {
     /// register after that. A `call` of a register takes the note of the
     /// last `mov` that loaded the helper, while no other instruction writes
     /// that register.
-    fn render(&self, seen: &BTreeMap<u32, Instruction>) -> Vec<Line> {
+    ///
+    /// A call through a register that holds the vtable of the object of the
+    /// procedure takes the note of that slot. The tracking reads the
+    /// instructions in the order of their addresses.
+    fn render(&self, seen: &BTreeMap<u32, Instruction>, entry: u32) -> Vec<Line> {
         let mut formatter = IntelFormatter::new();
         let mut info = InstructionInfoFactory::new();
         let mut loaded: BTreeMap<Register, ImportedFunction> = BTreeMap::new();
         let mut lines = Vec::with_capacity(seen.len());
+        let mut me = MeTracker::default();
+        let in_method = self.methods.contains(&entry);
         for (at, instruction) in seen {
             let mut text = String::new();
             formatter.format(instruction, &mut text);
@@ -506,6 +521,10 @@ impl Walk<'_, '_> {
             {
                 notes.push(Note::Import(function.clone()));
             }
+            if in_method && let Some(offset) = me.slot_of(instruction) {
+                notes.push(Note::Me(offset));
+            }
+            let copied_object = me.copy_target(instruction);
             for used in info.info(instruction).used_registers() {
                 if matches!(
                     used.access(),
@@ -515,7 +534,14 @@ impl Walk<'_, '_> {
                         | OpAccess::ReadCondWrite
                 ) {
                     loaded.remove(&used.register().full_register32());
+                    if !clears_the_low_bit(instruction) {
+                        me.forget(used.register().full_register32());
+                    }
                 }
+            }
+            me.learn(instruction);
+            if let Some(register) = copied_object {
+                me.objects.insert(register);
             }
             if instruction.mnemonic() == Mnemonic::Mov
                 && instruction.op0_kind() == OpKind::Register
@@ -554,6 +580,7 @@ impl Walk<'_, '_> {
             if let Some((at, note)) = self.checked_call(instructions, check)
                 && let Some(line) = lines.get_mut(at)
             {
+                line.notes.retain(|old| !matches!(old, Note::Me(_)));
                 line.notes.push(note);
             }
         }
@@ -700,7 +727,7 @@ impl Walk<'_, '_> {
             }
         }
         self.fill_holes(&mut seen, &tables, &mut found);
-        let lines = self.render(&seen);
+        let lines = self.render(&seen, entry);
         (
             Procedure {
                 entry: Va::new(entry),
@@ -711,6 +738,87 @@ impl Walk<'_, '_> {
             found,
         )
     }
+}
+
+/// The registers that hold the object of a procedure, or its vtable.
+#[derive(Default)]
+struct MeTracker {
+    /// Each register that holds the object.
+    objects: BTreeSet<Register>,
+    /// Each register that holds the vtable of the object.
+    vtables: BTreeSet<Register>,
+}
+
+impl MeTracker {
+    /// Gives the vtable offset when `instruction` calls through the vtable
+    /// of the object.
+    fn slot_of(&self, instruction: &Instruction) -> Option<u16> {
+        (instruction.flow_control() == FlowControl::IndirectCall
+            && instruction.op0_kind() == OpKind::Memory
+            && instruction.memory_index() == Register::None
+            && self.vtables.contains(&instruction.memory_base()))
+        .then(|| u16::try_from(instruction.memory_displacement32()).ok())
+        .flatten()
+    }
+
+    /// Gives the target when `instruction` copies the object to a register.
+    fn copy_target(&self, instruction: &Instruction) -> Option<Register> {
+        (instruction.mnemonic() == Mnemonic::Mov
+            && instruction.op0_kind() == OpKind::Register
+            && instruction.op1_kind() == OpKind::Register
+            && self.objects.contains(&instruction.op1_register()))
+        .then(|| instruction.op0_register())
+    }
+
+    /// Forgets what `register` held.
+    fn forget(&mut self, register: Register) {
+        self.objects.remove(&register);
+        self.vtables.remove(&register);
+    }
+
+    /// Records what `instruction` puts in a register. A call leaves no
+    /// value in the three registers that a callee can change.
+    fn learn(&mut self, instruction: &Instruction) {
+        if matches!(
+            instruction.flow_control(),
+            FlowControl::Call | FlowControl::IndirectCall
+        ) {
+            for register in [Register::EAX, Register::ECX, Register::EDX] {
+                self.forget(register);
+            }
+            return;
+        }
+        if instruction.code() != Code::Mov_r32_rm32 || instruction.op1_kind() != OpKind::Memory {
+            return;
+        }
+        let base = instruction.memory_base();
+        let offset = instruction.memory_displacement32();
+        if instruction.memory_index() != Register::None {
+            return;
+        }
+        if base == Register::EBP && offset == ME_ARGUMENT_AT {
+            self.objects.insert(instruction.op0_register());
+        } else if offset == 0 && self.objects.contains(&base) {
+            self.vtables.insert(instruction.op0_register());
+        }
+    }
+}
+
+/// Tells whether `instruction` clears only the low bit of a register.
+///
+/// The first argument of a procedure of an object holds a flag in its low
+/// bit, and the compiler clears the bit to get the object.
+fn clears_the_low_bit(instruction: &Instruction) -> bool {
+    instruction.mnemonic() == Mnemonic::And
+        && instruction.op0_kind() == OpKind::Register
+        && match (
+            instruction.op0_register().size(),
+            instruction.try_immediate(1),
+        ) {
+            (1, Ok(value)) => value == 0xFE,
+            (4, Ok(value)) => value & 0xFFFF_FFFF == 0xFFFF_FFFE,
+            _ => false,
+        }
 }
 
 /// Tells whether `note` names the helper that checks an object call.
@@ -760,6 +868,7 @@ pub fn disassemble(pe: &PeImage<'_>) -> Listing {
         decoded: 0,
         truncated: false,
         table_budget: MAX_TABLE_READS,
+        methods: object_methods(pe).into_keys().collect(),
     };
     let mut procedures = Vec::new();
     while let Some(entry) = work.pop() {
@@ -959,6 +1068,7 @@ impl Names<'_> {
                     |export| format!("Declare {export}"),
                 ),
             Note::Text(text) => format!("{text:?}"),
+            Note::Me(offset) => format!("Me, vtable offset {offset:#X}"),
             Note::Interface { iid, offset } => {
                 format!("interface {}, vtable offset {offset:#X}", guid_text(iid))
             }
