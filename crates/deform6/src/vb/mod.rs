@@ -28,6 +28,7 @@ pub mod gui;
 pub mod header;
 pub mod lift;
 pub mod links;
+pub mod native;
 pub mod object;
 pub mod ocx;
 pub mod opcodes;

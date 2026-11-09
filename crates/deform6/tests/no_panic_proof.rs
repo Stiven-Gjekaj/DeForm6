@@ -493,11 +493,20 @@ fn drive_one(source: &str, path: &Path, opcode_table: &OpcodeTable) {
     // native or P-code, so it meets bytes that are not a method table too.
     println!("no_panic_proof: {source} {} procdesc", path.display());
     drive_method_tables(&data);
+    drive_native_listing(&data);
 }
 
 /// Reads the method table of each object that the public walk reaches, the
 /// body of each descriptor, and the method link table. A step that refuses ends the walk for this
 /// input; nothing is asserted about the results.
+/// Drives the native walk and its text, so that the proof covers them.
+fn drive_native_listing(data: &[u8]) {
+    let Ok(pe) = deform6::read::pe::PeImage::parse(data) else {
+        return;
+    };
+    let _ = deform6::vb::native::disassemble(&pe);
+}
+
 fn drive_method_tables(data: &[u8]) {
     let Ok(pe) = PeImage::parse(data) else {
         return;

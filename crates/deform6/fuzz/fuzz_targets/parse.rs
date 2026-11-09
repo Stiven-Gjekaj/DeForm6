@@ -45,4 +45,9 @@ fuzz_target!(|data: &[u8]| {
     // Fidelity: the second walk takes the same untrusted bytes through its
     // own resolution of the chain, and it is public.
     let _ = deform6::fidelity::walk::walk(data);
+
+    // The native walk follows addresses and jump tables that the file gives.
+    if let Ok(pe) = deform6::read::pe::PeImage::parse(data) {
+        let _ = deform6::vb::native::disassemble(&pe);
+    }
 });
