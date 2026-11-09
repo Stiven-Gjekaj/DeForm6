@@ -36,6 +36,11 @@ shipped binary. The tables name that difference where it changes a decision.
 | Fuzzing | `cargo-fuzz` plus `libfuzzer-sys` | 0.13.2 / 0.4.13 | dev only | `afl.rs`, `proptest`, `arbitrary` |
 | CLI | `clap`, default features off | 4.6.6 | 6 | `clap` default (17), `argh`, `lexopt`, `pico-args` |
 | Differential harness | Plain `#[test]` plus a pinned ratio file | n/a | 0 | `insta`, `expect-test` |
+| x86 decoding, Phase 12 | `iced-x86`, default features off | 1.21.0 | 2 | Hand-written decoder |
+
+`iced-x86` entered the library on 2026-11-09, for the native listing. It adds
+`iced-x86` and `lazy_static`. It is the version that `xtask` already pinned.
+The totals below are from 2026-09-07 and do not count it.
 
 ## The measured total
 
