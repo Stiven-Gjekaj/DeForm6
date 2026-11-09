@@ -39,7 +39,7 @@ use crate::vb::links::{LinkSlot, read_method_links};
 use crate::vb::object::{Object, ObjectTable};
 use crate::vb::privateobj::{ProcNames, Procedure as ProcedureName, ProcedureList};
 use crate::vb::project::{DeclareTable, ObjectTableHead, ProjectInfo};
-use crate::vb::types::VbTypes;
+use crate::vb::types::{VbTypes, guid_text};
 
 /// The most instructions that one listing holds.
 ///
@@ -71,6 +71,12 @@ const DECLARE_PUSH_AT: u32 = 12;
 /// cache: `or eax, eax`, `je +2`, `jmp eax`, `push`.
 const DECLARE_TAIL: [u8; 7] = [0x0B, 0xC0, 0x74, 0x02, 0xFF, 0xE0, 0x68];
 
+/// The name of the helper that raises the error of a failed object call.
+const CHECK_OBJECT: &str = "__vbaHresultCheckObj";
+
+/// How many instructions before a check block the search goes.
+const MAX_CHECK_REACH: usize = 64;
+
 /// The name of the exception handler of the runtime.
 const EXCEPTION_HANDLER: &str = "__vbaExceptHandler";
 
@@ -86,6 +92,14 @@ pub enum Note {
     Declare(Va),
     /// An operand is the address of this string constant.
     Text(String),
+    /// The instruction calls a member of an object, and the check block
+    /// after the call names the interface and the vtable offset.
+    Interface {
+        /// The GUID of the interface.
+        iid: [u8; 16],
+        /// The vtable offset of the member.
+        offset: u16,
+    },
 }
 
 /// One decoded instruction.
@@ -519,7 +533,67 @@ impl Walk<'_, '_> {
                 notes,
             });
         }
+        let instructions: Vec<Instruction> = seen.values().copied().collect();
+        self.note_checked_calls(&instructions, &mut lines);
         lines
+    }
+
+    /// Adds the note of each object call that a check block names.
+    fn note_checked_calls(&self, instructions: &[Instruction], lines: &mut [Line]) {
+        let checks: Vec<usize> = lines
+            .iter()
+            .zip(instructions)
+            .enumerate()
+            .filter(|(_, (line, instruction))| {
+                instruction.flow_control() == FlowControl::IndirectCall
+                    && line.notes.iter().any(is_object_check)
+            })
+            .map(|(at, _)| at)
+            .collect();
+        for check in checks {
+            if let Some((at, note)) = self.checked_call(instructions, check)
+                && let Some(line) = lines.get_mut(at)
+            {
+                line.notes.push(note);
+            }
+        }
+    }
+
+    /// Gives the call that the check at index `check` belongs to, and its
+    /// note.
+    ///
+    /// The compiler gives the helper four values: the offset, the address
+    /// of the GUID, the object and the result. The call is the last one
+    /// before them that goes through that offset of a vtable.
+    fn checked_call(&self, instructions: &[Instruction], check: usize) -> Option<(usize, Note)> {
+        let before = instructions.get(..check)?;
+        let mut pushes = before
+            .iter()
+            .enumerate()
+            .rev()
+            .take(MAX_CHECK_REACH)
+            .filter(|(_, instruction)| instruction.mnemonic() == Mnemonic::Push);
+        pushes.next()?;
+        pushes.next()?;
+        let (_, iid) = pushes.next()?;
+        let (first, offset) = pushes.next()?;
+        let iid = pushed_value(iid)?;
+        let offset = pushed_value(offset)?;
+        let iid: [u8; 16] = self
+            .pe
+            .region_at_va(Va::new(iid))?
+            .take(Off::new(0), 16)?
+            .try_into()
+            .ok()?;
+        let (at, _) = before
+            .get(..first)?
+            .iter()
+            .enumerate()
+            .rev()
+            .take(MAX_CHECK_REACH)
+            .find(|(_, instruction)| calls_vtable_slot(instruction, offset))?;
+        let offset = u16::try_from(offset).ok()?;
+        Some((at, Note::Interface { iid, offset }))
     }
 
     /// Walks the procedure at `entry`, and gives each new entry that its
@@ -637,6 +711,30 @@ impl Walk<'_, '_> {
             found,
         )
     }
+}
+
+/// Tells whether `note` names the helper that checks an object call.
+fn is_object_check(note: &Note) -> bool {
+    matches!(note, Note::Import(function)
+        if function.name == ImportName::Name(CHECK_OBJECT.to_owned()))
+}
+
+/// Gives the value of a `push` of a constant.
+fn pushed_value(instruction: &Instruction) -> Option<u32> {
+    matches!(instruction.code(), Code::Pushd_imm32 | Code::Pushd_imm8)
+        .then(|| instruction.try_immediate(0).ok())
+        .flatten()
+        .and_then(|value| u32::try_from(value).ok())
+}
+
+/// Tells whether `instruction` calls through the vtable slot at `offset`:
+/// `call dword ptr [reg+offset]`.
+fn calls_vtable_slot(instruction: &Instruction, offset: u32) -> bool {
+    instruction.flow_control() == FlowControl::IndirectCall
+        && instruction.op0_kind() == OpKind::Memory
+        && instruction.memory_base() != Register::None
+        && instruction.memory_index() == Register::None
+        && instruction.memory_displacement32() == offset
 }
 
 /// Gives the limit of a compare when it is a small value that is not
@@ -861,6 +959,9 @@ impl Names<'_> {
                     |export| format!("Declare {export}"),
                 ),
             Note::Text(text) => format!("{text:?}"),
+            Note::Interface { iid, offset } => {
+                format!("interface {}, vtable offset {offset:#X}", guid_text(iid))
+            }
         }
     }
 }
