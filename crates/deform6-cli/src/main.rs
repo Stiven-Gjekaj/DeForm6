@@ -44,13 +44,14 @@ use deform6::vb::controlinfo::EventReport;
 use deform6::vb::controltree::ControlKind;
 use deform6::vb::functyp::{Argument, DefaultValue, Prototype, TypeEntry, VbType};
 use deform6::vb::header::{VbHeader, header_region};
+use deform6::vb::native;
 use deform6::vb::object::ObjectTable;
 use deform6::vb::ocx::{Clsid, ExternalControl, OcxHeader};
 use deform6::vb::opcodes::OpcodeTable;
 use deform6::vb::pcode::{PcodeEnd, PcodeInstruction, PcodeTable, disassemble};
 use deform6::vb::privateobj::Gap;
 use deform6::vb::procdesc::{MethodEntry, read_method_table};
-use deform6::vb::project::{Declaration, ExportName};
+use deform6::vb::project::{Declaration, DeclareTable, ExportName};
 use deform6::vb::project::{ObjectTableHead, ProjectInfo};
 use deform6::vb::propstream::PropertyValue;
 use deform6::vb::types::VbTypes;
@@ -105,16 +106,18 @@ enum Command {
         vb_types: Option<PathBuf>,
     },
 
-    /// Reads one P-code executable and prints the P-code of each procedure,
-    /// decoded with a table that `cargo run -p xtask --
-    /// derive-pcode-table` wrote from a runtime that you own.
+    /// Reads one executable and prints each procedure. A P-code program
+    /// needs a table that `cargo run -p xtask -- derive-pcode-table` wrote
+    /// from a runtime that you own. A native program gives x86 instructions
+    /// with notes, and not Basic statements.
     Disasm {
         /// The executable to read.
         input: PathBuf,
 
-        /// The P-code table. This repository does not ship one.
+        /// The P-code table. This repository does not ship one. A P-code
+        /// program needs it, and a native program does not.
         #[arg(long)]
-        pcode_table: PathBuf,
+        pcode_table: Option<PathBuf>,
 
         /// Prints each procedure as statements where the lift succeeds, and
         /// as the listing with the reason where it does not. The statements
@@ -303,7 +306,7 @@ fn run(cli: &Cli) -> Exit {
             pcode_table,
             lift,
             vb_types,
-        } => run_disasm(input, pcode_table, *lift, vb_types.as_deref()),
+        } => run_disasm(input, pcode_table.as_deref(), *lift, vb_types.as_deref()),
         Command::Extract {
             input,
             output,
@@ -464,8 +467,13 @@ fn load_opcode_table(opcode_table_path: Option<&Path>) -> Result<(OpcodeTable, S
 /// refuses gets the same exit code as from `inspect`. A native program holds
 /// no P-code: the command says so and exits with 0. A table that cannot be
 /// read is [`Exit::Internal`], as a bad `--opcode-table` is.
-fn run_disasm(path: &Path, table_path: &Path, lift: bool, types_path: Option<&Path>) -> Exit {
-    let table = match load_pcode_table(table_path) {
+fn run_disasm(
+    path: &Path,
+    table_path: Option<&Path>,
+    lift: bool,
+    types_path: Option<&Path>,
+) -> Exit {
+    let table = match table_path.map(load_pcode_table).transpose() {
         Ok(table) => table,
         Err(exit) => return exit,
     };
@@ -492,18 +500,27 @@ fn run_disasm(path: &Path, table_path: &Path, lift: bool, types_path: Option<&Pa
         }
     };
     println!("File         {}", path.display());
+    if let Some(types_path) = types_path {
+        println!("VB types     {}", types_path.display());
+    }
+    if report.native {
+        return match print_native(&data, &report, types.as_ref()) {
+            Ok(()) => Exit::Ok,
+            Err(refusal) => {
+                eprintln!("{refusal}");
+                exit_for(refusal)
+            }
+        };
+    }
+    let (Some(table), Some(table_path)) = (table, table_path) else {
+        eprintln!("this program is P-code, so disasm needs --pcode-table; {DERIVE_PCODE_TABLE}");
+        return Exit::Internal;
+    };
     println!(
         "P-code table {}, {} slots",
         table_path.display(),
         table.len()
     );
-    if let Some(types_path) = types_path {
-        println!("VB types     {}", types_path.display());
-    }
-    if report.native {
-        println!("This program is native code, and it holds no P-code.");
-        return Exit::Ok;
-    }
     match print_pcode(&data, &table, types.as_ref(), lift) {
         Ok(()) => Exit::Ok,
         Err(refusal) => {
@@ -511,6 +528,28 @@ fn run_disasm(path: &Path, table_path: &Path, lift: bool, types_path: Option<&Pa
             exit_for(refusal)
         }
     }
+}
+
+/// Prints the annotated x86 of each procedure of a native program.
+fn print_native(
+    data: &[u8],
+    report: &deform6::vb::Report,
+    types: Option<&VbTypes>,
+) -> Result<(), deform6::Refusal> {
+    let pe = PeImage::parse(data)?;
+    let header = VbHeader::read(&header_region(&pe)?)?;
+    let info = ProjectInfo::read(&pe, header.lp_project_data)?;
+    let listing = native::disassemble(&pe);
+    let names = native::Names {
+        handlers: native::handler_names(report),
+        types,
+        declares: Some(DeclareTable::read(&pe, &info)),
+    };
+    println!("Mode         native");
+    println!("Procedures   {}", listing.procedures.len());
+    println!("These are x86 instructions with notes. They are not Basic statements.");
+    print!("{}", native::listing_text(&pe, &listing, &names));
+    Ok(())
 }
 
 /// Prints the P-code of each procedure of each object, in the order of the

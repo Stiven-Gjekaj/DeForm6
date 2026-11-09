@@ -1579,8 +1579,8 @@ fn disasm_prints_the_p_code_of_each_procedure() {
     assert!(stdout.contains("P-code table"), "{stdout}");
 }
 
-/// `disasm` on a native program says that it holds no P-code, and exits
-/// with 0. A table that cannot be read exits with 5.
+/// `disasm` on a native program prints its x86 with the names of its
+/// helpers, and exits with 0. A table that cannot be read exits with 5.
 #[test]
 fn disasm_names_a_native_program_and_refuses_a_missing_table() {
     let table = write_pcode_table("native");
@@ -1593,9 +1593,11 @@ fn disasm_names_a_native_program_and_refuses_a_missing_table() {
     fs::remove_file(&table).unwrap();
     assert_eq!(code, 0);
     assert!(
-        stdout.contains("This program is native code, and it holds no P-code."),
+        stdout.contains("They are not Basic statements."),
         "{stdout}"
     );
+    assert!(stdout.contains("push ebp"), "{stdout}");
+    assert!(stdout.contains("; __vba"), "{stdout}");
 
     let (code, _, stderr) = run(&[
         OsStr::new("disasm"),
@@ -1818,10 +1820,7 @@ fn each_command_help_names_its_own_work() {
         !disasm.contains("writes a Visual Basic 6 project directory"),
         "{disasm}"
     );
-    assert!(
-        disasm.contains("prints the P-code of each procedure"),
-        "{disasm}"
-    );
+    assert!(disasm.contains("prints each procedure"), "{disasm}");
 }
 
 /// Writes a shell script that acts as `VB6.EXE /make` for the
