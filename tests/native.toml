@@ -29,7 +29,7 @@ instructions = 4383
 strings = 14
 strings_in_source = 14
 runtime_calls = 413
-idioms = 367
+idioms = 368
 checked_calls = 80
 me_calls = 106
 
@@ -51,7 +51,7 @@ instructions = 26798
 strings = 290
 strings_in_source = 290
 runtime_calls = 2852
-idioms = 2699
+idioms = 2700
 checked_calls = 553
 me_calls = 476
 
@@ -62,7 +62,7 @@ instructions = 544
 strings = 0
 strings_in_source = 0
 runtime_calls = 54
-idioms = 47
+idioms = 52
 checked_calls = 0
 me_calls = 3
 
@@ -73,7 +73,7 @@ instructions = 5411
 strings = 64
 strings_in_source = 64
 runtime_calls = 655
-idioms = 597
+idioms = 608
 checked_calls = 70
 me_calls = 85
 
@@ -84,7 +84,7 @@ instructions = 2260
 strings = 26
 strings_in_source = 26
 runtime_calls = 260
-idioms = 237
+idioms = 240
 checked_calls = 24
 me_calls = 51
 
@@ -117,7 +117,7 @@ instructions = 5261
 strings = 46
 strings_in_source = 46
 runtime_calls = 630
-idioms = 557
+idioms = 558
 checked_calls = 79
 me_calls = 82
 
@@ -348,7 +348,7 @@ instructions = 2153
 strings = 2
 strings_in_source = 2
 runtime_calls = 200
-idioms = 178
+idioms = 196
 checked_calls = 43
 me_calls = 47
 
@@ -370,7 +370,7 @@ instructions = 4759
 strings = 64
 strings_in_source = 64
 runtime_calls = 610
-idioms = 573
+idioms = 576
 checked_calls = 73
 me_calls = 80
 
