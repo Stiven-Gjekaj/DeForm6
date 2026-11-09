@@ -12,6 +12,12 @@ heading its version and its date.
 
 ### What this delivers
 
+- `disasm` on a native program prints each procedure as x86 instructions
+  with notes: the runtime helper and its idiom, the string constant, the
+  `Declare` export and the called procedure. `--pcode-table` is now optional,
+  and a P-code program still needs it. The listing is not Basic.
+  `tests/native.toml` pins each program against its source: the listing
+  holds 701 of the 701 procedures that the source declares.
 - `extract --verify-build` builds the written project with the Visual
   Basic 6 IDE that the user owns. It finds `VB6.EXE` through `--compiler`,
   the variable `DEFORM6_VB6`, or `Microsoft Visual Studio\VB98\VB6.EXE`
