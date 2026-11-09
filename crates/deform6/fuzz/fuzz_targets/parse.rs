@@ -51,6 +51,7 @@ fuzz_target!(|data: &[u8]| {
         let listing = deform6::vb::native::disassemble(&pe);
         let names = deform6::vb::native::Names {
             handlers: std::collections::BTreeMap::new(),
+            methods: deform6::vb::native::object_methods(&pe),
             types: None,
             declares: None,
         };

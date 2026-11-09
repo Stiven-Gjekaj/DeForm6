@@ -488,9 +488,10 @@ fn run_disasm(
             return Exit::Internal;
         }
     };
-    let report = match deform6::inspect(
+    let report = match deform6::inspect_with_types(
         &data,
         &OpcodeTable::builtin(),
+        types.as_ref(),
         deform6::journal::Mode::Strict,
     ) {
         Ok(report) => report,
@@ -542,6 +543,7 @@ fn print_native(
     let listing = native::disassemble(&pe);
     let names = native::Names {
         handlers: native::handler_names(report),
+        methods: native::object_methods(&pe),
         types,
         declares: Some(DeclareTable::read(&pe, &info)),
     };

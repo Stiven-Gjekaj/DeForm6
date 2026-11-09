@@ -818,6 +818,8 @@ pub fn object_methods(pe: &PeImage<'_>) -> BTreeMap<u32, ObjectMethod> {
 pub struct Names<'t> {
     /// The name of each handler, by its address.
     pub handlers: BTreeMap<u32, String>,
+    /// Each procedure that a link table names, by its address.
+    pub methods: BTreeMap<u32, ObjectMethod>,
     /// The types file, which names an import by its ordinal.
     pub types: Option<&'t VbTypes>,
     /// The `Declare` table of the program.
@@ -830,6 +832,7 @@ impl Names<'_> {
         self.handlers
             .get(&va.get())
             .cloned()
+            .or_else(|| self.methods.get(&va.get()).map(ObjectMethod::text))
             .unwrap_or_else(|| format!("sub_{:08X}", va.get()))
     }
 

@@ -1608,6 +1608,41 @@ fn disasm_names_a_native_program_and_refuses_a_missing_table() {
     assert_eq!(code, 5, "{stderr}");
 }
 
+/// `disasm` names a public procedure of a native form from its link slot.
+#[test]
+fn disasm_names_a_public_procedure_of_a_native_form() {
+    let (code, stdout, stderr) = run(&[
+        OsStr::new("disasm"),
+        corpus_root()
+            .join("public-domain/PassGen/PassGen.exe")
+            .as_os_str(),
+    ]);
+    assert_eq!(code, 0, "{stderr}");
+    assert!(
+        stdout.contains("\nfrmPassGen.addLenNumbers at "),
+        "{stdout}"
+    );
+}
+
+/// `disasm --vb-types` gives the name of the event of a native handler.
+#[test]
+fn disasm_names_the_event_of_a_native_handler_from_the_types_file() {
+    let types =
+        std::env::temp_dir().join(format!("deform6-native-events-{}.toml", std::process::id()));
+    let event = "[[events.\"{33AD4EF2-6699-11CF-B70C-00AA0060D393}\"]]\nparameters = []\n";
+    let others = format!("{event}name = \"Other\"\n").repeat(16);
+    fs::write(&types, format!("{event}name = \"Click\"\n{others}")).unwrap();
+    let (code, stdout, stderr) = run(&[
+        OsStr::new("disasm"),
+        gradient_sample_path().as_os_str(),
+        OsStr::new("--vb-types"),
+        types.as_os_str(),
+    ]);
+    fs::remove_file(&types).unwrap();
+    assert_eq!(code, 0, "{stderr}");
+    assert!(stdout.contains("\nForm1.Command1_Click at "), "{stdout}");
+}
+
 /// `disasm --lift` gives the reason when a body does not lift, and then the
 /// listing. The small table holds placeholder names, which give no family,
 /// so each body of `Fast_Flames.exe` gives the reason.
