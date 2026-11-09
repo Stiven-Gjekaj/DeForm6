@@ -8,16 +8,191 @@
     reason = "a test builds the state it needs and must fail loudly when that state is wrong"
 )]
 
-//! Asks the native corpus programs for their annotated disassembly, and
-//! compares the answer with the source that each program was built from.
+//! Asks each native corpus program for its annotated disassembly, and
+//! compares the answer with the source that the program was built from.
+//!
+//! `tests/native.toml` pins the numbers. Set `DEFORM6_PRINT_NATIVE` to print
+//! the table that the run measures.
 
 #[allow(dead_code, reason = "each test file uses a part of the harness")]
 mod support;
 
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
 use deform6::read::pe::{ImportName, PeImage};
-use deform6::vb::native::{Note, disassemble, handler_names};
+use deform6::vb::helpers::idiom;
+use deform6::vb::native::{Listing, Note, disassemble, handler_names};
 use deform6::vb::opcodes::OpcodeTable;
-use support::vbp;
+use support::{source, vbp};
+
+/// What one program gives.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+struct Measure {
+    /// The procedures that the listing holds.
+    procedures: usize,
+    /// The procedures that the source declares.
+    declared: usize,
+    /// The instructions that the listing holds.
+    instructions: usize,
+    /// The string notes of the listing.
+    strings: usize,
+    /// The string notes whose text is in the source.
+    strings_in_source: usize,
+    /// The notes that name a helper or an ordinal of the runtime.
+    runtime_calls: usize,
+    /// The notes of a named helper that has an idiom.
+    idioms: usize,
+}
+
+/// Gives the source text of each object of the project of `exe`, and the
+/// count of the procedures that it declares.
+fn source_of(exe: &Path, projects: &[PathBuf]) -> (String, usize) {
+    let project_path = vbp::select_project_file(exe, projects)
+        .unwrap_or_else(|err| panic!("{}: {err}", exe.display()));
+    let project = vbp::Project::read(&project_path);
+    let mut text = String::new();
+    let mut declared = 0;
+    for object in project.declared_objects() {
+        if !object.source_file.is_file() {
+            continue;
+        }
+        declared += source::declared_procedures(&object.source_file).len();
+        text.extend(
+            std::fs::read(&object.source_file)
+                .unwrap()
+                .iter()
+                .map(|byte| char::from(*byte)),
+        );
+        text.push('\n');
+    }
+    (text, declared)
+}
+
+/// Tells whether the source holds the literal `found`. A tab is the
+/// intrinsic constant `vbTab`, which the source names and does not quote.
+fn in_source(found: &str, text: &str) -> bool {
+    text.contains(&found.replace('"', "\"\"")) || (found == "\t" && text.contains("vbTab"))
+}
+
+/// Measures `listing` against `text`, and fails on a fault of the walk.
+fn measure(exe: &Path, listing: &Listing, text: &str, declared: usize) -> Measure {
+    let mut result = Measure {
+        procedures: listing.procedures.len(),
+        declared,
+        instructions: listing.procedures.iter().map(|p| p.lines.len()).sum(),
+        strings: 0,
+        strings_in_source: 0,
+        runtime_calls: 0,
+        idioms: 0,
+    };
+    assert!(!listing.truncated, "{}: truncated", exe.display());
+    for procedure in &listing.procedures {
+        assert!(
+            procedure.open_jumps.is_empty() && procedure.undecoded.is_empty(),
+            "{} at {:08X}: open {:?}, undecoded {:?}",
+            exe.display(),
+            procedure.entry.get(),
+            procedure.open_jumps,
+            procedure.undecoded
+        );
+        for note in procedure.lines.iter().flat_map(|line| &line.notes) {
+            match note {
+                Note::Text(found) => {
+                    result.strings += 1;
+                    if in_source(found, text) {
+                        result.strings_in_source += 1;
+                    } else if std::env::var_os("DEFORM6_PRINT_NATIVE").is_some() {
+                        println!("# not in source: {found:?}");
+                    }
+                }
+                Note::Import(function) => {
+                    result.runtime_calls += 1;
+                    if let ImportName::Name(name) = &function.name
+                        && idiom(name).is_some()
+                    {
+                        result.idioms += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    result
+}
+
+/// Reads the pinned numbers.
+fn pinned() -> BTreeMap<String, toml::Table> {
+    let path = vbp::corpus_root().join("../tests/native.toml");
+    let text = std::fs::read_to_string(path).unwrap();
+    let table: toml::Table = text.parse().unwrap();
+    table["program"]
+        .as_table()
+        .unwrap()
+        .iter()
+        .map(|(key, value)| (key.clone(), value.as_table().unwrap().clone()))
+        .collect()
+}
+
+/// Gives the path of `exe` relative to the corpus, with forward slashes.
+fn key_of(exe: &Path) -> String {
+    exe.strip_prefix(vbp::corpus_root())
+        .unwrap()
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+#[test]
+fn each_native_program_gives_the_pinned_listing_with_no_fault() {
+    let projects = vbp::project_files();
+    let pins = pinned();
+    let print = std::env::var_os("DEFORM6_PRINT_NATIVE").is_some();
+    let mut failures = Vec::new();
+    let mut seen = 0;
+    for exe in &vbp::executables() {
+        let data = std::fs::read(exe).unwrap();
+        let pe = PeImage::parse(&data).unwrap();
+        let listing = disassemble(&pe);
+        let (text, declared) = source_of(exe, &projects);
+        let got = measure(exe, &listing, &text, declared);
+        let key = key_of(exe);
+        if print {
+            println!(
+                "[program.\"{key}\"]\nprocedures = {}\ndeclared = {}\ninstructions = {}\nstrings = {}\nstrings_in_source = {}\nruntime_calls = {}\nidioms = {}\n",
+                got.procedures,
+                got.declared,
+                got.instructions,
+                got.strings,
+                got.strings_in_source,
+                got.runtime_calls,
+                got.idioms
+            );
+            continue;
+        }
+        seen += 1;
+        let Some(pin) = pins.get(&key) else {
+            failures.push(format!("{key}: no entry in tests/native.toml, got {got:?}"));
+            continue;
+        };
+        let number = |name: &str| usize::try_from(pin[name].as_integer().unwrap()).unwrap();
+        let want = Measure {
+            procedures: number("procedures"),
+            declared: number("declared"),
+            instructions: number("instructions"),
+            strings: number("strings"),
+            strings_in_source: number("strings_in_source"),
+            runtime_calls: number("runtime_calls"),
+            idioms: number("idioms"),
+        };
+        if got != want {
+            failures.push(format!("{key}: pinned {want:?}, now {got:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    if !print {
+        assert_eq!(seen, pins.len(), "tests/native.toml holds a stale entry");
+    }
+}
 
 /// Each bound event handler that the report gives is an entry of the
 /// listing, so the listing misses no procedure that a form names.

@@ -1,0 +1,413 @@
+# The pinned measure of the annotated disassembly of each native program.
+#
+# `cargo test -p deform6 --test native_listing` fails when a number moves,
+# and the message gives the new number. Set DEFORM6_PRINT_NATIVE to print
+# this table.
+#
+# `procedures` is what the listing holds. `declared` is what the source
+# declares, counted from each source file of the project that is in the
+# repository. `Edge_Detection.exe` holds 30 and declares 13, because the
+# source of its class `cCommonDialog` is not in the repository.
+#
+# `instructions` is the count of decoded instructions. A change of the walk
+# moves it.
+#
+# `strings` is the count of string notes. `strings_in_source` is how many of
+# them the source holds as a literal. `runtime_calls` is the count of notes
+# of an import. `idioms` is how many of them have an idiom.
+
+[program."public-domain/HexScroll/Hex Scroll.exe"]
+procedures = 23
+declared = 23
+instructions = 4383
+strings = 14
+strings_in_source = 14
+runtime_calls = 413
+idioms = 367
+
+[program."public-domain/LockWorkStation/LockWorkStation.exe"]
+procedures = 1
+declared = 1
+instructions = 66
+strings = 1
+strings_in_source = 1
+runtime_calls = 7
+idioms = 6
+
+[program."public-domain/PassGen/PassGen.exe"]
+procedures = 83
+declared = 83
+instructions = 26798
+strings = 290
+strings_in_source = 290
+runtime_calls = 2852
+idioms = 2699
+
+[program."public-domain/SK-Gradient-Sample__VB6/demo/Project1.exe"]
+procedures = 3
+declared = 3
+instructions = 544
+strings = 0
+strings_in_source = 0
+runtime_calls = 54
+idioms = 47
+
+[program."public-domain/SK-MCI-Sample__VB6/demo/Project1.exe"]
+procedures = 21
+declared = 21
+instructions = 5411
+strings = 64
+strings_in_source = 64
+runtime_calls = 655
+idioms = 597
+
+[program."public-domain/SK-TFTP-Sample__VB6/Client/demo/TFTPClient.exe"]
+procedures = 15
+declared = 15
+instructions = 2260
+strings = 26
+strings_in_source = 26
+runtime_calls = 260
+idioms = 237
+
+[program."public-domain/SK-TFTP-Sample__VB6/Server/demo/Server.exe"]
+procedures = 6
+declared = 6
+instructions = 1412
+strings = 12
+strings_in_source = 12
+runtime_calls = 141
+idioms = 132
+
+[program."public-domain/SK-Winsock-Sample__VB6/demo/SubReality_WinsockSample.exe"]
+procedures = 5
+declared = 5
+instructions = 846
+strings = 3
+strings_in_source = 3
+runtime_calls = 95
+idioms = 94
+
+[program."public-domain/UUID2/VB6/UUID2.exe"]
+procedures = 25
+declared = 25
+instructions = 5261
+strings = 46
+strings_in_source = 46
+runtime_calls = 630
+idioms = 557
+
+[program."public-domain/dump/VB6/rot47/Rot47.exe"]
+procedures = 10
+declared = 10
+instructions = 995
+strings = 3
+strings_in_source = 3
+runtime_calls = 97
+idioms = 90
+
+[program."public-domain/machineLanguageConversion/ASCII/Ascii.exe"]
+procedures = 6
+declared = 6
+instructions = 614
+strings = 1
+strings_in_source = 1
+runtime_calls = 61
+idioms = 58
+
+[program."public-domain/machineLanguageConversion/Hex/Hex.exe"]
+procedures = 7
+declared = 7
+instructions = 771
+strings = 2
+strings_in_source = 2
+runtime_calls = 74
+idioms = 70
+
+[program."public-domain/machineLanguageConversion/Octal/Octal.exe"]
+procedures = 6
+declared = 6
+instructions = 593
+strings = 1
+strings_in_source = 1
+runtime_calls = 55
+idioms = 51
+
+[program."vb6-code/Artificial-life/Artificial Life.exe"]
+procedures = 33
+declared = 33
+instructions = 7458
+strings = 73
+strings_in_source = 73
+runtime_calls = 824
+idioms = 776
+
+[program."vb6-code/Blacklight-effect/Blacklight.exe"]
+procedures = 14
+declared = 14
+instructions = 3035
+strings = 13
+strings_in_source = 13
+runtime_calls = 332
+idioms = 314
+
+[program."vb6-code/Brightness-effect/Part 1 - Pure VB6/vbBrightness.exe"]
+procedures = 7
+declared = 7
+instructions = 733
+strings = 0
+strings_in_source = 0
+runtime_calls = 47
+idioms = 45
+
+[program."vb6-code/Brightness-effect/Part 2 - API - GetPixel and SetPixel/apiBrightness.exe"]
+procedures = 7
+declared = 7
+instructions = 762
+strings = 0
+strings_in_source = 0
+runtime_calls = 49
+idioms = 47
+
+[program."vb6-code/Brightness-effect/Part 4 - Even faster DIBs/Realtime_Brightness.exe"]
+procedures = 15
+declared = 15
+instructions = 2869
+strings = 0
+strings_in_source = 0
+runtime_calls = 257
+idioms = 254
+
+[program."vb6-code/Color-shift-effect/ColorShift.exe"]
+procedures = 12
+declared = 12
+instructions = 2895
+strings = 13
+strings_in_source = 13
+runtime_calls = 331
+idioms = 313
+
+[program."vb6-code/Colorize-effect/Colorize.exe"]
+procedures = 22
+declared = 22
+instructions = 4139
+strings = 15
+strings_in_source = 15
+runtime_calls = 396
+idioms = 377
+
+[program."vb6-code/Contrast-effect/Contrast.exe"]
+procedures = 13
+declared = 13
+instructions = 2949
+strings = 13
+strings_in_source = 13
+runtime_calls = 334
+idioms = 316
+
+[program."vb6-code/Curves-effect/Curves.exe"]
+procedures = 19
+declared = 19
+instructions = 4901
+strings = 20
+strings_in_source = 20
+runtime_calls = 487
+idioms = 463
+
+[program."vb6-code/Custom-image-filters/Custom_Filters.exe"]
+procedures = 20
+declared = 20
+instructions = 6895
+strings = 21
+strings_in_source = 21
+runtime_calls = 781
+idioms = 758
+
+[program."vb6-code/Diffuse-effect/Diffuse.exe"]
+procedures = 18
+declared = 18
+instructions = 4056
+strings = 17
+strings_in_source = 17
+runtime_calls = 436
+idioms = 414
+
+[program."vb6-code/Edge-detection/Edge_Detection.exe"]
+procedures = 30
+declared = 13
+instructions = 7020
+strings = 110
+strings_in_source = 108
+runtime_calls = 813
+idioms = 775
+
+[program."vb6-code/Emboss-engrave-effect/Emboss_Engrave.exe"]
+procedures = 24
+declared = 24
+instructions = 5161
+strings = 13
+strings_in_source = 13
+runtime_calls = 462
+idioms = 442
+
+[program."vb6-code/Fill-image-region/Filling.exe"]
+procedures = 3
+declared = 3
+instructions = 349
+strings = 0
+strings_in_source = 0
+runtime_calls = 36
+idioms = 30
+
+[program."vb6-code/Fire-effect/Fast_Flames.exe"]
+procedures = 9
+declared = 9
+instructions = 1744
+strings = 1
+strings_in_source = 1
+runtime_calls = 161
+idioms = 154
+
+[program."vb6-code/Game-physics-basic/Physics_Demo.exe"]
+procedures = 12
+declared = 12
+instructions = 3604
+strings = 1
+strings_in_source = 1
+runtime_calls = 204
+idioms = 193
+
+[program."vb6-code/Gradient-2D/Gradient.exe"]
+procedures = 9
+declared = 9
+instructions = 2153
+strings = 2
+strings_in_source = 2
+runtime_calls = 200
+idioms = 178
+
+[program."vb6-code/Grayscale-effect/Grayscale.exe"]
+procedures = 26
+declared = 26
+instructions = 6377
+strings = 20
+strings_in_source = 20
+runtime_calls = 594
+idioms = 576
+
+[program."vb6-code/Hidden-Markov-model/HMM.exe"]
+procedures = 8
+declared = 8
+instructions = 4759
+strings = 64
+strings_in_source = 64
+runtime_calls = 610
+idioms = 573
+
+[program."vb6-code/Histograms-advanced/Advanced Histogram Viewer.exe"]
+procedures = 29
+declared = 29
+instructions = 6658
+strings = 20
+strings_in_source = 20
+runtime_calls = 619
+idioms = 593
+
+[program."vb6-code/Histograms-basic/Basic Histogram Viewer.exe"]
+procedures = 18
+declared = 18
+instructions = 4495
+strings = 20
+strings_in_source = 20
+runtime_calls = 481
+idioms = 455
+
+[program."vb6-code/Levels-effect/Image Levels.exe"]
+procedures = 34
+declared = 34
+instructions = 7074
+strings = 20
+strings_in_source = 20
+runtime_calls = 686
+idioms = 659
+
+[program."vb6-code/Mandelbrot/Mandelbrot.exe"]
+procedures = 8
+declared = 8
+instructions = 2264
+strings = 6
+strings_in_source = 6
+runtime_calls = 223
+idioms = 217
+
+[program."vb6-code/Map-editor-2D/Map Editor.exe"]
+procedures = 31
+declared = 31
+instructions = 6356
+strings = 17
+strings_in_source = 17
+runtime_calls = 594
+idioms = 571
+
+[program."vb6-code/Nature-effects/Nature_Filters.exe"]
+procedures = 26
+declared = 26
+instructions = 6131
+strings = 22
+strings_in_source = 22
+runtime_calls = 507
+idioms = 489
+
+[program."vb6-code/Randomize-effects/RandomizationFX.exe"]
+procedures = 20
+declared = 20
+instructions = 5212
+strings = 13
+strings_in_source = 13
+runtime_calls = 591
+idioms = 547
+
+[program."vb6-code/Scanner-TWAIN/VB_Scanner_Support.exe"]
+procedures = 4
+declared = 4
+instructions = 1302
+strings = 23
+strings_in_source = 23
+runtime_calls = 142
+idioms = 136
+
+[program."vb6-code/Screen-capture/ScreenCapture.exe"]
+procedures = 1
+declared = 1
+instructions = 1245
+strings = 0
+strings_in_source = 0
+runtime_calls = 36
+idioms = 36
+
+[program."vb6-code/Sepia-effect/Sepia.exe"]
+procedures = 12
+declared = 12
+instructions = 2949
+strings = 13
+strings_in_source = 13
+runtime_calls = 333
+idioms = 315
+
+[program."vb6-code/Threshold-effect/Threshold.exe"]
+procedures = 15
+declared = 15
+instructions = 3191
+strings = 13
+strings_in_source = 13
+runtime_calls = 352
+idioms = 334
+
+[program."vb6-code/Transparency-2D/Transparency.exe"]
+procedures = 8
+declared = 8
+instructions = 1549
+strings = 0
+strings_in_source = 0
+runtime_calls = 131
+idioms = 131
