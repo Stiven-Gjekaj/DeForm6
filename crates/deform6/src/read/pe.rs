@@ -12,6 +12,8 @@
 //! library. The Phase 5 fuzz target enters through this public API, so a
 //! crash inside `object` is found here and reported upstream.
 
+use std::collections::BTreeMap;
+
 use object::LittleEndian as LE;
 use object::pe::ImageNtHeaders32;
 use object::read::pe::{ImageNtHeaders as _, ImageOptionalHeader as _, Import, PeFile32};
@@ -66,6 +68,24 @@ impl From<PeReject> for Refusal {
             PeReject::NotPe32 => Self::NotPe32,
         }
     }
+}
+
+/// How the import table names a function.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum ImportName {
+    /// The table gives the name.
+    Name(String),
+    /// The table gives only the ordinal.
+    Ordinal(u16),
+}
+
+/// One function that the import table names, as an owned value.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ImportedFunction {
+    /// The upper cased name of the DLL.
+    pub dll: String,
+    /// The name or the ordinal of the function.
+    pub name: ImportName,
 }
 
 /// One section of the image, as an owned value.
@@ -398,6 +418,59 @@ impl<'a> PeImage<'a> {
         None
     }
 
+    /// Gives each function that the import table names, by the address of
+    /// its slot in the import address table.
+    ///
+    /// Gives an empty map when the image has no import table. A descriptor
+    /// or a thunk that cannot be read ends the walk, and the map keeps what
+    /// the walk read before that point.
+    #[must_use]
+    pub fn import_slots(&self) -> BTreeMap<u32, ImportedFunction> {
+        let mut slots = BTreeMap::new();
+        let Ok(Some(table)) = self.file.import_table() else {
+            return slots;
+        };
+        let Ok(mut descriptors) = table.descriptors() else {
+            return slots;
+        };
+        while let Ok(Some(descriptor)) = descriptors.next() {
+            let Ok(dll) = table.name(descriptor.name.get(LE)) else {
+                continue;
+            };
+            let first = descriptor.first_thunk.get(LE);
+            let lookup = match descriptor.original_first_thunk.get(LE) {
+                0 => first,
+                rva => rva,
+            };
+            let (Ok(mut thunks), Some(mut at)) =
+                (table.thunks(lookup), self.image_base.checked_add(first))
+            else {
+                continue;
+            };
+            while let Ok(Some(thunk)) = thunks.next::<ImageNtHeaders32>() {
+                let name = match table.import::<ImageNtHeaders32>(thunk) {
+                    Ok(Import::Ordinal(ordinal)) => ImportName::Ordinal(ordinal),
+                    Ok(Import::Name(_, name)) => {
+                        ImportName::Name(String::from_utf8_lossy(name).into_owned())
+                    }
+                    Err(_) => break,
+                };
+                slots.insert(
+                    at,
+                    ImportedFunction {
+                        dll: String::from_utf8_lossy(dll).to_ascii_uppercase(),
+                        name,
+                    },
+                );
+                let Some(next) = at.checked_add(4) else {
+                    break;
+                };
+                at = next;
+            }
+        }
+        slots
+    }
+
     /// Gives the upper cased name of every DLL in the delay load directory.
     ///
     /// **This list is informational only and must never decide the runtime.**
@@ -632,7 +705,7 @@ fn overlap_defects(sections: &[SectionInfo], table_at: u32) -> Vec<Defect> {
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{PeImage, PeReject, SectionInfo, overlap_defects};
+    use super::{ImportName, PeImage, PeReject, SectionInfo, overlap_defects};
     use crate::error::{Defect, DefectKind, Refusal, Site};
     use crate::read::region::{Off, Rva, Va};
 
@@ -1052,6 +1125,34 @@ mod tests {
         assert_eq!(
             image.imported_dlls().unwrap(),
             vec!["SOMELIB.DLL", "OTHERLIB.DLL"]
+        );
+    }
+
+    /// `PassGen.exe` imports `rtcErrObj` of the runtime by the ordinal 685,
+    /// and it imports `__vbaFreeStr` by its name.
+    #[test]
+    fn the_import_slots_of_a_corpus_file_give_names_and_ordinals() {
+        let data = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/public-domain/PassGen/PassGen.exe"
+        ))
+        .unwrap();
+        let pe = PeImage::parse(&data).unwrap();
+        let slots = pe.import_slots();
+        assert!(
+            slots
+                .values()
+                .all(|function| function.dll == "MSVBVM60.DLL")
+        );
+        assert!(
+            slots
+                .values()
+                .any(|function| function.name == ImportName::Ordinal(685))
+        );
+        assert!(
+            slots
+                .values()
+                .any(|function| function.name == ImportName::Name("__vbaFreeStr".to_owned()))
         );
     }
 
