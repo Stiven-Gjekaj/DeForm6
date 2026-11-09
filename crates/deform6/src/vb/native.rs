@@ -33,8 +33,12 @@ use crate::read::pe::{ImportName, ImportedFunction, PeImage};
 use crate::read::region::{Off, Region, Va};
 use crate::vb::Report;
 use crate::vb::controlinfo::EventReport;
+use crate::vb::header::{VbHeader, header_region};
 use crate::vb::helpers;
-use crate::vb::project::DeclareTable;
+use crate::vb::links::{LinkSlot, read_method_links};
+use crate::vb::object::{Object, ObjectTable};
+use crate::vb::privateobj::{ProcNames, Procedure as ProcedureName, ProcedureList};
+use crate::vb::project::{DeclareTable, ObjectTableHead, ProjectInfo};
 use crate::vb::types::VbTypes;
 
 /// The most instructions that one listing holds.
@@ -129,7 +133,7 @@ fn all_bytes<'a>(region: &Region<'a>) -> Option<&'a [u8]> {
 
 /// Gives the target of the native stub at `stub`, when `window` is the 13
 /// bytes of a native stub.
-fn stub_target(window: &[u8], stub: u32) -> Option<u32> {
+pub(crate) fn stub_target(window: &[u8], stub: u32) -> Option<u32> {
     let [0x81, 0x6C, 0x24, 0x04, _, _, _, _, 0xE9, a, b, c, d] = *window else {
         return None;
     };
@@ -710,6 +714,104 @@ pub fn handler_names(report: &Report) -> BTreeMap<u32, String> {
         }
     }
     names
+}
+
+/// Gives the objects of `pe`, or nothing when the object table cannot be
+/// read.
+fn objects_of(pe: &PeImage<'_>) -> Vec<Object> {
+    (|| {
+        let header = VbHeader::read(&header_region(pe).ok()?).ok()?;
+        let info = ProjectInfo::read(pe, header.lp_project_data).ok()?;
+        let head = ObjectTableHead::read(pe, info.lp_object_table).ok()?;
+        Some(
+            ObjectTable::walk(pe, info.lp_object_table, &head)
+                .ok()?
+                .objects,
+        )
+    })()
+    .unwrap_or_default()
+}
+
+/// One procedure that the link table of an object names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ObjectMethod {
+    /// The name of the object.
+    pub object: String,
+    /// The place of the procedure among the procedures of the object, in
+    /// the order of the source.
+    pub index: u16,
+    /// The name of the procedure, when it is public.
+    pub name: Option<String>,
+}
+
+impl ObjectMethod {
+    /// Gives the text that names the procedure.
+    #[must_use]
+    pub fn text(&self) -> String {
+        match &self.name {
+            Some(name) => format!("{}.{name}", self.object),
+            None => format!("{}.proc{}", self.object, self.index),
+        }
+    }
+}
+
+/// Gives each procedure that the link table of `object` names, by the
+/// address of its code.
+///
+/// The name array of the object holds each `Declare` statement first, and
+/// then each procedure in the order of the source. The link table holds the
+/// public procedures in that order, and then the private ones in that
+/// order. So the slots of the link table give the place of each procedure
+/// in the source.
+fn methods_of(pe: &PeImage<'_>, object: &Object) -> BTreeMap<u32, ObjectMethod> {
+    let Ok(links) = read_method_links(pe, object) else {
+        return BTreeMap::new();
+    };
+    let targets: Vec<u32> = links
+        .slots
+        .iter()
+        .filter_map(|slot| match slot {
+            LinkSlot::Native(target) => Some(target.get()),
+            _ => None,
+        })
+        .collect();
+    let slots = match ProcedureList::read(pe, object).procs {
+        ProcNames::Slots(slots) => slots,
+        ProcNames::NoNameArray { .. } => Vec::new(),
+    };
+    let procedures = slots
+        .get(slots.len().saturating_sub(targets.len())..)
+        .unwrap_or_default();
+    let (public, private): (Vec<_>, Vec<_>) = (0_u16..)
+        .zip(procedures)
+        .partition(|(_, slot)| matches!(slot, ProcedureName::Public(_)));
+    let mut methods = BTreeMap::new();
+    for (target, (index, slot)) in targets.iter().zip(public.into_iter().chain(private)) {
+        let name = match slot {
+            ProcedureName::Public(name) => Some(name.clone()),
+            ProcedureName::Private => None,
+        };
+        methods.insert(
+            *target,
+            ObjectMethod {
+                object: object.name.clone(),
+                index,
+                name,
+            },
+        );
+    }
+    methods
+}
+
+/// Gives each procedure that a link table of `pe` names, by the address of
+/// its code.
+#[must_use]
+pub fn object_methods(pe: &PeImage<'_>) -> BTreeMap<u32, ObjectMethod> {
+    objects_of(pe)
+        .iter()
+        .flat_map(|object| methods_of(pe, object))
+        .collect()
 }
 
 /// The names that the text of a listing needs.

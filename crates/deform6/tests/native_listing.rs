@@ -17,12 +17,12 @@
 #[allow(dead_code, reason = "each test file uses a part of the harness")]
 mod support;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use deform6::read::pe::{ImportName, PeImage};
 use deform6::vb::helpers::idiom;
-use deform6::vb::native::{Listing, Note, disassemble, handler_names};
+use deform6::vb::native::{Listing, Note, disassemble, handler_names, object_methods};
 use deform6::vb::opcodes::OpcodeTable;
 use support::{source, vbp};
 
@@ -218,6 +218,95 @@ fn each_event_handler_of_a_form_is_a_procedure_of_the_listing() {
         }
     }
     assert!(handlers > 300, "{handlers} handlers");
+}
+
+/// Each procedure slot of a link table goes to a procedure of the listing.
+#[test]
+fn each_native_link_slot_goes_to_a_procedure_of_the_listing() {
+    let mut slots = 0;
+    for exe in &vbp::executables() {
+        let data = std::fs::read(exe).unwrap();
+        let pe = PeImage::parse(&data).unwrap();
+        let listing = disassemble(&pe);
+        let entries: BTreeSet<u32> = listing.procedures.iter().map(|p| p.entry.get()).collect();
+        for (address, method) in object_methods(&pe) {
+            slots += 1;
+            assert!(
+                entries.contains(&address),
+                "{}: {} at {address:08X}",
+                exe.display(),
+                method.text()
+            );
+        }
+    }
+    assert_eq!(slots, 701, "the number of the link slots moved");
+}
+
+/// The link table gives the place of each procedure of an object in its
+/// source. A public procedure gives the name at that place, and an event
+/// handler that the control records name gives its name at that place.
+#[test]
+fn each_link_slot_gives_the_place_of_its_procedure_in_the_source() {
+    let table = OpcodeTable::builtin();
+    let projects = vbp::project_files();
+    let (mut methods, mut public, mut handlers) = (0, 0, 0);
+    for exe in &vbp::executables() {
+        let data = std::fs::read(exe).unwrap();
+        let pe = PeImage::parse(&data).unwrap();
+        let report = deform6::inspect(&data, &table, deform6::journal::Mode::Strict).unwrap();
+        let named = handler_names(&report);
+        let project_path = vbp::select_project_file(exe, &projects).unwrap();
+        let declared: BTreeMap<String, Vec<String>> = vbp::Project::read(&project_path)
+            .declared_objects()
+            .into_iter()
+            .filter(|object| object.source_file.is_file())
+            .filter_map(|object| {
+                let names = source::declared_procedures(&object.source_file);
+                Some((object.name?, names))
+            })
+            .collect();
+        for (address, method) in object_methods(&pe) {
+            let Some(names) = declared.get(&method.object) else {
+                continue;
+            };
+            methods += 1;
+            let place = &names[usize::from(method.index)];
+            if let Some(name) = &method.name {
+                public += 1;
+                assert!(
+                    place.eq_ignore_ascii_case(name),
+                    "{}: {name} is {place}",
+                    exe.display()
+                );
+            }
+            let Some(handler) = named.get(&address) else {
+                continue;
+            };
+            let (_, event) = handler.split_once('.').unwrap();
+            if event.contains("_event") {
+                let (owner, _) = event.split_once("_event").unwrap();
+                assert!(
+                    place
+                        .to_ascii_lowercase()
+                        .starts_with(&owner.to_ascii_lowercase()),
+                    "{}: {handler} is {place} in the source",
+                    exe.display()
+                );
+            } else {
+                assert!(
+                    place.eq_ignore_ascii_case(event),
+                    "{}: {handler} is {place}",
+                    exe.display()
+                );
+            }
+            handlers += 1;
+        }
+    }
+    assert_eq!(
+        (methods, public, handlers),
+        (684, 185, 389),
+        "the number of the checked procedures moved"
+    );
 }
 
 /// The source of `LockWorkStation` holds one `Shell` of one literal. The

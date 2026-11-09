@@ -31,6 +31,7 @@ use crate::read::pe::PeImage;
 use crate::read::region::{Off, Rva, Va};
 use crate::vb::classify::has_optional_info;
 use crate::vb::lift::Callees;
+use crate::vb::native::stub_target;
 use crate::vb::object::Object;
 use crate::vb::procdesc::{MethodEntry, MethodTable};
 
@@ -74,6 +75,10 @@ pub enum LinkSlot {
         /// The offset of the field in the object.
         field: u32,
     },
+    /// The slot names the jump of a native stub, and the jump goes to this
+    /// procedure. The entry is 8 bytes into the stub, past `sub dword ptr
+    /// [esp+4], <adjustment>`.
+    Native(Va),
     /// The slot names something else.
     Other,
 }
@@ -112,7 +117,7 @@ impl MethodLinks {
             .checked_sub(self.first_slot)?;
         match self.slots.get(usize::try_from(index).ok()?)? {
             LinkSlot::Method(descriptor) => Some(*descriptor),
-            LinkSlot::Variable { .. } | LinkSlot::Other => None,
+            LinkSlot::Variable { .. } | LinkSlot::Native(_) | LinkSlot::Other => None,
         }
     }
 }
@@ -144,7 +149,7 @@ impl MethodLinks {
                     variables = variables.saturating_add(1);
                     continue;
                 }
-                LinkSlot::Other => continue,
+                LinkSlot::Native(_) | LinkSlot::Other => continue,
             };
             let found = methods.entries.iter().find_map(|entry| match entry {
                 MethodEntry::Descriptor { index, descriptor } if descriptor.va == *va => {
@@ -164,6 +169,12 @@ impl MethodLinks {
 
 /// The bytes of the accessor of a public variable.
 const ACCESSOR_LEN: u32 = 15;
+
+/// Where the jump of a native stub is in the stub.
+const NATIVE_JUMP_AT: u32 = 8;
+
+/// The length of a native stub.
+const NATIVE_STUB_LEN: u32 = 13;
 
 /// Reads the slot that `entry` names.
 fn slot(pe: &PeImage<'_>, entry: Va) -> LinkSlot {
@@ -199,7 +210,16 @@ fn slot(pe: &PeImage<'_>, entry: Va) -> LinkSlot {
             field: u32::from_le_bytes([*f0, *f1, *f2, *f3]),
         };
     }
-    LinkSlot::Other
+    entry
+        .get()
+        .checked_sub(NATIVE_JUMP_AT)
+        .and_then(|stub| {
+            let window = pe
+                .region_at_va(Va::new(stub))?
+                .take(Off::new(0), NATIVE_STUB_LEN)?;
+            stub_target(window, stub)
+        })
+        .map_or(LinkSlot::Other, |target| LinkSlot::Native(Va::new(target)))
 }
 
 /// Reads the method link table of `object`.
