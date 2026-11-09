@@ -427,6 +427,146 @@ fn each_object_call_names_a_member_that_its_source_procedure_names() {
     );
 }
 
+/// The helpers whose idiom a statement cannot carry out by itself: each
+/// call of the helper comes from a word of the source, and each such word
+/// compiles to the helper.
+const STATEMENT_HELPERS: [(&str, &str); 21] = [
+    ("__vbaEnd", "end"),
+    ("__vbaErase", "erase"),
+    ("__vbaFPInt", "int("),
+    ("__vbaFileClose", "close"),
+    ("__vbaFileOpen", "open"),
+    ("__vbaGet3", "get"),
+    ("__vbaGet4", "get"),
+    ("__vbaInStr", "instr"),
+    ("__vbaLenBstr", "len("),
+    ("__vbaLenBstrB", "lenb("),
+    ("__vbaLineInputStr", "line input"),
+    ("__vbaNew", "new"),
+    ("__vbaOnError", "on error"),
+    ("__vbaPowerR8", "^"),
+    ("__vbaPrintFile", "print"),
+    ("__vbaPut3", "put"),
+    ("__vbaPut4", "put"),
+    ("__vbaRedim", "redim"),
+    ("__vbaRedimPreserve", "redim preserve"),
+    ("__vbaStrCat", "&"),
+    ("__vbaUbound", "ubound"),
+];
+
+/// The words of the source that always compile to a call of one of these
+/// helpers.
+const WORD_HELPERS: [(&str, &[&str]); 6] = [
+    ("redim ", &["__vbaRedim", "__vbaRedimPreserve"]),
+    ("erase ", &["__vbaErase"]),
+    ("instr(", &["__vbaInStr", "__vbaInStrVar"]),
+    ("ubound(", &["__vbaUbound"]),
+    ("line input ", &["__vbaLineInputStr", "__vbaLineInputVar"]),
+    ("on error ", &["__vbaOnError"]),
+];
+
+/// Gives the source body of each procedure of `exe` that a link slot names,
+/// in lower case, with the helpers that the listing calls in it.
+fn bodies_and_helpers(exe: &Path, projects: &[PathBuf]) -> Vec<(String, Vec<String>)> {
+    let data = std::fs::read(exe).unwrap();
+    let pe = PeImage::parse(&data).unwrap();
+    let methods = object_methods(&pe);
+    let project_path = vbp::select_project_file(exe, projects).unwrap();
+    let bodies: BTreeMap<String, Vec<(String, Vec<String>)>> = vbp::Project::read(&project_path)
+        .declared_objects()
+        .into_iter()
+        .filter(|object| object.source_file.is_file())
+        .filter_map(|object| {
+            let bodies = source::procedure_bodies(&object.source_file);
+            Some((object.name?, bodies))
+        })
+        .collect();
+    let mut out = Vec::new();
+    for procedure in &disassemble(&pe).procedures {
+        let Some(method) = methods.get(&procedure.entry.get()) else {
+            continue;
+        };
+        let Some(objects) = bodies.get(&method.object) else {
+            continue;
+        };
+        let body = objects[usize::from(method.index)]
+            .1
+            .join("\n")
+            .to_ascii_lowercase()
+            .replace("on local error", "on error");
+        let helpers = procedure
+            .lines
+            .iter()
+            .filter(|line| line.text.starts_with("call"))
+            .flat_map(|line| &line.notes)
+            .filter_map(|note| match note {
+                Note::Import(function) => match &function.name {
+                    ImportName::Name(name) => Some(name.clone()),
+                    ImportName::Ordinal(_) => None,
+                },
+                _ => None,
+            })
+            .collect();
+        out.push((body, helpers));
+    }
+    out
+}
+
+/// Each call of a helper of [`STATEMENT_HELPERS`] is in a procedure whose
+/// source holds the word of its idiom.
+#[test]
+fn the_idiom_of_each_statement_helper_is_a_word_of_its_source_procedure() {
+    let projects = vbp::project_files();
+    let mut calls = 0;
+    for exe in &vbp::executables() {
+        for (body, helpers) in bodies_and_helpers(exe, &projects) {
+            for name in &helpers {
+                let Some((helper, word)) =
+                    STATEMENT_HELPERS.iter().find(|(helper, _)| helper == name)
+                else {
+                    continue;
+                };
+                let text = idiom(helper).unwrap().to_ascii_lowercase();
+                assert!(
+                    text.contains(word.trim_end_matches('(')),
+                    "{helper}: {text}"
+                );
+                assert!(
+                    body.contains(word),
+                    "{}: {helper} and no {word:?} in\n{body}",
+                    exe.display()
+                );
+                calls += 1;
+            }
+        }
+    }
+    assert_eq!(calls, 1260, "the calls of the statement helpers moved");
+}
+
+/// Each procedure whose source holds a word of [`WORD_HELPERS`] calls one
+/// of its helpers.
+#[test]
+fn each_word_of_the_source_gives_its_helper_in_the_listing() {
+    let projects = vbp::project_files();
+    let mut words = 0;
+    for exe in &vbp::executables() {
+        for (body, helpers) in bodies_and_helpers(exe, &projects) {
+            for (word, wanted) in WORD_HELPERS {
+                if !body.contains(word) {
+                    continue;
+                }
+                words += 1;
+                assert!(
+                    helpers.iter().any(|name| wanted.contains(&name.as_str())),
+                    "{}: {word:?} and no {wanted:?} in\n{body}",
+                    exe.display()
+                );
+            }
+        }
+    }
+    assert_eq!(words, 115, "the procedures with these words moved");
+}
+
 /// The source of `LockWorkStation` holds one `Shell` of one literal. The
 /// listing gives the literal, and the helper that copies it.
 #[test]
