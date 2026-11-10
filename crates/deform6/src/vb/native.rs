@@ -79,6 +79,16 @@ const CHECK_OBJECT: &str = "__vbaHresultCheckObj";
 /// How many instructions before a check block the search goes.
 const MAX_CHECK_REACH: usize = 64;
 
+/// Where `OptionalObjectInfo` is, after `ObjectInfo`.
+const OPTIONAL_OBJECT_INFO_AT: u32 = 0x38;
+
+/// Where `OptionalObjectInfo` holds the address of the GUID of the base
+/// interface.
+const BASE_IID_AT: u32 = 4;
+
+/// The length of a GUID.
+const GUID_LEN: u32 = 16;
+
 /// Where a procedure of an object finds the object in its frame.
 const ME_ARGUMENT_AT: u32 = 8;
 
@@ -1057,6 +1067,9 @@ pub struct ObjectFacts {
     pub name: String,
     /// The GUID of the default interface of the object.
     pub default_iid: Option<[u8; 16]>,
+    /// The GUID of the interface of the object that a form holds before
+    /// the GUID of its base interface.
+    pub own_iid: Option<[u8; 16]>,
     /// The members of the object that the file names, by vtable offset.
     pub callees: Callees,
     /// The code of each procedure of the object, by vtable offset.
@@ -1070,6 +1083,23 @@ fn function_text(function: &TypeFunction) -> String {
         Some(kind @ ("get" | "let" | "set")) => format!("{name} ({kind})"),
         _ => name,
     }
+}
+
+/// Gives the GUID of the interface that the file holds right before the
+/// GUID of the base interface of `object`.
+fn own_iid(pe: &PeImage<'_>, object: &Object) -> Option<[u8; 16]> {
+    let optional = object
+        .lp_object_info
+        .get()
+        .checked_add(OPTIONAL_OBJECT_INFO_AT)?;
+    let base = pe
+        .region_at_va(Va::new(optional))?
+        .u32_le(Off::new(BASE_IID_AT))?;
+    let own = base.checked_sub(GUID_LEN)?;
+    pe.region_at_va(Va::new(own))?
+        .take(Off::new(0), GUID_LEN)?
+        .try_into()
+        .ok()
 }
 
 /// Gives what the file tells about `object`.
@@ -1088,6 +1118,7 @@ fn facts_of(pe: &PeImage<'_>, object: &Object, types: Option<&VbTypes>) -> Objec
     ObjectFacts {
         name: object.name.clone(),
         default_iid: default_iid(pe, object),
+        own_iid: own_iid(pe, object),
         callees: profile(pe, object, types),
         slots,
     }
@@ -1171,15 +1202,13 @@ impl<'t> Names<'t> {
             let function = control_array_function("", offset)?;
             return Some(format!("control array.{}", function_text(&function)));
         }
-        if let Some(object) = self
-            .objects
-            .iter()
-            .find(|object| object.default_iid.as_ref() == Some(iid))
-        {
-            return self.member_text(object, &object.name, offset);
+        if let Some(name) = self.types.and_then(|types| types.interface_of_iid(iid)) {
+            return Some(format!("{name}.{}", self.function_text(name, offset)?));
         }
-        let name = self.types?.interface_of_iid(iid)?;
-        Some(format!("{name}.{}", self.function_text(name, offset)?))
+        let object = self.objects.iter().find(|object| {
+            object.default_iid.as_ref() == Some(iid) || object.own_iid.as_ref() == Some(iid)
+        })?;
+        self.member_text(object, &object.name, offset)
     }
 
     /// Gives the text of the member at `offset` of the object of the
