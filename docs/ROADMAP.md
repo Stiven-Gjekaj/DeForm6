@@ -1064,7 +1064,8 @@ names the member, such as `_ComboBox.Text (get)` or `Me.cmbLength`.
 
 **Other notes.** A floating point constant gets its value. An argument of a
 public procedure or of an event handler gets its name. A function of the
-runtime that has an ordinal gets its Basic form, such as `Left$`.
+runtime that has an ordinal gets its Basic form, such as `Left$`. A
+late-bound call gets the name of its member, and `__vbaNew` gets its class.
 
 **What it measures,** over the 44 native corpus programs, against the
 source. `tests/native.toml` and `tests/native_listing.rs` pin each number:
@@ -1082,6 +1083,7 @@ source. `tests/native.toml` and `tests/native_listing.rs` pin each number:
 | String notes in the source of their own procedure | 1019 of 1019 |
 | Floating point constants that the source holds as a literal | 417 of 418 |
 | Argument names in the source of their procedure | 557 of 557 |
+| Late-bound members and `New` classes in the source of their procedure | 171 of 171 |
 
 The 97 other member names are default members, such as `Text1 = "a"`, which
 the source does not write. The test fails for another name. Two of the
