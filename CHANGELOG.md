@@ -18,6 +18,11 @@ heading its version and its date.
   and a P-code program still needs it. The listing is not Basic.
   `tests/native.toml` pins each program against its source: the listing
   holds 701 of the 701 procedures that the source declares.
+- The listing of a native program names each procedure by its name or by
+  its place in the source. It gives a note for 6121 of the 6170 calls
+  through a vtable, and with `--vb-types` the note names the member. It
+  also gives floating point constants, the names of arguments and the Basic
+  form of a runtime function that has an ordinal.
 - `extract --verify-build` builds the written project with the Visual
   Basic 6 IDE that the user owns. It finds `VB6.EXE` through `--compiler`,
   the variable `DEFORM6_VB6`, or `Microsoft Visual Studio\VB98\VB6.EXE`
