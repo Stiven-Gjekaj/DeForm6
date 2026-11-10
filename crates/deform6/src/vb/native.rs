@@ -14,6 +14,22 @@
 //! found through a call. A frame prologue that installs
 //! `__vbaExceptHandler` is an entry too, and it finds most of the rest.
 //!
+//! # The names
+//!
+//! The link table of an object gives the address of each procedure of the
+//! object, and its place in the source. The file holds the name of a public
+//! procedure only. The name of an event handler comes from its control and
+//! from the types file. A private procedure takes its place, such as
+//! `Form1.proc3`. A procedure of a standard module takes its place, when the
+//! objects beside the module show where its code is.
+//!
+//! # The object calls
+//!
+//! A call through a vtable takes a note in one of three ways. A check block
+//! after the call names the interface and the offset. A register that holds
+//! the first argument of a procedure of an object gives the object. A global
+//! variable that `__vbaNew2` fills gives the default instance of a form.
+//!
 //! # The bounds
 //!
 //! The walk follows the control flow from each entry. It never decodes
