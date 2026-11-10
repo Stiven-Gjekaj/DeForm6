@@ -756,6 +756,94 @@ fn each_word_of_the_source_gives_its_helper_in_the_listing() {
     assert_eq!(words, 117, "the procedures with these words moved");
 }
 
+/// A joined note names a control and its member. The source of the
+/// procedure uses that control, and uses that member of it. A statement
+/// can leave out a default member, and a control array gives `Item`.
+#[test]
+fn each_joined_call_names_a_control_and_a_member_of_its_source_procedure() {
+    let Some(types) = derived_types() else {
+        println!("no types file in derived/, so this test checks nothing");
+        return;
+    };
+    let table = OpcodeTable::builtin();
+    let projects = vbp::project_files();
+    let (mut total, mut named, mut bare) = (0, 0, 0);
+    for exe in &vbp::executables() {
+        let data = std::fs::read(exe).unwrap();
+        let pe = PeImage::parse(&data).unwrap();
+        let report = deform6::inspect_with_types(
+            &data,
+            &table,
+            Some(&types),
+            deform6::journal::Mode::Strict,
+        )
+        .unwrap();
+        let listing = disassemble(&pe);
+        let names = Names::read(&pe, &listing, Some(&report), Some(&types));
+        let project_path = vbp::select_project_file(exe, &projects).unwrap();
+        let bodies: BTreeMap<String, Vec<(String, Vec<String>)>> =
+            vbp::Project::read(&project_path)
+                .declared_objects()
+                .into_iter()
+                .filter(|object| object.source_file.is_file())
+                .filter_map(|object| {
+                    let bodies = source::procedure_bodies(&object.source_file);
+                    Some((object.name?, bodies))
+                })
+                .collect();
+        for procedure in &listing.procedures {
+            let Some(method) = names.methods.get(&procedure.entry.get()) else {
+                continue;
+            };
+            let Some(objects) = bodies.get(&method.object) else {
+                continue;
+            };
+            let body = objects[usize::from(method.index)]
+                .1
+                .join("\n")
+                .to_ascii_lowercase();
+            for line in &procedure.lines {
+                if !line
+                    .notes
+                    .iter()
+                    .any(|note| matches!(note, Note::Receiver { .. }))
+                {
+                    continue;
+                }
+                let Some(text) = names.line_notes(&pe, line, procedure.entry).pop() else {
+                    continue;
+                };
+                let lower = text.to_ascii_lowercase();
+                let path = lower.split(' ').next().unwrap();
+                let parts: Vec<&str> = path.split('.').collect();
+                if parts.len() < 2 {
+                    continue;
+                }
+                let member = parts[parts.len() - 1];
+                let control = parts[parts.len() - 2];
+                total += 1;
+                if body.contains(&format!("{control}.{member}")) {
+                    named += 1;
+                } else {
+                    assert!(
+                        body.contains(control)
+                            && matches!(member, "text" | "caption" | "value" | "item"),
+                        "{}: {text} is in no statement of {}\n{body}",
+                        exe.display(),
+                        method.text()
+                    );
+                    bare += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(
+        (total, named, bare),
+        (1144, 1043, 101),
+        "the joined calls moved"
+    );
+}
+
 /// The name that the listing gives an argument is a word of the source
 /// of its procedure.
 #[test]

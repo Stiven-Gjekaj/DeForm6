@@ -113,6 +113,12 @@ const MAX_LATE_PUSHES: usize = 4;
 /// The longest member name of a late-bound call, in UTF-16 units.
 const MAX_IDENTIFIER_UNITS: u32 = 0x100;
 
+/// The first vtable offset after the three methods of `IUnknown`.
+const FIRST_MEMBER_OFFSET: u32 = 0x0C;
+
+/// The name of the helper that stores an object reference.
+const OBJECT_SET: &str = "__vbaObjSet";
+
 /// How many instructions after a call can jump to its check block.
 const MAX_JUMPS_TO_CHECK: usize = 6;
 
@@ -174,6 +180,14 @@ pub enum Note {
     LateMember(String),
     /// The instruction calls `__vbaNew` for the class at this `ObjectInfo`.
     NewObject(Va),
+    /// The instruction calls the member at this vtable offset of the object
+    /// that the note `source` gave.
+    Receiver {
+        /// The note of the call that gave the object.
+        source: Box<Note>,
+        /// The vtable offset of the member.
+        offset: u16,
+    },
     /// An operand is in the frame of the procedure, at this positive offset
     /// from `ebp`.
     Argument(u32),
@@ -625,7 +639,9 @@ impl Walk<'_, '_> {
         let mut pending: BTreeMap<u32, Frame> = BTreeMap::new();
         let mut fell_through = true;
         let in_method = self.methods.contains(&entry);
-        for (at, instruction) in seen {
+        let ordered: Vec<&Instruction> = seen.values().collect();
+        let mut pushed_notes: BTreeMap<usize, Note> = BTreeMap::new();
+        for (index, (at, instruction)) in seen.iter().enumerate() {
             match (pending.remove(at), fell_through) {
                 (Some(saved), true) => frame.meet(&saved),
                 (Some(saved), false) => frame = saved,
@@ -650,6 +666,29 @@ impl Walk<'_, '_> {
                     offset,
                 });
             }
+            if let Some(note) = frame.chains.receiver_of(instruction) {
+                notes.push(note);
+            }
+            if let Some(note) = frame.chains.pushed_note(instruction) {
+                pushed_notes.insert(index, note);
+            }
+            let source = (instruction.flow_control() == FlowControl::IndirectCall)
+                .then(|| notes.iter().find(|note| is_object_source(note)).cloned())
+                .flatten();
+            let set_object = (instruction.flow_control() == FlowControl::IndirectCall
+                && notes.iter().any(is_object_set))
+            .then(|| {
+                let order: Vec<usize> = (index.saturating_sub(MAX_CHECK_REACH)..index)
+                    .rev()
+                    .filter(|at| {
+                        ordered
+                            .get(*at)
+                            .is_some_and(|one| one.mnemonic() == Mnemonic::Push)
+                    })
+                    .collect();
+                pushed_notes.get(order.get(1)?).cloned()
+            })
+            .flatten();
             let copied_object = frame.me.copy_target(instruction);
             for used in info.info(instruction).used_registers() {
                 if matches!(
@@ -661,6 +700,7 @@ impl Walk<'_, '_> {
                 ) {
                     loaded.remove(&used.register().full_register32());
                     frame.instances.forget(used.register().full_register32());
+                    frame.chains.forget(used.register().full_register32());
                     if !clears_the_low_bit(instruction) {
                         frame.me.forget(used.register().full_register32());
                     }
@@ -668,6 +708,7 @@ impl Walk<'_, '_> {
             }
             frame.me.learn(instruction);
             frame.instances.learn(instruction, &globals);
+            frame.chains.learn(instruction, source, set_object);
             if let Some(register) = copied_object {
                 frame.me.objects.insert(register);
             }
@@ -836,10 +877,13 @@ impl Walk<'_, '_> {
             }
         }
         for at in 0..lines.len() {
-            let unnoted = lines.get(at).is_some_and(|line| line.notes.is_empty())
-                && instructions
-                    .get(at)
-                    .is_some_and(|one| calls_vtable_slot(one, one.memory_displacement32()));
+            let unnoted = lines.get(at).is_some_and(|line| {
+                line.notes
+                    .iter()
+                    .all(|note| matches!(note, Note::Receiver { .. }))
+            }) && instructions
+                .get(at)
+                .is_some_and(|one| calls_vtable_slot(one, one.memory_displacement32()));
             if unnoted
                 && let Some(note) = self.shared_check(instructions, lines, at)
                 && let Some(line) = lines.get_mut(at)
@@ -1103,6 +1147,8 @@ struct Frame {
     me: MeTracker,
     /// The registers that hold a default instance.
     instances: InstanceTracker,
+    /// The registers that hold an object that a call gave.
+    chains: ChainTracker,
 }
 
 impl Frame {
@@ -1113,6 +1159,7 @@ impl Frame {
         if self.me.pushed != other.me.pushed {
             self.me.pushed = None;
         }
+        self.chains.meet(&other.chains);
         self.instances
             .objects
             .retain(|key, value| other.instances.objects.get(key) == Some(value));
@@ -1131,6 +1178,7 @@ impl Frame {
         self.me.vtables.clear();
         self.instances.objects.clear();
         self.instances.vtables.clear();
+        self.chains = ChainTracker::default();
     }
 }
 
@@ -1243,6 +1291,116 @@ fn clears_the_low_bit(instruction: &Instruction) -> bool {
         }
 }
 
+/// The registers that hold an object that a call gave, or its vtable.
+///
+/// The compiler hands the result of a call of an accessor to `__vbaObjSet`,
+/// and calls the object that the helper returns. The chain goes only through
+/// that helper, because the result of another call can be a status code.
+#[derive(Clone, Default)]
+struct ChainTracker {
+    /// The note of the call that each register holds the result of.
+    returned: BTreeMap<Register, Note>,
+    /// The note of the call that gave the object in each register.
+    objects: BTreeMap<Register, Note>,
+    /// The note of the call that gave the object whose vtable each register
+    /// holds.
+    vtables: BTreeMap<Register, Note>,
+}
+
+impl ChainTracker {
+    /// Keeps only what `other` knows too.
+    fn meet(&mut self, other: &Self) {
+        self.returned
+            .retain(|key, value| other.returned.get(key) == Some(value));
+        self.objects
+            .retain(|key, value| other.objects.get(key) == Some(value));
+        self.vtables
+            .retain(|key, value| other.vtables.get(key) == Some(value));
+    }
+
+    /// Forgets what `register` held.
+    fn forget(&mut self, register: Register) {
+        self.returned.remove(&register);
+        self.objects.remove(&register);
+        self.vtables.remove(&register);
+    }
+
+    /// Gives the note when `instruction` calls a member of a held object.
+    /// The first three slots of a vtable are `IUnknown`, so they name no
+    /// member of the source.
+    fn receiver_of(&self, instruction: &Instruction) -> Option<Note> {
+        if instruction.flow_control() != FlowControl::IndirectCall
+            || instruction.op0_kind() != OpKind::Memory
+            || instruction.memory_index() != Register::None
+            || instruction.memory_displacement32() < FIRST_MEMBER_OFFSET
+        {
+            return None;
+        }
+        Some(Note::Receiver {
+            source: Box::new(self.vtables.get(&instruction.memory_base())?.clone()),
+            offset: u16::try_from(instruction.memory_displacement32()).ok()?,
+        })
+    }
+
+    /// Gives the note of the result in the register that `instruction`
+    /// pushes.
+    fn pushed_note(&self, instruction: &Instruction) -> Option<Note> {
+        (instruction.mnemonic() == Mnemonic::Push && instruction.op0_kind() == OpKind::Register)
+            .then(|| self.returned.get(&instruction.op0_register()).cloned())
+            .flatten()
+    }
+
+    /// Records what `instruction` puts in a register. `source` is the note
+    /// of an accessor, and `set_object` is the note of the object that
+    /// `__vbaObjSet` returns.
+    fn learn(&mut self, instruction: &Instruction, source: Option<Note>, set_object: Option<Note>) {
+        if matches!(
+            instruction.flow_control(),
+            FlowControl::Call | FlowControl::IndirectCall
+        ) {
+            for register in [Register::EAX, Register::ECX, Register::EDX] {
+                self.forget(register);
+            }
+            if let Some(note) = source {
+                self.returned.insert(Register::EAX, note);
+            }
+            if let Some(note) = set_object {
+                self.objects.insert(Register::EAX, note);
+            }
+            return;
+        }
+        if instruction.mnemonic() != Mnemonic::Mov || instruction.op0_kind() != OpKind::Register {
+            return;
+        }
+        let target = instruction.op0_register();
+        if instruction.op1_kind() == OpKind::Register {
+            let from = instruction.op1_register();
+            if let Some(note) = self.objects.get(&from).cloned() {
+                self.objects.insert(target, note);
+            }
+        } else if instruction.op1_kind() == OpKind::Memory
+            && instruction.memory_index() == Register::None
+            && instruction.memory_displacement32() == 0
+            && let Some(note) = self.objects.get(&instruction.memory_base()).cloned()
+        {
+            self.vtables.insert(target, note);
+        }
+    }
+}
+
+/// Tells whether `note` can give an object through `__vbaObjSet`.
+fn is_object_source(note: &Note) -> bool {
+    matches!(
+        note,
+        Note::Me(_)
+            | Note::Instance { .. }
+            | Note::Import(ImportedFunction {
+                name: ImportName::Ordinal(_),
+                ..
+            })
+    )
+}
+
 /// The default instances that a procedure loads, and the registers that
 /// hold one of them or its vtable.
 #[derive(Clone, Default)]
@@ -1314,6 +1472,12 @@ fn index_of(instructions: &[Instruction], address: u32) -> Option<usize> {
     instructions
         .binary_search_by_key(&u64::from(address), Instruction::ip)
         .ok()
+}
+
+/// Tells whether `note` names the helper that stores an object reference.
+fn is_object_set(note: &Note) -> bool {
+    matches!(note, Note::Import(function)
+        if function.name == ImportName::Name(OBJECT_SET.to_owned()))
 }
 
 /// Tells whether `note` names the helper that checks an object call.
@@ -1909,6 +2073,69 @@ impl<'t> Names<'t> {
         self.member_text(object, &object.name, offset)
     }
 
+    /// Gives the text of the object that `source` gave, and the interface of
+    /// that object when the file gives it.
+    fn source_text(&self, source: &Note, entry: Va) -> Option<(String, Option<String>)> {
+        match source {
+            Note::Me(offset) => {
+                let method = self.methods.get(&entry.get())?;
+                let object = self
+                    .objects
+                    .get(*self.object_of_name.get(&method.object)?)?;
+                let (control, interface) = object.callees.control(*offset)?;
+                Some((format!("Me.{control}"), interface.map(str::to_owned)))
+            }
+            Note::Instance { object, offset } => {
+                let facts = self.objects.get(*self.object_of_info.get(&object.get())?)?;
+                let (control, interface) = facts.callees.control(*offset)?;
+                Some((
+                    format!("{}.{control}", facts.name),
+                    interface.map(str::to_owned),
+                ))
+            }
+            Note::Import(ImportedFunction {
+                name: ImportName::Ordinal(ordinal),
+                ..
+            }) => {
+                let import = self.types?.import(*ordinal)?;
+                Some((import.name.clone(), import.result_interface.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    /// Gives the text of each note of `line`, in the procedure at `entry`.
+    /// A call of a member of an object that an accessor gave takes one note
+    /// that joins the two, such as `Me.Text1.Text (get)`.
+    #[must_use]
+    pub fn line_notes(&self, pe: &PeImage<'_>, line: &Line, entry: Va) -> Vec<String> {
+        let joined = line.notes.iter().find_map(|note| {
+            let Note::Receiver { source, offset } = note else {
+                return None;
+            };
+            let (text, interface) = self.source_text(source, entry)?;
+            let member = line
+                .notes
+                .iter()
+                .find_map(|other| match other {
+                    Note::Interface { iid, offset } => self.interface_text(iid, *offset),
+                    _ => None,
+                })
+                .and_then(|member| member.split_once('.').map(|(_, rest)| rest.to_owned()))
+                .or_else(|| self.function_text(&interface?, *offset))?;
+            Some(format!("{text}.{member}"))
+        });
+        let mut notes: Vec<String> = line
+            .notes
+            .iter()
+            .filter(|note| joined.is_none() || !matches!(note, Note::Interface { .. }))
+            .map(|note| self.note(pe, note, entry))
+            .filter(|text| !text.is_empty())
+            .collect();
+        notes.extend(joined);
+        notes
+    }
+
     /// Gives the text of the member at `offset` of the object of the
     /// procedure at `entry`.
     fn me_text(&self, entry: Va, offset: u16) -> String {
@@ -1967,6 +2194,7 @@ impl<'t> Names<'t> {
                 ),
             Note::Text(text) => format!("{text:?}"),
             Note::Number(text) => text.clone(),
+            Note::Receiver { .. } => String::new(),
             Note::LateMember(name) => format!("late-bound member {name}"),
             Note::NewObject(object) => self
                 .object_of_info
@@ -2011,12 +2239,7 @@ pub fn listing_text(pe: &PeImage<'_>, listing: &Listing, names: &Names<'_>) -> S
             procedure.entry.get()
         );
         for line in &procedure.lines {
-            let notes: Vec<String> = line
-                .notes
-                .iter()
-                .map(|note| names.note(pe, note, procedure.entry))
-                .filter(|text| !text.is_empty())
-                .collect();
+            let notes = names.line_notes(pe, line, procedure.entry);
             if notes.is_empty() {
                 let _ = writeln!(out, "  {:08X}  {}", line.va.get(), line.text);
             } else {
