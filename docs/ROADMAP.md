@@ -542,9 +542,13 @@ The projects in the corpus gave the same result in each run: 42 of 44 built.
 The two corpus projects that do not build fail because of faults upstream,
 which the first run names.
 
-**What stays open.** The table has one row. For another control, DeForm6
-writes the class identifier on the `Object=` line, and VB6 does not load that
-line. A second control in the corpus can add a row.
+**Closed on 2026-11-10.** The table still has one row, because the corpus
+holds one control of an OCX. `derive-vb-types` now reads the type library of
+each OCX that you give it, and `extract --vb-types` writes its `Object=`
+line. The tool gives the line of the corpus project file for `MSWINSCK.OCX`
+and for `COMDLG32.OCX`, each byte for byte. With no types file, another
+control still gets the class identifier on that line, and VB6 does not load
+it.
 
 #### Part 3, done on 2026-11-05
 
@@ -1079,10 +1083,10 @@ source. `tests/native.toml` and `tests/native_listing.rs` pin each number:
 | Procedures that a link slot names | 701 |
 | Their place against the source, for the 574 that have a name or an event | 574 of 574 |
 | Procedures with a name or a place in the listing | 718 of 718 |
-| Calls through a vtable with a note | 6155 of 6170 |
+| Calls through a vtable with a note | 6167 of 6170 |
 | Calls of `__vbaHresultCheckObj` that name their call | 3094 of 3094 |
-| Named object calls whose member is in the source of the procedure | 4785 of 4885 |
-| Joined calls whose `control.member` is in the source of the procedure | 1043 of 1144 |
+| Named object calls whose member is in the source of the procedure | 4795 of 4895 |
+| Joined calls whose `control.member` is in the source of the procedure | 1095 of 1201 |
 | Calls of 21 statement helpers whose word is in the source of the procedure | 1264 of 1264 |
 | Procedures with a statement word that call its helper | 117 of 117 |
 | String notes in the source of their own procedure | 1020 of 1020 |
@@ -1091,7 +1095,7 @@ source. `tests/native.toml` and `tests/native_listing.rs` pin each number:
 | Late-bound members and `New` classes in the source of their procedure | 171 of 171 |
 
 The 100 other member names are default members, such as `Text1 = "a"`, which
-the source does not write. The 101 other joined calls are default members,
+the source does not write. The 106 other joined calls are default members,
 or `Item` of a control array. The test fails for another name. Three of the
 measures need `derived/vb-types.toml`. A machine with no such file skips
 them. The 6 other string notes of the corpus are in procedures whose source
@@ -1103,8 +1107,8 @@ tests find each of these places correct. The file does not prove the rule.
 
 **The ceiling.** This phase ends here. The file holds no name for a private
 procedure or for a local variable, and no name of a procedure of a standard
-module. 15 calls through a vtable have no note, because the listing does not
-follow the value through a frame slot or an array. The notes join only an
+module. 3 calls through a vtable have no note, because the listing does not
+follow the value through a slot above `esp` or through an array. The notes join only an
 accessor and its member. A join into whole statements is a decompiler for
 native code, and no measure in this project shows that it can be correct.
 
@@ -1128,10 +1132,15 @@ action.
 that writes it. A missing `VB6.EXE` names `--compiler` and `DEFORM6_VB6`.
 A test holds each message.
 
-**What stays open.** Steps 1 to 3 ran on the author's Windows 11 host with
-the Visual Basic 6 IDE: `--verify-build` built 86 of 86. Nobody has done
-step 4, the edit and build in the IDE, by hand. This project has not tested
-twinBASIC, so `docs/WORKFLOW.md` gives its route as untested.
+**Step 4, done on 2026-11-10.** Steps 1 to 3 ran on the author's Windows 11
+host with the Visual Basic 6 IDE: `--verify-build` built 86 of 86. Step 4 ran
+in the Visual Basic 6 IDE on the Windows XP host, through its keyboard, on the
+gradient sample. For the native program and for the lifted P-code program, the
+IDE opened the project with no error. A new event handler went in through the
+code window, **File, Make** built the executable, and the handler ran.
+
+**What stays open.** This project has not run twinBASIC, so
+`docs/WORKFLOW.md` gives its route as untested.
 
 ## What blocks what
 
@@ -1168,9 +1177,15 @@ Windows XP with the Visual Basic 6 IDE, in a virtual machine.
 
 ## Open questions to close before planning around them
 
-- Does a hosted Windows runner still carry the Visual Basic 6 runtime? This
-  no longer blocks the build gate: the record is a measurement from the
-  author's host, and the gate checks that it covers the files that DeForm6
-  writes now. It matters only for a gate that builds on each push.
 - Does the twinBASIC command line accept a Visual Basic project file directly,
-  or does it need a conversion step first?
+  or does it need a conversion step first? Its published examples of
+  `--buildAndExit32` show a `.twinproj` file, and its IDE imports a `.vbp`
+  file. No run in this project confirms either one.
+
+## Questions that a measure closed
+
+- Does a hosted Windows runner still carry the Visual Basic 6 runtime? On
+  2026-11-10, `windows-2022` and `windows-2025` each held
+  `SysWOW64\MSVBVM60.DLL`, version 6.00.9848. Neither held `VB6.OLB` or
+  `VB6.EXE`. So a hosted runner can run a built program, and it cannot build
+  one.
