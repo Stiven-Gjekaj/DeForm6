@@ -18,6 +18,7 @@
 #
 # `checked_calls` is the count of object calls that a check block names. The
 # corpus holds 3094 calls of `__vbaHresultCheckObj`, and each one names a call.
+# A call can also jump to a check block that another call uses.
 #
 # `me_calls` is the count of calls through the vtable of the object of the
 # procedure.

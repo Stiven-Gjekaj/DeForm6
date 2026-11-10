@@ -1067,6 +1067,10 @@ public procedure or of an event handler gets its name. A function of the
 runtime that has an ordinal gets its Basic form, such as `Left$`. A
 late-bound call gets the name of its member, and `__vbaNew` gets its class.
 
+**The joined calls.** When the object of a member call comes from an
+accessor through `__vbaObjSet`, one note gives the two together, such as
+`Me.cmbLength.Text (get)`.
+
 **What it measures,** over the 44 native corpus programs, against the
 source. `tests/native.toml` and `tests/native_listing.rs` pin each number:
 
@@ -1074,29 +1078,35 @@ source. `tests/native.toml` and `tests/native_listing.rs` pin each number:
 |---|---|
 | Procedures that a link slot names | 701 |
 | Their place against the source, for the 574 that have a name or an event | 574 of 574 |
-| Procedures with a name or a place in the listing | 711 of 718 |
-| Calls through a vtable with a note | 6121 of 6170 |
+| Procedures with a name or a place in the listing | 718 of 718 |
+| Calls through a vtable with a note | 6155 of 6170 |
 | Calls of `__vbaHresultCheckObj` that name their call | 3094 of 3094 |
-| Named object calls whose member is in the source of the procedure | 4638 of 4735 |
-| Calls of 21 statement helpers whose word is in the source of the procedure | 1263 of 1263 |
-| Procedures with a statement word that call its helper | 116 of 116 |
-| String notes in the source of their own procedure | 1019 of 1019 |
+| Named object calls whose member is in the source of the procedure | 4785 of 4885 |
+| Joined calls whose `control.member` is in the source of the procedure | 1043 of 1144 |
+| Calls of 21 statement helpers whose word is in the source of the procedure | 1264 of 1264 |
+| Procedures with a statement word that call its helper | 117 of 117 |
+| String notes in the source of their own procedure | 1020 of 1020 |
 | Floating point constants that the source holds as a literal | 417 of 418 |
 | Argument names in the source of their procedure | 557 of 557 |
 | Late-bound members and `New` classes in the source of their procedure | 171 of 171 |
 
-The 97 other member names are default members, such as `Text1 = "a"`, which
-the source does not write. The test fails for another name. Two of the
+The 100 other member names are default members, such as `Text1 = "a"`, which
+the source does not write. The 101 other joined calls are default members,
+or `Item` of a control array. The test fails for another name. Three of the
 measures need `derived/vb-types.toml`. A machine with no such file skips
-them. The 7 other string notes of the corpus are in procedures whose source
-is not in the repository or whose place the listing does not know.
+them. The 6 other string notes of the corpus are in procedures whose source
+is not in the repository.
 
-**What stays open.** Seven procedures of `Map Editor.exe` stay `sub_`,
-because two modules are beside each other in its object table. The file
-holds no name for a private procedure or for a local variable, and no name
-of a procedure of a standard module. 49 calls through a vtable have no note,
-because the register comes from an array or a value that the listing does
-not follow. The notes do not join into statements.
+The 7 procedures of `Map Editor.exe` take their module from one rule: two modules
+beside each other, where the count of one is the number of procedures. The
+tests find each of these places correct. The file does not prove the rule.
+
+**The ceiling.** This phase ends here. The file holds no name for a private
+procedure or for a local variable, and no name of a procedure of a standard
+module. 15 calls through a vtable have no note, because the listing does not
+follow the value through a frame slot or an array. The notes join only an
+accessor and its member. A join into whole statements is a decompiler for
+native code, and no measure in this project shows that it can be correct.
 
 ### Phase 13: The workflow
 
@@ -1135,7 +1145,7 @@ Phase 8  (exit met: 44 of 44 on XP; --verify-build 86 of 86 on Windows 11)
                  |
                  +-- Phase 11 (exit met: 42 of 42 build, 226 of 226 screens the same)
 
-Phase 12 runs beside 10 and 11.
+Phase 12 (done at its ceiling: annotated x86, and not Basic)
 Phase 13 closes the milestone.
 ```
 
