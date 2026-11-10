@@ -48,6 +48,8 @@ struct Measure {
     checked_calls: usize,
     /// The calls through the vtable of the object of the procedure.
     me_calls: usize,
+    /// The calls through the vtable of the default instance of a form.
+    instance_calls: usize,
     /// The floating point constants that the listing gives.
     numbers: usize,
     /// The floating point constants that the source holds as a literal.
@@ -148,6 +150,7 @@ fn measure(exe: &Path, listing: &Listing, text: &str, declared: usize) -> Measur
         idioms: 0,
         checked_calls: 0,
         me_calls: 0,
+        instance_calls: 0,
         numbers: 0,
         numbers_in_source: 0,
     };
@@ -181,6 +184,7 @@ fn measure(exe: &Path, listing: &Listing, text: &str, declared: usize) -> Measur
                 }
                 Note::Interface { .. } => result.checked_calls += 1,
                 Note::Me(_) => result.me_calls += 1,
+                Note::Instance { .. } => result.instance_calls += 1,
                 Note::Number(found) => {
                     result.numbers += 1;
                     if number_in_source(found, text) {
@@ -233,7 +237,7 @@ fn each_native_program_gives_the_pinned_listing_with_no_fault() {
         let key = key_of(exe);
         if print {
             println!(
-                "[program.\"{key}\"]\nprocedures = {}\ndeclared = {}\ninstructions = {}\nstrings = {}\nstrings_in_source = {}\nruntime_calls = {}\nidioms = {}\nchecked_calls = {}\nme_calls = {}\nnumbers = {}\nnumbers_in_source = {}\n",
+                "[program.\"{key}\"]\nprocedures = {}\ndeclared = {}\ninstructions = {}\nstrings = {}\nstrings_in_source = {}\nruntime_calls = {}\nidioms = {}\nchecked_calls = {}\nme_calls = {}\ninstance_calls = {}\nnumbers = {}\nnumbers_in_source = {}\n",
                 got.procedures,
                 got.declared,
                 got.instructions,
@@ -243,6 +247,7 @@ fn each_native_program_gives_the_pinned_listing_with_no_fault() {
                 got.idioms,
                 got.checked_calls,
                 got.me_calls,
+                got.instance_calls,
                 got.numbers,
                 got.numbers_in_source
             );
@@ -264,6 +269,7 @@ fn each_native_program_gives_the_pinned_listing_with_no_fault() {
             idioms: number("idioms"),
             checked_calls: number("checked_calls"),
             me_calls: number("me_calls"),
+            instance_calls: number("instance_calls"),
             numbers: number("numbers"),
             numbers_in_source: number("numbers_in_source"),
         };
@@ -456,7 +462,10 @@ fn each_object_call_names_a_member_that_its_source_procedure_names() {
             let (_, lines) = &objects[usize::from(method.index)];
             let body = lines.join("\n").to_ascii_lowercase();
             for note in procedure.lines.iter().flat_map(|line| &line.notes) {
-                if !matches!(note, Note::Me(_) | Note::Interface { .. }) {
+                if !matches!(
+                    note,
+                    Note::Me(_) | Note::Interface { .. } | Note::Instance { .. }
+                ) {
                     continue;
                 }
                 let text = names.note(&pe, note, procedure.entry);
@@ -492,7 +501,7 @@ fn each_object_call_names_a_member_that_its_source_procedure_names() {
     }
     assert_eq!(
         (total, found, unnamed),
-        (4644, 4547, 8),
+        (4675, 4578, 8),
         "the object calls moved"
     );
 }

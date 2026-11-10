@@ -76,6 +76,9 @@ const DECLARE_TAIL: [u8; 7] = [0x0B, 0xC0, 0x74, 0x02, 0xFF, 0xE0, 0x68];
 /// The name of the helper that raises the error of a failed object call.
 const CHECK_OBJECT: &str = "__vbaHresultCheckObj";
 
+/// The name of the helper that makes the default instance of a form.
+const NEW_INSTANCE: &str = "__vbaNew2";
+
 /// How many instructions before a check block the search goes.
 const MAX_CHECK_REACH: usize = 64;
 
@@ -120,6 +123,13 @@ pub enum Note {
     Me(u16),
     /// An operand is the address of this floating point constant, as text.
     Number(String),
+    /// The instruction calls a member of the default instance of a form.
+    Instance {
+        /// The address of the `ObjectInfo` of the form.
+        object: Va,
+        /// The vtable offset of the member.
+        offset: u16,
+    },
 }
 
 /// One decoded instruction.
@@ -548,6 +558,7 @@ impl Walk<'_, '_> {
         let mut loaded: BTreeMap<Register, ImportedFunction> = BTreeMap::new();
         let mut lines = Vec::with_capacity(seen.len());
         let mut frame = Frame::default();
+        frame.instances.globals = self.default_instances(seen);
         let mut pending: BTreeMap<u32, Frame> = BTreeMap::new();
         let mut fell_through = true;
         let in_method = self.methods.contains(&entry);
@@ -570,6 +581,12 @@ impl Walk<'_, '_> {
             if in_method && let Some(offset) = frame.me.slot_of(instruction) {
                 notes.push(Note::Me(offset));
             }
+            if let Some((object, offset)) = frame.instances.slot_of(instruction) {
+                notes.push(Note::Instance {
+                    object: Va::new(object),
+                    offset,
+                });
+            }
             let copied_object = frame.me.copy_target(instruction);
             for used in info.info(instruction).used_registers() {
                 if matches!(
@@ -580,12 +597,14 @@ impl Walk<'_, '_> {
                         | OpAccess::ReadCondWrite
                 ) {
                     loaded.remove(&used.register().full_register32());
+                    frame.instances.forget(used.register().full_register32());
                     if !clears_the_low_bit(instruction) {
                         frame.me.forget(used.register().full_register32());
                     }
                 }
             }
             frame.me.learn(instruction);
+            frame.instances.learn(instruction);
             if let Some(register) = copied_object {
                 frame.me.objects.insert(register);
             }
@@ -630,6 +649,41 @@ impl Walk<'_, '_> {
         lines
     }
 
+    /// Gives the `ObjectInfo` of the default instance that each global
+    /// variable holds, from each call of `__vbaNew2` in `seen`.
+    fn default_instances(&self, seen: &BTreeMap<u32, Instruction>) -> BTreeMap<u32, u32> {
+        let instructions: Vec<&Instruction> = seen.values().collect();
+        let mut globals = BTreeMap::new();
+        for (at, instruction) in instructions.iter().enumerate() {
+            let creates = instruction.flow_control() == FlowControl::IndirectCall
+                && instruction.op0_kind() == OpKind::Memory
+                && instruction.memory_base() == Register::None
+                && self
+                    .imports
+                    .get(&instruction.memory_displacement32())
+                    .is_some_and(|function| {
+                        function.name == ImportName::Name(NEW_INSTANCE.to_owned())
+                    });
+            if !creates {
+                continue;
+            }
+            let mut pushes = instructions
+                .get(..at)
+                .unwrap_or_default()
+                .iter()
+                .rev()
+                .take(MAX_CHECK_REACH)
+                .filter(|earlier| earlier.mnemonic() == Mnemonic::Push);
+            if let (Some(object), Some(global)) = (
+                pushes.next().and_then(|push| pushed_value(push)),
+                pushes.next().and_then(|push| pushed_value(push)),
+            ) {
+                globals.insert(global, object);
+            }
+        }
+        globals
+    }
+
     /// Adds the note of each object call that a check block names.
     fn note_checked_calls(&self, instructions: &[Instruction], lines: &mut [Line]) {
         let checks: Vec<usize> = lines
@@ -646,7 +700,8 @@ impl Walk<'_, '_> {
             if let Some((at, note)) = self.checked_call(instructions, check)
                 && let Some(line) = lines.get_mut(at)
             {
-                line.notes.retain(|old| !matches!(old, Note::Me(_)));
+                line.notes
+                    .retain(|old| !matches!(old, Note::Me(_) | Note::Instance { .. }));
                 line.notes.push(note);
             }
         }
@@ -811,6 +866,8 @@ impl Walk<'_, '_> {
 struct Frame {
     /// The registers that hold the object of the procedure.
     me: MeTracker,
+    /// The registers that hold a default instance.
+    instances: InstanceTracker,
 }
 
 impl Frame {
@@ -818,6 +875,15 @@ impl Frame {
     fn meet(&mut self, other: &Self) {
         self.me.objects.retain(|one| other.me.objects.contains(one));
         self.me.vtables.retain(|one| other.me.vtables.contains(one));
+        self.instances
+            .objects
+            .retain(|key, value| other.instances.objects.get(key) == Some(value));
+        self.instances
+            .vtables
+            .retain(|key, value| other.instances.vtables.get(key) == Some(value));
+        for (global, object) in &other.instances.globals {
+            self.instances.globals.entry(*global).or_insert(*object);
+        }
     }
 
     /// Forgets what the next block cannot use. A block that no forward
@@ -828,6 +894,8 @@ impl Frame {
             |register: &Register| matches!(register, Register::EBX | Register::ESI | Register::EDI);
         self.me.objects.retain(lasts);
         self.me.vtables.clear();
+        self.instances.objects.clear();
+        self.instances.vtables.clear();
     }
 }
 
@@ -910,6 +978,73 @@ fn clears_the_low_bit(instruction: &Instruction) -> bool {
             (4, Ok(value)) => value & 0xFFFF_FFFF == 0xFFFF_FFFE,
             _ => false,
         }
+}
+
+/// The default instances that a procedure loads, and the registers that
+/// hold one of them or its vtable.
+#[derive(Clone, Default)]
+struct InstanceTracker {
+    /// The `ObjectInfo` of the form that each global variable holds.
+    globals: BTreeMap<u32, u32>,
+    /// The `ObjectInfo` of the instance that each register holds.
+    objects: BTreeMap<Register, u32>,
+    /// The `ObjectInfo` of the instance whose vtable each register holds.
+    vtables: BTreeMap<Register, u32>,
+}
+
+impl InstanceTracker {
+    /// Gives the `ObjectInfo` and the vtable offset when `instruction`
+    /// calls through the vtable of a default instance.
+    fn slot_of(&self, instruction: &Instruction) -> Option<(u32, u16)> {
+        if instruction.flow_control() != FlowControl::IndirectCall
+            || instruction.op0_kind() != OpKind::Memory
+            || instruction.memory_index() != Register::None
+        {
+            return None;
+        }
+        let object = *self.vtables.get(&instruction.memory_base())?;
+        Some((
+            object,
+            u16::try_from(instruction.memory_displacement32()).ok()?,
+        ))
+    }
+
+    /// Forgets what `register` held.
+    fn forget(&mut self, register: Register) {
+        self.objects.remove(&register);
+        self.vtables.remove(&register);
+    }
+
+    /// Records what `instruction` puts in a register.
+    fn learn(&mut self, instruction: &Instruction) {
+        if matches!(
+            instruction.flow_control(),
+            FlowControl::Call | FlowControl::IndirectCall
+        ) {
+            for register in [Register::EAX, Register::ECX, Register::EDX] {
+                self.forget(register);
+            }
+            return;
+        }
+        if instruction.mnemonic() != Mnemonic::Mov
+            || instruction.op0_kind() != OpKind::Register
+            || instruction.op0_register().size() != 4
+            || instruction.op1_kind() != OpKind::Memory
+            || instruction.memory_index() != Register::None
+        {
+            return;
+        }
+        let target = instruction.op0_register();
+        if instruction.memory_base() == Register::None {
+            if let Some(object) = self.globals.get(&instruction.memory_displacement32()) {
+                self.objects.insert(target, *object);
+            }
+        } else if instruction.memory_displacement32() == 0
+            && let Some(object) = self.objects.get(&instruction.memory_base()).copied()
+        {
+            self.vtables.insert(target, object);
+        }
+    }
 }
 
 /// Tells whether `note` names the helper that checks an object call.
@@ -1118,6 +1253,8 @@ pub fn object_methods(pe: &PeImage<'_>) -> BTreeMap<u32, ObjectMethod> {
 pub struct ObjectFacts {
     /// The name of the object.
     pub name: String,
+    /// The address of the `ObjectInfo` of the object.
+    pub object_info: u32,
     /// The GUID of the default interface of the object.
     pub default_iid: Option<[u8; 16]>,
     /// The GUID of the interface of the object that a form holds before
@@ -1170,6 +1307,7 @@ fn facts_of(pe: &PeImage<'_>, object: &Object, types: Option<&VbTypes>) -> Objec
     }
     ObjectFacts {
         name: object.name.clone(),
+        object_info: object.lp_object_info.get(),
         default_iid: default_iid(pe, object),
         own_iid: own_iid(pe, object),
         callees: profile(pe, object, types),
@@ -1324,6 +1462,12 @@ impl<'t> Names<'t> {
                 ),
             Note::Text(text) => format!("{text:?}"),
             Note::Number(text) => text.clone(),
+            Note::Instance { object, offset } => self
+                .objects
+                .iter()
+                .find(|facts| facts.object_info == object.get())
+                .and_then(|facts| self.member_text(facts, &facts.name, *offset))
+                .unwrap_or_else(|| format!("default instance, vtable offset {offset:#X}")),
             Note::Me(offset) => self.me_text(entry, *offset),
             Note::Interface { iid, offset } => {
                 self.interface_text(iid, *offset).unwrap_or_else(|| {

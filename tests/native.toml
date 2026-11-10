@@ -22,6 +22,9 @@
 # `me_calls` is the count of calls through the vtable of the object of the
 # procedure.
 #
+# `instance_calls` is the count of calls through the vtable of the default
+# instance of a form.
+#
 # `numbers` is the count of floating point constants that an instruction
 # reads. `numbers_in_source` is how many of them the source holds as a
 # literal. The one other is an expression of constants.
@@ -36,6 +39,7 @@ runtime_calls = 413
 idioms = 368
 checked_calls = 80
 me_calls = 106
+instance_calls = 1
 numbers = 9
 numbers_in_source = 9
 
@@ -49,6 +53,7 @@ runtime_calls = 7
 idioms = 6
 checked_calls = 0
 me_calls = 2
+instance_calls = 0
 numbers = 0
 numbers_in_source = 0
 
@@ -62,6 +67,7 @@ runtime_calls = 2852
 idioms = 2700
 checked_calls = 553
 me_calls = 493
+instance_calls = 3
 numbers = 18
 numbers_in_source = 18
 
@@ -75,6 +81,7 @@ runtime_calls = 54
 idioms = 52
 checked_calls = 0
 me_calls = 3
+instance_calls = 0
 numbers = 9
 numbers_in_source = 9
 
@@ -88,6 +95,7 @@ runtime_calls = 655
 idioms = 608
 checked_calls = 70
 me_calls = 89
+instance_calls = 0
 numbers = 33
 numbers_in_source = 33
 
@@ -101,6 +109,7 @@ runtime_calls = 260
 idioms = 240
 checked_calls = 24
 me_calls = 59
+instance_calls = 0
 numbers = 1
 numbers_in_source = 1
 
@@ -114,6 +123,7 @@ runtime_calls = 141
 idioms = 132
 checked_calls = 19
 me_calls = 27
+instance_calls = 0
 numbers = 0
 numbers_in_source = 0
 
@@ -127,6 +137,7 @@ runtime_calls = 95
 idioms = 94
 checked_calls = 14
 me_calls = 30
+instance_calls = 0
 numbers = 0
 numbers_in_source = 0
 
@@ -140,6 +151,7 @@ runtime_calls = 630
 idioms = 558
 checked_calls = 79
 me_calls = 84
+instance_calls = 1
 numbers = 17
 numbers_in_source = 17
 
@@ -153,6 +165,7 @@ runtime_calls = 97
 idioms = 90
 checked_calls = 16
 me_calls = 25
+instance_calls = 0
 numbers = 0
 numbers_in_source = 0
 
@@ -166,6 +179,7 @@ runtime_calls = 61
 idioms = 58
 checked_calls = 8
 me_calls = 18
+instance_calls = 0
 numbers = 0
 numbers_in_source = 0
 
@@ -179,6 +193,7 @@ runtime_calls = 74
 idioms = 70
 checked_calls = 11
 me_calls = 22
+instance_calls = 0
 numbers = 0
 numbers_in_source = 0
 
@@ -192,6 +207,7 @@ runtime_calls = 55
 idioms = 51
 checked_calls = 7
 me_calls = 17
+instance_calls = 0
 numbers = 0
 numbers_in_source = 0
 
@@ -205,6 +221,7 @@ runtime_calls = 824
 idioms = 776
 checked_calls = 166
 me_calls = 112
+instance_calls = 2
 numbers = 16
 numbers_in_source = 16
 
@@ -218,6 +235,7 @@ runtime_calls = 332
 idioms = 314
 checked_calls = 56
 me_calls = 44
+instance_calls = 0
 numbers = 2
 numbers_in_source = 2
 
@@ -231,6 +249,7 @@ runtime_calls = 47
 idioms = 45
 checked_calls = 16
 me_calls = 19
+instance_calls = 0
 numbers = 3
 numbers_in_source = 3
 
@@ -244,6 +263,7 @@ runtime_calls = 49
 idioms = 47
 checked_calls = 18
 me_calls = 19
+instance_calls = 0
 numbers = 3
 numbers_in_source = 3
 
@@ -257,6 +277,7 @@ runtime_calls = 257
 idioms = 254
 checked_calls = 59
 me_calls = 46
+instance_calls = 0
 numbers = 0
 numbers_in_source = 0
 
@@ -270,6 +291,7 @@ runtime_calls = 331
 idioms = 313
 checked_calls = 54
 me_calls = 35
+instance_calls = 0
 numbers = 2
 numbers_in_source = 2
 
@@ -283,6 +305,7 @@ runtime_calls = 396
 idioms = 377
 checked_calls = 73
 me_calls = 77
+instance_calls = 0
 numbers = 38
 numbers_in_source = 38
 
@@ -296,6 +319,7 @@ runtime_calls = 334
 idioms = 316
 checked_calls = 56
 me_calls = 38
+instance_calls = 0
 numbers = 2
 numbers_in_source = 2
 
@@ -309,6 +333,7 @@ runtime_calls = 487
 idioms = 463
 checked_calls = 76
 me_calls = 68
+instance_calls = 3
 numbers = 30
 numbers_in_source = 30
 
@@ -322,6 +347,7 @@ runtime_calls = 781
 idioms = 758
 checked_calls = 172
 me_calls = 131
+instance_calls = 0
 numbers = 3
 numbers_in_source = 3
 
@@ -335,6 +361,7 @@ runtime_calls = 436
 idioms = 414
 checked_calls = 75
 me_calls = 74
+instance_calls = 0
 numbers = 7
 numbers_in_source = 7
 
@@ -348,6 +375,7 @@ runtime_calls = 813
 idioms = 775
 checked_calls = 88
 me_calls = 91
+instance_calls = 0
 numbers = 3
 numbers_in_source = 3
 
@@ -361,6 +389,7 @@ runtime_calls = 462
 idioms = 442
 checked_calls = 101
 me_calls = 87
+instance_calls = 0
 numbers = 3
 numbers_in_source = 3
 
@@ -374,6 +403,7 @@ runtime_calls = 36
 idioms = 30
 checked_calls = 4
 me_calls = 10
+instance_calls = 0
 numbers = 3
 numbers_in_source = 3
 
@@ -387,6 +417,7 @@ runtime_calls = 161
 idioms = 154
 checked_calls = 28
 me_calls = 33
+instance_calls = 0
 numbers = 6
 numbers_in_source = 6
 
@@ -400,6 +431,7 @@ runtime_calls = 204
 idioms = 193
 checked_calls = 39
 me_calls = 25
+instance_calls = 25
 numbers = 52
 numbers_in_source = 52
 
@@ -413,6 +445,7 @@ runtime_calls = 200
 idioms = 196
 checked_calls = 43
 me_calls = 47
+instance_calls = 0
 numbers = 0
 numbers_in_source = 0
 
@@ -426,6 +459,7 @@ runtime_calls = 594
 idioms = 576
 checked_calls = 133
 me_calls = 133
+instance_calls = 0
 numbers = 7
 numbers_in_source = 7
 
@@ -439,6 +473,7 @@ runtime_calls = 610
 idioms = 576
 checked_calls = 73
 me_calls = 80
+instance_calls = 0
 numbers = 9
 numbers_in_source = 9
 
@@ -452,6 +487,7 @@ runtime_calls = 619
 idioms = 593
 checked_calls = 108
 me_calls = 95
+instance_calls = 14
 numbers = 40
 numbers_in_source = 40
 
@@ -465,6 +501,7 @@ runtime_calls = 481
 idioms = 455
 checked_calls = 86
 me_calls = 73
+instance_calls = 2
 numbers = 8
 numbers_in_source = 8
 
@@ -478,6 +515,7 @@ runtime_calls = 686
 idioms = 659
 checked_calls = 137
 me_calls = 171
+instance_calls = 5
 numbers = 26
 numbers_in_source = 25
 
@@ -491,6 +529,7 @@ runtime_calls = 223
 idioms = 217
 checked_calls = 53
 me_calls = 68
+instance_calls = 0
 numbers = 9
 numbers_in_source = 9
 
@@ -504,6 +543,7 @@ runtime_calls = 594
 idioms = 571
 checked_calls = 96
 me_calls = 72
+instance_calls = 57
 numbers = 7
 numbers_in_source = 7
 
@@ -517,6 +557,7 @@ runtime_calls = 507
 idioms = 489
 checked_calls = 121
 me_calls = 92
+instance_calls = 0
 numbers = 32
 numbers_in_source = 32
 
@@ -530,6 +571,7 @@ runtime_calls = 591
 idioms = 547
 checked_calls = 105
 me_calls = 59
+instance_calls = 0
 numbers = 3
 numbers_in_source = 3
 
@@ -543,6 +585,7 @@ runtime_calls = 142
 idioms = 136
 checked_calls = 25
 me_calls = 27
+instance_calls = 0
 numbers = 0
 numbers_in_source = 0
 
@@ -556,6 +599,7 @@ runtime_calls = 36
 idioms = 36
 checked_calls = 13
 me_calls = 2
+instance_calls = 0
 numbers = 0
 numbers_in_source = 0
 
@@ -569,6 +613,7 @@ runtime_calls = 333
 idioms = 315
 checked_calls = 53
 me_calls = 34
+instance_calls = 0
 numbers = 14
 numbers_in_source = 14
 
@@ -582,6 +627,7 @@ runtime_calls = 352
 idioms = 334
 checked_calls = 59
 me_calls = 49
+instance_calls = 0
 numbers = 3
 numbers_in_source = 3
 
@@ -595,5 +641,6 @@ runtime_calls = 131
 idioms = 131
 checked_calls = 27
 me_calls = 28
+instance_calls = 0
 numbers = 0
 numbers_in_source = 0
