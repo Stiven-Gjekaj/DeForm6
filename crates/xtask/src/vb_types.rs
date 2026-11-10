@@ -38,6 +38,9 @@
 //!   An executable imports the functions of the runtime by these ordinals.
 //!   `variant_result` tells that the function returns a `Variant`: a call
 //!   of it passes the address of the result first.
+//! - `[libraries]` maps the GUID of each creatable class to the text of its
+//!   type library on an `Object=` line: `{guid}#major.minor#0`. The
+//!   executable holds the class and not the library.
 //! - `[interfaces.<name>]` gives `vtable_size`, and for each vtable offset
 //!   the names of the functions there, the kinds, `arg_bytes` and `result`.
 //!   `arg_bytes` is the sum of the sizes of the parameters on the stack: 4
@@ -60,7 +63,7 @@
 use std::collections::BTreeMap;
 
 use crate::msft::{
-    Function, Kind, PARAMFLAG_FRETVAL, Parameter, TypeInfo, VT_PTR, guid_text, parse,
+    Function, Kind, PARAMFLAG_FRETVAL, Parameter, TypeInfo, VT_PTR, guid_text, library_attr, parse,
 };
 
 /// The default output path, relative to the workspace root.
@@ -180,6 +183,7 @@ pub(crate) struct Types {
     iids: BTreeMap<String, String>,
     imports: BTreeMap<String, Import>,
     interfaces: BTreeMap<String, Interface>,
+    libraries: BTreeMap<String, String>,
 }
 
 /// The bytes of the vtable of `IDispatch`: seven functions of 4 bytes.
@@ -357,6 +361,9 @@ impl Types {
         for (key, value) in other.interfaces {
             self.interfaces.entry(key).or_insert(value);
         }
+        for (key, value) in other.libraries {
+            self.libraries.entry(key).or_insert(value);
+        }
     }
 }
 
@@ -493,6 +500,20 @@ fn prefer_export_names(types: &mut Types, exports: &BTreeMap<u32, String>) {
 }
 
 /// Reads the libraries, derives the types and writes them to `out`.
+/// Records that each creatable class of `infos` is in the library that
+/// `declaration` names.
+fn add_libraries(types: &mut Types, infos: &[TypeInfo], declaration: &str) {
+    for info in infos {
+        if info.kind == Kind::Coclass
+            && let Some(guid) = &info.guid
+        {
+            types
+                .libraries
+                .insert(guid_text(guid), declaration.to_owned());
+        }
+    }
+}
+
 fn derive_file(inputs: &[String], out: &str) -> Result<String, String> {
     let mut types = Types::default();
     let mut exports = BTreeMap::new();
@@ -500,9 +521,11 @@ fn derive_file(inputs: &[String], out: &str) -> Result<String, String> {
         let bytes = std::fs::read(input).map_err(|err| format!("reading {input}: {err}"))?;
         exports.extend(export_names(&bytes));
         for library in libraries(&bytes).map_err(|err| format!("{input}: {err}"))? {
-            types.merge(derive(
-                &parse(library).map_err(|err| format!("{input}: {err}"))?,
-            )?);
+            let infos = parse(library).map_err(|err| format!("{input}: {err}"))?;
+            let mut derived = derive(&infos)?;
+            let attr = library_attr(library).map_err(|err| format!("{input}: {err}"))?;
+            add_libraries(&mut derived, &infos, &attr.declaration());
+            types.merge(derived);
         }
     }
     prefer_export_names(&mut types, &exports);
@@ -530,7 +553,9 @@ fn derive_file(inputs: &[String], out: &str) -> Result<String, String> {
     reason = "a test builds the state it needs and must fail loudly when that state is wrong"
 )]
 mod tests {
-    use super::{declaration, derive, libraries, prefer_export_names, render};
+    use super::{
+        Types, add_libraries, declaration, derive, libraries, prefer_export_names, render,
+    };
     use crate::msft::tests::library;
     use crate::msft::{Function, Kind, Parameter, TypeInfo, parse};
 
@@ -765,6 +790,20 @@ mod tests {
         let block = text.split("[imports.644]").nth(1).unwrap();
         let block = block.split("\n[").next().unwrap();
         assert!(!block.contains("names"), "{block}");
+    }
+
+    #[test]
+    fn a_class_of_a_library_gives_the_declaration_of_the_library() {
+        let mut class = interface(Vec::new());
+        class.kind = Kind::Coclass;
+        class.guid = Some([0x22; 16]);
+        let mut types = Types::default();
+        add_libraries(&mut types, &[class, interface(Vec::new())], "{L}#1.0#0");
+        assert_eq!(types.libraries.len(), 1);
+        assert_eq!(
+            types.libraries["{22222222-2222-2222-2222-222222222222}"],
+            "{L}#1.0#0"
+        );
     }
 
     #[test]

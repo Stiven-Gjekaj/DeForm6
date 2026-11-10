@@ -142,6 +142,32 @@ pub(crate) struct TypeInfo {
     pub functions: Vec<Function>,
 }
 
+/// The identity of a type library.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LibraryAttr {
+    /// The 16 bytes of the GUID of the library.
+    pub guid: [u8; 16],
+    /// The major version.
+    pub major: u16,
+    /// The minor version.
+    pub minor: u16,
+}
+
+impl LibraryAttr {
+    /// Gives the text that an `Object=` line of a project file holds:
+    /// `{guid}#major.minor#0`, with the numbers in hexadecimal. The locale
+    /// is 0 on each `Object=` line of the corpus, and the library of
+    /// `MSWINSCK.OCX` itself gives 0x409.
+    pub(crate) fn declaration(&self) -> String {
+        format!(
+            "{}#{:X}.{:X}#0",
+            guid_text(&self.guid),
+            self.major,
+            self.minor
+        )
+    }
+}
+
 /// Reads a little-endian `i32` at `at`.
 fn i32_at(bytes: &[u8], at: usize) -> Option<i32> {
     u32_at(bytes, at).map(u32::cast_signed)
@@ -381,6 +407,44 @@ fn functions(
 ///
 /// Gives an error that names the place when the file is not an `MSFT` type
 /// library, or when a read goes past its end.
+/// Reads the identity of the type library `bytes`.
+pub(crate) fn library_attr(bytes: &[u8]) -> Result<LibraryAttr, String> {
+    if bytes.get(..MAGIC.len()) != Some(MAGIC) {
+        return Err("the file does not start with MSFT".to_owned());
+    }
+    let header = |at: usize| u32_at(bytes, at).ok_or("the file ends in the header");
+    let varflags = header(0x14)?;
+    let count = usize::try_from(header(0x20)?).map_err(|_| "the type info count does not fit")?;
+    let offsets = if varflags & HELP_DLL_FLAG == 0 {
+        HEADER_LEN
+    } else {
+        HEADER_LEN + 4
+    };
+    let directory = add(
+        offsets,
+        count
+            .checked_mul(4)
+            .ok_or("the type info count overflows")?,
+        "the segment directory",
+    )?;
+    let guids = segment(bytes, directory, SEGMENT_GUIDS)?;
+    let position = i32_at(bytes, 0x08).ok_or("the file ends in the header")?;
+    let start = add(
+        guids,
+        to_usize(position, "the GUID of the library")?,
+        "a GUID",
+    )?;
+    let raw = bytes
+        .get(start..add(start, 16, "a GUID")?)
+        .ok_or_else(|| format!("the GUID of the library at {start:#x} is cut"))?;
+    let version = header(0x18)?;
+    Ok(LibraryAttr {
+        guid: <[u8; 16]>::try_from(raw).map_err(|_| "a GUID is not 16 bytes")?,
+        major: u16::try_from(version & 0xFFFF).unwrap_or(0),
+        minor: u16::try_from(version >> 16).unwrap_or(0),
+    })
+}
+
 pub(crate) fn parse(bytes: &[u8]) -> Result<Vec<TypeInfo>, String> {
     if bytes.get(..MAGIC.len()) != Some(MAGIC) {
         return Err("the file does not start with MSFT".to_owned());
@@ -489,6 +553,7 @@ pub(crate) fn guid_text(guid: &[u8; 16]) -> String {
 )]
 pub(crate) mod tests {
     use super::{Function, Kind, Parameter, guid_text, parameter_pointee, parse};
+    use super::{HEADER_LEN, SEGMENT_GUIDS, SEGMENT_LEN, library_attr};
 
     fn put_u16(out: &mut [u8], at: usize, value: u16) {
         out[at..at + 2].copy_from_slice(&value.to_le_bytes());
@@ -674,6 +739,29 @@ pub(crate) mod tests {
         let mut record = library();
         put_u16(&mut record, 0x604, 0xFFFF);
         assert!(parse(&record).is_err());
+    }
+
+    #[test]
+    fn a_library_gives_its_guid_its_version_and_its_locale() {
+        let mut bytes = vec![0_u8; 0x200];
+        bytes[..4].copy_from_slice(b"MSFT");
+        bytes[0x08..0x0C].copy_from_slice(&0x10_u32.to_le_bytes());
+        bytes[0x18..0x1C].copy_from_slice(&0x000A_0001_u32.to_le_bytes());
+        let entry = HEADER_LEN + SEGMENT_GUIDS * SEGMENT_LEN;
+        bytes[entry..entry + 4].copy_from_slice(&0x100_u32.to_le_bytes());
+        bytes[0x110..0x120].copy_from_slice(&[0x11; 16]);
+        let attr = library_attr(&bytes).unwrap();
+        assert_eq!(attr.guid, [0x11; 16]);
+        assert_eq!((attr.major, attr.minor), (1, 10));
+        assert_eq!(
+            attr.declaration(),
+            "{11111111-1111-1111-1111-111111111111}#1.A#0"
+        );
+    }
+
+    #[test]
+    fn a_library_with_no_magic_gives_no_identity() {
+        assert!(library_attr(b"NOPE").is_err());
     }
 
     #[test]
