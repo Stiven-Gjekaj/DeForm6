@@ -1418,6 +1418,52 @@ fn arguments_of(entry: &ProcedureEntry) -> BTreeMap<u32, String> {
     out
 }
 
+/// Gives the entries of `inside` that each module of `run` holds, in the
+/// order of `run`.
+///
+/// A count of a module holds its procedures and its `Declare` statements.
+/// So a run of one module holds each entry. In a longer run, the counts
+/// divide the entries when their sum is the number of entries. When one
+/// count alone is the number of entries, that module holds them. Otherwise
+/// the file does not show the division, and each module gets no entry.
+fn split_among_modules<'e>(pe: &PeImage<'_>, run: &[Object], inside: &'e [u32]) -> Vec<&'e [u32]> {
+    if let [_] = run {
+        return vec![inside];
+    }
+    let counts: Vec<usize> = run
+        .iter()
+        .map(|object| match ProcedureList::read(pe, object).procs {
+            ProcNames::NoNameArray { proc_count } => {
+                usize::try_from(proc_count).unwrap_or(usize::MAX)
+            }
+            ProcNames::Slots(slots) => slots.len(),
+        })
+        .collect();
+    if counts
+        .iter()
+        .try_fold(0_usize, |sum, count| sum.checked_add(*count))
+        == Some(inside.len())
+    {
+        let mut rest = inside;
+        return counts
+            .iter()
+            .map(|count| {
+                let (part, tail) = rest.split_at(*count);
+                rest = tail;
+                part
+            })
+            .collect();
+    }
+    let mut alone = counts.iter().filter(|count| **count == inside.len());
+    if alone.next().is_some() && alone.next().is_none() {
+        return counts
+            .iter()
+            .map(|count| if *count == inside.len() { inside } else { &[] })
+            .collect();
+    }
+    vec![&[]; run.len()]
+}
+
 /// Gives each procedure of a standard module that `listing` holds, by the
 /// address of its code.
 ///
@@ -1425,9 +1471,8 @@ fn arguments_of(entry: &ProcedureEntry) -> BTreeMap<u32, String> {
 /// objects in the order of the object table, and the procedures of an
 /// object in the order of the source. So the procedures that no link table
 /// names, between the code of the object before a module and the code of
-/// the object after it, are the procedures of that module. The function
-/// leaves out a module whose neighbour is a module too, because the file
-/// does not show where one ends and the other starts.
+/// the object after it, are the procedures of that module. Modules beside
+/// each other divide the procedures as [`split_among_modules`] tells.
 fn module_methods(pe: &PeImage<'_>, listing: &Listing) -> BTreeMap<u32, ObjectMethod> {
     let objects = objects_of(pe);
     let ranges: Vec<Option<(u32, u32)>> = objects
@@ -1472,21 +1517,37 @@ fn module_methods(pe: &PeImage<'_>, listing: &Listing) -> BTreeMap<u32, ObjectMe
         .filter(|entry| !owned.contains_key(entry))
         .collect();
     let mut modules = BTreeMap::new();
-    for ((index, object), (low, high)) in objects.iter().enumerate().zip(lasts.iter().zip(&firsts))
-    {
-        let beside_a_module =
-            (index > 0 && is_module(index.saturating_sub(1))) || is_module(index.saturating_add(1));
-        if !is_module(index) || beside_a_module || low >= high {
+    let mut index = 0;
+    while index < objects.len() {
+        if !is_module(index) {
+            index = index.saturating_add(1);
             continue;
         }
-        let inside = entries.range((Bound::Excluded(*low), Bound::Excluded(*high)));
-        for (place, entry) in (0_u16..).zip(inside) {
-            modules.entry(*entry).or_insert_with(|| ObjectMethod {
-                object: object.name.clone(),
-                index: place,
-                slot: usize::from(place),
-                name: None,
-            });
+        let start = index;
+        while is_module(index) {
+            index = index.saturating_add(1);
+        }
+        let (Some(low), Some(high)) = (lasts.get(start), firsts.get(index.saturating_sub(1)))
+        else {
+            continue;
+        };
+        if low >= high {
+            continue;
+        }
+        let inside: Vec<u32> = entries
+            .range((Bound::Excluded(*low), Bound::Excluded(*high)))
+            .copied()
+            .collect();
+        let run = objects.get(start..index).unwrap_or_default();
+        for (object, part) in run.iter().zip(split_among_modules(pe, run, &inside)) {
+            for (place, entry) in (0_u16..).zip(part) {
+                modules.entry(*entry).or_insert_with(|| ObjectMethod {
+                    object: object.name.clone(),
+                    index: place,
+                    slot: usize::from(place),
+                    name: None,
+                });
+            }
         }
         if modules.len() >= entries.len() {
             break;

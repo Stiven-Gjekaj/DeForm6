@@ -501,7 +501,7 @@ fn each_object_call_names_a_member_that_its_source_procedure_names() {
     }
     assert_eq!(
         (total, found, unnamed),
-        (4735, 4638, 8),
+        (4851, 4754, 8),
         "the object calls moved"
     );
 }
@@ -673,7 +673,7 @@ fn each_string_note_is_a_literal_of_its_source_procedure() {
             }
         }
     }
-    assert_eq!(strings, 1019, "the string notes moved");
+    assert_eq!(strings, 1020, "the string notes moved");
 }
 
 /// The member of each late-bound call and the class of each `New` is a
@@ -727,7 +727,7 @@ fn the_idiom_of_each_statement_helper_is_a_word_of_its_source_procedure() {
             }
         }
     }
-    assert_eq!(calls, 1263, "the calls of the statement helpers moved");
+    assert_eq!(calls, 1264, "the calls of the statement helpers moved");
 }
 
 /// Each procedure whose source holds a word of [`WORD_HELPERS`] calls one
@@ -753,7 +753,7 @@ fn each_word_of_the_source_gives_its_helper_in_the_listing() {
             }
         }
     }
-    assert_eq!(words, 116, "the procedures with these words moved");
+    assert_eq!(words, 117, "the procedures with these words moved");
 }
 
 /// The name that the listing gives an argument is a word of the source
