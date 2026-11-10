@@ -558,7 +558,7 @@ impl Walk<'_, '_> {
         let mut loaded: BTreeMap<Register, ImportedFunction> = BTreeMap::new();
         let mut lines = Vec::with_capacity(seen.len());
         let mut frame = Frame::default();
-        frame.instances.globals = self.default_instances(seen);
+        let globals = self.default_instances(seen);
         let mut pending: BTreeMap<u32, Frame> = BTreeMap::new();
         let mut fell_through = true;
         let in_method = self.methods.contains(&entry);
@@ -604,7 +604,7 @@ impl Walk<'_, '_> {
                 }
             }
             frame.me.learn(instruction);
-            frame.instances.learn(instruction);
+            frame.instances.learn(instruction, &globals);
             if let Some(register) = copied_object {
                 frame.me.objects.insert(register);
             }
@@ -881,9 +881,6 @@ impl Frame {
         self.instances
             .vtables
             .retain(|key, value| other.instances.vtables.get(key) == Some(value));
-        for (global, object) in &other.instances.globals {
-            self.instances.globals.entry(*global).or_insert(*object);
-        }
     }
 
     /// Forgets what the next block cannot use. A block that no forward
@@ -984,8 +981,6 @@ fn clears_the_low_bit(instruction: &Instruction) -> bool {
 /// hold one of them or its vtable.
 #[derive(Clone, Default)]
 struct InstanceTracker {
-    /// The `ObjectInfo` of the form that each global variable holds.
-    globals: BTreeMap<u32, u32>,
     /// The `ObjectInfo` of the instance that each register holds.
     objects: BTreeMap<Register, u32>,
     /// The `ObjectInfo` of the instance whose vtable each register holds.
@@ -1015,8 +1010,9 @@ impl InstanceTracker {
         self.vtables.remove(&register);
     }
 
-    /// Records what `instruction` puts in a register.
-    fn learn(&mut self, instruction: &Instruction) {
+    /// Records what `instruction` puts in a register. `globals` gives the
+    /// `ObjectInfo` of the form that each global variable holds.
+    fn learn(&mut self, instruction: &Instruction, globals: &BTreeMap<u32, u32>) {
         if matches!(
             instruction.flow_control(),
             FlowControl::Call | FlowControl::IndirectCall
@@ -1036,7 +1032,7 @@ impl InstanceTracker {
         }
         let target = instruction.op0_register();
         if instruction.memory_base() == Register::None {
-            if let Some(object) = self.globals.get(&instruction.memory_displacement32()) {
+            if let Some(object) = globals.get(&instruction.memory_displacement32()) {
                 self.objects.insert(target, *object);
             }
         } else if instruction.memory_displacement32() == 0
@@ -1323,6 +1319,12 @@ pub struct Names<'t> {
     pub methods: BTreeMap<u32, ObjectMethod>,
     /// What the file gives for each object.
     pub objects: Vec<ObjectFacts>,
+    /// The index in [`Names::objects`] of the object of each interface GUID.
+    object_of_iid: BTreeMap<[u8; 16], usize>,
+    /// The index in [`Names::objects`] of the object of each `ObjectInfo`.
+    object_of_info: BTreeMap<u32, usize>,
+    /// The index in [`Names::objects`] of the object of each name.
+    object_of_name: BTreeMap<String, usize>,
     /// The types file, which names an import by its ordinal and a member
     /// of an interface by its vtable offset.
     pub types: Option<&'t VbTypes>,
@@ -1341,13 +1343,27 @@ impl<'t> Names<'t> {
             .and_then(|region| VbHeader::read(&region).ok())
             .and_then(|header| ProjectInfo::read(pe, header.lp_project_data).ok())
             .map(|info| DeclareTable::read(pe, &info));
+        let objects: Vec<ObjectFacts> = objects
+            .iter()
+            .map(|object| facts_of(pe, object, types))
+            .collect();
+        let mut object_of_iid = BTreeMap::new();
+        let mut object_of_info = BTreeMap::new();
+        let mut object_of_name = BTreeMap::new();
+        for (index, object) in objects.iter().enumerate() {
+            for iid in [object.default_iid, object.own_iid].into_iter().flatten() {
+                object_of_iid.entry(iid).or_insert(index);
+            }
+            object_of_info.entry(object.object_info).or_insert(index);
+            object_of_name.entry(object.name.clone()).or_insert(index);
+        }
         Names {
             handlers: report.map(handler_names).unwrap_or_default(),
             methods: object_methods(pe),
-            objects: objects
-                .iter()
-                .map(|object| facts_of(pe, object, types))
-                .collect(),
+            objects,
+            object_of_iid,
+            object_of_info,
+            object_of_name,
             types,
             declares,
         }
@@ -1396,9 +1412,7 @@ impl<'t> Names<'t> {
         if let Some(name) = self.types.and_then(|types| types.interface_of_iid(iid)) {
             return Some(format!("{name}.{}", self.function_text(name, offset)?));
         }
-        let object = self.objects.iter().find(|object| {
-            object.default_iid.as_ref() == Some(iid) || object.own_iid.as_ref() == Some(iid)
-        })?;
+        let object = self.objects.get(*self.object_of_iid.get(iid)?)?;
         self.member_text(object, &object.name, offset)
     }
 
@@ -1414,10 +1428,8 @@ impl<'t> Names<'t> {
         self.methods
             .get(&entry.get())
             .and_then(|method| {
-                let object = self
-                    .objects
-                    .iter()
-                    .find(|object| object.name == method.object)?;
+                let index = self.object_of_name.get(&method.object)?;
+                let object = self.objects.get(*index)?;
                 self.member_text(object, "Me", offset)
             })
             .unwrap_or_else(|| format!("Me, vtable offset {offset:#X}"))
@@ -1463,9 +1475,9 @@ impl<'t> Names<'t> {
             Note::Text(text) => format!("{text:?}"),
             Note::Number(text) => text.clone(),
             Note::Instance { object, offset } => self
-                .objects
-                .iter()
-                .find(|facts| facts.object_info == object.get())
+                .object_of_info
+                .get(&object.get())
+                .and_then(|index| self.objects.get(*index))
                 .and_then(|facts| self.member_text(facts, &facts.name, *offset))
                 .unwrap_or_else(|| format!("default instance, vtable offset {offset:#X}")),
             Note::Me(offset) => self.me_text(entry, *offset),
