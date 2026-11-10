@@ -104,3 +104,36 @@ pub fn idiom(name: &str) -> Option<&'static str> {
         _ => return None,
     })
 }
+
+/// Gives the statement of a function that the runtime exports by ordinal,
+/// from its name in `MSVBVM60.DLL`.
+///
+/// The runtime names the string form of `Left` as `_B_str_Left` and the
+/// `Variant` form as `_B_var_Left`. Basic writes them as `Left$` and `Left`.
+#[must_use]
+pub fn basic_function(export: &str) -> Option<String> {
+    if let Some(name) = export.strip_prefix("_B_str_") {
+        return Some(format!("{name}$"));
+    }
+    export.strip_prefix("_B_var_").map(str::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::basic_function;
+
+    #[test]
+    fn the_string_form_takes_a_dollar_sign() {
+        assert_eq!(basic_function("_B_str_Left").as_deref(), Some("Left$"));
+    }
+
+    #[test]
+    fn the_variant_form_takes_the_bare_name() {
+        assert_eq!(basic_function("_B_var_Mid").as_deref(), Some("Mid"));
+    }
+
+    #[test]
+    fn another_name_has_no_basic_form() {
+        assert_eq!(basic_function("MsgBox"), None);
+    }
+}

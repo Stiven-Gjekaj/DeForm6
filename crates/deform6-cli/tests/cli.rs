@@ -1643,6 +1643,30 @@ fn disasm_names_the_event_of_a_native_handler_from_the_types_file() {
     assert!(stdout.contains("\nForm1.Command1_Click at "), "{stdout}");
 }
 
+/// `disasm --vb-types` gives the Basic form of a function of the runtime
+/// that the program imports by its ordinal.
+#[test]
+fn disasm_gives_the_basic_form_of_an_ordinal_import() {
+    let types = std::env::temp_dir().join(format!(
+        "deform6-native-ordinal-{}.toml",
+        std::process::id()
+    ));
+    fs::write(&types, "[imports]\n606 = { name = \"_B_str_String\" }\n").unwrap();
+    let path = corpus_root().join("vb6-code/Hidden-Markov-model/HMM.exe");
+    let (code, stdout, stderr) = run(&[
+        OsStr::new("disasm"),
+        path.as_os_str(),
+        OsStr::new("--vb-types"),
+        types.as_os_str(),
+    ]);
+    fs::remove_file(&types).unwrap();
+    assert_eq!(code, 0, "{stderr}");
+    assert!(
+        stdout.contains("; String$ (_B_str_String, ordinal 606)"),
+        "{stdout}"
+    );
+}
+
 /// `disasm --lift` gives the reason when a body does not lift, and then the
 /// listing. The small table holds placeholder names, which give no family,
 /// so each body of `Fast_Flames.exe` gives the reason.

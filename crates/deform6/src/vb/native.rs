@@ -1197,7 +1197,10 @@ impl<'t> Names<'t> {
                 },
                 ImportName::Ordinal(ordinal) => {
                     match self.types.and_then(|types| types.import(*ordinal)) {
-                        Some(import) => format!("{} (ordinal {ordinal})", import.name),
+                        Some(import) => match helpers::basic_function(&import.name) {
+                            Some(basic) => format!("{basic} ({}, ordinal {ordinal})", import.name),
+                            None => format!("{} (ordinal {ordinal})", import.name),
+                        },
                         None => format!("ordinal {ordinal} of {}", function.dll),
                     }
                 }
