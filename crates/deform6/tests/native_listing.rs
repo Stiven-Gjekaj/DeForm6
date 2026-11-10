@@ -716,6 +716,72 @@ fn each_word_of_the_source_gives_its_helper_in_the_listing() {
     assert_eq!(words, 116, "the procedures with these words moved");
 }
 
+/// The name that the listing gives an argument is a word of the source
+/// of its procedure.
+#[test]
+fn each_argument_name_is_a_word_of_its_source_procedure() {
+    let Some(types) = derived_types() else {
+        println!("no types file in derived/, so this test checks nothing");
+        return;
+    };
+    let table = OpcodeTable::builtin();
+    let projects = vbp::project_files();
+    let mut total = 0;
+    for exe in &vbp::executables() {
+        let data = std::fs::read(exe).unwrap();
+        let pe = PeImage::parse(&data).unwrap();
+        let report = deform6::inspect_with_types(
+            &data,
+            &table,
+            Some(&types),
+            deform6::journal::Mode::Strict,
+        )
+        .unwrap();
+        let listing = disassemble(&pe);
+        let names = Names::read(&pe, &listing, Some(&report), Some(&types));
+        let project_path = vbp::select_project_file(exe, &projects).unwrap();
+        let bodies: BTreeMap<String, Vec<(String, Vec<String>)>> =
+            vbp::Project::read(&project_path)
+                .declared_objects()
+                .into_iter()
+                .filter(|object| object.source_file.is_file())
+                .filter_map(|object| {
+                    let bodies = source::procedure_bodies(&object.source_file);
+                    Some((object.name?, bodies))
+                })
+                .collect();
+        for procedure in &listing.procedures {
+            let Some(method) = names.methods.get(&procedure.entry.get()) else {
+                continue;
+            };
+            let Some(objects) = bodies.get(&method.object) else {
+                continue;
+            };
+            let body = objects[usize::from(method.index)]
+                .1
+                .join("\n")
+                .to_ascii_lowercase();
+            for note in procedure.lines.iter().flat_map(|line| &line.notes) {
+                let Note::Argument(_) = note else {
+                    continue;
+                };
+                let text = names.note(&pe, note, procedure.entry);
+                if text.is_empty() {
+                    continue;
+                }
+                total += 1;
+                assert!(
+                    body.contains(&text.to_ascii_lowercase()),
+                    "{}: {} has no {text}",
+                    exe.display(),
+                    method.text()
+                );
+            }
+        }
+    }
+    assert_eq!(total, 557, "the argument notes moved");
+}
+
 /// The source of `LockWorkStation` holds one `Shell` of one literal. The
 /// listing gives the literal, and the helper that copies it.
 #[test]

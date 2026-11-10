@@ -31,10 +31,10 @@ use iced_x86::{
 
 use crate::read::pe::{ImportName, ImportedFunction, PeImage};
 use crate::read::region::{Off, Region, Va};
-use crate::vb::Report;
 use crate::vb::classify::{ObjectKind, classify};
 use crate::vb::context::{default_iid, profile};
 use crate::vb::controlinfo::EventReport;
+use crate::vb::functyp::VbType;
 use crate::vb::header::{VbHeader, header_region};
 use crate::vb::helpers;
 use crate::vb::lift::{Callees, control_array_function, member_name};
@@ -43,6 +43,7 @@ use crate::vb::object::{Object, ObjectTable};
 use crate::vb::privateobj::{ProcNames, Procedure as ProcedureName, ProcedureList};
 use crate::vb::project::{DeclareTable, ObjectTableHead, ProjectInfo};
 use crate::vb::types::{TypeFunction, VbTypes, guid_text};
+use crate::vb::{ObjectProcedures, ProcedureEntry, Report};
 
 /// The most instructions that one listing holds.
 ///
@@ -93,6 +94,12 @@ const BASE_IID_AT: u32 = 4;
 /// The length of a GUID.
 const GUID_LEN: u32 = 16;
 
+/// Where a procedure of an object finds its first argument in its frame.
+const FIRST_ARGUMENT_AT: u32 = 0x0C;
+
+/// The end of the frame offsets that can be an argument.
+const MAX_ARGUMENT_AT: u32 = 0x1_0000;
+
 /// Where a procedure of an object finds the object in its frame.
 const ME_ARGUMENT_AT: u32 = 8;
 
@@ -124,6 +131,9 @@ pub enum Note {
     Me(u16),
     /// An operand is the address of this floating point constant, as text.
     Number(String),
+    /// An operand is in the frame of the procedure, at this positive offset
+    /// from `ebp`.
+    Argument(u32),
     /// The instruction calls a member of the default instance of a form.
     Instance {
         /// The address of the `ObjectInfo` of the form.
@@ -355,6 +365,14 @@ impl Walk<'_, '_> {
         }
         for operand in 0..instruction.op_count() {
             match instruction.op_kind(operand) {
+                OpKind::Memory
+                    if instruction.memory_base() == Register::EBP
+                        && instruction.memory_index() == Register::None
+                        && instruction.memory_displacement32() >= FIRST_ARGUMENT_AT
+                        && instruction.memory_displacement32() < MAX_ARGUMENT_AT =>
+                {
+                    notes.push(Note::Argument(instruction.memory_displacement32()));
+                }
                 OpKind::Immediate32 => {
                     if let Some(text) = string_at(self.pe, instruction.immediate32()) {
                         notes.push(Note::Text(text));
@@ -1171,6 +1189,8 @@ pub struct ObjectMethod {
     /// The place of the procedure among the procedures of the object, in
     /// the order of the source.
     pub index: u16,
+    /// The place of the procedure in the name array of the object.
+    pub slot: usize,
     /// The name of the procedure, when it is public.
     pub name: Option<String>,
 }
@@ -1210,9 +1230,8 @@ fn methods_of(pe: &PeImage<'_>, object: &Object) -> BTreeMap<u32, ObjectMethod> 
         ProcNames::Slots(slots) => slots,
         ProcNames::NoNameArray { .. } => Vec::new(),
     };
-    let procedures = slots
-        .get(slots.len().saturating_sub(targets.len())..)
-        .unwrap_or_default();
+    let first_slot = slots.len().saturating_sub(targets.len());
+    let procedures = slots.get(first_slot..).unwrap_or_default();
     let (public, private): (Vec<_>, Vec<_>) = (0_u16..)
         .zip(procedures)
         .partition(|(_, slot)| matches!(slot, ProcedureName::Public(_)));
@@ -1227,6 +1246,7 @@ fn methods_of(pe: &PeImage<'_>, object: &Object) -> BTreeMap<u32, ObjectMethod> 
             ObjectMethod {
                 object: object.name.clone(),
                 index,
+                slot: first_slot.saturating_add(usize::from(index)),
                 name,
             },
         );
@@ -1242,6 +1262,57 @@ pub fn object_methods(pe: &PeImage<'_>) -> BTreeMap<u32, ObjectMethod> {
         .iter()
         .flat_map(|object| methods_of(pe, object))
         .collect()
+}
+
+/// Gives the stack bytes of an argument.
+const fn argument_size(vb_type: &VbType, by_reference: bool) -> u32 {
+    if by_reference {
+        return 4;
+    }
+    match vb_type {
+        VbType::Double | VbType::Date | VbType::Currency => 8,
+        VbType::Variant => 16,
+        _ => 4,
+    }
+}
+
+/// Gives the name of each argument of `entry`, by its frame offset.
+fn arguments_of(entry: &ProcedureEntry) -> BTreeMap<u32, String> {
+    let mut out = BTreeMap::new();
+    let mut at = FIRST_ARGUMENT_AT;
+    match entry {
+        ProcedureEntry::Public {
+            prototype: Some(prototype),
+            ..
+        } => {
+            for argument in &prototype.arguments {
+                out.insert(at, argument.name.clone());
+                let size = argument_size(
+                    &argument.entry.vb_type,
+                    argument.entry.by_ref || argument.entry.array,
+                );
+                at = at.saturating_add(size);
+            }
+        }
+        ProcedureEntry::Handler { parameters, .. } => {
+            for parameter in parameters {
+                let (by_value, text) = match parameter.strip_prefix("ByVal ") {
+                    Some(rest) => (true, rest),
+                    None => (false, parameter.strip_prefix("ByRef ").unwrap_or(parameter)),
+                };
+                let name = text.split(' ').next().unwrap_or(text);
+                out.insert(at, name.to_owned());
+                let size = match (by_value, text.rsplit(' ').next()) {
+                    (true, Some("Double" | "Date" | "Currency")) => 8,
+                    (true, Some("Variant")) => 16,
+                    _ => 4,
+                };
+                at = at.saturating_add(size);
+            }
+        }
+        _ => {}
+    }
+    out
 }
 
 /// Gives each procedure of a standard module that `listing` holds, by the
@@ -1304,6 +1375,7 @@ fn module_methods(pe: &PeImage<'_>, listing: &Listing) -> BTreeMap<u32, ObjectMe
                 ObjectMethod {
                     object: object.name.clone(),
                     index: place,
+                    slot: usize::from(place),
                     name: None,
                 },
             );
@@ -1388,6 +1460,9 @@ pub struct Names<'t> {
     pub methods: BTreeMap<u32, ObjectMethod>,
     /// What the file gives for each object.
     pub objects: Vec<ObjectFacts>,
+    /// The name of each argument, by the address of the procedure and the
+    /// frame offset.
+    arguments: BTreeMap<u32, BTreeMap<u32, String>>,
     /// The index in [`Names::objects`] of the object of each interface GUID.
     object_of_iid: BTreeMap<[u8; 16], usize>,
     /// The index in [`Names::objects`] of the object of each `ObjectInfo`.
@@ -1431,12 +1506,30 @@ impl<'t> Names<'t> {
             object_of_info.entry(object.object_info).or_insert(index);
             object_of_name.entry(object.name.clone()).or_insert(index);
         }
+        let methods: BTreeMap<u32, ObjectMethod> = object_methods(pe)
+            .into_iter()
+            .chain(module_methods(pe, listing))
+            .collect();
+        let entries: BTreeMap<&str, &Vec<ProcedureEntry>> = report
+            .map(|report| report.objects.as_slice())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|object| match &object.procedures {
+                ObjectProcedures::Slots(slots) => Some((object.name.as_str(), slots)),
+                ObjectProcedures::NoNameArray { .. } => None,
+            })
+            .collect();
+        let arguments = methods
+            .iter()
+            .filter_map(|(address, method)| {
+                let entry = entries.get(method.object.as_str())?.get(method.slot)?;
+                Some((*address, arguments_of(entry)))
+            })
+            .collect();
         Names {
             handlers: report.map(handler_names).unwrap_or_default(),
-            methods: object_methods(pe)
-                .into_iter()
-                .chain(module_methods(pe, listing))
-                .collect(),
+            methods,
+            arguments,
             objects,
             object_of_iid,
             object_of_info,
@@ -1551,6 +1644,12 @@ impl<'t> Names<'t> {
                 ),
             Note::Text(text) => format!("{text:?}"),
             Note::Number(text) => text.clone(),
+            Note::Argument(offset) => self
+                .arguments
+                .get(&entry.get())
+                .and_then(|names| names.get(offset))
+                .cloned()
+                .unwrap_or_default(),
             Note::Instance { object, offset } => self
                 .object_of_info
                 .get(&object.get())
@@ -1584,6 +1683,7 @@ pub fn listing_text(pe: &PeImage<'_>, listing: &Listing, names: &Names<'_>) -> S
                 .notes
                 .iter()
                 .map(|note| names.note(pe, note, procedure.entry))
+                .filter(|text| !text.is_empty())
                 .collect();
             if notes.is_empty() {
                 let _ = writeln!(out, "  {:08X}  {}", line.va.get(), line.text);
@@ -1629,12 +1729,30 @@ pub fn listing_text(pe: &PeImage<'_>, listing: &Listing, names: &Names<'_>) -> S
     reason = "a test builds its own literal; a wrong value must fail loudly"
 )]
 mod tests {
-    use super::{prologue_handler, stub_target};
+    use super::{ProcedureEntry, arguments_of, prologue_handler, stub_target};
 
     /// `sub dword ptr [esp+4], 0x3F`, then `jmp +0x423`.
     const STUB: [u8; 13] = [
         0x81, 0x6C, 0x24, 0x04, 0x3F, 0, 0, 0, 0xE9, 0x23, 0x04, 0, 0,
     ];
+
+    #[test]
+    fn a_handler_gives_each_argument_its_frame_offset() {
+        let entry = ProcedureEntry::Handler {
+            name: "a_Click".to_owned(),
+            parameters: vec![
+                "ByVal X As Double".to_owned(),
+                "Y As Double".to_owned(),
+                "ByVal Z As Variant".to_owned(),
+                "Last As Long".to_owned(),
+            ],
+        };
+        let names = arguments_of(&entry);
+        assert_eq!(names[&0x0C], "X");
+        assert_eq!(names[&0x14], "Y");
+        assert_eq!(names[&0x18], "Z");
+        assert_eq!(names[&0x28], "Last");
+    }
 
     #[test]
     fn a_stub_gives_the_address_after_it_plus_the_displacement() {
