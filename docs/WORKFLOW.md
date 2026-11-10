@@ -33,7 +33,9 @@ cargo run -p xtask -- derive-pcode-table <path-to-MSVBVM60.DLL> derived/symbols/
 ```
 
 Each command writes its file into `derived/`. Give each OCX that your
-program uses to `derive-vb-types`, such as `MSWINSCK.OCX`.
+program uses to `derive-vb-types`, such as `MSWINSCK.OCX`. The file then
+holds the type library of each control, and `extract --vb-types` writes its
+`Object=` line.
 
 `fetch-pcode-symbols` reads the Microsoft symbol server. Run it on a host
 with a network. The other commands do not need a network.
@@ -88,7 +90,8 @@ compiler, the outcome, the exit code and the lines that VB6 wrote.
 ## Step 4: edit and build in the IDE
 
 Open the `.vbp` file in the Visual Basic 6 IDE. Edit the code, then use
-**File, Make** to build the executable.
+**File, Make** to build the executable. This step ran on one native and one
+lifted P-code project: a new event handler built and ran in each one.
 
 For a P-code program, the project holds `CompilationType=-1`, so VB6 builds
 P-code again, as the original was built. For a native program, the project
@@ -103,13 +106,15 @@ give them back.
 
 This project has not tested twinBASIC. Its IDE imports a `.vbp` file into a
 new twinBASIC project. `--verify-build` runs the Visual Basic 6 IDE only.
-An unattended build on the twinBASIC command line needs its Professional
-Edition.
+The published examples of its command line build a `.twinproj` file, so
+import the project in the IDE first. An unattended build on the twinBASIC
+command line needs its Professional Edition.
 
 ## What this path does not give
 
 - The source of a procedure. The lift is the P-code, written as statements.
 - Statements for a native program.
 - The names of most variables.
-- The `Object=` line of a control other than the Winsock control. DeForm6
-  writes the class identifier on that line, and VB6 does not load it.
+- The `Object=` line of a control other than the Winsock control, when you
+  do not give its OCX to `derive-vb-types`. DeForm6 then writes the class
+  identifier on that line, and VB6 does not load it.
