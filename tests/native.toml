@@ -61,7 +61,7 @@ strings_in_source = 290
 runtime_calls = 2852
 idioms = 2700
 checked_calls = 553
-me_calls = 476
+me_calls = 493
 numbers = 18
 numbers_in_source = 18
 
@@ -87,7 +87,7 @@ strings_in_source = 64
 runtime_calls = 655
 idioms = 608
 checked_calls = 70
-me_calls = 85
+me_calls = 89
 numbers = 33
 numbers_in_source = 33
 
@@ -100,7 +100,7 @@ strings_in_source = 26
 runtime_calls = 260
 idioms = 240
 checked_calls = 24
-me_calls = 51
+me_calls = 59
 numbers = 1
 numbers_in_source = 1
 
@@ -139,7 +139,7 @@ strings_in_source = 46
 runtime_calls = 630
 idioms = 558
 checked_calls = 79
-me_calls = 82
+me_calls = 84
 numbers = 17
 numbers_in_source = 17
 
@@ -204,7 +204,7 @@ strings_in_source = 73
 runtime_calls = 824
 idioms = 776
 checked_calls = 166
-me_calls = 106
+me_calls = 112
 numbers = 16
 numbers_in_source = 16
 
@@ -256,7 +256,7 @@ strings_in_source = 0
 runtime_calls = 257
 idioms = 254
 checked_calls = 59
-me_calls = 44
+me_calls = 46
 numbers = 0
 numbers_in_source = 0
 
@@ -282,7 +282,7 @@ strings_in_source = 15
 runtime_calls = 396
 idioms = 377
 checked_calls = 73
-me_calls = 76
+me_calls = 77
 numbers = 38
 numbers_in_source = 38
 
@@ -308,7 +308,7 @@ strings_in_source = 20
 runtime_calls = 487
 idioms = 463
 checked_calls = 76
-me_calls = 66
+me_calls = 68
 numbers = 30
 numbers_in_source = 30
 
@@ -321,7 +321,7 @@ strings_in_source = 21
 runtime_calls = 781
 idioms = 758
 checked_calls = 172
-me_calls = 130
+me_calls = 131
 numbers = 3
 numbers_in_source = 3
 
@@ -360,7 +360,7 @@ strings_in_source = 13
 runtime_calls = 462
 idioms = 442
 checked_calls = 101
-me_calls = 86
+me_calls = 87
 numbers = 3
 numbers_in_source = 3
 
@@ -425,7 +425,7 @@ strings_in_source = 20
 runtime_calls = 594
 idioms = 576
 checked_calls = 133
-me_calls = 132
+me_calls = 133
 numbers = 7
 numbers_in_source = 7
 
@@ -490,7 +490,7 @@ strings_in_source = 6
 runtime_calls = 223
 idioms = 217
 checked_calls = 53
-me_calls = 67
+me_calls = 68
 numbers = 9
 numbers_in_source = 9
 
@@ -503,7 +503,7 @@ strings_in_source = 17
 runtime_calls = 594
 idioms = 571
 checked_calls = 96
-me_calls = 70
+me_calls = 72
 numbers = 7
 numbers_in_source = 7
 
@@ -542,7 +542,7 @@ strings_in_source = 23
 runtime_calls = 142
 idioms = 136
 checked_calls = 25
-me_calls = 9
+me_calls = 27
 numbers = 0
 numbers_in_source = 0
 

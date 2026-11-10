@@ -492,7 +492,7 @@ fn each_object_call_names_a_member_that_its_source_procedure_names() {
     }
     assert_eq!(
         (total, found, unnamed),
-        (4578, 4481, 8),
+        (4644, 4547, 8),
         "the object calls moved"
     );
 }

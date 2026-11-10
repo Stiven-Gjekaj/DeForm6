@@ -547,9 +547,17 @@ impl Walk<'_, '_> {
         let mut info = InstructionInfoFactory::new();
         let mut loaded: BTreeMap<Register, ImportedFunction> = BTreeMap::new();
         let mut lines = Vec::with_capacity(seen.len());
-        let mut me = MeTracker::default();
+        let mut frame = Frame::default();
+        let mut pending: BTreeMap<u32, Frame> = BTreeMap::new();
+        let mut fell_through = true;
         let in_method = self.methods.contains(&entry);
         for (at, instruction) in seen {
+            match (pending.remove(at), fell_through) {
+                (Some(saved), true) => frame.meet(&saved),
+                (Some(saved), false) => frame = saved,
+                (None, true) => {}
+                (None, false) => frame.clear_registers(),
+            }
             let mut text = String::new();
             formatter.format(instruction, &mut text);
             let mut notes = self.notes(instruction);
@@ -559,10 +567,10 @@ impl Walk<'_, '_> {
             {
                 notes.push(Note::Import(function.clone()));
             }
-            if in_method && let Some(offset) = me.slot_of(instruction) {
+            if in_method && let Some(offset) = frame.me.slot_of(instruction) {
                 notes.push(Note::Me(offset));
             }
-            let copied_object = me.copy_target(instruction);
+            let copied_object = frame.me.copy_target(instruction);
             for used in info.info(instruction).used_registers() {
                 if matches!(
                     used.access(),
@@ -573,14 +581,34 @@ impl Walk<'_, '_> {
                 ) {
                     loaded.remove(&used.register().full_register32());
                     if !clears_the_low_bit(instruction) {
-                        me.forget(used.register().full_register32());
+                        frame.me.forget(used.register().full_register32());
                     }
                 }
             }
-            me.learn(instruction);
+            frame.me.learn(instruction);
             if let Some(register) = copied_object {
-                me.objects.insert(register);
+                frame.me.objects.insert(register);
             }
+            let flow = instruction.flow_control();
+            if matches!(
+                flow,
+                FlowControl::ConditionalBranch | FlowControl::UnconditionalBranch
+            ) && instruction.op0_kind() == OpKind::NearBranch32
+                && instruction.near_branch32() > *at
+            {
+                pending
+                    .entry(instruction.near_branch32())
+                    .and_modify(|saved| saved.meet(&frame))
+                    .or_insert_with(|| frame.clone());
+            }
+            fell_through = !matches!(
+                flow,
+                FlowControl::UnconditionalBranch
+                    | FlowControl::IndirectBranch
+                    | FlowControl::Return
+                    | FlowControl::Interrupt
+                    | FlowControl::Exception
+            );
             if instruction.mnemonic() == Mnemonic::Mov
                 && instruction.op0_kind() == OpKind::Register
                 && instruction.op1_kind() == OpKind::Memory
@@ -778,8 +806,33 @@ impl Walk<'_, '_> {
     }
 }
 
+/// What the listing knows at one instruction.
+#[derive(Clone, Default)]
+struct Frame {
+    /// The registers that hold the object of the procedure.
+    me: MeTracker,
+}
+
+impl Frame {
+    /// Keeps only what `other` knows too.
+    fn meet(&mut self, other: &Self) {
+        self.me.objects.retain(|one| other.me.objects.contains(one));
+        self.me.vtables.retain(|one| other.me.vtables.contains(one));
+    }
+
+    /// Forgets what the next block cannot use. A block that no forward
+    /// jump reaches keeps the registers that a call does not change, because
+    /// the compiler keeps the object in one of them for the whole procedure.
+    fn clear_registers(&mut self) {
+        let lasts =
+            |register: &Register| matches!(register, Register::EBX | Register::ESI | Register::EDI);
+        self.me.objects.retain(lasts);
+        self.me.vtables.clear();
+    }
+}
+
 /// The registers that hold the object of a procedure, or its vtable.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct MeTracker {
     /// Each register that holds the object.
     objects: BTreeSet<Register>,
