@@ -871,6 +871,7 @@ mod tests {
             o_uuid: Off::new(0),
             ouuid_field_offset: 0x38,
             ouuid_text: Some("248DD896-BB45-11CF-9ABC-0080C7E7B78D".to_owned()),
+            type_library: None,
         }]);
 
         let reason = join_component(&mut control, &table);
@@ -906,6 +907,7 @@ mod tests {
             o_uuid: Off::new(0),
             ouuid_field_offset: 0x38,
             ouuid_text: Some("248DD896-BB45-11CF-9ABC-0080C7E7B78D".to_owned()),
+            type_library: None,
         }]);
 
         let reason = join_component(&mut control, &table);
@@ -975,6 +977,7 @@ mod tests {
             o_uuid: Off::new(0),
             ouuid_field_offset: 0,
             ouuid_text: None,
+            type_library: None,
         }]);
 
         let reason = join_component(&mut control, &table);
@@ -1005,6 +1008,7 @@ mod tests {
             o_uuid: Off::new(0),
             ouuid_field_offset: 0x38,
             ouuid_text: Some("not a real guid at all, thirty six characters".to_owned()),
+            type_library: None,
         }]);
 
         let reason = join_component(&mut control, &table);
@@ -1036,6 +1040,7 @@ mod tests {
             o_uuid: Off::new(0),
             ouuid_field_offset: 0x38,
             ouuid_text: Some("248DD896-BB45-11CF-9ABC-0080C7E7B78D".to_owned()),
+            type_library: None,
         }]);
 
         let reason = join_component(&mut control, &table);
@@ -1068,6 +1073,7 @@ mod tests {
             o_uuid: Off::new(0),
             ouuid_field_offset: 0x38,
             ouuid_text: Some("248DD896-BB45-11CF-9ABC-0080C7E7B78D".to_owned()),
+            type_library: None,
         }]);
 
         let reason = join_component(&mut control, &table);

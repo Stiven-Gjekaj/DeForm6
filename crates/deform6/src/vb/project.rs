@@ -1098,6 +1098,10 @@ pub struct Component {
     /// presented as a confirmed match: a value differing by even one byte is
     /// a different identifier.
     pub ouuid_text: Option<String>,
+    /// The text of the type library of this control on an `Object=` line,
+    /// when a types file that the user derived from the OCX gives it. The
+    /// executable does not hold this text.
+    pub type_library: Option<String>,
 }
 
 /// The external component table, reached from
@@ -1432,6 +1436,7 @@ fn read_component_entry(entry: &Region<'_>) -> Result<Component, EntryFailure> {
         // Both filled by the caller, for the same reason `guid_text` is.
         ouuid_field_offset: 0,
         ouuid_text: None,
+        type_library: None,
     })
 }
 
@@ -3242,6 +3247,7 @@ mod tests {
                 o_uuid: table.components[0].o_uuid,
                 ouuid_field_offset: table.components[0].ouuid_field_offset,
                 ouuid_text: table.components[0].ouuid_text.clone(),
+                type_library: None,
             }
         );
         assert_eq!(table.components[1].file_name, "Second.ocx");

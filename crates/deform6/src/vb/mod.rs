@@ -345,6 +345,23 @@ pub struct Report {
     pub defects: Vec<Defect>,
 }
 
+/// Gives each component the type library that `types` names for its class.
+fn with_type_libraries(
+    mut components: Vec<project::Component>,
+    types: Option<&types::VbTypes>,
+) -> Vec<project::Component> {
+    if let Some(types) = types {
+        for component in &mut components {
+            component.type_library = component
+                .ouuid_text
+                .as_deref()
+                .and_then(|class| types.library_of(class))
+                .map(str::to_owned);
+        }
+    }
+    components
+}
+
 /// Reads one executable and reports what it holds.
 ///
 /// # The order of the steps is load bearing
@@ -509,7 +526,7 @@ pub fn inspect_with_types(
         object_count,
         objects,
         declarations: declare_table.declarations,
-        components: component_table.components,
+        components: with_type_libraries(component_table.components, types),
         forms,
         defects,
     })

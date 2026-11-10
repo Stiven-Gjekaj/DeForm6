@@ -2138,3 +2138,41 @@ fn a_fixed_array_gives_its_slot_its_type_and_its_bounds() {
         ]
     );
 }
+
+/// The types file that `derive-vb-types` wrote from an OCX gives the type
+/// library that the project file declares for the class of the control.
+#[test]
+fn the_types_file_gives_the_type_library_that_the_project_file_declares() {
+    let path = vbp::corpus_root().join("../derived/vb-types.toml");
+    let Ok(bytes) = std::fs::read(path) else {
+        println!("no types file in derived/, so this test checks nothing");
+        return;
+    };
+    let types = VbTypes::parse(&bytes).unwrap();
+    let project = vbp::corpus_root().join("public-domain/SK-Winsock-Sample__VB6");
+    let file = std::fs::read_dir(project)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("vbp"))
+        })
+        .unwrap();
+    let text: String = std::fs::read(file)
+        .unwrap()
+        .iter()
+        .map(|byte| char::from(*byte))
+        .collect();
+    let line = text
+        .lines()
+        .find(|line| line.ends_with("MSWINSCK.OCX"))
+        .unwrap();
+    let declared = line
+        .strip_prefix("Object=")
+        .and_then(|rest| rest.split(';').next())
+        .unwrap();
+    assert_eq!(
+        types.library_of("248DD896-BB45-11CF-9ABC-0080C7E7B78D"),
+        Some(declared)
+    );
+}

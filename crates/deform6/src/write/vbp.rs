@@ -256,7 +256,8 @@ const CORPUS_LIBRARIES: [CorpusLibrary; 1] = [CorpusLibrary {
 /// recovered file name holds a line break.
 ///
 /// A class identifier that [`CORPUS_LIBRARIES`] holds gives the line that
-/// the corpus project files declare, graded `inferred`. Any other class
+/// the corpus project files declare, graded `inferred`. So does a class
+/// that a types file names, through [`Component::type_library`]. Any other class
 /// identifier is written where the type library identifier goes, graded
 /// `unrecoverable`: Visual Basic 6 does not load that line. The first build
 /// run, which `docs/ROADMAP.md` records under phase 8, gave
@@ -314,6 +315,17 @@ fn object_line(component: &Component) -> Result<(String, ReportItem), ReportItem
             "the executable does not hold the type library identifier, the version or the \
              locale of this Object= line; the line is the one that the corpus project files \
              declare for the class identifier that the oUuid field names",
+        ),
+        None if component.type_library.is_some() => (
+            format!(
+                "Object={}; {}",
+                component.type_library.as_deref().unwrap_or_default(),
+                component.file_name
+            ),
+            Confidence::Inferred,
+            "the executable does not hold the type library identifier of this Object= line; \
+             the types file that the user derived from the OCX names it for the class \
+             identifier that the oUuid field names",
         ),
         None => (
             format!("Object={{{identifier}}}#1.0#0; {}", component.file_name),
@@ -568,6 +580,7 @@ mod tests {
             o_uuid: Off::new(0x04),
             ouuid_field_offset: 0x100,
             ouuid_text: Some("248DD896-BB45-11CF-9ABC-0080C7E7B78D".to_owned()),
+            type_library: None,
         }
     }
 
@@ -692,6 +705,21 @@ mod tests {
         assert_eq!(
             line,
             "Object={248DD890-BB45-11CF-9ABC-0080C7E7B78D}#1.0#0; MSWINSCK.OCX"
+        );
+        assert_eq!(item.confidence, Confidence::Inferred);
+    }
+
+    /// A class that the table does not hold takes the line of the type
+    /// library that the types file names.
+    #[test]
+    fn a_class_that_the_types_file_names_gives_its_type_library() {
+        let mut component = resolved_component("Grid", "GRID32.OCX");
+        component.ouuid_text = Some("00000000-0000-0000-0000-0000000000AB".to_owned());
+        component.type_library = Some("{AAAAAAAA-0000-0000-0000-000000000000}#2.1#0".to_owned());
+        let (line, item) = object_line(&component).unwrap();
+        assert_eq!(
+            line,
+            "Object={AAAAAAAA-0000-0000-0000-000000000000}#2.1#0; GRID32.OCX"
         );
         assert_eq!(item.confidence, Confidence::Inferred);
     }

@@ -181,6 +181,7 @@ pub struct VbTypes {
     iids: BTreeMap<String, String>,
     imports: BTreeMap<u16, ImportType>,
     interfaces: BTreeMap<String, InterfaceType>,
+    libraries: BTreeMap<String, String>,
 }
 
 /// The file, before it is folded into [`VbTypes`].
@@ -196,6 +197,8 @@ struct RawTypes {
     imports: BTreeMap<String, ImportType>,
     #[serde(default)]
     interfaces: BTreeMap<String, RawInterface>,
+    #[serde(default)]
+    libraries: BTreeMap<String, String>,
 }
 
 /// One interface of the file.
@@ -299,6 +302,7 @@ impl VbTypes {
             iids: raw.iids,
             imports,
             interfaces,
+            libraries: raw.libraries,
         })
     }
 
@@ -429,6 +433,15 @@ impl VbTypes {
             }
         }
         callees
+    }
+
+    /// Gives the text of the type library of the class `class_id`, as the
+    /// `Object=` line of a project holds it. `class_id` has no braces.
+    #[must_use]
+    pub fn library_of(&self, class_id: &str) -> Option<&str> {
+        self.libraries
+            .get(&format!("{{{class_id}}}"))
+            .map(String::as_str)
     }
 
     /// Gives the name of the interface whose GUID is `guid`.
