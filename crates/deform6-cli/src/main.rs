@@ -539,7 +539,7 @@ fn print_native(
 ) -> Result<(), deform6::Refusal> {
     let pe = PeImage::parse(data)?;
     let listing = native::disassemble(&pe);
-    let names = native::Names::read(&pe, Some(report), types);
+    let names = native::Names::read(&pe, &listing, Some(report), types);
     println!("Mode         native");
     println!("Procedures   {}", listing.procedures.len());
     println!("These are x86 instructions with notes. They are not Basic statements.");

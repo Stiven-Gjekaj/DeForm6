@@ -32,6 +32,7 @@ use iced_x86::{
 use crate::read::pe::{ImportName, ImportedFunction, PeImage};
 use crate::read::region::{Off, Region, Va};
 use crate::vb::Report;
+use crate::vb::classify::{ObjectKind, classify};
 use crate::vb::context::{default_iid, profile};
 use crate::vb::controlinfo::EventReport;
 use crate::vb::header::{VbHeader, header_region};
@@ -1243,6 +1244,74 @@ pub fn object_methods(pe: &PeImage<'_>) -> BTreeMap<u32, ObjectMethod> {
         .collect()
 }
 
+/// Gives each procedure of a standard module that `listing` holds, by the
+/// address of its code.
+///
+/// The file holds no name for such a procedure. The compiler lays out the
+/// objects in the order of the object table, and the procedures of an
+/// object in the order of the source. So the procedures that no link table
+/// names, between the code of the object before a module and the code of
+/// the object after it, are the procedures of that module. The function
+/// leaves out a module whose neighbour is a module too, because the file
+/// does not show where one ends and the other starts.
+fn module_methods(pe: &PeImage<'_>, listing: &Listing) -> BTreeMap<u32, ObjectMethod> {
+    let objects = objects_of(pe);
+    let ranges: Vec<Option<(u32, u32)>> = objects
+        .iter()
+        .map(|object| {
+            let methods = methods_of(pe, object);
+            Some((*methods.keys().next()?, *methods.keys().next_back()?))
+        })
+        .collect();
+    let owned = object_methods(pe);
+    let is_module = |index: usize| {
+        objects
+            .get(index)
+            .is_some_and(|object| classify(object.f_object_type) == ObjectKind::Module)
+    };
+    let mut modules = BTreeMap::new();
+    for (index, object) in objects.iter().enumerate() {
+        if !is_module(index)
+            || is_module(index.saturating_sub(1)) && index > 0
+            || is_module(index.saturating_add(1))
+        {
+            continue;
+        }
+        let low = ranges
+            .get(..index)
+            .unwrap_or_default()
+            .iter()
+            .flatten()
+            .map(|(_, last)| *last)
+            .max()
+            .unwrap_or(0);
+        let high = ranges
+            .get(index.saturating_add(1)..)
+            .unwrap_or_default()
+            .iter()
+            .flatten()
+            .map(|(first, _)| *first)
+            .min()
+            .unwrap_or(u32::MAX);
+        let entries = listing
+            .procedures
+            .iter()
+            .map(|procedure| procedure.entry.get())
+            .filter(|entry| *entry > low && *entry < high && !owned.contains_key(entry));
+        for (place, entry) in (0_u16..).zip(entries) {
+            modules.insert(
+                entry,
+                ObjectMethod {
+                    object: object.name.clone(),
+                    index: place,
+                    name: None,
+                },
+            );
+        }
+    }
+    modules
+}
+
 /// What the file gives for one object of the program.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -1336,7 +1405,12 @@ impl<'t> Names<'t> {
     /// Gives the names of `pe`. A caller with no report gives no handler
     /// name.
     #[must_use]
-    pub fn read(pe: &PeImage<'_>, report: Option<&Report>, types: Option<&'t VbTypes>) -> Self {
+    pub fn read(
+        pe: &PeImage<'_>,
+        listing: &Listing,
+        report: Option<&Report>,
+        types: Option<&'t VbTypes>,
+    ) -> Self {
         let objects = objects_of(pe);
         let declares = header_region(pe)
             .ok()
@@ -1359,7 +1433,10 @@ impl<'t> Names<'t> {
         }
         Names {
             handlers: report.map(handler_names).unwrap_or_default(),
-            methods: object_methods(pe),
+            methods: object_methods(pe)
+                .into_iter()
+                .chain(module_methods(pe, listing))
+                .collect(),
             objects,
             object_of_iid,
             object_of_info,

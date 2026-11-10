@@ -439,7 +439,7 @@ fn each_object_call_names_a_member_that_its_source_procedure_names() {
             deform6::journal::Mode::Strict,
         )
         .unwrap();
-        let names = Names::read(&pe, Some(&report), Some(&types));
+        let names = Names::read(&pe, &disassemble(&pe), Some(&report), Some(&types));
         let project_path = vbp::select_project_file(exe, &projects).unwrap();
         let bodies: BTreeMap<String, Vec<(String, Vec<String>)>> =
             vbp::Project::read(&project_path)
@@ -501,7 +501,7 @@ fn each_object_call_names_a_member_that_its_source_procedure_names() {
     }
     assert_eq!(
         (total, found, unnamed),
-        (4675, 4578, 8),
+        (4735, 4638, 8),
         "the object calls moved"
     );
 }
@@ -544,12 +544,23 @@ const WORD_HELPERS: [(&str, &[&str]); 6] = [
     ("on error ", &["__vbaOnError"]),
 ];
 
-/// Gives the source body of each procedure of `exe` that a link slot names,
-/// in lower case, with the helpers that the listing calls in it.
-fn bodies_and_helpers(exe: &Path, projects: &[PathBuf]) -> Vec<(String, Vec<String>)> {
+/// One procedure of the listing, with its source.
+struct Sourced {
+    /// The text of the source body.
+    body: String,
+    /// The name of each helper that the procedure calls.
+    helpers: Vec<String>,
+    /// The text of each string note.
+    strings: Vec<String>,
+}
+
+/// Gives each procedure of `exe` whose place in the source the listing
+/// knows.
+fn sourced_procedures(exe: &Path, projects: &[PathBuf]) -> Vec<Sourced> {
     let data = std::fs::read(exe).unwrap();
     let pe = PeImage::parse(&data).unwrap();
-    let methods = object_methods(&pe);
+    let listing = disassemble(&pe);
+    let names = Names::read(&pe, &listing, None, None);
     let project_path = vbp::select_project_file(exe, projects).unwrap();
     let bodies: BTreeMap<String, Vec<(String, Vec<String>)>> = vbp::Project::read(&project_path)
         .declared_objects()
@@ -561,18 +572,17 @@ fn bodies_and_helpers(exe: &Path, projects: &[PathBuf]) -> Vec<(String, Vec<Stri
         })
         .collect();
     let mut out = Vec::new();
-    for procedure in &disassemble(&pe).procedures {
-        let Some(method) = methods.get(&procedure.entry.get()) else {
+    for procedure in &listing.procedures {
+        let Some(method) = names.methods.get(&procedure.entry.get()) else {
             continue;
         };
         let Some(objects) = bodies.get(&method.object) else {
             continue;
         };
-        let body = objects[usize::from(method.index)]
-            .1
-            .join("\n")
-            .to_ascii_lowercase()
-            .replace("on local error", "on error");
+        let body = objects
+            .get(usize::from(method.index))
+            .map(|(_, lines)| lines.join("\n"))
+            .unwrap_or_default();
         let helpers = procedure
             .lines
             .iter()
@@ -586,9 +596,66 @@ fn bodies_and_helpers(exe: &Path, projects: &[PathBuf]) -> Vec<(String, Vec<Stri
                 _ => None,
             })
             .collect();
-        out.push((body, helpers));
+        let strings = procedure
+            .lines
+            .iter()
+            .flat_map(|line| &line.notes)
+            .filter_map(|note| match note {
+                Note::Text(text) => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        out.push(Sourced {
+            body,
+            helpers,
+            strings,
+        });
     }
     out
+}
+
+/// Gives `body` in lower case, with one form of `On Error`.
+fn normal_body(body: &str) -> String {
+    body.to_ascii_lowercase()
+        .replace("on local error", "on error")
+}
+
+/// Tells whether `body` holds the string `found`. The compiler joins a
+/// literal and an intrinsic constant into one string, so each part between
+/// control characters must be in `body`. A string of control characters
+/// alone is an intrinsic constant, which the source names and does not
+/// quote.
+fn in_procedure(found: &str, body: &str) -> bool {
+    let parts: Vec<&str> = found
+        .split(['\r', '\n', '\t'])
+        .filter(|part| !part.is_empty())
+        .collect();
+    if parts.is_empty() {
+        return body.to_ascii_lowercase().contains("vb");
+    }
+    parts.iter().all(|part| in_source(part, body))
+}
+
+/// Each string note is a literal of the source of its own procedure. So the
+/// place of each procedure of an object is the place in the source.
+#[test]
+fn each_string_note_is_a_literal_of_its_source_procedure() {
+    let projects = vbp::project_files();
+    let mut strings = 0;
+    for exe in &vbp::executables() {
+        for procedure in sourced_procedures(exe, &projects) {
+            for text in &procedure.strings {
+                assert!(
+                    in_procedure(text, &procedure.body),
+                    "{}: {text:?} is not in\n{}",
+                    exe.display(),
+                    procedure.body
+                );
+                strings += 1;
+            }
+        }
+    }
+    assert_eq!(strings, 1019, "the string notes moved");
 }
 
 /// Each call of a helper of [`STATEMENT_HELPERS`] is in a procedure whose
@@ -598,8 +665,9 @@ fn the_idiom_of_each_statement_helper_is_a_word_of_its_source_procedure() {
     let projects = vbp::project_files();
     let mut calls = 0;
     for exe in &vbp::executables() {
-        for (body, helpers) in bodies_and_helpers(exe, &projects) {
-            for name in &helpers {
+        for procedure in sourced_procedures(exe, &projects) {
+            let body = normal_body(&procedure.body);
+            for name in &procedure.helpers {
                 let Some((helper, word)) =
                     STATEMENT_HELPERS.iter().find(|(helper, _)| helper == name)
                 else {
@@ -619,7 +687,7 @@ fn the_idiom_of_each_statement_helper_is_a_word_of_its_source_procedure() {
             }
         }
     }
-    assert_eq!(calls, 1260, "the calls of the statement helpers moved");
+    assert_eq!(calls, 1263, "the calls of the statement helpers moved");
 }
 
 /// Each procedure whose source holds a word of [`WORD_HELPERS`] calls one
@@ -629,7 +697,9 @@ fn each_word_of_the_source_gives_its_helper_in_the_listing() {
     let projects = vbp::project_files();
     let mut words = 0;
     for exe in &vbp::executables() {
-        for (body, helpers) in bodies_and_helpers(exe, &projects) {
+        for procedure in sourced_procedures(exe, &projects) {
+            let body = normal_body(&procedure.body);
+            let helpers = &procedure.helpers;
             for (word, wanted) in WORD_HELPERS {
                 if !body.contains(word) {
                     continue;
@@ -643,7 +713,7 @@ fn each_word_of_the_source_gives_its_helper_in_the_listing() {
             }
         }
     }
-    assert_eq!(words, 115, "the procedures with these words moved");
+    assert_eq!(words, 116, "the procedures with these words moved");
 }
 
 /// The source of `LockWorkStation` holds one `Shell` of one literal. The
