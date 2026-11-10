@@ -19,8 +19,9 @@ heading its version and its date.
   `tests/native.toml` pins each program against its source: the listing
   holds 701 of the 701 procedures that the source declares.
 - The listing of a native program names each procedure by its name or by
-  its place in the source. It gives a note for 6121 of the 6170 calls
-  through a vtable, and with `--vb-types` the note names the member. It
+  its place in the source. It gives a note for 6155 of the 6170 calls
+  through a vtable, and with `--vb-types` the note names the member, and
+  joins an accessor and its member, such as `Me.Text1.Text (get)`. It
   also gives floating point constants, the names of arguments and the Basic
   form of a runtime function that has an ordinal.
 - `extract --verify-build` builds the written project with the Visual
