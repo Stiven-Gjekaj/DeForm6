@@ -113,6 +113,9 @@ const MAX_LATE_PUSHES: usize = 4;
 /// The longest member name of a late-bound call, in UTF-16 units.
 const MAX_IDENTIFIER_UNITS: u32 = 0x100;
 
+/// How many instructions after a call can jump to its check block.
+const MAX_JUMPS_TO_CHECK: usize = 6;
+
 /// How many instructions before a check block the search goes.
 const MAX_CHECK_REACH: usize = 64;
 
@@ -827,15 +830,30 @@ impl Walk<'_, '_> {
                 line.notes.push(note);
             }
         }
+        for at in 0..lines.len() {
+            let unnoted = lines.get(at).is_some_and(|line| line.notes.is_empty())
+                && instructions
+                    .get(at)
+                    .is_some_and(|one| calls_vtable_slot(one, one.memory_displacement32()));
+            if unnoted
+                && let Some(note) = self.shared_check(instructions, lines, at)
+                && let Some(line) = lines.get_mut(at)
+            {
+                line.notes.push(note);
+            }
+        }
     }
 
-    /// Gives the call that the check at index `check` belongs to, and its
-    /// note.
+    /// Gives the four values of the check at index `check`: the index of
+    /// the first `push`, the GUID and the vtable offset.
     ///
     /// The compiler gives the helper four values: the offset, the address
-    /// of the GUID, the object and the result. The call is the last one
-    /// before them that goes through that offset of a vtable.
-    fn checked_call(&self, instructions: &[Instruction], check: usize) -> Option<(usize, Note)> {
+    /// of the GUID, the object and the result.
+    fn check_values(
+        &self,
+        instructions: &[Instruction],
+        check: usize,
+    ) -> Option<(usize, [u8; 16], u32)> {
         let before = instructions.get(..check)?;
         let mut pushes = before
             .iter()
@@ -855,7 +873,15 @@ impl Walk<'_, '_> {
             .take(Off::new(0), 16)?
             .try_into()
             .ok()?;
-        let (at, _) = before
+        Some((first, iid, offset))
+    }
+
+    /// Gives the call that the check at index `check` belongs to, and its
+    /// note. The call is the last one before the values of the check that
+    /// goes through that offset of a vtable.
+    fn checked_call(&self, instructions: &[Instruction], check: usize) -> Option<(usize, Note)> {
+        let (first, iid, offset) = self.check_values(instructions, check)?;
+        let (at, _) = instructions
             .get(..first)?
             .iter()
             .enumerate()
@@ -864,6 +890,88 @@ impl Walk<'_, '_> {
             .find(|(_, instruction)| calls_vtable_slot(instruction, offset))?;
         let offset = u16::try_from(offset).ok()?;
         Some((at, Note::Interface { iid, offset }))
+    }
+
+    /// Gives the note of the call at index `at` when the code after it
+    /// reaches a check of the same offset. The compiler merges the check
+    /// blocks of two calls that have the same values, in whole or in part,
+    /// so the path can go through a jump.
+    fn shared_check(
+        &self,
+        instructions: &[Instruction],
+        lines: &[Line],
+        at: usize,
+    ) -> Option<Note> {
+        let call = instructions.get(at)?;
+        let offset = call.memory_displacement32();
+        let next = at.checked_add(1)?;
+        let after = instructions.get(next..)?;
+        let branches = after
+            .iter()
+            .take(MAX_JUMPS_TO_CHECK)
+            .filter(|jump| jump.flow_control() == FlowControl::ConditionalBranch)
+            .filter_map(|jump| {
+                (jump.op0_kind() == OpKind::NearBranch32)
+                    .then(|| index_of(instructions, jump.near_branch32()))
+                    .flatten()
+            });
+        std::iter::once(next)
+            .chain(branches)
+            .find_map(|start| self.check_on_path(instructions, lines, start, offset))
+    }
+
+    /// Follows the code from index `start` to a check, and gives its note
+    /// when the check has the vtable offset `offset`.
+    fn check_on_path(
+        &self,
+        instructions: &[Instruction],
+        lines: &[Line],
+        start: usize,
+        offset: u32,
+    ) -> Option<Note> {
+        let mut at = start;
+        let mut pushes = Vec::new();
+        for _ in 0..MAX_CHECK_REACH {
+            let instruction = instructions.get(at)?;
+            let is_check = lines
+                .get(at)
+                .is_some_and(|line| line.notes.iter().any(is_object_check));
+            match instruction.flow_control() {
+                FlowControl::IndirectCall if is_check => {
+                    let [first, iid, _, _] = *pushes.last_chunk::<4>()?;
+                    if pushed_value(first)? != offset {
+                        return None;
+                    }
+                    let iid: [u8; 16] = self
+                        .pe
+                        .region_at_va(Va::new(pushed_value(iid)?))?
+                        .take(Off::new(0), 16)?
+                        .try_into()
+                        .ok()?;
+                    return Some(Note::Interface {
+                        iid,
+                        offset: u16::try_from(offset).ok()?,
+                    });
+                }
+                FlowControl::Call
+                | FlowControl::IndirectCall
+                | FlowControl::Return
+                | FlowControl::IndirectBranch => return None,
+                FlowControl::UnconditionalBranch => {
+                    if instruction.op0_kind() != OpKind::NearBranch32 {
+                        return None;
+                    }
+                    at = index_of(instructions, instruction.near_branch32())?;
+                    continue;
+                }
+                _ => {}
+            }
+            if instruction.mnemonic() == Mnemonic::Push {
+                pushes.push(instruction);
+            }
+            at = at.checked_add(1)?;
+        }
+        None
     }
 
     /// Walks the procedure at `entry`, and gives each new entry that its
@@ -1163,6 +1271,13 @@ impl InstanceTracker {
             self.vtables.insert(target, object);
         }
     }
+}
+
+/// Gives the index in `instructions` of the instruction at `address`.
+fn index_of(instructions: &[Instruction], address: u32) -> Option<usize> {
+    instructions
+        .binary_search_by_key(&u64::from(address), Instruction::ip)
+        .ok()
 }
 
 /// Tells whether `note` names the helper that checks an object call.
