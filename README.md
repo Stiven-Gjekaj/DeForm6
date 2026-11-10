@@ -172,10 +172,11 @@ A check that passes because it reads the wrong place is worse than no check.
    `tests/builds.toml` holds each result and the lines that VB6 wrote. The
    two corpus projects that do not build are `Edge_Detection`, whose
    `cCommonDialog.cls` is not in its directory, and `HMM`, whose `frmHMM.frx`
-   is damaged, as fact 2 says. DeForm6 knows the `Object=` line of one
-   control only: the Winsock control, which the corpus holds. For another
-   control, it writes the class identifier of the control on that line, and
-   VB6 does not load the line. With such a line, the Winsock projects gave
+   is damaged, as fact 2 says. DeForm6 knows the `Object=` line of the
+   Winsock control, which the corpus holds. For another control, give its OCX
+   to `derive-vb-types` and the file to `extract --vb-types`. With no such
+   file, it writes the class identifier of the control on that line, and VB6
+   does not load the line. With such a line, the Winsock projects gave
    `'MSWINSCK.OCX' could not be loaded`.
    No test starts VB6, because the test machine has no Windows. The gate
    fails when DeForm6 writes different files than the Windows host built.
