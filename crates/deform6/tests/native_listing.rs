@@ -48,6 +48,10 @@ struct Measure {
     checked_calls: usize,
     /// The calls through the vtable of the object of the procedure.
     me_calls: usize,
+    /// The floating point constants that the listing gives.
+    numbers: usize,
+    /// The floating point constants that the source holds as a literal.
+    numbers_in_source: usize,
 }
 
 /// Gives the source text of each object of the project of `exe`, and the
@@ -80,6 +84,58 @@ fn in_source(found: &str, text: &str) -> bool {
     text.contains(&found.replace('"', "\"\"")) || (found == "\t" && text.contains("vbTab"))
 }
 
+/// Tells whether two numbers round to the same `Single`.
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "the test asks what the conversion to a Single gives"
+)]
+fn same_single(a: f64, b: f64) -> bool {
+    a as f32 == b as f32
+}
+
+/// Tells whether a number of the source text gives the same value as
+/// `found`. The source can write it with no leading zero, with a type
+/// sign, with an exponent, or as a `Single` that rounds to the same bits.
+fn number_in_source(found: &str, text: &str) -> bool {
+    let value: f64 = found.parse().unwrap();
+    let wanted = value.abs();
+    let is_number = |c: char| c.is_ascii_digit() || c == '.';
+    let bytes: Vec<char> = text.chars().collect();
+    let mut at = 0;
+    while at < bytes.len() {
+        if !is_number(bytes[at])
+            || (at > 0 && (bytes[at - 1].is_alphanumeric() || bytes[at - 1] == '_'))
+        {
+            at += 1;
+            continue;
+        }
+        let start = at;
+        while at < bytes.len() && is_number(bytes[at]) {
+            at += 1;
+        }
+        if at + 1 < bytes.len() && matches!(bytes[at], 'e' | 'E' | 'd' | 'D') {
+            let mut end = at + 1;
+            if matches!(bytes[end], '+' | '-') {
+                end += 1;
+            }
+            let digits = end;
+            while end < bytes.len() && bytes[end].is_ascii_digit() {
+                end += 1;
+            }
+            if end > digits {
+                at = end;
+            }
+        }
+        let literal: String = bytes[start..at].iter().collect();
+        if let Ok(number) = literal.replace(['d', 'D'], "e").parse::<f64>()
+            && (number == wanted || same_single(number, wanted))
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// Measures `listing` against `text`, and fails on a fault of the walk.
 fn measure(exe: &Path, listing: &Listing, text: &str, declared: usize) -> Measure {
     let mut result = Measure {
@@ -92,6 +148,8 @@ fn measure(exe: &Path, listing: &Listing, text: &str, declared: usize) -> Measur
         idioms: 0,
         checked_calls: 0,
         me_calls: 0,
+        numbers: 0,
+        numbers_in_source: 0,
     };
     assert!(!listing.truncated, "{}: truncated", exe.display());
     for procedure in &listing.procedures {
@@ -123,6 +181,14 @@ fn measure(exe: &Path, listing: &Listing, text: &str, declared: usize) -> Measur
                 }
                 Note::Interface { .. } => result.checked_calls += 1,
                 Note::Me(_) => result.me_calls += 1,
+                Note::Number(found) => {
+                    result.numbers += 1;
+                    if number_in_source(found, text) {
+                        result.numbers_in_source += 1;
+                    } else if std::env::var_os("DEFORM6_PRINT_NATIVE").is_some() {
+                        println!("# no literal: {found}");
+                    }
+                }
                 _ => {}
             }
         }
@@ -167,7 +233,7 @@ fn each_native_program_gives_the_pinned_listing_with_no_fault() {
         let key = key_of(exe);
         if print {
             println!(
-                "[program.\"{key}\"]\nprocedures = {}\ndeclared = {}\ninstructions = {}\nstrings = {}\nstrings_in_source = {}\nruntime_calls = {}\nidioms = {}\nchecked_calls = {}\nme_calls = {}\n",
+                "[program.\"{key}\"]\nprocedures = {}\ndeclared = {}\ninstructions = {}\nstrings = {}\nstrings_in_source = {}\nruntime_calls = {}\nidioms = {}\nchecked_calls = {}\nme_calls = {}\nnumbers = {}\nnumbers_in_source = {}\n",
                 got.procedures,
                 got.declared,
                 got.instructions,
@@ -176,7 +242,9 @@ fn each_native_program_gives_the_pinned_listing_with_no_fault() {
                 got.runtime_calls,
                 got.idioms,
                 got.checked_calls,
-                got.me_calls
+                got.me_calls,
+                got.numbers,
+                got.numbers_in_source
             );
             continue;
         }
@@ -196,6 +264,8 @@ fn each_native_program_gives_the_pinned_listing_with_no_fault() {
             idioms: number("idioms"),
             checked_calls: number("checked_calls"),
             me_calls: number("me_calls"),
+            numbers: number("numbers"),
+            numbers_in_source: number("numbers_in_source"),
         };
         if got != want {
             failures.push(format!("{key}: pinned {want:?}, now {got:?}"));

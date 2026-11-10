@@ -26,7 +26,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use iced_x86::{
     Code, Decoder, DecoderOptions, FlowControl, Formatter, Instruction, InstructionInfoFactory,
-    IntelFormatter, Mnemonic, OpAccess, OpKind, Register,
+    IntelFormatter, MemorySize, Mnemonic, OpAccess, OpKind, Register,
 };
 
 use crate::read::pe::{ImportName, ImportedFunction, PeImage};
@@ -108,6 +108,8 @@ pub enum Note {
     /// The instruction calls a member of the object of the procedure, at
     /// this vtable offset.
     Me(u16),
+    /// An operand is the address of this floating point constant, as text.
+    Number(String),
 }
 
 /// One decoded instruction.
@@ -343,12 +345,36 @@ impl Walk<'_, '_> {
                 {
                     if let Some(function) = self.imports.get(&instruction.memory_displacement32()) {
                         notes.push(Note::Import(function.clone()));
+                    } else if let Some(number) = self.number_at(instruction) {
+                        notes.push(Note::Number(number));
                     }
                 }
                 _ => {}
             }
         }
         notes
+    }
+
+    /// Gives the text of the floating point constant that `instruction`
+    /// reads from a fixed address. A value of 4 bytes prints in the fewest
+    /// digits that give the same `Single`.
+    fn number_at(&self, instruction: &Instruction) -> Option<String> {
+        let region = self
+            .pe
+            .region_at_va(Va::new(instruction.memory_displacement32()))?;
+        match instruction.memory_size() {
+            MemorySize::Float32 => {
+                let bits = region.u32_le(Off::new(0))?;
+                let value = f32::from_bits(bits);
+                value.is_finite().then(|| format!("{value}"))
+            }
+            MemorySize::Float64 => {
+                let bytes: [u8; 8] = region.take(Off::new(0), 8)?.try_into().ok()?;
+                let value = f64::from_le_bytes(bytes);
+                value.is_finite().then(|| format!("{value}"))
+            }
+            _ => None,
+        }
     }
 
     /// Gives the address that a `push imm32` hands to a later `ret`, when
@@ -1215,6 +1241,7 @@ impl<'t> Names<'t> {
                     |export| format!("Declare {export}"),
                 ),
             Note::Text(text) => format!("{text:?}"),
+            Note::Number(text) => text.clone(),
             Note::Me(offset) => self.me_text(entry, *offset),
             Note::Interface { iid, offset } => {
                 self.interface_text(iid, *offset).unwrap_or_else(|| {
