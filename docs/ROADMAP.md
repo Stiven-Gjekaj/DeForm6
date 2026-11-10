@@ -1086,8 +1086,8 @@ source. `tests/native.toml` and `tests/native_listing.rs` pin each number:
 The 97 other member names are default members, such as `Text1 = "a"`, which
 the source does not write. The test fails for another name. Two of the
 measures need `derived/vb-types.toml`. A machine with no such file skips
-them. The other string notes of the corpus are in the class `cCommonDialog`,
-whose source is not in the repository.
+them. The 7 other string notes of the corpus are in procedures whose source
+is not in the repository or whose place the listing does not know.
 
 **What stays open.** Seven procedures of `Map Editor.exe` stay `sub_`,
 because two modules are beside each other in its object table. The file
