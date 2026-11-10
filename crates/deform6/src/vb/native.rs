@@ -135,6 +135,10 @@ const FIRST_ARGUMENT_AT: u32 = 0x0C;
 /// The end of the frame offsets that can be an argument.
 const MAX_ARGUMENT_AT: u32 = 0x1_0000;
 
+/// Where a procedure with no `ebp` frame finds the object, above `esp` at
+/// its entry.
+const FIRST_STACK_ARGUMENT: u32 = 4;
+
 /// Where a procedure of an object finds the object in its frame.
 const ME_ARGUMENT_AT: u32 = 8;
 
@@ -616,6 +620,7 @@ impl Walk<'_, '_> {
         let mut loaded: BTreeMap<Register, ImportedFunction> = BTreeMap::new();
         let mut lines = Vec::with_capacity(seen.len());
         let mut frame = Frame::default();
+        frame.me.pushed = Some(0);
         let globals = self.default_instances(seen);
         let mut pending: BTreeMap<u32, Frame> = BTreeMap::new();
         let mut fell_through = true;
@@ -1105,6 +1110,9 @@ impl Frame {
     fn meet(&mut self, other: &Self) {
         self.me.objects.retain(|one| other.me.objects.contains(one));
         self.me.vtables.retain(|one| other.me.vtables.contains(one));
+        if self.me.pushed != other.me.pushed {
+            self.me.pushed = None;
+        }
         self.instances
             .objects
             .retain(|key, value| other.instances.objects.get(key) == Some(value));
@@ -1133,6 +1141,9 @@ struct MeTracker {
     objects: BTreeSet<Register>,
     /// Each register that holds the vtable of the object.
     vtables: BTreeSet<Register>,
+    /// How far `esp` moved since the entry, until the first call. `None`
+    /// before the first instruction shows it, and after the first call.
+    pushed: Option<u32>,
 }
 
 impl MeTracker {
@@ -1169,11 +1180,31 @@ impl MeTracker {
             instruction.flow_control(),
             FlowControl::Call | FlowControl::IndirectCall
         ) {
+            self.pushed = None;
             for register in [Register::EAX, Register::ECX, Register::EDX] {
                 self.forget(register);
             }
             return;
         }
+        self.pushed = self.pushed.and_then(|pushed| match instruction.mnemonic() {
+            Mnemonic::Push => pushed.checked_add(4),
+            Mnemonic::Sub
+                if instruction.op0_kind() == OpKind::Register
+                    && instruction.op0_register() == Register::ESP =>
+            {
+                instruction
+                    .try_immediate(1)
+                    .ok()
+                    .and_then(|bytes| u32::try_from(bytes).ok())
+                    .and_then(|bytes| pushed.checked_add(bytes))
+            }
+            _ if instruction.op0_kind() == OpKind::Register
+                && instruction.op0_register() == Register::ESP =>
+            {
+                None
+            }
+            _ => Some(pushed),
+        });
         if instruction.code() != Code::Mov_r32_rm32 || instruction.op1_kind() != OpKind::Memory {
             return;
         }
@@ -1182,7 +1213,12 @@ impl MeTracker {
         if instruction.memory_index() != Register::None {
             return;
         }
-        if base == Register::EBP && offset == ME_ARGUMENT_AT {
+        let at_entry = self
+            .pushed
+            .and_then(|pushed| pushed.checked_add(FIRST_STACK_ARGUMENT));
+        if (base == Register::EBP && offset == ME_ARGUMENT_AT)
+            || (base == Register::ESP && Some(offset) == at_entry)
+        {
             self.objects.insert(instruction.op0_register());
         } else if offset == 0 && self.objects.contains(&base) {
             self.vtables.insert(instruction.op0_register());
