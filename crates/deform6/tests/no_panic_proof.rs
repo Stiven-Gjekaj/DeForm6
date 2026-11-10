@@ -505,7 +505,13 @@ fn drive_native_listing(data: &[u8]) {
         return;
     };
     let listing = deform6::vb::native::disassemble(&pe);
-    let names = deform6::vb::native::Names::read(&pe, &listing, None, None);
+    let report = deform6::inspect(
+        data,
+        &deform6::vb::opcodes::OpcodeTable::builtin(),
+        deform6::journal::Mode::Salvage,
+    )
+    .ok();
+    let names = deform6::vb::native::Names::read(&pe, &listing, report.as_ref(), None);
     let _ = deform6::vb::native::listing_text(&pe, &listing, &names);
 }
 

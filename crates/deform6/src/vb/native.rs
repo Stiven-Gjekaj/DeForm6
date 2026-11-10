@@ -39,6 +39,7 @@
 //! without end.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Bound;
 
 use iced_x86::{
     Code, Decoder, DecoderOptions, FlowControl, Formatter, Instruction, InstructionInfoFactory,
@@ -1356,45 +1357,53 @@ fn module_methods(pe: &PeImage<'_>, listing: &Listing) -> BTreeMap<u32, ObjectMe
             .get(index)
             .is_some_and(|object| classify(object.f_object_type) == ObjectKind::Module)
     };
+    let lasts: Vec<u32> = ranges
+        .iter()
+        .scan(0_u32, |highest, range| {
+            let before = *highest;
+            if let Some((_, last)) = range {
+                *highest = before.max(*last);
+            }
+            Some(before)
+        })
+        .collect();
+    let mut firsts: Vec<u32> = ranges
+        .iter()
+        .rev()
+        .scan(u32::MAX, |lowest, range| {
+            let after = *lowest;
+            if let Some((first, _)) = range {
+                *lowest = after.min(*first);
+            }
+            Some(after)
+        })
+        .collect();
+    firsts.reverse();
+    let entries: BTreeSet<u32> = listing
+        .procedures
+        .iter()
+        .map(|procedure| procedure.entry.get())
+        .filter(|entry| !owned.contains_key(entry))
+        .collect();
     let mut modules = BTreeMap::new();
-    for (index, object) in objects.iter().enumerate() {
-        if !is_module(index)
-            || is_module(index.saturating_sub(1)) && index > 0
-            || is_module(index.saturating_add(1))
-        {
+    for ((index, object), (low, high)) in objects.iter().enumerate().zip(lasts.iter().zip(&firsts))
+    {
+        let beside_a_module =
+            (index > 0 && is_module(index.saturating_sub(1))) || is_module(index.saturating_add(1));
+        if !is_module(index) || beside_a_module || low >= high {
             continue;
         }
-        let low = ranges
-            .get(..index)
-            .unwrap_or_default()
-            .iter()
-            .flatten()
-            .map(|(_, last)| *last)
-            .max()
-            .unwrap_or(0);
-        let high = ranges
-            .get(index.saturating_add(1)..)
-            .unwrap_or_default()
-            .iter()
-            .flatten()
-            .map(|(first, _)| *first)
-            .min()
-            .unwrap_or(u32::MAX);
-        let entries = listing
-            .procedures
-            .iter()
-            .map(|procedure| procedure.entry.get())
-            .filter(|entry| *entry > low && *entry < high && !owned.contains_key(entry));
-        for (place, entry) in (0_u16..).zip(entries) {
-            modules.insert(
-                entry,
-                ObjectMethod {
-                    object: object.name.clone(),
-                    index: place,
-                    slot: usize::from(place),
-                    name: None,
-                },
-            );
+        let inside = entries.range((Bound::Excluded(*low), Bound::Excluded(*high)));
+        for (place, entry) in (0_u16..).zip(inside) {
+            modules.entry(*entry).or_insert_with(|| ObjectMethod {
+                object: object.name.clone(),
+                index: place,
+                slot: usize::from(place),
+                name: None,
+            });
+        }
+        if modules.len() >= entries.len() {
+            break;
         }
     }
     modules
