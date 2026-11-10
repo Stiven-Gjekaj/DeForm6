@@ -8,9 +8,9 @@ does not do. A change that no release holds yet goes under one
 `## [Unreleased]` heading above the newest release. A release gives that
 heading its version and its date.
 
-## [Unreleased]
+## [5.0.0] - 2026-11-10
 
-### What this delivers
+### What this release delivers
 
 - `disasm` on a native program prints each procedure as x86 instructions
   with notes: the runtime helper and its idiom, the string constant, the
@@ -59,12 +59,21 @@ heading its version and its date.
   acts as `VB6.EXE`.
 - This project has not tested twinBASIC. `--verify-build` runs the Visual
   Basic 6 IDE only.
+- 3 of the 6170 calls through a vtable in a native program have no note.
 
-### What this does not do
+### What changes for a caller
 
-- It does not change the version in `Cargo.toml`, and it has no tag.
-- It changes no public item of the library. A report without
-  `--verify-build` has the same bytes as before.
+- `Component` has the new public field `type_library`. Code that builds a
+  `Component` by its fields must give it.
+- `vb::native::Names` is new with `Names::read`, and `disasm` takes
+  `--vb-types` for a native program.
+
+### What this release does not do
+
+- It does not recover the statements of a native program. The listing is
+  x86 with notes, and a compiler cannot take it.
+- It holds no name that the file does not hold: a private procedure, a local
+  variable and a procedure of a standard module have a place or an offset.
 
 ## [4.0.0] - 2026-11-05
 
