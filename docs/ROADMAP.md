@@ -1046,6 +1046,56 @@ variable. A procedure of a standard module has no name. The text of an idiom
 comes from what the runtime is known to do, and no test compares an idiom
 with a statement of the source. The notes do not join into statements.
 
+#### Part 2, done on 2026-11-10
+
+**The names of the procedures.** The link table of an object holds the
+address of each procedure. Its order is the public procedures, then the
+private ones, each in the order of the source. So the listing names each
+procedure by its place: `frmMain.proc3`, or by its name when it is public or
+an event handler. The procedures of a standard module take a place too, when
+the objects beside the module show where its code is.
+
+**The object calls.** A call through a vtable gets a note in three ways. The
+check block after the call gives the interface and the offset. The first
+argument of a procedure of an object gives `Me`. The global variable that
+`__vbaNew2` fills gives the default instance of a form. The listing follows
+these values through the branches of a procedure. With `--vb-types`, a note
+names the member, such as `_ComboBox.Text (get)` or `Me.cmbLength`.
+
+**Other notes.** A floating point constant gets its value. An argument of a
+public procedure or of an event handler gets its name. A function of the
+runtime that has an ordinal gets its Basic form, such as `Left$`.
+
+**What it measures,** over the 44 native corpus programs, against the
+source. `tests/native.toml` and `tests/native_listing.rs` pin each number:
+
+| Measured | Result |
+|---|---|
+| Procedures that a link slot names | 701 |
+| Their place against the source, for the 574 that have a name or an event | 574 of 574 |
+| Procedures with a name or a place in the listing | 711 of 718 |
+| Calls through a vtable with a note | 6121 of 6170 |
+| Calls of `__vbaHresultCheckObj` that name their call | 3094 of 3094 |
+| Named object calls whose member is in the source of the procedure | 4638 of 4735 |
+| Calls of 21 statement helpers whose word is in the source of the procedure | 1263 of 1263 |
+| Procedures with a statement word that call its helper | 116 of 116 |
+| String notes in the source of their own procedure | 1019 of 1019 |
+| Floating point constants that the source holds as a literal | 417 of 418 |
+| Argument names in the source of their procedure | 557 of 557 |
+
+The 97 other member names are default members, such as `Text1 = "a"`, which
+the source does not write. The test fails for another name. Two of the
+measures need `derived/vb-types.toml`. A machine with no such file skips
+them. The other string notes of the corpus are in the class `cCommonDialog`,
+whose source is not in the repository.
+
+**What stays open.** Seven procedures of `Map Editor.exe` stay `sub_`,
+because two modules are beside each other in its object table. The file
+holds no name for a private procedure or for a local variable, and no name
+of a procedure of a standard module. 49 calls through a vtable have no note,
+because the register comes from an array or a value that the listing does
+not follow. The notes do not join into statements.
+
 ### Phase 13: The workflow
 
 **Goal.** One documented path from a compiled program to a rebuilt one.
