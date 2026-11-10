@@ -184,10 +184,12 @@ A check that passes because it reads the wrong place is worse than no check.
 
 4. **A native program gives annotated x86, and not Basic.**
    `disasm` on a native program prints the x86 instructions of each
-   procedure, with a note for each runtime helper, each string constant and
-   each procedure that it calls. A note gives the idiom that a helper
-   carries out, such as `a & b` for `__vbaStrCat`. The listing is not Basic,
-   and a compiler cannot take it.
+   procedure, with a note for each runtime helper, each string constant,
+   each floating point constant, each argument and each procedure that it
+   calls. A note gives the idiom that a helper carries out, such as `a & b`
+   for `__vbaStrCat`. With `--vb-types`, a note names the member of each
+   object call, such as `_TextBox.Text (get)` or `Me.cmbLength`. The listing
+   is not Basic, and a compiler cannot take it.
 
 ---
 
