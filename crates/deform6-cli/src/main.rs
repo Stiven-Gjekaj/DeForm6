@@ -127,7 +127,9 @@ enum Command {
 
         /// The interfaces of the controls, which `cargo run -p xtask --
         /// derive-vb-types` writes from `VB6.OLB`. With them, `--lift` can
-        /// follow a call of a control. This repository does not ship them.
+        /// follow a call of a control, and the listing of a native program
+        /// names each member that it calls. This repository does not ship
+        /// them.
         #[arg(long)]
         vb_types: Option<PathBuf>,
     },
