@@ -632,7 +632,7 @@ impl Walk<'_, '_> {
         let mut formatter = IntelFormatter::new();
         let mut info = InstructionInfoFactory::new();
         let mut loaded: BTreeMap<Register, ImportedFunction> = BTreeMap::new();
-        let mut lines = Vec::with_capacity(seen.len());
+        let mut lines = Vec::new();
         let mut frame = Frame::default();
         frame.me.pushed = Some(0);
         let globals = self.default_instances(seen);
