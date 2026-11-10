@@ -825,6 +825,7 @@ impl Walk<'_, '_> {
     fn default_instances(&self, seen: &BTreeMap<u32, Instruction>) -> BTreeMap<u32, u32> {
         let instructions: Vec<&Instruction> = seen.values().collect();
         let mut globals = BTreeMap::new();
+        let mut loaders = BTreeSet::new();
         for (at, instruction) in instructions.iter().enumerate() {
             let names_helper = instruction.memory_base() == Register::None
                 && instruction.memory_index() == Register::None
@@ -834,9 +835,20 @@ impl Walk<'_, '_> {
                     .is_some_and(|function| {
                         function.name == ImportName::Name(NEW_INSTANCE.to_owned())
                     });
+            if instruction.mnemonic() == Mnemonic::Mov
+                && instruction.op0_kind() == OpKind::Register
+                && instruction.op1_kind() == OpKind::Memory
+                && names_helper
+            {
+                loaders.insert(instruction.op0_register());
+                continue;
+            }
             let creates = instruction.flow_control() == FlowControl::IndirectCall
-                && instruction.op0_kind() == OpKind::Memory
-                && names_helper;
+                && match instruction.op0_kind() {
+                    OpKind::Memory => names_helper,
+                    OpKind::Register => loaders.contains(&instruction.op0_register()),
+                    _ => false,
+                };
             if !creates {
                 continue;
             }

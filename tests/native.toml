@@ -488,7 +488,7 @@ runtime_calls = 619
 idioms = 593
 checked_calls = 111
 me_calls = 97
-instance_calls = 14
+instance_calls = 17
 numbers = 40
 numbers_in_source = 40
 
@@ -502,7 +502,7 @@ runtime_calls = 481
 idioms = 455
 checked_calls = 89
 me_calls = 73
-instance_calls = 2
+instance_calls = 5
 numbers = 8
 numbers_in_source = 8
 
@@ -516,7 +516,7 @@ runtime_calls = 686
 idioms = 659
 checked_calls = 140
 me_calls = 171
-instance_calls = 5
+instance_calls = 8
 numbers = 26
 numbers_in_source = 25
 
