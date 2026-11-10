@@ -501,7 +501,7 @@ fn each_object_call_names_a_member_that_its_source_procedure_names() {
     }
     assert_eq!(
         (total, found, unnamed),
-        (4885, 4785, 8),
+        (4886, 4786, 8),
         "the object calls moved"
     );
 }
@@ -827,7 +827,7 @@ fn each_joined_call_names_a_control_and_a_member_of_its_source_procedure() {
                 } else {
                     assert!(
                         body.contains(control)
-                            && matches!(member, "text" | "caption" | "value" | "item"),
+                            && matches!(member, "text" | "caption" | "value" | "item" | "number"),
                         "{}: {text} is in no statement of {}\n{body}",
                         exe.display(),
                         method.text()
@@ -839,7 +839,7 @@ fn each_joined_call_names_a_control_and_a_member_of_its_source_procedure() {
     }
     assert_eq!(
         (total, named, bare),
-        (1144, 1043, 101),
+        (1201, 1095, 106),
         "the joined calls moved"
     );
 }

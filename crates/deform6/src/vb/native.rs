@@ -826,15 +826,17 @@ impl Walk<'_, '_> {
         let instructions: Vec<&Instruction> = seen.values().collect();
         let mut globals = BTreeMap::new();
         for (at, instruction) in instructions.iter().enumerate() {
-            let creates = instruction.flow_control() == FlowControl::IndirectCall
-                && instruction.op0_kind() == OpKind::Memory
-                && instruction.memory_base() == Register::None
+            let names_helper = instruction.memory_base() == Register::None
+                && instruction.memory_index() == Register::None
                 && self
                     .imports
                     .get(&instruction.memory_displacement32())
                     .is_some_and(|function| {
                         function.name == ImportName::Name(NEW_INSTANCE.to_owned())
                     });
+            let creates = instruction.flow_control() == FlowControl::IndirectCall
+                && instruction.op0_kind() == OpKind::Memory
+                && names_helper;
             if !creates {
                 continue;
             }
@@ -1156,6 +1158,12 @@ impl Frame {
     fn meet(&mut self, other: &Self) {
         self.me.objects.retain(|one| other.me.objects.contains(one));
         self.me.vtables.retain(|one| other.me.vtables.contains(one));
+        self.me
+            .saved_objects
+            .retain(|one| other.me.saved_objects.contains(one));
+        self.me
+            .saved_vtables
+            .retain(|one| other.me.saved_vtables.contains(one));
         if self.me.pushed != other.me.pushed {
             self.me.pushed = None;
         }
@@ -1189,6 +1197,10 @@ struct MeTracker {
     objects: BTreeSet<Register>,
     /// Each register that holds the vtable of the object.
     vtables: BTreeSet<Register>,
+    /// Each frame offset below `ebp` that holds the object.
+    saved_objects: BTreeSet<u32>,
+    /// Each frame offset below `ebp` that holds the vtable of the object.
+    saved_vtables: BTreeSet<u32>,
     /// How far `esp` moved since the entry, until the first call. `None`
     /// before the first instruction shows it, and after the first call.
     pushed: Option<u32>,
@@ -1204,6 +1216,19 @@ impl MeTracker {
             && self.vtables.contains(&instruction.memory_base()))
         .then(|| u16::try_from(instruction.memory_displacement32()).ok())
         .flatten()
+    }
+
+    /// Records what the frame slot at `offset` holds after a store of
+    /// `register`.
+    fn save(&mut self, offset: u32, register: Register) {
+        self.saved_objects.remove(&offset);
+        self.saved_vtables.remove(&offset);
+        if self.objects.contains(&register) {
+            self.saved_objects.insert(offset);
+        }
+        if self.vtables.contains(&register) {
+            self.saved_vtables.insert(offset);
+        }
     }
 
     /// Gives the target when `instruction` copies the object to a register.
@@ -1253,6 +1278,17 @@ impl MeTracker {
             }
             _ => Some(pushed),
         });
+        if instruction.code() == Code::Mov_rm32_r32
+            && instruction.op0_kind() == OpKind::Memory
+            && instruction.memory_base() == Register::EBP
+            && instruction.memory_index() == Register::None
+        {
+            self.save(
+                instruction.memory_displacement32(),
+                instruction.op1_register(),
+            );
+            return;
+        }
         if instruction.code() != Code::Mov_r32_rm32 || instruction.op1_kind() != OpKind::Memory {
             return;
         }
@@ -1260,6 +1296,14 @@ impl MeTracker {
         let offset = instruction.memory_displacement32();
         if instruction.memory_index() != Register::None {
             return;
+        }
+        if base == Register::EBP && instruction.memory_index() == Register::None {
+            if self.saved_objects.contains(&offset) {
+                self.objects.insert(instruction.op0_register());
+            }
+            if self.saved_vtables.contains(&offset) {
+                self.vtables.insert(instruction.op0_register());
+            }
         }
         let at_entry = self
             .pushed
@@ -1305,6 +1349,9 @@ struct ChainTracker {
     /// The note of the call that gave the object whose vtable each register
     /// holds.
     vtables: BTreeMap<Register, Note>,
+    /// The note of the call that gave the object at each frame offset below
+    /// `ebp`.
+    saved: BTreeMap<u32, Note>,
 }
 
 impl ChainTracker {
@@ -1316,6 +1363,8 @@ impl ChainTracker {
             .retain(|key, value| other.objects.get(key) == Some(value));
         self.vtables
             .retain(|key, value| other.vtables.get(key) == Some(value));
+        self.saved
+            .retain(|key, value| other.saved.get(key) == Some(value));
     }
 
     /// Forgets what `register` held.
@@ -1369,10 +1418,37 @@ impl ChainTracker {
             }
             return;
         }
+        if instruction.code() == Code::Mov_rm32_r32
+            && instruction.op0_kind() == OpKind::Memory
+            && instruction.memory_base() == Register::EBP
+            && instruction.memory_index() == Register::None
+        {
+            let offset = instruction.memory_displacement32();
+            match self.objects.get(&instruction.op1_register()).cloned() {
+                Some(note) => {
+                    self.saved.insert(offset, note);
+                }
+                None => {
+                    self.saved.remove(&offset);
+                }
+            }
+            return;
+        }
         if instruction.mnemonic() != Mnemonic::Mov || instruction.op0_kind() != OpKind::Register {
             return;
         }
         let target = instruction.op0_register();
+        if instruction.op1_kind() == OpKind::Memory
+            && instruction.memory_base() == Register::EBP
+            && instruction.memory_index() == Register::None
+            && let Some(note) = self
+                .saved
+                .get(&instruction.memory_displacement32())
+                .cloned()
+        {
+            self.objects.insert(target, note);
+            return;
+        }
         if instruction.op1_kind() == OpKind::Register {
             let from = instruction.op1_register();
             if let Some(note) = self.objects.get(&from).cloned() {
