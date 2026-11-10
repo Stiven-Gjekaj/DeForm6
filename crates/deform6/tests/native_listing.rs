@@ -552,6 +552,8 @@ struct Sourced {
     helpers: Vec<String>,
     /// The text of each string note.
     strings: Vec<String>,
+    /// The member of each late-bound call, and the class of each `New`.
+    named_words: Vec<String>,
 }
 
 /// Gives each procedure of `exe` whose place in the source the listing
@@ -605,10 +607,26 @@ fn sourced_procedures(exe: &Path, projects: &[PathBuf]) -> Vec<Sourced> {
                 _ => None,
             })
             .collect();
+        let named_words = procedure
+            .lines
+            .iter()
+            .flat_map(|line| &line.notes)
+            .filter_map(|note| match note {
+                Note::LateMember(name) => Some(name.clone()),
+                Note::NewObject(_) => {
+                    let text = names.note(&pe, note, procedure.entry);
+                    text.strip_prefix("New ")
+                        .filter(|class| !class.contains(' '))
+                        .map(str::to_owned)
+                }
+                _ => None,
+            })
+            .collect();
         out.push(Sourced {
             body,
             helpers,
             strings,
+            named_words,
         });
     }
     out
@@ -656,6 +674,28 @@ fn each_string_note_is_a_literal_of_its_source_procedure() {
         }
     }
     assert_eq!(strings, 1019, "the string notes moved");
+}
+
+/// The member of each late-bound call and the class of each `New` is a
+/// word of the source of the procedure.
+#[test]
+fn each_late_bound_member_and_class_is_a_word_of_its_source_procedure() {
+    let projects = vbp::project_files();
+    let mut words = 0;
+    for exe in &vbp::executables() {
+        for procedure in sourced_procedures(exe, &projects) {
+            let body = normal_body(&procedure.body);
+            for word in &procedure.named_words {
+                assert!(
+                    body.contains(&word.to_ascii_lowercase()),
+                    "{}: {word:?} is not in\n{body}",
+                    exe.display()
+                );
+                words += 1;
+            }
+        }
+    }
+    assert_eq!(words, 171, "the late-bound and New notes moved");
 }
 
 /// Each call of a helper of [`STATEMENT_HELPERS`] is in a procedure whose

@@ -98,6 +98,21 @@ const CHECK_OBJECT: &str = "__vbaHresultCheckObj";
 /// The name of the helper that makes the default instance of a form.
 const NEW_INSTANCE: &str = "__vbaNew2";
 
+/// The name of the helper of a late-bound call with no result.
+const LATE_CALL: &str = "__vbaLateMemCall";
+
+/// The name of the helper of a late-bound call with a result.
+const LATE_CALL_LOAD: &str = "__vbaLateMemCallLd";
+
+/// The name of the helper that makes a new object.
+const NEW_OBJECT: &str = "__vbaNew";
+
+/// How many pushes before a late-bound call can hold its name.
+const MAX_LATE_PUSHES: usize = 4;
+
+/// The longest member name of a late-bound call, in UTF-16 units.
+const MAX_IDENTIFIER_UNITS: u32 = 0x100;
+
 /// How many instructions before a check block the search goes.
 const MAX_CHECK_REACH: usize = 64;
 
@@ -148,6 +163,10 @@ pub enum Note {
     Me(u16),
     /// An operand is the address of this floating point constant, as text.
     Number(String),
+    /// The instruction makes a late-bound call of the member of this name.
+    LateMember(String),
+    /// The instruction calls `__vbaNew` for the class at this `ObjectInfo`.
+    NewObject(Va),
     /// An operand is in the frame of the procedure, at this positive offset
     /// from `ebp`.
     Argument(u32),
@@ -682,7 +701,74 @@ impl Walk<'_, '_> {
         }
         let instructions: Vec<Instruction> = seen.values().copied().collect();
         self.note_checked_calls(&instructions, &mut lines);
+        self.note_helper_arguments(&instructions, &mut lines);
         lines
+    }
+
+    /// Adds the note of what a late-bound call or a `New` names in its
+    /// arguments.
+    fn note_helper_arguments(&self, instructions: &[Instruction], lines: &mut [Line]) {
+        for at in 0..lines.len() {
+            let Some(name) = lines.get(at).and_then(|line| {
+                line.notes.iter().find_map(|note| match note {
+                    Note::Import(ImportedFunction {
+                        name: ImportName::Name(name),
+                        ..
+                    }) if name == LATE_CALL || name == LATE_CALL_LOAD || name == NEW_OBJECT => {
+                        Some(name.clone())
+                    }
+                    _ => None,
+                })
+            }) else {
+                continue;
+            };
+            if !instructions
+                .get(at)
+                .is_some_and(|one| one.flow_control() == FlowControl::IndirectCall)
+            {
+                continue;
+            }
+            let mut values = instructions
+                .get(..at)
+                .unwrap_or_default()
+                .iter()
+                .rev()
+                .take(MAX_CHECK_REACH)
+                .filter(|earlier| earlier.mnemonic() == Mnemonic::Push)
+                .take(MAX_LATE_PUSHES)
+                .filter_map(pushed_value);
+            let note = if name == NEW_OBJECT {
+                values.next().map(|object| Note::NewObject(Va::new(object)))
+            } else {
+                values
+                    .find_map(|value| self.identifier_at(value))
+                    .map(Note::LateMember)
+            };
+            if let (Some(note), Some(line)) = (note, lines.get_mut(at)) {
+                line.notes.push(note);
+            }
+        }
+    }
+
+    /// Gives the name at `va`: UTF-16 units up to a zero unit, each a
+    /// letter, a digit or `_`.
+    fn identifier_at(&self, va: u32) -> Option<String> {
+        let region = self.pe.region_at_va(Va::new(va))?;
+        let mut units = Vec::new();
+        for index in 0..MAX_IDENTIFIER_UNITS {
+            let unit = region.u16_le(Off::new(index.checked_mul(2)?))?;
+            if unit == 0 {
+                break;
+            }
+            units.push(unit);
+        }
+        let name = String::from_utf16(&units).ok()?;
+        (!name.is_empty()
+            && units.len() < MAX_IDENTIFIER_UNITS as usize
+            && name
+                .chars()
+                .all(|one| one.is_ascii_alphanumeric() || one == '_'))
+        .then_some(name)
     }
 
     /// Gives the `ObjectInfo` of the default instance that each global
@@ -1669,6 +1755,15 @@ impl<'t> Names<'t> {
                 ),
             Note::Text(text) => format!("{text:?}"),
             Note::Number(text) => text.clone(),
+            Note::LateMember(name) => format!("late-bound member {name}"),
+            Note::NewObject(object) => self
+                .object_of_info
+                .get(&object.get())
+                .and_then(|index| self.objects.get(*index))
+                .map_or_else(
+                    || format!("New, class at {:08X}", object.get()),
+                    |facts| format!("New {}", facts.name),
+                ),
             Note::Argument(offset) => self
                 .arguments
                 .get(&entry.get())
