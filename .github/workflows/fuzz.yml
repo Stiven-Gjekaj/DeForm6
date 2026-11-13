@@ -16,6 +16,9 @@ name: fuzz
 on:
   pull_request:
   push:
+  # A person can start the scheduled campaign by hand, to check a change
+  # to it without a wait for the schedule.
+  workflow_dispatch:
   schedule:
     # 03:00 UTC, once a day. The runner queue is short at that hour, and
     # the scheduled campaign is bounded by an iteration count rather than
@@ -37,7 +40,7 @@ jobs:
     # The scheduled job below already covers the schedule trigger. Without
     # this condition this job would also run on that trigger, doubling the
     # queue time for no new coverage.
-    if: github.event_name != 'schedule'
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
 
     steps:
       - name: Check out the repository
@@ -146,7 +149,7 @@ jobs:
     # Runs on the schedule trigger only, never on a push and never on a
     # pull request: fuzz-pr already covers those, and a second campaign on
     # every pull request would double the queue time for no new coverage.
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Check out the repository
