@@ -84,7 +84,14 @@ pub const PR_MAX_TOTAL_TIME: u32 = 60;
 /// leak more, must measure again and record the result here.
 /// `cron_runs_is_no_larger_than_the_run_count_the_peak_was_measured_at`
 /// fails when this number grows past the measured count.
-pub const CRON_RUNS: u32 = 500_000;
+///
+/// The number must also let the job end inside the six hours that GitHub
+/// gives a job. The native listing of 5.0.0 made each input slower: the
+/// scheduled run of 2026-11-13 ran 11 inputs a second on CI, against about
+/// 370 before. Four runs of 500_000 then stopped at the limit. So the count
+/// is now 150_000, and
+/// `cron_runs_end_inside_the_job_limit_at_the_measured_rate` holds it.
+pub const CRON_RUNS: u32 = 150_000;
 
 /// Whether libFuzzer's own leak detector runs. `0` means it does not.
 ///
@@ -237,6 +244,27 @@ mod tests {
     /// The highest peak resident set, in mebibytes, that `CRON_RUNS`'s doc
     /// comment records.
     const MEASURED_PEAK_RSS_MB: u32 = 1159;
+
+    /// The inputs a second of the scheduled run of 2026-11-13 on CI, the
+    /// slowest rate that `CRON_RUNS`'s doc comment records.
+    const MEASURED_CI_INPUTS_PER_SECOND: u32 = 11;
+
+    /// The seconds that a scheduled campaign may take: five of the six
+    /// hours that GitHub gives a job, so that the build and the seeding fit
+    /// too.
+    const CAMPAIGN_SECONDS: u32 = 5 * 60 * 60;
+
+    /// The campaign ends before GitHub stops the job, at the slowest rate
+    /// that was measured on CI.
+    #[test]
+    fn cron_runs_end_inside_the_job_limit_at_the_measured_rate() {
+        let seconds = CRON_RUNS / MEASURED_CI_INPUTS_PER_SECOND;
+        assert!(
+            seconds <= CAMPAIGN_SECONDS,
+            "CRON_RUNS ({CRON_RUNS}) takes {seconds} seconds at \
+             {MEASURED_CI_INPUTS_PER_SECOND} inputs a second, more than {CAMPAIGN_SECONDS}"
+        );
+    }
 
     /// A model of the leak gives no bound, because one input can leak more
     /// than once. The bound is a measurement. This test holds `CRON_RUNS`
