@@ -8,9 +8,9 @@ does not do. A change that no release holds yet goes under one
 `## [Unreleased]` heading above the newest release. A release gives that
 heading its version and its date.
 
-## [Unreleased]
+## [5.0.1] - 2026-11-13
 
-### What this delivers
+### What this release delivers
 
 - The native listing decodes each address one time. A stub that points into
   the middle of a procedure no longer makes the walk decode that code again.
@@ -20,7 +20,7 @@ heading its version and its date.
   by hand. Each campaign of 500000 since 5.0.0 stopped at the six hour limit
   of a GitHub job.
 
-### What this does not do
+### What this release does not do
 
 - It does not change the text of the listing or a public item.
 
