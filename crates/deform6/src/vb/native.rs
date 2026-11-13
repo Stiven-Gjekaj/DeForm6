@@ -378,6 +378,10 @@ struct Walk<'p, 'a> {
     /// Each entry that is a procedure of an object, so that its first
     /// argument is the object.
     methods: BTreeSet<u32>,
+    /// The address of each instruction that an earlier procedure holds. A
+    /// procedure of a program never runs into the code of another one, so
+    /// the walk stops there and decodes no address twice.
+    claimed: BTreeSet<u32>,
 }
 
 impl Walk<'_, '_> {
@@ -1072,7 +1076,7 @@ impl Walk<'_, '_> {
                 let Ok(at) = u32::try_from(instruction.ip()) else {
                     break;
                 };
-                if seen.contains_key(&at) {
+                if seen.contains_key(&at) || self.claimed.contains(&at) {
                     break;
                 }
                 if instruction.is_invalid() {
@@ -1616,10 +1620,16 @@ pub fn disassemble(pe: &PeImage<'_>) -> Listing {
         truncated: false,
         table_budget: MAX_TABLE_READS,
         methods: object_methods(pe).into_keys().collect(),
+        claimed: BTreeSet::new(),
     };
     let mut procedures = Vec::new();
     while let Some(entry) = work.pop() {
+        if walk.claimed.contains(&entry) {
+            continue;
+        }
         let (procedure, found) = walk.procedure(entry);
+        walk.claimed
+            .extend(procedure.lines.iter().map(|line| line.va.get()));
         procedures.push(procedure);
         work.extend(found);
         if walk.truncated {

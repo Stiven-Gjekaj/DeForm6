@@ -910,6 +910,49 @@ fn each_argument_name_is_a_word_of_its_source_procedure() {
     assert_eq!(total, 557, "the argument notes moved");
 }
 
+/// A native stub that the file holds anywhere can point into the middle of
+/// a procedure. The walk decodes each address once, so no instruction is in
+/// two procedures.
+#[test]
+fn a_stub_into_the_middle_of_a_procedure_decodes_no_address_twice() {
+    let path = vbp::corpus_root().join("public-domain/LockWorkStation/LockWorkStation.exe");
+    let mut data = std::fs::read(path).unwrap();
+    let pe = PeImage::parse(&data).unwrap();
+    let listing = disassemble(&pe);
+    let middle = listing.procedures[0].lines[5].va.get();
+    let text = *pe
+        .sections()
+        .iter()
+        .find(|section| section.name.starts_with(b".text"))
+        .unwrap();
+    let start = usize::try_from(text.pointer_to_raw_data.get()).unwrap();
+    let size = usize::try_from(text.size_of_raw_data.min(text.virtual_size)).unwrap();
+    let at = (start..start + size - 13)
+        .rev()
+        .find(|at| data[*at..*at + 13].iter().all(|byte| *byte == 0))
+        .unwrap();
+    let stub_va = pe.image_base() + text.virtual_address.get() + u32::try_from(at - start).unwrap();
+    let jump = i32::try_from(i64::from(middle) - i64::from(stub_va + 13)).unwrap();
+    data[at..at + 8].copy_from_slice(&[0x81, 0x6C, 0x24, 0x04, 0, 0, 0, 0]);
+    data[at + 8] = 0xE9;
+    data[at + 9..at + 13].copy_from_slice(&jump.to_le_bytes());
+    let pe = PeImage::parse(&data).unwrap();
+    let listing = disassemble(&pe);
+    let mut seen = BTreeSet::new();
+    for line in listing
+        .procedures
+        .iter()
+        .flat_map(|procedure| &procedure.lines)
+    {
+        assert!(
+            seen.insert(line.va.get()),
+            "{:08X} is decoded twice",
+            line.va.get()
+        );
+    }
+    assert!(seen.contains(&middle));
+}
+
 /// The source of `LockWorkStation` holds one `Shell` of one literal. The
 /// listing gives the literal, and the helper that copies it.
 #[test]
